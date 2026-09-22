@@ -73,52 +73,57 @@ bool UpdateManager::checkForUpdatesSync(UpdateInfo& outInfo) {
         "Accept: application/vnd.github.v3+json"
     };
 
-    // 1. Try GitHub Releases API first (instant, real-time, no CDN cache delay)
-    std::string apiEndpoint = "https://api.github.com/repos/" + std::string(GITHUB_REPO) + "/releases/latest";
-    HttpResponse resp = HttpClient::instance().get(apiEndpoint, headers);
+    // 1. Try version.json manifest with cache-buster timestamp (immune to GitHub API rate limits and CDN caching)
+    std::string manifestUrl = std::string(VERSION_MANIFEST_URL) + "?t=" + std::to_string(std::time(nullptr));
+    std::vector<std::string> manifestHeaders = {
+        "User-Agent: RomCloud-OTA/1.0 (TrimUI Brick Pro)",
+        "Cache-Control: no-cache, no-store, must-revalidate",
+        "Pragma: no-cache"
+    };
+    HttpResponse mResp = HttpClient::instance().get(manifestUrl, manifestHeaders);
     
     std::string remoteVer = "";
     std::string changelog = "";
     std::string relDate = "";
     std::string binUrl = "";
 
-    if (resp.success && !resp.body.empty() && resp.statusCode == 200) {
-        std::string tag = JsonHelper::extractString(resp.body, "tag_name");
-        if (!tag.empty()) {
-            remoteVer = tag;
-            if (remoteVer.front() == 'v' || remoteVer.front() == 'V') {
-                remoteVer.erase(0, 1);
-            }
-            changelog = JsonHelper::extractString(resp.body, "body");
-            relDate = JsonHelper::extractString(resp.body, "published_at");
-            if (relDate.length() >= 10) relDate = relDate.substr(0, 10);
-
-            // Try to get download URL from release assets
-            auto assets = JsonHelper::extractArrayObjects(resp.body, "assets");
-            for (const auto& asset : assets) {
-                std::string name = JsonHelper::extractString(asset, "name");
-                if (name == "RomCloud" || name == "RomCloud.bin") {
-                    binUrl = JsonHelper::extractString(asset, "browser_download_url");
-                    break;
-                }
-            }
-            // Fallback if no assets found
-            if (binUrl.empty()) {
-                binUrl = "https://github.com/" + std::string(GITHUB_REPO) + "/releases/download/" + tag + "/RomCloud";
-            }
-        }
+    if (mResp.success && !mResp.body.empty() && mResp.statusCode == 200) {
+        remoteVer = JsonHelper::extractString(mResp.body, "version");
+        binUrl = JsonHelper::extractString(mResp.body, "binary_url");
+        if (binUrl.empty()) binUrl = JsonHelper::extractString(mResp.body, "download_url");
+        changelog = JsonHelper::extractString(mResp.body, "changelog");
+        relDate = JsonHelper::extractString(mResp.body, "release_date");
     }
 
-    // 2. Fallback to version.json manifest if API failed or rate-limited
+    // 2. Fallback to GitHub Releases API if manifest was empty
     if (remoteVer.empty()) {
-        Logger::info("Falling back to version.json manifest: " + std::string(VERSION_MANIFEST_URL));
-        HttpResponse mResp = HttpClient::instance().get(VERSION_MANIFEST_URL, headers);
-        if (mResp.success && !mResp.body.empty()) {
-            remoteVer = JsonHelper::extractString(mResp.body, "version");
-            binUrl = JsonHelper::extractString(mResp.body, "binary_url");
-            if (binUrl.empty()) binUrl = JsonHelper::extractString(mResp.body, "download_url");
-            changelog = JsonHelper::extractString(mResp.body, "changelog");
-            relDate = JsonHelper::extractString(mResp.body, "release_date");
+        Logger::info("Checking GitHub Releases API as fallback...");
+        std::string apiEndpoint = "https://api.github.com/repos/" + std::string(GITHUB_REPO) + "/releases/latest";
+        HttpResponse resp = HttpClient::instance().get(apiEndpoint, headers);
+        if (resp.success && !resp.body.empty() && resp.statusCode == 200) {
+            std::string tag = JsonHelper::extractString(resp.body, "tag_name");
+            if (!tag.empty()) {
+                remoteVer = tag;
+                if (remoteVer.front() == 'v' || remoteVer.front() == 'V') {
+                    remoteVer.erase(0, 1);
+                }
+                changelog = JsonHelper::extractString(resp.body, "body");
+                relDate = JsonHelper::extractString(resp.body, "published_at");
+                if (relDate.length() >= 10) relDate = relDate.substr(0, 10);
+
+                // Try to get download URL from release assets
+                auto assets = JsonHelper::extractArrayObjects(resp.body, "assets");
+                for (const auto& asset : assets) {
+                    std::string name = JsonHelper::extractString(asset, "name");
+                    if (name == "RomCloud" || name == "RomCloud.bin") {
+                        binUrl = JsonHelper::extractString(asset, "browser_download_url");
+                        break;
+                    }
+                }
+                if (binUrl.empty()) {
+                    binUrl = "https://github.com/" + std::string(GITHUB_REPO) + "/releases/download/" + tag + "/RomCloud";
+                }
+            }
         }
     }
 
