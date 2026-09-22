@@ -213,7 +213,8 @@ std::string WebServer::buildHtmlResponse() {
     if (ip.empty()) ip = "192.168.1.164";
 
     auto& db = DatabaseManager::instance();
-    std::string savedDriveUrl = db.getSetting("drive_folder_url", "https://drive.google.com/drive/folders/1j4Bfo5YS65zSGSOWHWRrXjovTfX6syWD");
+    bool isLinked = AuthManager::instance().isLinked();
+    std::string savedDriveUrl = isLinked ? db.getSetting("drive_folder_url", "") : "";
     std::string lastSyncTime = DriveSyncEngine::instance().getLastSyncTime();
 
     int totalLocal = 0, totalCloud = 0;
@@ -770,8 +771,8 @@ std::string WebServer::buildHtmlResponse() {
           <form action="/connect" method="POST" style="margin-top: 18px; border-top: 1px solid var(--border); padding-top: 14px;">
             <label style="font-size: 12px; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 6px;">URL Thư mục Google Drive Master:</label>
             <div style="display: flex; gap: 8px;">
-              <input type="text" name="drive_url" value=")HTML" + savedDriveUrl + R"HTML(" style="flex: 1; padding: 8px 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: #fff; font-size: 12px;" required>
-              <button type="submit" class="btn btn-secondary">Lưu link</button>
+              <input type="text" name="drive_url" value=")HTML" + savedDriveUrl + R"HTML(" placeholder="https://drive.google.com/drive/folders/... (Dán link vào đây)" autocomplete="off" style="flex: 1; padding: 8px 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: #fff; font-size: 12px;" required>
+              <button type="submit" class="btn btn-primary">🔗 Kết nối &amp; Quét ngay</button>
             </div>
           </form>
         </div>
@@ -1338,6 +1339,9 @@ void WebServer::handleClient(int clientFd) {
         std::string body = buildHtmlResponse();
         std::string res = "HTTP/1.1 200 OK\r\n"
                           "Content-Type: text/html; charset=UTF-8\r\n"
+                          "Cache-Control: no-cache, no-store, must-revalidate, max-age=0\r\n"
+                          "Pragma: no-cache\r\n"
+                          "Expires: 0\r\n"
                           "Content-Length: " + std::to_string(body.length()) + "\r\n"
                           "Connection: close\r\n\r\n" + body;
         send(clientFd, res.c_str(), res.length(), 0);

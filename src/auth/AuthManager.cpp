@@ -235,6 +235,8 @@ void AuthManager::logout() {
     db.setSetting("auth_expires_at", "0");
     db.setSetting("auth_user_email", "");
     db.setSetting("drive_folder_id", "");
+    db.setSetting("drive_folder_url", "");
+    db.setSetting("last_cloud_sync_time", "Chưa đồng bộ");
     db.clearCloudGames();
 
     m_state = AuthState::UNLINKED;
