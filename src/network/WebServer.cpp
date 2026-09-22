@@ -1504,16 +1504,6 @@ std::string WebServer::buildHtmlResponse() {
             sInput.disabled = false;
             sInput.placeholder = '🔍 Nhập tên game hoặc tên file ROM để tìm kiếm ngay...';
           }
-        }
-
-        const backupBadge = document.getElementById('backup-perm-badge');
-        if (backupBadge) {
-          if (data.can_upload) {
-            backupBadge.innerHTML = `<span style="color:var(--green);">🟢 Đã kích hoạt</span> (Tự động sao lưu vào thư mục /RomCloud_Backup)`;
-          } else {
-            backupBadge.innerHTML = `<span style="color:var(--yellow);">⚪ Chưa kích hoạt</span> (Chế độ hiện tại chỉ cho phép tải về)`;
-          }
-        }
         } else {
           authPill.innerHTML = `Drive: <b style="color:var(--text-dim);">⚪ Đã đăng xuất</b>`;
           btnHeadLogout.style.display = 'none';
@@ -1528,6 +1518,15 @@ std::string WebServer::buildHtmlResponse() {
             sInput.disabled = true;
             sInput.value = '';
             sInput.placeholder = '🔒 Chưa kết nối Google Drive. Vui lòng kết nối để hiển thị ROM...';
+          }
+        }
+
+        const backupBadge = document.getElementById('backup-perm-badge');
+        if (backupBadge) {
+          if (data.can_upload) {
+            backupBadge.innerHTML = `<span style="color:var(--green);">🟢 Đã kích hoạt</span> (Tự động sao lưu vào thư mục /RomCloud_Backup)`;
+          } else {
+            backupBadge.innerHTML = `<span style="color:var(--yellow);">⚪ Chưa kích hoạt</span> (Chế độ hiện tại chỉ cho phép tải về)`;
           }
         }
 
