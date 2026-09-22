@@ -62,7 +62,7 @@ bool UIManager::init(SDL_Window* window, SDL_Renderer* renderer) {
     // Auto-check for OTA updates in background on launch
     UpdateManager::instance().checkForUpdatesAsync([this](bool hasUpdate, const UpdateInfo& info) {
         if (hasUpdate) {
-            showToast("Đã có bản cập nhật mới v" + info.remoteVersion + "!", {34, 197, 94, 255}, 6000);
+            showToast(std::string(UiStrings::TOAST_NEW_OTA_PREFIX) + info.remoteVersion + "!", {34, 197, 94, 255}, 6000);
         }
     });
 
@@ -264,7 +264,7 @@ void UIManager::update() {
                         if (AuthManager::instance().isLinked()) {
                             bool added = DownloadManager::instance().addToQueue(g, m_activeSystem);
                             if (added) {
-                                showToast("Đã thêm vào hàng tải: " + g.title, {0, 180, 216, 255}, 2500);
+                                showToast(std::string(UiStrings::TOAST_ADDED_TO_QUEUE) + g.title, {0, 180, 216, 255}, 2500);
                                 // Auto-start if nothing is currently downloading
                                 if (!DownloadManager::instance().isDownloading()) {
                                     DownloadManager::instance().processNextInQueue();
@@ -280,12 +280,12 @@ void UIManager::update() {
                     if (DownloadManager::instance().isDownloading() &&
                         DownloadManager::instance().getProgress().gameId == g.id) {
                         DownloadManager::instance().cancelDownload();
-                        showToast("Đã dừng tải: " + g.title, {245, 158, 11, 255});
+                        showToast(std::string(UiStrings::TOAST_DOWNLOAD_STOPPED) + g.title, {245, 158, 11, 255});
                         DownloadManager::instance().processNextInQueue();
                         refreshGames();
                     } else if (DownloadManager::instance().isInQueue(g.id)) {
                         DownloadManager::instance().removeFromQueue(g.id);
-                        showToast("Đã bỏ khỏi hàng tải: " + g.title, {245, 158, 11, 255});
+                        showToast(std::string(UiStrings::TOAST_REMOVED_FROM_QUEUE) + g.title, {245, 158, 11, 255});
                     } else if (g.localState == GameState::LOCAL) {
                         setState(UIState::CONFIRM_DELETE);
                     } else {
@@ -481,7 +481,7 @@ void UIManager::update() {
                             if (DatabaseManager::instance().getSystemById(g.systemId, sys)) {
                                 bool added = DownloadManager::instance().addToQueue(g, sys);
                                 if (added) {
-                                    showToast("Đã thêm vào hàng tải: " + g.title, {0, 180, 216, 255}, 2500);
+                                    showToast(std::string(UiStrings::TOAST_ADDED_TO_QUEUE) + g.title, {0, 180, 216, 255}, 2500);
                                     if (!DownloadManager::instance().isDownloading()) {
                                         DownloadManager::instance().processNextInQueue();
                                     }
@@ -771,9 +771,9 @@ void UIManager::renderSearchState() {
 
     int numResults = static_cast<int>(m_searchResults.size());
     if (m_searchQuery.length() < 2) {
-        drawText("Nhập ít nhất 2 ký tự để tìm kiếm...", rPanelX + rPanelW / 2, rPanelY + 30, {80, 95, 115, 255}, m_fontSmall, true);
+        drawText(UiStrings::SEARCH_PROMPT_MIN_CHARS, rPanelX + rPanelW / 2, rPanelY + 30, {80, 95, 115, 255}, m_fontSmall, true);
     } else if (numResults == 0) {
-        drawText("Không tìm thấy kết quả.", rPanelX + rPanelW / 2, rPanelY + 30, {239, 68, 68, 255}, m_fontSmall, true);
+        drawText(UiStrings::SEARCH_NO_RESULTS, rPanelX + rPanelW / 2, rPanelY + 30, {239, 68, 68, 255}, m_fontSmall, true);
     } else {
         std::string countStr = std::to_string(numResults) + " kết quả";
         drawText(countStr, rPanelX + rPanelW / 2, rPanelY + 12, {100, 115, 135, 255}, m_fontSmall, true);
@@ -838,7 +838,7 @@ void UIManager::renderFooter() {
 
         if (isLocal) {
             drawText("X", 30, 726, {239, 68, 68, 255}, m_fontMedium);
-            drawText("XÓA ROM (THẺ)", 52, 730, {239, 68, 68, 255}, m_fontSmall);
+            drawText(UiStrings::BTN_DELETE_ROM_SD, 52, 730, {239, 68, 68, 255}, m_fontSmall);
         } else {
             drawText("A", 30, 726, {34, 197, 94, 255}, m_fontMedium);
             drawText(UiStrings::FOOTER_ADD_QUEUE, 52, 730, {210, 220, 230, 255}, m_fontSmall);
@@ -853,36 +853,36 @@ void UIManager::renderFooter() {
         }
 
         drawText("Y", 440, 726, {234, 179, 8, 255}, m_fontMedium);
-        drawText("NHẢY CHỮ (A-Z)", 462, 730, {210, 220, 230, 255}, m_fontSmall);
+        drawText(UiStrings::BTN_JUMP_ALPHA, 462, 730, {210, 220, 230, 255}, m_fontSmall);
 
         drawText("START", 593, 726, {0, 180, 216, 255}, m_fontMedium);
-        drawText("TÌM KIẾM", 648, 730, {0, 180, 216, 255}, m_fontSmall);
+        drawText(UiStrings::BTN_SEARCH, 648, 730, {0, 180, 216, 255}, m_fontSmall);
 
         drawText("SELECT", 728, 726, {168, 85, 247, 255}, m_fontMedium);
         drawText(UiStrings::FOOTER_FILTER, 800, 730, {210, 220, 230, 255}, m_fontSmall);
     } else if (m_currentState == UIState::SEARCH) {
         if (!m_kbInResults) {
             drawText("A", 30, 726, {34, 197, 94, 255}, m_fontMedium);
-            drawText("CHỌN KÝ TỰ", 52, 730, {210, 220, 230, 255}, m_fontSmall);
+            drawText(UiStrings::BTN_SELECT_CHAR, 52, 730, {210, 220, 230, 255}, m_fontSmall);
 
             drawText("X", 170, 726, {245, 158, 11, 255}, m_fontMedium);
-            drawText("XÓA HẾT", 192, 730, {210, 220, 230, 255}, m_fontSmall);
+            drawText(UiStrings::BTN_CLEAR_ALL, 192, 730, {210, 220, 230, 255}, m_fontSmall);
         } else {
             drawText("A", 30, 726, {34, 197, 94, 255}, m_fontMedium);
-            drawText("TẢI VỀ", 52, 730, {210, 220, 230, 255}, m_fontSmall);
+            drawText(UiStrings::BTN_DOWNLOAD, 52, 730, {210, 220, 230, 255}, m_fontSmall);
 
             drawText("X", 130, 726, {239, 68, 68, 255}, m_fontMedium);
-            drawText("XÓA ROM", 152, 730, {239, 68, 68, 255}, m_fontSmall);
+            drawText(UiStrings::BTN_DELETE_ROM, 152, 730, {239, 68, 68, 255}, m_fontSmall);
         }
 
         drawText("B", 280, 726, {239, 68, 68, 255}, m_fontMedium);
-        drawText("QUAY LẠI", 302, 730, {210, 220, 230, 255}, m_fontSmall);
+        drawText(UiStrings::BTN_BACK, 302, 730, {210, 220, 230, 255}, m_fontSmall);
     } else if (m_currentState == UIState::CONFIRM_DELETE) {
         drawText("A", 30, 726, {239, 68, 68, 255}, m_fontMedium);
-        drawText("XÁC NHẬN XÓA (THẺ)", 52, 730, {239, 68, 68, 255}, m_fontSmall);
+        drawText(UiStrings::BTN_CONFIRM_DELETE_SD, 52, 730, {239, 68, 68, 255}, m_fontSmall);
 
         drawText("B / X", 240, 726, {150, 160, 175, 255}, m_fontMedium);
-        drawText("HỦY BỎ", 295, 730, {210, 220, 230, 255}, m_fontSmall);
+        drawText(UiStrings::BTN_CANCEL_ACTION, 295, 730, {210, 220, 230, 255}, m_fontSmall);
     } else if (m_currentState == UIState::SYSTEM_SELECT) {
         drawText("A", 30, 726, {34, 197, 94, 255}, m_fontMedium);
         drawText(UiStrings::FOOTER_ENTER_SYSTEM, 55, 730, {210, 220, 230, 255}, m_fontSmall);
@@ -977,9 +977,9 @@ void UIManager::renderSystemSelectState() {
     int totalLocal = 0, totalCloud = 0;
     DatabaseManager::instance().getTotalGameCounts(totalLocal, totalCloud);
 
-    std::string summary = std::string(UiStrings::SYSTEM_SELECT_TITLE) + " (" + std::to_string(m_cachedSystems.size()) + " Hệ máy | " +
-                          std::to_string(totalLocal) + " Game trên thẻ | " +
-                          std::to_string(totalCloud) + " Game trên Cloud)";
+    std::string summary = std::string(UiStrings::SYSTEM_SELECT_TITLE) + " (" + std::to_string(m_cachedSystems.size()) + UiStrings::SYS_SELECT_SYSTEMS_LABEL +
+                          std::to_string(totalLocal) + UiStrings::SYS_SELECT_GAMES_LOCAL +
+                          std::to_string(totalCloud) + UiStrings::SYS_SELECT_GAMES_CLOUD;
     drawText(summary, cardX + 30, cardY + 16, {0, 180, 216, 255}, m_fontLarge);
 
     int visibleCount = 6;
@@ -1362,10 +1362,10 @@ void UIManager::renderSettingsState() {
     drawText("Trạng thái Google Drive:", cardX + 40, rowY, {160, 175, 190, 255}, m_fontMedium);
     if (AuthManager::instance().isLinked()) {
         std::string email = AuthManager::instance().getUserEmail();
-        drawText("ĐÃ KẾT NỐI", cardX + 320, rowY, {34, 197, 94, 255}, m_fontMedium);
+        drawText(UiStrings::SETTING_CONNECTED, cardX + 320, rowY, {34, 197, 94, 255}, m_fontMedium);
         drawBadge(cardX + 610, rowY - 6, 190, 38, "[X] Đăng xuất", {185, 28, 28, 255}, {255, 255, 255, 255});
     } else {
-        drawText("CHƯA KẾT NỐI", cardX + 320, rowY, {239, 68, 68, 255}, m_fontMedium);
+        drawText(UiStrings::SETTING_DISCONNECTED, cardX + 320, rowY, {239, 68, 68, 255}, m_fontMedium);
         drawBadge(cardX + 510, rowY - 6, 290, 38, "[A] Kết nối qua Web Local", {30, 58, 138, 255}, {255, 255, 255, 255});
     }
 
