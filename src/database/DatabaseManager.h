@@ -63,6 +63,7 @@ public:
 
     std::vector<GameRecord> getGamesBySystem(int systemId, int stateFilter = -1, const std::string& searchQuery = "");
     std::vector<GameRecord> searchAllGames(const std::string& query, int limit = 60);
+    std::vector<GameRecord> getGamesFiltered(int systemId, int stateFilter, const std::string& searchQuery, int limit, int offset, int& outTotalCount);
     bool getGameById(int64_t gameId, GameRecord& outGame);
     bool getGameByFilename(int systemId, const std::string& filename, GameRecord& outGame);
     bool getGameByCloudId(const std::string& cloudFileId, GameRecord& outGame);

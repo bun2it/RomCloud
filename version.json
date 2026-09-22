@@ -1,7 +1,7 @@
 {
-  "version": "1.0.4",
-  "release_date": "2026-09-21",
+  "version": "1.0.5",
+  "release_date": "2026-09-22",
   "binary_url": "https://raw.githubusercontent.com/bun2it/RomCloud/main/bin/RomCloud",
-  "changelog": "v1.0.4: Thêm TÌM KIẾM GAME ngay trên màn hình TrimUI (bàn phím ảo D-Pad, hiện kết quả 2 panel), ẩn Google Cloud API Key khỏi giao diện Web Portal."
+  "changelog": "v1.0.5: Ra mắt Giao diện Quản lý ROM Web Portal đầy đủ (Tìm kiếm, Tải game, Hàng đợi tải, Xóa ROM thẻ nhớ, Đo dung lượng SD card, Cào ảnh bìa, Kích hoạt đồng bộ Drive qua web)."
 }
 

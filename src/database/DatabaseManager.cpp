@@ -404,6 +404,87 @@ std::vector<GameRecord> DatabaseManager::searchAllGames(const std::string& query
     return list;
 }
 
+std::vector<GameRecord> DatabaseManager::getGamesFiltered(int systemId, int stateFilter, const std::string& searchQuery, int limit, int offset, int& outTotalCount) {
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
+    std::vector<GameRecord> list;
+    outTotalCount = 0;
+    if (!m_db) return list;
+
+    std::string whereClause = " WHERE 1=1";
+    if (systemId > 0) {
+        whereClause += " AND g.system_id = " + std::to_string(systemId);
+    }
+    if (stateFilter >= 0) {
+        whereClause += " AND g.local_state = " + std::to_string(stateFilter);
+    }
+    if (!searchQuery.empty()) {
+        whereClause += " AND (g.title LIKE ? OR g.filename LIKE ?)";
+    }
+
+    // 1. Get total count
+    std::string countSql = "SELECT COUNT(*) FROM games g" + whereClause + ";";
+    sqlite3_stmt* cStmt = nullptr;
+    if (sqlite3_prepare_v2(m_db, countSql.c_str(), -1, &cStmt, nullptr) == SQLITE_OK) {
+        if (!searchQuery.empty()) {
+            std::string pattern = "%" + searchQuery + "%";
+            sqlite3_bind_text(cStmt, 1, pattern.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text(cStmt, 2, pattern.c_str(), -1, SQLITE_TRANSIENT);
+        }
+        if (sqlite3_step(cStmt) == SQLITE_ROW) {
+            outTotalCount = sqlite3_column_int(cStmt, 0);
+        }
+        sqlite3_finalize(cStmt);
+    }
+
+    // 2. Fetch page items
+    std::string sql = "SELECT g.id, g.cloud_file_id, g.system_id, g.filename, g.title, g.size_bytes, g.mime_type, g.drive_modified_time, g.checksum_sha256, g.local_path, g.local_state, g.cover_path, g.created_at, g.updated_at, COALESCE(s.code,'') FROM games g LEFT JOIN systems s ON g.system_id = s.id" + whereClause + " ORDER BY g.title ASC LIMIT ? OFFSET ?;";
+
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2(m_db, sql.c_str(), -1, &stmt, nullptr) == SQLITE_OK) {
+        int pIdx = 1;
+        if (!searchQuery.empty()) {
+            std::string pattern = "%" + searchQuery + "%";
+            sqlite3_bind_text(stmt, pIdx++, pattern.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text(stmt, pIdx++, pattern.c_str(), -1, SQLITE_TRANSIENT);
+        }
+        sqlite3_bind_int(stmt, pIdx++, limit > 0 ? limit : 50);
+        sqlite3_bind_int(stmt, pIdx++, offset >= 0 ? offset : 0);
+
+        while (sqlite3_step(stmt) == SQLITE_ROW) {
+            GameRecord g;
+            g.id = sqlite3_column_int64(stmt, 0);
+            const char* cid = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1));
+            if (cid) g.cloudFileId = cid;
+            g.systemId = sqlite3_column_int(stmt, 2);
+            const char* fn = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 3));
+            if (fn) g.filename = fn;
+            const char* tt = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 4));
+            if (tt) g.title = tt;
+            g.sizeBytes = static_cast<uint64_t>(sqlite3_column_int64(stmt, 5));
+            const char* mime = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 6));
+            if (mime) g.mimeType = mime;
+            const char* mod = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 7));
+            if (mod) g.driveModifiedTime = mod;
+            const char* sha = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 8));
+            if (sha) g.checksumSha256 = sha;
+            const char* lpath = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 9));
+            if (lpath) g.localPath = lpath;
+            g.localState = static_cast<GameState>(sqlite3_column_int(stmt, 10));
+            const char* cov = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 11));
+            if (cov) g.coverPath = cov;
+            const char* cat = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 12));
+            if (cat) g.createdAt = cat;
+            const char* uat = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 13));
+            if (uat) g.updatedAt = uat;
+            const char* scode = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 14));
+            if (scode) g.systemCode = scode;
+            list.push_back(g);
+        }
+        sqlite3_finalize(stmt);
+    }
+    return list;
+}
+
 bool DatabaseManager::getGameById(int64_t gameId, GameRecord& outGame) {
     std::lock_guard<std::recursive_mutex> lock(m_mutex);
     if (!m_db) return false;

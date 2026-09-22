@@ -9,6 +9,7 @@
 #include "../filesystem/FileSystemManager.h"
 #include "../ui/BoxartScraper.h"
 #include "../app/Application.h"
+#include "../config/AppConfig.h"
 #include "HttpClient.h"
 
 #include <sys/socket.h>
@@ -19,6 +20,7 @@
 #include <cstring>
 #include <vector>
 #include <algorithm>
+#include <iomanip>
 
 namespace RomCloud {
 
@@ -63,11 +65,60 @@ static std::string extractFolderId(const std::string& url) {
         if (endPos != std::string::npos) id = id.substr(0, endPos);
         return id;
     }
-    // Direct folder ID fallback if no slashes
     if (url.find('/') == std::string::npos && url.length() >= 20) {
         return url;
     }
     return "";
+}
+
+static std::string extractPostParam(const std::string& postBody, const std::string& paramName) {
+    std::string key = paramName + "=";
+    size_t keyPos = 0;
+    while (true) {
+        keyPos = postBody.find(key, keyPos);
+        if (keyPos == std::string::npos) return "";
+        if (keyPos == 0 || postBody[keyPos - 1] == '&') break;
+        keyPos += key.length();
+    }
+    std::string rawVal = postBody.substr(keyPos + key.length());
+    size_t ampersand = rawVal.find('&');
+    if (ampersand != std::string::npos) rawVal = rawVal.substr(0, ampersand);
+    return urlDecode(rawVal);
+}
+
+static std::string extractQueryParam(const std::string& queryStr, const std::string& paramName) {
+    std::string key = paramName + "=";
+    size_t keyPos = 0;
+    while (true) {
+        keyPos = queryStr.find(key, keyPos);
+        if (keyPos == std::string::npos) return "";
+        if (keyPos == 0 || queryStr[keyPos - 1] == '&' || queryStr[keyPos - 1] == '?') break;
+        keyPos += key.length();
+    }
+    std::string rawVal = queryStr.substr(keyPos + key.length());
+    size_t ampersand = rawVal.find('&');
+    if (ampersand != std::string::npos) rawVal = rawVal.substr(0, ampersand);
+    return urlDecode(rawVal);
+}
+
+static std::string escapeJson(const std::string& in) {
+    std::string out;
+    out.reserve(in.size() + 10);
+    for (char c : in) {
+        if (c == '"') out += "\\\"";
+        else if (c == '\\') out += "\\\\";
+        else if (c == '\b') out += "\\b";
+        else if (c == '\f') out += "\\f";
+        else if (c == '\n') out += "\\n";
+        else if (c == '\r') out += "\\r";
+        else if (c == '\t') out += "\\t";
+        else if (static_cast<unsigned char>(c) < 32) {
+            // drop non-printable
+        } else {
+            out += c;
+        }
+    }
+    return out;
 }
 
 WebServer& WebServer::instance() {
@@ -99,14 +150,14 @@ bool WebServer::start(int port) {
     address.sin_port = htons(m_port);
 
     if (bind(m_serverFd, (struct sockaddr*)&address, sizeof(address)) < 0) {
-        Logger::error("WebServer: Failed to bind to port " + std::to_string(m_port));
+        Logger::error("WebServer: Bind failed on port " + std::to_string(m_port));
         close(m_serverFd);
         m_serverFd = -1;
         return false;
     }
 
-    if (listen(m_serverFd, 5) < 0) {
-        Logger::error("WebServer: Failed to listen on socket.");
+    if (listen(m_serverFd, 10) < 0) {
+        Logger::error("WebServer: Listen failed.");
         close(m_serverFd);
         m_serverFd = -1;
         return false;
@@ -114,7 +165,7 @@ bool WebServer::start(int port) {
 
     m_running = true;
     m_thread = std::thread(&WebServer::serverLoop, this);
-    Logger::info("WebServer: Started on port " + std::to_string(m_port));
+    Logger::info("WebServer: Portal started on port " + std::to_string(m_port));
     return true;
 }
 
@@ -131,78 +182,30 @@ void WebServer::stop() {
     if (m_thread.joinable()) {
         m_thread.join();
     }
-    Logger::info("WebServer: Stopped cleanly.");
+    Logger::info("WebServer: Stopped.");
 }
 
 void WebServer::serverLoop() {
     while (m_running) {
-        fd_set readFds;
-        FD_ZERO(&readFds);
-        FD_SET(m_serverFd, &readFds);
+        struct sockaddr_in clientAddr;
+        socklen_t clientLen = sizeof(clientAddr);
+        int clientFd = accept(m_serverFd, (struct sockaddr*)&clientAddr, &clientLen);
+        if (clientFd < 0) {
+            if (m_running) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            }
+            continue;
+        }
 
         struct timeval tv;
-        tv.tv_sec = 0;
-        tv.tv_usec = 200000; // 200ms timeout so thread terminates promptly on exit
+        tv.tv_sec = 4;
+        tv.tv_usec = 0;
+        setsockopt(clientFd, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof(tv));
+        setsockopt(clientFd, SOL_SOCKET, SO_SNDTIMEO, (const char*)&tv, sizeof(tv));
 
-        int ret = select(m_serverFd + 1, &readFds, nullptr, nullptr, &tv);
-        if (ret > 0 && FD_ISSET(m_serverFd, &readFds)) {
-            struct sockaddr_in clientAddr;
-            socklen_t clientLen = sizeof(clientAddr);
-            int clientFd = accept(m_serverFd, (struct sockaddr*)&clientAddr, &clientLen);
-            if (clientFd >= 0) {
-                // Set receive/send timeouts to 1 second to prevent hanging on idle connections
-                struct timeval timeout;
-                timeout.tv_sec = 1;
-                timeout.tv_usec = 0;
-                setsockopt(clientFd, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout));
-                setsockopt(clientFd, SOL_SOCKET, SO_SNDTIMEO, (const char*)&timeout, sizeof(timeout));
-
-                handleClient(clientFd);
-                shutdown(clientFd, SHUT_RDWR);
-                close(clientFd);
-            }
-        }
+        handleClient(clientFd);
+        close(clientFd);
     }
-}
-
-static std::string extractPostParam(const std::string& postBody, const std::string& paramName) {
-    std::string key = paramName + "=";
-    size_t keyPos = postBody.find(key);
-    if (keyPos == std::string::npos) return "";
-    std::string rawVal = postBody.substr(keyPos + key.length());
-    size_t ampersand = rawVal.find('&');
-    if (ampersand != std::string::npos) rawVal = rawVal.substr(0, ampersand);
-    return urlDecode(rawVal);
-}
-
-static std::string extractQueryParam(const std::string& queryStr, const std::string& paramName) {
-    std::string key = paramName + "=";
-    size_t keyPos = queryStr.find(key);
-    if (keyPos == std::string::npos) return "";
-    std::string rawVal = queryStr.substr(keyPos + key.length());
-    size_t ampersand = rawVal.find('&');
-    if (ampersand != std::string::npos) rawVal = rawVal.substr(0, ampersand);
-    return urlDecode(rawVal);
-}
-
-static std::string escapeJson(const std::string& in) {
-    std::string out;
-    out.reserve(in.size() + 10);
-    for (char c : in) {
-        if (c == '"') out += "\\\"";
-        else if (c == '\\') out += "\\\\";
-        else if (c == '\b') out += "\\b";
-        else if (c == '\f') out += "\\f";
-        else if (c == '\n') out += "\\n";
-        else if (c == '\r') out += "\\r";
-        else if (c == '\t') out += "\\t";
-        else if (static_cast<unsigned char>(c) < 32) {
-            // drop non-printable
-        } else {
-            out += c;
-        }
-    }
-    return out;
 }
 
 std::string WebServer::buildHtmlResponse() {
@@ -210,15 +213,8 @@ std::string WebServer::buildHtmlResponse() {
     if (ip.empty()) ip = "192.168.1.164";
 
     auto& db = DatabaseManager::instance();
-    std::string savedClientId = db.getSetting("auth_client_id", "");
-    if (savedClientId.empty()) savedClientId = "966407933571-pc0c8c9gcfh4eiofcresgj6je79524s3.apps.googleusercontent.com";
-    std::string savedClientSecret = db.getSetting("auth_client_secret", "");
-    if (savedClientSecret.empty()) savedClientSecret = AuthManager::getDefaultClientSecret();
     std::string savedDriveUrl = db.getSetting("drive_folder_url", "https://drive.google.com/drive/folders/1j4Bfo5YS65zSGSOWHWRrXjovTfX6syWD");
-    std::string savedApiKey = db.getSetting("google_api_key", "");
-
-    bool isLinked = AuthManager::instance().isLinked();
-    std::string currentEmail = isLinked ? AuthManager::instance().getUserEmail() : "Chưa đăng nhập";
+    std::string lastSyncTime = DriveSyncEngine::instance().getLastSyncTime();
 
     int totalLocal = 0, totalCloud = 0;
     db.getTotalGameCounts(totalLocal, totalCloud);
@@ -228,384 +224,1008 @@ std::string WebServer::buildHtmlResponse() {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>RomCloud TrimUI Portal</title>
+  <title>RomCloud - TrimUI ROM Manager</title>
   <style>
     :root {
-      --bg: #0f172a;
-      --card-bg: #1e293b;
+      --bg: #090d16;
+      --card-bg: #111827;
+      --card-alt: #1a2333;
+      --border: #1f293d;
+      --border-hover: #374151;
       --primary: #0284c7;
       --primary-hover: #0369a1;
+      --accent: #38bdf8;
       --text: #f8fafc;
       --text-muted: #94a3b8;
-      --border: #334155;
-      --green: #22c55e;
+      --text-dim: #64748b;
+      --green: #10b981;
+      --green-bg: #064e3b;
+      --green-border: #059669;
+      --red: #ef4444;
+      --red-bg: #7f1d1d;
       --yellow: #f59e0b;
+      --yellow-bg: #78350f;
+      --purple: #8b5cf6;
+      --radius: 12px;
     }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
       background: var(--bg);
       color: var(--text);
-      padding: 16px;
-      margin: 0;
       line-height: 1.5;
+      padding: 16px;
+      min-height: 100vh;
     }
-    .container { max-width: 560px; margin: 0 auto; }
-    .header { text-align: center; margin-bottom: 20px; }
-    .logo { font-size: 26px; font-weight: 800; color: #38bdf8; letter-spacing: -0.5px; }
-    .status-card {
-      background: #111827;
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 14px 18px;
-      margin-bottom: 18px;
-      font-size: 13px;
+    .container { max-width: 1140px; margin: 0 auto; }
+    
+    /* Header */
+    header {
       display: flex;
       justify-content: space-between;
       align-items: center;
+      flex-wrap: wrap;
+      gap: 12px;
+      padding: 14px 20px;
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      margin-bottom: 20px;
     }
-    .status-pill {
-      display: inline-block;
-      padding: 5px 12px;
-      border-radius: 20px;
+    .logo-area { display: flex; align-items: center; gap: 10px; }
+    .logo-icon { font-size: 26px; }
+    .logo-text { font-size: 22px; font-weight: 800; color: var(--accent); letter-spacing: -0.5px; }
+    .device-badge {
+      font-size: 11px;
+      padding: 3px 8px;
+      border-radius: 6px;
+      background: #0284c722;
+      color: var(--accent);
+      border: 1px solid #0284c744;
       font-weight: 600;
-      font-size: 12px;
     }
-    .pill-green { background: #14532d; color: #4ade80; border: 1px solid #22c55e; }
-    .pill-gray { background: #374151; color: #d1d5db; }
+    .header-stats {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .stat-pill {
+      font-size: 12px;
+      padding: 4px 10px;
+      border-radius: 8px;
+      background: var(--card-alt);
+      border: 1px solid var(--border);
+      color: var(--text-muted);
+    }
+    .stat-pill b { color: var(--text); }
+    .stat-pill.active-download {
+      background: #0284c722;
+      border-color: var(--primary);
+      color: var(--accent);
+    }
+
+    /* Tabs */
+    .tab-bar {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 20px;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 8px;
+      overflow-x: auto;
+    }
+    .tab-btn {
+      padding: 10px 18px;
+      background: transparent;
+      border: 1px solid transparent;
+      border-radius: 8px;
+      color: var(--text-muted);
+      font-weight: 600;
+      font-size: 14px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      white-space: nowrap;
+      transition: all 0.15s ease;
+    }
+    .tab-btn:hover { color: var(--text); background: var(--card-alt); }
+    .tab-btn.active {
+      background: var(--primary);
+      color: #fff;
+      border-color: var(--primary-hover);
+      box-shadow: 0 4px 12px rgba(2, 132, 199, 0.3);
+    }
+    .badge {
+      display: inline-block;
+      padding: 2px 7px;
+      border-radius: 10px;
+      font-size: 11px;
+      font-weight: 700;
+      background: rgba(255,255,255,0.2);
+    }
+
+    /* Tab Content */
+    .tab-content { display: none; }
+    .tab-content.active { display: block; animation: fadeIn 0.2s ease; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+
+    /* Controls Bar */
+    .controls-bar {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px;
+      margin-bottom: 20px;
+    }
+    .search-row {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+    .search-input-wrap {
+      position: relative;
+      flex: 1;
+    }
+    .search-input {
+      width: 100%;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 36px 10px 14px;
+      font-size: 14px;
+      color: #fff;
+      outline: none;
+      transition: border 0.15s ease;
+    }
+    .search-input:focus { border-color: var(--primary); }
+    .search-clear {
+      position: absolute;
+      right: 10px;
+      top: 50%;
+      transform: translateY(-50%);
+      background: none;
+      border: none;
+      color: var(--text-dim);
+      font-size: 16px;
+      cursor: pointer;
+      display: none;
+    }
+    
+    /* System & State Pills */
+    .filter-pills-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      overflow-x: auto;
+      padding-bottom: 4px;
+    }
+    .pill-btn {
+      padding: 6px 12px;
+      border-radius: 20px;
+      border: 1px solid var(--border);
+      background: var(--card-alt);
+      color: var(--text-muted);
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: all 0.15s;
+    }
+    .pill-btn:hover { color: var(--text); border-color: var(--text-dim); }
+    .pill-btn.active {
+      background: var(--accent);
+      color: #090d16;
+      border-color: var(--accent);
+      font-weight: 700;
+    }
+    .state-filter-group {
+      display: flex;
+      gap: 6px;
+      border-right: 1px solid var(--border);
+      padding-right: 10px;
+      margin-right: 4px;
+    }
+
+    /* Game Table / Cards */
+    .game-list-container {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+    .game-list-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px 18px;
+      background: var(--card-alt);
+      border-bottom: 1px solid var(--border);
+      font-size: 13px;
+      color: var(--text-muted);
+      font-weight: 600;
+    }
+    .game-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+    .game-table th {
+      text-align: left;
+      padding: 10px 16px;
+      background: var(--card-alt);
+      color: var(--text-dim);
+      font-weight: 600;
+      border-bottom: 1px solid var(--border);
+    }
+    .game-table td {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+      vertical-align: middle;
+    }
+    .game-table tr:hover td {
+      background: rgba(255,255,255,0.02);
+    }
+    .game-title {
+      font-weight: 600;
+      color: var(--text);
+      display: block;
+      margin-bottom: 2px;
+    }
+    .game-file {
+      font-size: 11px;
+      color: var(--text-dim);
+      font-family: monospace;
+    }
+    .sys-tag {
+      display: inline-block;
+      padding: 3px 8px;
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.3px;
+    }
+    .sys-GBA { background: #7c2d12; color: #fdba74; }
+    .sys-FC, .sys-NES { background: #991b1b; color: #fca5a5; }
+    .sys-SFC, .sys-SNES { background: #1e3a8a; color: #bfdbfe; }
+    .sys-PS, .sys-PSX { background: #374151; color: #e5e7eb; }
+    .sys-MD { background: #14532d; color: #86efac; }
+    .sys-N64 { background: #581c87; color: #e9d5ff; }
+    .sys-NDS { background: #064e3b; color: #6ee7b7; }
+    .sys-PSP { background: #164e63; color: #a5f3fc; }
+    .sys-ARCADE, .sys-NEOGEO { background: #831843; color: #fbcfe8; }
+    .sys-default { background: #334155; color: #cbd5e1; }
+
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 4px 9px;
+      border-radius: 12px;
+      font-size: 11px;
+      font-weight: 600;
+    }
+    .status-local { background: var(--green-bg); color: var(--green); border: 1px solid var(--green-border); }
+    .status-cloud { background: #1e293b; color: var(--text-dim); border: 1px solid var(--border); }
+    .status-queue { background: var(--yellow-bg); color: var(--yellow); border: 1px solid var(--yellow); }
+
+    /* Action Buttons */
+    .btn {
+      padding: 6px 12px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      border: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      transition: all 0.15s;
+    }
+    .btn-primary { background: var(--primary); color: #fff; }
+    .btn-primary:hover { background: var(--primary-hover); }
+    .btn-danger { background: var(--red-bg); color: var(--red); border: 1px solid var(--red); }
+    .btn-danger:hover { background: var(--red); color: #fff; }
+    .btn-secondary { background: var(--card-alt); color: var(--text-muted); border: 1px solid var(--border); }
+    .btn-secondary:hover { color: var(--text); border-color: var(--text-dim); }
+
+    /* Pagination */
+    .pagination {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 14px 18px;
+      background: var(--card-alt);
+    }
+
+    /* Queue & Active Download Card */
+    .active-download-card {
+      background: linear-gradient(135deg, #0c4a6e 0%, #0f172a 100%);
+      border: 1px solid #0284c766;
+      border-radius: var(--radius);
+      padding: 20px;
+      margin-bottom: 20px;
+      box-shadow: 0 10px 25px rgba(2, 132, 199, 0.15);
+    }
+    .progress-track {
+      height: 10px;
+      background: rgba(0,0,0,0.5);
+      border-radius: 5px;
+      overflow: hidden;
+      margin: 12px 0 8px 0;
+    }
+    .progress-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #38bdf8, #22c55e);
+      border-radius: 5px;
+      transition: width 0.3s ease;
+      width: 0%;
+    }
+    .dl-metrics {
+      display: flex;
+      justify-content: space-between;
+      font-size: 12px;
+      color: #94a3b8;
+    }
+
+    /* Cards Grid */
+    .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; margin-bottom: 20px; }
     .card {
       background: var(--card-bg);
-      border-radius: 16px;
-      padding: 24px;
-      margin-bottom: 20px;
-      box-shadow: 0 10px 25px -5px rgba(0,0,0,0.4);
       border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
     }
-    h2 { font-size: 18px; color: #f1f5f9; margin-top: 0; margin-bottom: 10px; }
-    p { font-size: 14px; color: var(--text-muted); margin-top: 0; margin-bottom: 14px; }
-    label { font-size: 13px; color: var(--text-muted); display: block; margin-bottom: 6px; font-weight: 500; }
-    input[type=text] {
-      width: 100%;
-      box-sizing: border-box;
-      padding: 13px 14px;
-      border-radius: 10px;
-      border: 1px solid #475569;
-      background: #0f172a;
+    .card h3 { font-size: 16px; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; color: var(--accent); }
+    
+    /* Storage Meter */
+    .storage-bar {
+      height: 12px;
+      background: #1e293b;
+      border-radius: 6px;
+      overflow: hidden;
+      margin: 10px 0;
+      display: flex;
+    }
+    .storage-used { background: var(--accent); height: 100%; }
+
+    /* Toast Notification */
+    #toast {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      background: #1e293b;
+      border: 1px solid var(--primary);
       color: #fff;
-      font-size: 14px;
-      margin-bottom: 16px;
-      outline: none;
-    }
-    input[type=text]:focus { border-color: #38bdf8; }
-    button.btn-main {
-      width: 100%;
-      padding: 15px;
-      border: none;
-      border-radius: 10px;
-      font-weight: 700;
-      font-size: 15px;
-      cursor: pointer;
-      background: #0284c7;
-      color: white;
-      transition: background 0.2s;
-    }
-    button.btn-main:active { background: #0369a1; }
-    .guide-box {
-      background: #0f172a;
-      border-left: 4px solid #38bdf8;
+      padding: 12px 20px;
       border-radius: 8px;
-      padding: 14px 16px;
-      font-size: 13px;
-      color: #cbd5e1;
-      margin-top: 18px;
-      line-height: 1.6;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.6);
+      font-size: 14px;
+      font-weight: 500;
+      opacity: 0;
+      transform: translateY(20px);
+      transition: all 0.25s ease;
+      z-index: 9999;
+      pointer-events: none;
     }
-    .guide-box b { color: #38bdf8; }
+    #toast.show { opacity: 1; transform: translateY(0); }
+
+    /* Mobile Adaptations */
+    @media (max-width: 680px) {
+      .game-table th:nth-child(3), .game-table td:nth-child(3) { display: none; }
+      .hide-mobile { display: none; }
+    }
   </style>
 </head>
 <body>
   <div class="container">
-    <div class="header">
-      <div class="logo">RomCloud</div>
-      <div style="font-size: 13px; color: #94a3b8; margin-top: 4px;">Cổng kết nối Google Drive & Quản lý ROM &bull; <b>)HTML" + ip + R"HTML(:8080</b></div>
+    <!-- Header -->
+    <header>
+      <div class="logo-area">
+        <span class="logo-icon">🎮</span>
+        <div>
+          <span class="logo-text">RomCloud</span>
+          <span class="device-badge">TrimUI Brick / Smart Pro</span>
+        </div>
+      </div>
+      <div class="header-stats">
+        <div class="stat-pill" id="head-storage-pill">SD: <b>Đang tải...</b></div>
+        <div class="stat-pill">Games: <b id="head-local-count">)HTML" + std::to_string(totalLocal) + R"HTML(</b> thẻ / <b id="head-cloud-count">)HTML" + std::to_string(totalCloud) + R"HTML(</b> cloud</div>
+      </div>
+    </header>
+
+    <!-- Navigation Tabs -->
+    <div class="tab-bar">
+      <button class="tab-btn active" onclick="switchTab('tab-roms')">🎮 Quản lý ROM</button>
+      <button class="tab-btn" onclick="switchTab('tab-queue')">📥 Hàng đợi tải <span class="badge" id="nav-queue-badge">0</span></button>
+      <button class="tab-btn" onclick="switchTab('tab-storage')">☁️ Đồng bộ &amp; Thẻ nhớ</button>
+      <button class="tab-btn" onclick="switchTab('tab-ota')">🚀 Cập nhật OTA</button>
     </div>
 
-    <!-- STATUS CARD -->
-    <div class="status-card">
-      <div>
-        <div style="font-weight: 600;">Trạng thái kết nối Drive:</div>
-        <div style="color: #94a3b8; font-size: 12px; margin-top: 2px;">)HTML" + (isLinked ? currentEmail : "Chưa kết nối thư mục") + R"HTML(</div>
-      </div>
-      <div style="display: flex; gap: 8px; align-items: center;">
-        )HTML" + (isLinked ? R"HTML(<span class="status-pill pill-green">ĐÃ KẾT NỐI</span>
-        <form method="POST" action="/unlink" style="margin: 0;" onsubmit="return confirm('Bạn có chắc muốn hủy liên kết Google Drive?');">
-          <button type="submit" style="background: #ef4444; color: #fff; border: none; border-radius: 6px; padding: 6px 12px; font-size: 12px; font-weight: 600; cursor: pointer;">HỦY KẾT NỐI</button>
-        </form>)HTML" : "<span class=\"status-pill pill-gray\">CHƯA KẾT NỐI</span>") + R"HTML(
-      </div>
-    </div>
+    <!-- TAB 1: ROM MANAGER -->
+    <div id="tab-roms" class="tab-content active">
+      <div class="controls-bar">
+        <div class="search-row">
+          <div class="search-input-wrap">
+            <input type="text" id="rom-search" class="search-input" placeholder="🔍 Nhập tên game hoặc tên file ROM để tìm kiếm ngay..." oninput="onSearchInput()">
+            <button id="search-clear-btn" class="search-clear" onclick="clearSearch()">&times;</button>
+          </div>
+        </div>
 
-    <!-- MAIN CARD: PUBLIC GOOGLE DRIVE LINK -->
-    <div class="card">
-      <h2>Liên kết thư mục Google Drive chia sẻ</h2>
-      <p>Dành cho thư mục Google Drive được chia sẻ ở chế độ công khai (Bất kỳ ai có liên kết đều xem được).</p>
-
-      <div style="background: rgba(245, 158, 11, 0.12); border: 1px solid #f59e0b; border-radius: 8px; padding: 14px 18px; margin: 16px 0; font-size: 13px; line-height: 1.6; color: #fbbf24;">
-        <b>⚠️ TUYÊN BỐ MIỄN TRỪ TRÁCH NHIỆM BẢN QUYỀN (DISCLAIMER):</b><br>
-        • RomCloud là phần mềm mã nguồn mở độc lập, KHÔNG chứa sẵn hoặc phân phối bất kỳ file ROM hay dữ liệu có bản quyền nào.<br>
-        • Người dùng hoàn toàn tự chịu trách nhiệm về nội dung và quyền sử dụng các tệp tin trong Google Drive của mình.
+        <div class="filter-pills-row">
+          <div class="state-filter-group">
+            <button class="pill-btn active" id="filter-state-all" onclick="setStateFilter(-1)">Tất cả</button>
+            <button class="pill-btn" id="filter-state-local" onclick="setStateFilter(1)">🟢 Đã tải</button>
+            <button class="pill-btn" id="filter-state-cloud" onclick="setStateFilter(0)">☁️ Chưa tải</button>
+          </div>
+          <div id="system-pills-container" style="display: flex; gap: 6px;">
+            <!-- Rendered by JS -->
+          </div>
+        </div>
       </div>
 
-      <form method="POST" action="/connect">
-        <label>Liên kết thư mục Google Drive:</label>
-        <input type="text" name="drive_url" value=")HTML" + savedDriveUrl + R"HTML(" placeholder="https://drive.google.com/drive/folders/..." required>
-
-        <!-- API Key hidden - pre-configured by admin -->
-        <input type="hidden" name="api_key" value=")HTML" + savedApiKey + R"HTML(">
-
-        <button type="submit" class="btn-main">👉 KẾT NỐI &amp; ĐỒNG BỘ VÀO MÁY TRIMUI</button>
-      </form>
-
-      <div class="guide-box">
-        <b>💡 Hướng dẫn kết nối nhanh:</b><br>
-        1. Mở Google Drive trên điện thoại hoặc máy tính.<br>
-        2. Chọn thư mục chứa ROM &rarr; Bấm <b>Chia sẻ</b> &rarr; Đặt quyền truy cập là <i>"Bất kỳ ai có đường liên kết đều có thể xem"</i>.<br>
-        3. Dán liên kết vào ô bên trên và bấm <b>KẾT NỐI &amp; ĐỒNG BỘ</b>. Máy TrimUI sẽ tự động quét danh sách game!
-      </div>
-    </div>
-
-    <!-- SEARCH & ROM MANAGEMENT CARD -->
-    <div class="card" style="border: 1px solid #38bdf8;">
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-        <h2 style="margin: 0; font-size: 17px; color: #38bdf8;">🔍 Tìm kiếm & Tải ROM Drive</h2>
-        <span class="status-pill pill-gray">)HTML" + std::to_string(totalCloud) + R"HTML( Cloud &bull; )HTML" + std::to_string(totalLocal) + R"HTML( Trên thẻ</span>
-      </div>
-      <p style="font-size: 13px; color: #94a3b8; margin-bottom: 12px;">
-        Tìm kiếm tên game trên Google Drive. Bấm <b>Tải về</b> để nạp vào thẻ nhớ TrimUI, hoặc bấm <b>Xóa</b> để giải phóng bộ nhớ.
-      </p>
-
-      <input type="text" id="web-search-input" placeholder="🔍 Nhập tên game (VD: Mario, Pokemon, Contra, Sonic, Yu-Gi-Oh...)" oninput="onSearchInput(this.value)" style="margin-bottom: 8px;">
-
-      <div id="search-msg" style="display: none; font-size: 12px; padding: 8px 12px; border-radius: 6px; margin-bottom: 10px;"></div>
-
-      <div id="search-results-box" style="max-height: 400px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px;">
-        <div style="text-align: center; color: #64748b; font-size: 13px; padding: 24px 0;">
-          💡 Gõ từ khóa vào ô trên để tìm game trong kho...
+      <div class="game-list-container">
+        <div class="game-list-header">
+          <span id="game-results-count">Đang tải danh sách game...</span>
+          <span id="active-filters-desc" style="font-weight:400;">Tất cả hệ máy</span>
+        </div>
+        <table class="game-table">
+          <thead>
+            <tr>
+              <th style="width: 100px;">Hệ máy</th>
+              <th>Tên game / Tên file</th>
+              <th style="width: 110px;">Dung lượng</th>
+              <th style="width: 130px;">Trạng thái</th>
+              <th style="width: 160px; text-align: right;">Thao tác</th>
+            </tr>
+          </thead>
+          <tbody id="game-table-body">
+            <tr><td colspan="5" style="text-align: center; padding: 30px; color: var(--text-dim);">Đang tải dữ liệu từ máy TrimUI...</td></tr>
+          </tbody>
+        </table>
+        <div class="pagination">
+          <button class="btn btn-secondary" id="btn-prev-page" onclick="changePage(-1)">&larr; Trang trước</button>
+          <span id="page-indicator" style="font-size: 13px; color: var(--text-muted);">Trang 1</span>
+          <button class="btn btn-secondary" id="btn-next-page" onclick="changePage(1)">Trang sau &rarr;</button>
         </div>
       </div>
     </div>
 
-    <!-- OTA UPDATE CARD -->
-    <div class="card" style="border: 1px solid #0284c7;">
-      <div style="display: flex; justify-content: space-between; align-items: center;">
-        <h2 style="margin: 0; font-size: 16px; color: #38bdf8;">🔄 Cập nhật phần mềm (OTA Update)</h2>
-        <span id="ota-badge" class="status-pill pill-gray">v)HTML" + UpdateManager::instance().getCurrentVersion() + R"HTML(</span>
-      </div>
-      <p style="font-size: 13px; color: #94a3b8; margin: 8px 0 12px 0;">
-        Kiểm tra và cập nhật phiên bản RomCloud mới nhất từ GitHub trực tiếp vào máy TrimUI.
-      </p>
-
-      <div id="ota-info-box" style="display: none; background: #0f172a; border-radius: 8px; padding: 12px; margin-bottom: 12px; font-size: 13px;">
-        <div id="ota-ver-title" style="font-weight: 700; color: #22c55e;"></div>
-        <div id="ota-changelog" style="color: #cbd5e1; margin-top: 4px;"></div>
-      </div>
-
-      <div id="ota-progress-box" style="display: none; margin-bottom: 12px;">
-        <div style="background: #334155; border-radius: 6px; height: 12px; overflow: hidden;">
-          <div id="ota-bar" style="background: #22c55e; width: 0%; height: 100%; transition: width 0.3s;"></div>
+    <!-- TAB 2: DOWNLOAD QUEUE -->
+    <div id="tab-queue" class="tab-content">
+      <div id="active-download-section" style="display: none;" class="active-download-card">
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6px;">
+          <div>
+            <span class="sys-tag sys-default" id="dl-sys-tag">GBA</span>
+            <span style="font-size: 18px; font-weight: 700; margin-left: 8px;" id="dl-title">Pokemon Emerald</span>
+          </div>
+          <button class="btn btn-danger" onclick="cancelActiveDownload()">✕ Hủy tải</button>
         </div>
-        <div id="ota-prog-text" style="font-size: 12px; color: #94a3b8; margin-top: 4px; text-align: center;"></div>
+        <div style="font-size: 12px; color: #cbd5e1; font-family: monospace;" id="dl-file">pokemon.gba</div>
+        <div class="progress-track">
+          <div class="progress-fill" id="dl-progress-fill"></div>
+        </div>
+        <div class="dl-metrics">
+          <span id="dl-speed">0 KB/s</span>
+          <span id="dl-percent">0%</span>
+          <span id="dl-bytes">0 / 0 MB</span>
+        </div>
       </div>
 
-      <div style="display: flex; gap: 10px;">
-        <button type="button" id="btn-ota-check" onclick="checkOtaUpdate()" class="btn-main" style="flex: 1; padding: 11px; font-size: 14px; background: #334155;">🔍 Kiểm tra bản mới</button>
-        <button type="button" id="btn-ota-install" onclick="startOtaInstall()" class="btn-main" style="display: none; flex: 1; padding: 11px; font-size: 14px; background: #16a34a;">⬇️ Cập nhật ngay vào máy</button>
+      <div class="card">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;">
+          <h3>📥 Hàng đợi tải về (<span id="queue-count-num">0</span>)</h3>
+          <button class="btn btn-secondary" onclick="clearAllQueue()">🗑️ Xóa toàn bộ hàng đợi</button>
+        </div>
+        <div id="queue-list-container">
+          <p style="color: var(--text-dim); text-align: center; padding: 20px;">Hàng đợi tải về hiện đang trống.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 3: STORAGE & CLOUD SYNC -->
+    <div id="tab-storage" class="tab-content">
+      <div class="grid-2">
+        <div class="card">
+          <h3>💾 Dung lượng thẻ nhớ MicroSD</h3>
+          <div class="storage-bar">
+            <div class="storage-used" id="storage-bar-fill" style="width: 30%;"></div>
+          </div>
+          <div style="display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 12px;">
+            <span>Đã dùng: <b id="storage-used-txt">-- GB</b></span>
+            <span>Còn trống: <b id="storage-avail-txt" style="color: var(--green);">-- GB</b></span>
+            <span>Tổng: <b id="storage-total-txt">-- GB</b></span>
+          </div>
+          <p style="font-size: 12px; color: var(--text-dim); line-height: 1.6;">
+            ROM game tải về sẽ được đặt tại <code>/mnt/SDCARD/Roms/&lt;HỆ_MÁY&gt;/</code>. Khi rút thẻ nhớ hoặc cập nhật firmware TrimUI, toàn bộ game được giữ nguyên.
+          </p>
+        </div>
+
+        <div class="card">
+          <h3>☁️ Đồng bộ Google Drive</h3>
+          <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 14px;">
+            Lần đồng bộ gần nhất: <b id="last-sync-time">)HTML" + lastSyncTime + R"HTML(</b>
+          </p>
+          <div style="display: flex; gap: 10px; margin-bottom: 16px;">
+            <button class="btn btn-primary" id="btn-trigger-sync" onclick="triggerSync()">🔄 Quét &amp; Đồng bộ lại ngay</button>
+          </div>
+          <div id="sync-status-box" style="display: none; padding: 12px; background: var(--card-alt); border-radius: 8px; font-size: 13px; margin-top: 10px;">
+            <div id="sync-status-txt">Đang quét thư mục Google Drive...</div>
+          </div>
+
+          <form action="/connect" method="POST" style="margin-top: 18px; border-top: 1px solid var(--border); padding-top: 14px;">
+            <label style="font-size: 12px; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 6px;">URL Thư mục Google Drive Master:</label>
+            <div style="display: flex; gap: 8px;">
+              <input type="text" name="drive_url" value=")HTML" + savedDriveUrl + R"HTML(" style="flex: 1; padding: 8px 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: #fff; font-size: 12px;" required>
+              <button type="submit" class="btn btn-secondary">Lưu link</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 4: OTA UPDATE -->
+    <div id="tab-ota" class="tab-content">
+      <div class="card" style="max-width: 600px; margin: 0 auto;">
+        <h3>🚀 Cập nhật ứng dụng RomCloud (OTA)</h3>
+        <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 16px;">
+          Phiên bản trên máy hiện tại: <b style="color: var(--accent);">v)HTML" + UpdateManager::instance().getCurrentVersion() + R"HTML(</b>
+        </p>
+
+        <div style="display: flex; gap: 10px; margin-bottom: 16px;">
+          <button class="btn btn-primary" id="btn-ota-check" onclick="checkOtaUpdate()">Kiểm tra bản cập nhật mới</button>
+          <button class="btn btn-primary" id="btn-ota-install" onclick="startOtaUpdate()" style="display: none; background: var(--green);">Cập nhật ngay</button>
+        </div>
+
+        <div id="ota-info-box" style="display: none; background: var(--card-alt); border-radius: 8px; padding: 14px; margin-bottom: 14px; font-size: 13px;">
+          <div style="font-weight: 700; color: var(--accent); margin-bottom: 4px;" id="ota-version-title"></div>
+          <div style="color: var(--text-dim); font-size: 12px; margin-bottom: 8px;" id="ota-release-date"></div>
+          <div id="ota-changelog" style="color: #cbd5e1; line-height: 1.5; white-space: pre-wrap;"></div>
+        </div>
+
+        <div id="ota-progress-box" style="display: none; margin-top: 10px;">
+          <div class="progress-track"><div class="progress-fill" id="ota-progress-fill"></div></div>
+          <div style="font-size: 12px; color: var(--text-dim);" id="ota-status-txt">Đang tải bản cập nhật...</div>
+        </div>
       </div>
     </div>
   </div>
 
-  <script>
-    let searchDebounceTimer = null;
+  <div id="toast">Thông báo</div>
 
-    function onSearchInput(val) {
-      clearTimeout(searchDebounceTimer);
-      const q = val.trim();
-      const box = document.getElementById('search-results-box');
-      if (q.length < 2) {
-        box.innerHTML = '<div style="text-align: center; color: #64748b; font-size: 13px; padding: 20px 0;">💡 Gõ ít nhất 2 ký tự để tìm kiếm trong kho game...</div>';
-        return;
+  <script>
+    let currentTab = 'tab-roms';
+    let currentSystemId = 0;
+    let currentStateFilter = -1;
+    let currentSearch = '';
+    let currentPage = 1;
+    const pageSize = 50;
+    let searchDebounceTimer = null;
+    let dlPollTimer = null;
+    let systemsCache = [];
+
+    // Init
+    window.addEventListener('DOMContentLoaded', () => {
+      loadSystems();
+      loadStorageInfo();
+      loadGames();
+      startPolling();
+    });
+
+    function showToast(msg) {
+      const t = document.getElementById('toast');
+      t.textContent = msg;
+      t.classList.add('show');
+      setTimeout(() => t.classList.remove('show'), 3000);
+    }
+
+    function switchTab(tabId) {
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+      
+      const targetBtn = Array.from(document.querySelectorAll('.tab-btn')).find(b => b.getAttribute('onclick').includes(tabId));
+      if (targetBtn) targetBtn.classList.add('active');
+      
+      const targetContent = document.getElementById(tabId);
+      if (targetContent) targetContent.classList.add('active');
+      currentTab = tabId;
+
+      if (tabId === 'tab-queue') updateDownloadQueueUI();
+      if (tabId === 'tab-storage') loadStorageInfo();
+    }
+
+    async function loadSystems() {
+      try {
+        const res = await fetch('/api/systems');
+        systemsCache = await res.json();
+        renderSystemPills();
+      } catch (e) {}
+    }
+
+    function renderSystemPills() {
+      const c = document.getElementById('system-pills-container');
+      let html = `<button class="pill-btn ${currentSystemId === 0 ? 'active' : ''}" onclick="setSystemFilter(0)">Tất cả</button>`;
+      for (const s of systemsCache) {
+        if (s.cloud_count === 0 && s.local_count === 0) continue;
+        const active = (currentSystemId === s.id) ? 'active' : '';
+        html += `<button class="pill-btn ${active}" onclick="setSystemFilter(${s.id})">${s.code} (${s.local_count + s.cloud_count})</button>`;
       }
-      searchDebounceTimer = setTimeout(async () => {
-        box.innerHTML = '<div style="text-align: center; color: #38bdf8; font-size: 13px; padding: 15px 0;">⏳ Đang tìm kiếm...</div>';
-        try {
-          const res = await fetch('/api/search?q=' + encodeURIComponent(q));
-          const games = await res.json();
-          if (!games || games.length === 0) {
-            box.innerHTML = '<div style="text-align: center; color: #94a3b8; font-size: 13px; padding: 20px 0;">Không tìm thấy game nào khớp với "' + q + '".</div>';
-            return;
-          }
-          let html = '';
-          games.forEach(g => {
-            const isLocal = g.local_state === 1;
-            const safeTitle = g.title.replace(/'/g, "\\'");
-            html += `
-              <div style="background: #0f172a; border: 1px solid #334155; border-radius: 8px; padding: 10px 12px; display: flex; align-items: center; justify-content: space-between; gap: 8px;">
-                <div style="overflow: hidden; flex: 1;">
-                  <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 2px;">
-                    <span style="background: #1e293b; color: #38bdf8; font-size: 11px; font-weight: 700; padding: 2px 6px; border-radius: 4px; border: 1px solid #475569;">${g.sys_code}</span>
-                    <span style="font-weight: 600; font-size: 13px; color: #f8fafc; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${g.title}</span>
-                  </div>
-                  <div style="font-size: 11px; color: #64748b;">${g.filename} &bull; ${g.size_str}</div>
-                </div>
-                <div style="display: flex; gap: 6px; align-items: center; flex-shrink: 0;">
-                  ${isLocal ? `
-                    <span style="font-size: 11px; color: #4ade80; font-weight: 600; padding: 4px 8px; background: #14532d; border-radius: 6px;">✓ ĐÃ CÓ</span>
-                    <button onclick="deleteRom(${g.id}, '${safeTitle}')" style="background: #ef4444; color: #fff; border: none; border-radius: 6px; padding: 6px 10px; font-size: 11px; font-weight: 600; cursor: pointer;">🗑️ Xóa</button>
-                  ` : `
-                    <button onclick="downloadRom(${g.id}, '${safeTitle}')" style="background: #0284c7; color: #fff; border: none; border-radius: 6px; padding: 6px 12px; font-size: 11px; font-weight: 600; cursor: pointer;">⬇️ Tải về</button>
-                  `}
-                  <button onclick="scrapeBoxart(${g.id}, '${safeTitle}')" title="Cào ảnh bìa từ Libretro" style="background: #334155; color: #38bdf8; border: none; border-radius: 6px; padding: 6px 8px; font-size: 11px; cursor: pointer;">🎨</button>
-                </div>
-              </div>
-            `;
-          });
-          box.innerHTML = html;
-        } catch(err) {
-          box.innerHTML = '<div style="color: #ef4444; font-size: 12px; text-align: center;">Lỗi khi tìm kiếm. Vui lòng thử lại.</div>';
-        }
+      c.innerHTML = html;
+    }
+
+    function setSystemFilter(sysId) {
+      currentSystemId = sysId;
+      currentPage = 1;
+      renderSystemPills();
+      loadGames();
+    }
+
+    function setStateFilter(state) {
+      currentStateFilter = state;
+      currentPage = 1;
+      document.getElementById('filter-state-all').classList.toggle('active', state === -1);
+      document.getElementById('filter-state-local').classList.toggle('active', state === 1);
+      document.getElementById('filter-state-cloud').classList.toggle('active', state === 0);
+      loadGames();
+    }
+
+    function onSearchInput() {
+      const val = document.getElementById('rom-search').value.trim();
+      document.getElementById('search-clear-btn').style.display = val ? 'block' : 'none';
+      clearTimeout(searchDebounceTimer);
+      searchDebounceTimer = setTimeout(() => {
+        currentSearch = val;
+        currentPage = 1;
+        loadGames();
       }, 250);
     }
 
-    function showSearchToast(msg, isSuccess) {
-      const m = document.getElementById('search-msg');
-      m.style.display = 'block';
-      m.style.background = isSuccess ? '#14532d' : '#7f1d1d';
-      m.style.color = isSuccess ? '#4ade80' : '#fca5a5';
-      m.style.border = isSuccess ? '1px solid #22c55e' : '1px solid #ef4444';
-      m.innerText = msg;
-      setTimeout(() => { m.style.display = 'none'; }, 4000);
+    function clearSearch() {
+      document.getElementById('rom-search').value = '';
+      document.getElementById('search-clear-btn').style.display = 'none';
+      currentSearch = '';
+      currentPage = 1;
+      loadGames();
     }
 
-    async function downloadRom(id, title) {
+    async function loadGames() {
+      const tbody = document.getElementById('game-table-body');
+      tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; padding: 25px; color: var(--text-dim);">Đang tải danh sách game...</td></tr>`;
+
+      const offset = (currentPage - 1) * pageSize;
+      const url = `/api/games?system_id=${currentSystemId}&state=${currentStateFilter}&q=${encodeURIComponent(currentSearch)}&limit=${pageSize}&offset=${offset}`;
+
+      try {
+        const res = await fetch(url);
+        const data = await res.json();
+        renderGameTable(data.games, data.total);
+      } catch (e) {
+        tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; padding: 25px; color: var(--red);">Lỗi nạp dữ liệu. Vui lòng thử lại.</td></tr>`;
+      }
+    }
+
+    function renderGameTable(games, total) {
+      const tbody = document.getElementById('game-table-body');
+      const countSpan = document.getElementById('game-results-count');
+      const pageIndicator = document.getElementById('page-indicator');
+      const btnPrev = document.getElementById('btn-prev-page');
+      const btnNext = document.getElementById('btn-next-page');
+
+      const maxPages = Math.ceil(total / pageSize) || 1;
+      countSpan.innerHTML = `Tìm thấy <b>${total.toLocaleString()}</b> game`;
+      pageIndicator.textContent = `Trang ${currentPage} / ${maxPages}`;
+      btnPrev.disabled = (currentPage <= 1);
+      btnNext.disabled = (currentPage >= maxPages);
+
+      if (!games || games.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; padding: 30px; color: var(--text-dim);">Không tìm thấy game nào phù hợp với bộ lọc.</td></tr>`;
+        return;
+      }
+
+      let html = '';
+      for (const g of games) {
+        const sysClass = 'sys-' + (g.sys_code || 'default');
+        let statusBadge = '';
+        let actionButtons = '';
+
+        if (g.local_state === 1) {
+          statusBadge = `<span class="status-badge status-local">🟢 Đã tải</span>`;
+          actionButtons = `
+            <button class="btn btn-secondary" onclick="scrapeBoxart(${g.id})" title="Tải ảnh bìa">🖼️ Bìa</button>
+            <button class="btn btn-danger" onclick="deleteRom(${g.id}, '${escapeHtml(g.title)}')">🗑️ Xóa</button>
+          `;
+        } else if (g.in_queue) {
+          statusBadge = `<span class="status-badge status-queue">⏳ Hàng đợi</span>`;
+          actionButtons = `<button class="btn btn-secondary" onclick="removeFromQueue(${g.id})">✕ Bỏ</button>`;
+        } else {
+          statusBadge = `<span class="status-badge status-cloud">☁️ Cloud</span>`;
+          actionButtons = `<button class="btn btn-primary" onclick="downloadGame(${g.id})">📥 Tải về</button>`;
+        }
+
+        html += `
+          <tr>
+            <td><span class="sys-tag ${sysClass}">${g.sys_code || 'GAME'}</span></td>
+            <td>
+              <span class="game-title">${escapeHtml(g.title)}</span>
+              <span class="game-file">${escapeHtml(g.filename)}</span>
+            </td>
+            <td>${g.size_str || '0 B'}</td>
+            <td>${statusBadge}</td>
+            <td style="text-align: right;">${actionButtons}</td>
+          </tr>
+        `;
+      }
+      tbody.innerHTML = html;
+    }
+
+    function changePage(delta) {
+      currentPage += delta;
+      if (currentPage < 1) currentPage = 1;
+      loadGames();
+    }
+
+    function escapeHtml(s) {
+      if (!s) return '';
+      return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    // Actions
+    async function downloadGame(gameId) {
       try {
         const res = await fetch('/api/download_game', {
           method: 'POST',
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: 'game_id=' + id
+          body: `game_id=${gameId}`
         });
         const data = await res.json();
-        showSearchToast(data.message || ('Đã thêm "' + title + '" vào hàng tải.'), data.success);
-        const q = document.getElementById('web-search-input').value;
-        if (q.length >= 2) onSearchInput(q);
-      } catch(e) {
-        showSearchToast('Lỗi khi thêm vào hàng tải', false);
+        showToast(data.message || 'Đã thêm vào hàng tải.');
+        loadGames();
+        updateDownloadQueueUI();
+      } catch (e) {
+        showToast('Lỗi khi thêm vào hàng tải.');
       }
     }
 
-    async function deleteRom(id, title) {
-      if (!confirm('Bạn có chắc muốn xóa ROM "' + title + '" khỏi thẻ nhớ không?')) return;
+    async function deleteRom(gameId, title) {
+      if (!confirm(`Bạn có chắc chắn muốn xóa ROM "${title}" khỏi thẻ nhớ TrimUI? (File sẽ được giải phóng khỏi thẻ, bạn vẫn có thể tải lại sau)`)) {
+        return;
+      }
       try {
         const res = await fetch('/api/delete_rom', {
           method: 'POST',
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: 'game_id=' + id
+          body: `game_id=${gameId}`
         });
         const data = await res.json();
-        showSearchToast(data.message || ('Đã xóa "' + title + '" khỏi thẻ.'), data.success);
-        const q = document.getElementById('web-search-input').value;
-        if (q.length >= 2) onSearchInput(q);
-      } catch(e) {
-        showSearchToast('Lỗi khi xóa ROM', false);
+        showToast(data.message || 'Đã xóa ROM khỏi thẻ nhớ.');
+        loadGames();
+        loadStorageInfo();
+        loadSystems();
+      } catch (e) {
+        showToast('Lỗi khi xóa ROM.');
       }
     }
 
-    async function scrapeBoxart(id, title) {
-      showSearchToast('⏳ Đang cào ảnh bìa cho "' + title + '" từ Libretro...', true);
+    async function scrapeBoxart(gameId) {
+      showToast('Đang tìm kiếm ảnh bìa trên Libretro CDN...');
       try {
         const res = await fetch('/api/scrape_cover', {
           method: 'POST',
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: 'game_id=' + id
+          body: `game_id=${gameId}`
         });
         const data = await res.json();
-        showSearchToast(data.message, data.success);
-      } catch(e) {
-        showSearchToast('Lỗi khi cào ảnh bìa', false);
+        showToast(data.message || 'Cập nhật ảnh bìa hoàn tất.');
+      } catch (e) {
+        showToast('Lỗi cào ảnh bìa.');
       }
     }
 
-    let otaTimer = null;
-
-    async function checkOtaUpdate() {
-      const btnCheck = document.getElementById('btn-ota-check');
-      btnCheck.disabled = true;
-      btnCheck.innerText = 'Đang kiểm tra...';
+    async function cancelActiveDownload() {
+      if (!confirm('Bạn có chắc chắn muốn hủy lượt tải game hiện tại?')) return;
       try {
-        const resp = await fetch('/ota_check');
-        const data = await resp.json();
-        const infoBox = document.getElementById('ota-info-box');
-        const titleEl = document.getElementById('ota-ver-title');
-        const logEl = document.getElementById('ota-changelog');
-        const btnInstall = document.getElementById('btn-ota-install');
+        await fetch('/api/cancel_download', { method: 'POST' });
+        showToast('Đã gửi yêu cầu hủy tải.');
+        updateDownloadQueueUI();
+        loadGames();
+      } catch (e) {}
+    }
 
-        infoBox.style.display = 'block';
-        if (data.has_update) {
-          titleEl.innerText = '🎉 Có bản cập nhật mới: v' + data.remote_version + (data.release_date ? (' (' + data.release_date + ')') : '');
-          titleEl.style.color = '#22c55e';
-          logEl.innerText = data.changelog || 'Bản vá và nâng cấp hiệu năng.';
-          btnInstall.style.display = 'inline-block';
-          document.getElementById('ota-badge').className = 'status-pill pill-green';
-          document.getElementById('ota-badge').innerText = 'CÓ BẢN MỚI v' + data.remote_version;
+    async function removeFromQueue(gameId) {
+      try {
+        const res = await fetch('/api/remove_queue', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: `game_id=${gameId}`
+        });
+        const data = await res.json();
+        showToast(data.message || 'Đã xóa khỏi hàng đợi.');
+        updateDownloadQueueUI();
+        loadGames();
+      } catch (e) {}
+    }
+
+    async function clearAllQueue() {
+      if (!confirm('Xóa sạch toàn bộ các game đang xếp hàng tải về?')) return;
+      try {
+        await fetch('/api/clear_queue', { method: 'POST' });
+        showToast('Đã xóa sạch hàng đợi.');
+        updateDownloadQueueUI();
+        loadGames();
+      } catch (e) {}
+    }
+
+    async function triggerSync() {
+      const btn = document.getElementById('btn-trigger-sync');
+      btn.disabled = true;
+      btn.textContent = '⏳ Đang quét Google Drive...';
+      const box = document.getElementById('sync-status-box');
+      box.style.display = 'block';
+
+      try {
+        await fetch('/api/trigger_sync', { method: 'POST' });
+        showToast('Đã bắt đầu đồng bộ kho game Google Drive.');
+        pollSyncProgress();
+      } catch (e) {
+        btn.disabled = false;
+        btn.textContent = '🔄 Quét & Đồng bộ lại ngay';
+      }
+    }
+
+    async function pollSyncProgress() {
+      const timer = setInterval(async () => {
+        try {
+          const res = await fetch('/api/sync_status');
+          const data = await res.json();
+          const txt = document.getElementById('sync-status-txt');
+          if (data.is_syncing) {
+            txt.textContent = `Trạng thái: ${data.status} | Đang quét: ${data.current_platform || '...'} | Đã tìm thấy: ${data.games_found || 0} game`;
+          } else {
+            clearInterval(timer);
+            document.getElementById('btn-trigger-sync').disabled = false;
+            document.getElementById('btn-trigger-sync').textContent = '🔄 Quét & Đồng bộ lại ngay';
+            txt.textContent = `Đồng bộ hoàn tất! Tổng game tìm thấy: ${data.games_found || 0}`;
+            loadSystems();
+            loadGames();
+            loadStorageInfo();
+          }
+        } catch (e) {
+          clearInterval(timer);
+        }
+      }, 1500);
+    }
+
+    async function loadStorageInfo() {
+      try {
+        const res = await fetch('/api/storage_info');
+        const data = await res.json();
+        document.getElementById('storage-bar-fill').style.width = (data.used_pct || 0) + '%';
+        document.getElementById('storage-used-txt').textContent = data.used_str || '--';
+        document.getElementById('storage-avail-txt').textContent = data.avail_str || '--';
+        document.getElementById('storage-total-txt').textContent = data.total_str || '--';
+        document.getElementById('head-storage-pill').innerHTML = `SD: <b>${data.avail_str || '--'}</b> trống`;
+        document.getElementById('head-local-count').textContent = data.total_local || 0;
+        document.getElementById('head-cloud-count').textContent = data.total_cloud || 0;
+        if (data.last_sync) document.getElementById('last-sync-time').textContent = data.last_sync;
+      } catch (e) {}
+    }
+
+    async function updateDownloadQueueUI() {
+      try {
+        const res = await fetch('/api/download_status');
+        const data = await res.json();
+
+        // Queue Badge
+        document.getElementById('nav-queue-badge').textContent = data.queue_size || 0;
+        document.getElementById('queue-count-num').textContent = data.queue_size || 0;
+
+        // Active Download Section
+        const activeSec = document.getElementById('active-download-section');
+        if (data.is_downloading && data.active) {
+          activeSec.style.display = 'block';
+          document.getElementById('dl-sys-tag').textContent = data.active.system || 'GAME';
+          document.getElementById('dl-title').textContent = data.active.title || '';
+          document.getElementById('dl-file').textContent = data.active.filename || '';
+          document.getElementById('dl-progress-fill').style.width = (data.active.progress_pct || 0) + '%';
+          document.getElementById('dl-percent').textContent = (data.active.progress_pct || 0).toFixed(1) + '%';
+          document.getElementById('dl-speed').textContent = (data.active.speed_kbps > 1024) 
+            ? (data.active.speed_kbps / 1024).toFixed(1) + ' MB/s' 
+            : Math.round(data.active.speed_kbps) + ' KB/s';
+          
+          const curMB = (data.active.bytes_downloaded / (1024*1024)).toFixed(1);
+          const totMB = (data.active.total_bytes / (1024*1024)).toFixed(1);
+          document.getElementById('dl-bytes').textContent = `${curMB} / ${totMB} MB`;
         } else {
-          titleEl.innerText = '✅ Máy đang ở phiên bản mới nhất (v' + data.current_version + ')';
-          titleEl.style.color = '#38bdf8';
-          logEl.innerText = 'Không có bản cập nhật nào mới hơn trên GitHub repository.';
-          btnInstall.style.display = 'none';
+          activeSec.style.display = 'none';
+        }
+
+        // Queue List
+        const qContainer = document.getElementById('queue-list-container');
+        if (!data.queue || data.queue.length === 0) {
+          qContainer.innerHTML = `<p style="color: var(--text-dim); text-align: center; padding: 20px;">Hàng đợi tải về hiện đang trống.</p>`;
+        } else {
+          let qHtml = '<table class="game-table"><thead><tr><th>#</th><th>Hệ máy</th><th>Tên game</th><th>Dung lượng</th><th style="text-align:right;">Thao tác</th></tr></thead><tbody>';
+          data.queue.forEach((item, idx) => {
+            qHtml += `
+              <tr>
+                <td style="color: var(--text-dim); font-weight:700;">#${idx + 1}</td>
+                <td><span class="sys-tag sys-${item.system}">${item.system}</span></td>
+                <td><b>${escapeHtml(item.title)}</b></td>
+                <td>${item.size_str}</td>
+                <td style="text-align:right;"><button class="btn btn-secondary" onclick="removeFromQueue(${item.game_id})">✕ Bỏ</button></td>
+              </tr>
+            `;
+          });
+          qHtml += '</tbody></table>';
+          qContainer.innerHTML = qHtml;
+        }
+      } catch (e) {}
+    }
+
+    function startPolling() {
+      dlPollTimer = setInterval(() => {
+        updateDownloadQueueUI();
+      }, 1500);
+    }
+
+    // OTA
+    let otaPollTimer = null;
+    async function checkOtaUpdate() {
+      const btn = document.getElementById('btn-ota-check');
+      btn.disabled = true;
+      btn.textContent = 'Đang kiểm tra...';
+      try {
+        const res = await fetch('/ota_check');
+        const data = await res.json();
+        btn.disabled = false;
+        btn.textContent = 'Kiểm tra lại';
+
+        const box = document.getElementById('ota-info-box');
+        box.style.display = 'block';
+        if (data.has_update) {
+          document.getElementById('ota-version-title').innerHTML = `🎉 Có bản cập nhật mới: v${data.remote_version}`;
+          document.getElementById('ota-release-date').textContent = `Ngày phát hành: ${data.release_date}`;
+          document.getElementById('ota-changelog').textContent = data.changelog;
+          document.getElementById('btn-ota-install').style.display = 'inline-flex';
+        } else {
+          document.getElementById('ota-version-title').innerHTML = `✅ Bạn đang sử dụng bản mới nhất (v${data.current_version})`;
+          document.getElementById('ota-release-date').textContent = '';
+          document.getElementById('ota-changelog').textContent = 'Không có bản cập nhật nào mới hơn.';
+          document.getElementById('btn-ota-install').style.display = 'none';
         }
       } catch (e) {
-        alert('Lỗi kiểm tra OTA: ' + e);
-      } finally {
-        btnCheck.disabled = false;
-        btnCheck.innerText = '🔍 Kiểm tra bản mới';
+        btn.disabled = false;
+        btn.textContent = 'Kiểm tra lại';
       }
     }
 
-    async function startOtaInstall() {
-      if (!confirm('Bạn có chắc muốn tải về và cài đặt bản cập nhật ngay bây giờ?')) return;
+    async function startOtaUpdate() {
       document.getElementById('btn-ota-install').disabled = true;
       document.getElementById('btn-ota-check').disabled = true;
       document.getElementById('ota-progress-box').style.display = 'block';
 
       try {
         await fetch('/ota_start', { method: 'POST' });
-        if (otaTimer) clearInterval(otaTimer);
-        otaTimer = setInterval(pollOtaStatus, 1000);
-      } catch (e) {
-        alert('Không thể bắt đầu cập nhật: ' + e);
-      }
-    }
+        otaPollTimer = setInterval(async () => {
+          const res = await fetch('/ota_status');
+          const data = await res.json();
+          document.getElementById('ota-progress-fill').style.width = (data.progress_pct || 0) + '%';
+          document.getElementById('ota-status-txt').textContent = `Đang tải: ${(data.progress_pct || 0).toFixed(1)}%`;
 
-    async function pollOtaStatus() {
-      try {
-        const resp = await fetch('/ota_status');
-        const data = await resp.json();
-        const bar = document.getElementById('ota-bar');
-        const text = document.getElementById('ota-prog-text');
-
-        const pct = (data.progress_pct || 0);
-        bar.style.width = pct + '%';
-        text.innerText = 'Đang tải bản cập nhật: ' + pct.toFixed(1) + '%';
-
-        if (data.state === 'COMPLETED') {
-          clearInterval(otaTimer);
-          bar.style.width = '100%';
-          text.innerHTML = '<span style="color:#22c55e; font-weight:700;">🎉 ĐÃ CẬP NHẬT THÀNH CÔNG! Đang khởi động lại ứng dụng...</span>';
-          await fetch('/ota_restart', { method: 'POST' });
-          setTimeout(() => { location.reload(); }, 5000);
-        } else if (data.state === 'FAILED') {
-          clearInterval(otaTimer);
-          text.innerHTML = '<span style="color:#ef4444;">❌ Thất bại: ' + (data.error || 'Lỗi không xác định') + '</span>';
-          document.getElementById('btn-ota-install').disabled = false;
-          document.getElementById('btn-ota-check').disabled = false;
-        }
+          if (data.state === 'COMPLETED') {
+            clearInterval(otaPollTimer);
+            document.getElementById('ota-status-txt').innerHTML = `<span style="color:var(--green);font-weight:700;">🎉 ĐÃ CẬP NHẬT THÀNH CÔNG! Đang khởi động lại ứng dụng...</span>`;
+            await fetch('/ota_restart', { method: 'POST' });
+            setTimeout(() => location.reload(), 5000);
+          } else if (data.state === 'FAILED') {
+            clearInterval(otaPollTimer);
+            document.getElementById('ota-status-txt').innerHTML = `<span style="color:var(--red);">❌ Thất bại: ${data.error}</span>`;
+            document.getElementById('btn-ota-install').disabled = false;
+          }
+        }, 1000);
       } catch (e) {}
     }
   </script>
@@ -622,20 +1242,20 @@ std::string WebServer::buildSuccessResponse(const std::string& message) {
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>RomCloud - Kết nối thành công</title>
   <style>
-    body { font-family: -apple-system, sans-serif; background: #0f172a; color: #f8fafc; padding: 40px 20px; text-align: center; }
-    .card { background: #1e293b; border-radius: 16px; padding: 30px 20px; max-width: 440px; margin: 40px auto; border: 1px solid #16a34a; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
-    .icon { font-size: 54px; margin-bottom: 15px; color: #22c55e; }
-    h1 { font-size: 22px; color: #22c55e; margin: 0 0 15px 0; }
+    body { font-family: -apple-system, sans-serif; background: #090d16; color: #f8fafc; padding: 40px 20px; text-align: center; }
+    .card { background: #111827; border-radius: 16px; padding: 30px 20px; max-width: 440px; margin: 40px auto; border: 1px solid #10b981; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
+    .icon { font-size: 54px; margin-bottom: 15px; color: #10b981; }
+    h1 { font-size: 22px; color: #10b981; margin: 0 0 15px 0; }
     p { font-size: 15px; color: #cbd5e1; line-height: 1.6; margin-bottom: 25px; }
-    a { display: inline-block; padding: 12px 24px; background: #334155; color: #38bdf8; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 14px; }
+    a { display: inline-block; padding: 12px 24px; background: #1f293d; color: #38bdf8; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 14px; }
   </style>
 </head>
 <body>
   <div class="card">
     <div class="icon">&#10004;</div>
-    <h1>ĐÃ KẾT NỐI THÀNH CÔNG!</h1>
-    <p>)" + message + R"(<br><br><b>Hãy nhìn vào màn hình máy TrimUI</b>, quá trình đồng bộ kho game đang diễn ra tự động!</p>
-    <a href="/">&larr; Quay lại trang kết nối</a>
+    <h1>ĐÃ LƯU THÀNH CÔNG!</h1>
+    <p>)" + message + R"(<br><br>Quá trình đồng bộ kho game đang diễn ra tự động!</p>
+    <a href="/">&larr; Quay lại trang quản lý ROM</a>
   </div>
 </body>
 </html>)";
@@ -661,12 +1281,76 @@ void WebServer::handleClient(int clientFd) {
         queryString = fullPath.substr(qPos + 1);
     }
 
+    size_t bodyPos = req.find("\r\n\r\n");
+    std::string postBody = (bodyPos != std::string::npos) ? req.substr(bodyPos + 4) : "";
+
     if (method == "GET" && (path == "/" || path == "/index.html")) {
         std::string body = buildHtmlResponse();
         std::string res = "HTTP/1.1 200 OK\r\n"
                           "Content-Type: text/html; charset=UTF-8\r\n"
                           "Content-Length: " + std::to_string(body.length()) + "\r\n"
                           "Connection: close\r\n\r\n" + body;
+        send(clientFd, res.c_str(), res.length(), 0);
+    } else if (method == "GET" && path == "/api/systems") {
+        auto systems = DatabaseManager::instance().getSystems(true);
+        std::string json = "[";
+        for (size_t i = 0; i < systems.size(); ++i) {
+            const auto& s = systems[i];
+            if (i > 0) json += ",";
+            json += "{\"id\":" + std::to_string(s.id) + ",";
+            json += "\"code\":\"" + escapeJson(s.code) + "\",";
+            json += "\"name\":\"" + escapeJson(s.name) + "\",";
+            json += "\"local_count\":" + std::to_string(s.localCount) + ",";
+            json += "\"cloud_count\":" + std::to_string(s.cloudCount) + "}";
+        }
+        json += "]";
+        std::string res = "HTTP/1.1 200 OK\r\n"
+                          "Content-Type: application/json; charset=UTF-8\r\n"
+                          "Access-Control-Allow-Origin: *\r\n"
+                          "Content-Length: " + std::to_string(json.length()) + "\r\n"
+                          "Connection: close\r\n\r\n" + json;
+        send(clientFd, res.c_str(), res.length(), 0);
+    } else if (method == "GET" && path == "/api/games") {
+        std::string sysIdStr = extractQueryParam(queryString, "system_id");
+        std::string stateStr = extractQueryParam(queryString, "state");
+        std::string q = extractQueryParam(queryString, "q");
+        std::string limitStr = extractQueryParam(queryString, "limit");
+        std::string offsetStr = extractQueryParam(queryString, "offset");
+
+        int systemId = 0;
+        int stateFilter = -1;
+        int limit = 50;
+        int offset = 0;
+
+        try { if (!sysIdStr.empty()) systemId = std::stoi(sysIdStr); } catch(...) {}
+        try { if (!stateStr.empty()) stateFilter = std::stoi(stateStr); } catch(...) {}
+        try { if (!limitStr.empty()) limit = std::stoi(limitStr); } catch(...) {}
+        try { if (!offsetStr.empty()) offset = std::stoi(offsetStr); } catch(...) {}
+
+        int totalCount = 0;
+        auto games = DatabaseManager::instance().getGamesFiltered(systemId, stateFilter, q, limit, offset, totalCount);
+
+        std::string json = "{\"total\":" + std::to_string(totalCount) + ",\"games\":[";
+        for (size_t i = 0; i < games.size(); ++i) {
+            const auto& g = games[i];
+            bool inQueue = DownloadManager::instance().isInQueue(g.id);
+            if (i > 0) json += ",";
+            json += "{\"id\":" + std::to_string(g.id) + ",";
+            json += "\"title\":\"" + escapeJson(g.title) + "\",";
+            json += "\"filename\":\"" + escapeJson(g.filename) + "\",";
+            json += "\"sys_code\":\"" + escapeJson(g.systemCode.empty() ? "GAME" : g.systemCode) + "\",";
+            json += "\"size_str\":\"" + FileSystemManager::instance().formatBytes(g.sizeBytes) + "\",";
+            json += "\"local_state\":" + std::to_string(static_cast<int>(g.localState)) + ",";
+            json += "\"in_queue\":" + std::string(inQueue ? "true" : "false") + ",";
+            json += "\"has_cover\":" + std::string(g.coverPath.empty() ? "false" : "true") + "}";
+        }
+        json += "]}";
+
+        std::string res = "HTTP/1.1 200 OK\r\n"
+                          "Content-Type: application/json; charset=UTF-8\r\n"
+                          "Access-Control-Allow-Origin: *\r\n"
+                          "Content-Length: " + std::to_string(json.length()) + "\r\n"
+                          "Connection: close\r\n\r\n" + json;
         send(clientFd, res.c_str(), res.length(), 0);
     } else if (method == "GET" && path == "/api/search") {
         std::string q = extractQueryParam(queryString, "q");
@@ -695,9 +1379,53 @@ void WebServer::handleClient(int clientFd) {
                           "Content-Length: " + std::to_string(json.length()) + "\r\n"
                           "Connection: close\r\n\r\n" + json;
         send(clientFd, res.c_str(), res.length(), 0);
+    } else if (method == "GET" && path == "/api/download_status") {
+        auto prog = DownloadManager::instance().getProgress();
+        auto queue = DownloadManager::instance().getQueue();
+        bool isDownloading = DownloadManager::instance().isDownloading();
+
+        std::string stateStr = "IDLE";
+        if (prog.state == DownloadState::INITIALIZING) stateStr = "INITIALIZING";
+        else if (prog.state == DownloadState::DOWNLOADING) stateStr = "DOWNLOADING";
+        else if (prog.state == DownloadState::VERIFYING) stateStr = "VERIFYING";
+        else if (prog.state == DownloadState::COMPLETED) stateStr = "COMPLETED";
+        else if (prog.state == DownloadState::FAILED) stateStr = "FAILED";
+        else if (prog.state == DownloadState::CANCELLED) stateStr = "CANCELLED";
+
+        std::string json = "{";
+        json += "\"is_downloading\":" + std::string(isDownloading ? "true" : "false") + ",";
+        json += "\"active\":{";
+        json += "\"state\":\"" + stateStr + "\",";
+        json += "\"game_id\":" + std::to_string(prog.gameId) + ",";
+        json += "\"title\":\"" + escapeJson(prog.gameTitle) + "\",";
+        json += "\"system\":\"" + escapeJson(prog.systemCode) + "\",";
+        json += "\"filename\":\"" + escapeJson(prog.filename) + "\",";
+        json += "\"progress_pct\":" + std::to_string(prog.progressPct) + ",";
+        json += "\"speed_kbps\":" + std::to_string(prog.speedKBps) + ",";
+        json += "\"bytes_downloaded\":" + std::to_string(prog.bytesDownloaded) + ",";
+        json += "\"total_bytes\":" + std::to_string(prog.totalBytes) + ",";
+        json += "\"eta_seconds\":" + std::to_string(prog.etaSeconds) + ",";
+        json += "\"error\":\"" + escapeJson(prog.errorMessage) + "\"";
+        json += "},";
+        json += "\"queue_size\":" + std::to_string(queue.size()) + ",";
+        json += "\"queue\":[";
+        for (size_t i = 0; i < queue.size(); ++i) {
+            const auto& it = queue[i];
+            if (i > 0) json += ",";
+            json += "{\"game_id\":" + std::to_string(it.game.id) + ",";
+            json += "\"title\":\"" + escapeJson(it.game.title) + "\",";
+            json += "\"system\":\"" + escapeJson(it.sys.code) + "\",";
+            json += "\"size_str\":\"" + FileSystemManager::instance().formatBytes(it.game.sizeBytes) + "\"}";
+        }
+        json += "]}";
+
+        std::string res = "HTTP/1.1 200 OK\r\n"
+                          "Content-Type: application/json; charset=UTF-8\r\n"
+                          "Access-Control-Allow-Origin: *\r\n"
+                          "Content-Length: " + std::to_string(json.length()) + "\r\n"
+                          "Connection: close\r\n\r\n" + json;
+        send(clientFd, res.c_str(), res.length(), 0);
     } else if (method == "POST" && path == "/api/download_game") {
-        size_t bodyPos = req.find("\r\n\r\n");
-        std::string postBody = (bodyPos != std::string::npos) ? req.substr(bodyPos + 4) : "";
         std::string gameIdStr = extractPostParam(postBody, "game_id");
         int64_t gameId = 0;
         try { gameId = std::stoll(gameIdStr); } catch(...) {}
@@ -728,9 +1456,37 @@ void WebServer::handleClient(int clientFd) {
                           "Content-Length: " + std::to_string(json.length()) + "\r\n"
                           "Connection: close\r\n\r\n" + json;
         send(clientFd, res.c_str(), res.length(), 0);
+    } else if (method == "POST" && path == "/api/cancel_download") {
+        DownloadManager::instance().cancelDownload();
+        std::string json = "{\"success\":true,\"message\":\"Đã hủy tải lượt hiện tại.\"}";
+        std::string res = "HTTP/1.1 200 OK\r\n"
+                          "Content-Type: application/json; charset=UTF-8\r\n"
+                          "Access-Control-Allow-Origin: *\r\n"
+                          "Content-Length: " + std::to_string(json.length()) + "\r\n"
+                          "Connection: close\r\n\r\n" + json;
+        send(clientFd, res.c_str(), res.length(), 0);
+    } else if (method == "POST" && path == "/api/remove_queue") {
+        std::string gameIdStr = extractPostParam(postBody, "game_id");
+        int64_t gameId = 0;
+        try { gameId = std::stoll(gameIdStr); } catch(...) {}
+        bool ok = DownloadManager::instance().removeFromQueue(gameId);
+        std::string json = "{\"success\":" + std::string(ok ? "true" : "false") + ",\"message\":\"" + (ok ? "Đã xóa khỏi hàng đợi." : "Không tìm thấy game trong hàng đợi.") + "\"}";
+        std::string res = "HTTP/1.1 200 OK\r\n"
+                          "Content-Type: application/json; charset=UTF-8\r\n"
+                          "Access-Control-Allow-Origin: *\r\n"
+                          "Content-Length: " + std::to_string(json.length()) + "\r\n"
+                          "Connection: close\r\n\r\n" + json;
+        send(clientFd, res.c_str(), res.length(), 0);
+    } else if (method == "POST" && path == "/api/clear_queue") {
+        DownloadManager::instance().clearQueue();
+        std::string json = "{\"success\":true,\"message\":\"Đã xóa toàn bộ hàng đợi.\"}";
+        std::string res = "HTTP/1.1 200 OK\r\n"
+                          "Content-Type: application/json; charset=UTF-8\r\n"
+                          "Access-Control-Allow-Origin: *\r\n"
+                          "Content-Length: " + std::to_string(json.length()) + "\r\n"
+                          "Connection: close\r\n\r\n" + json;
+        send(clientFd, res.c_str(), res.length(), 0);
     } else if (method == "POST" && path == "/api/delete_rom") {
-        size_t bodyPos = req.find("\r\n\r\n");
-        std::string postBody = (bodyPos != std::string::npos) ? req.substr(bodyPos + 4) : "";
         std::string gameIdStr = extractPostParam(postBody, "game_id");
         int64_t gameId = 0;
         try { gameId = std::stoll(gameIdStr); } catch(...) {}
@@ -754,8 +1510,6 @@ void WebServer::handleClient(int clientFd) {
                           "Connection: close\r\n\r\n" + json;
         send(clientFd, res.c_str(), res.length(), 0);
     } else if (method == "POST" && path == "/api/scrape_cover") {
-        size_t bodyPos = req.find("\r\n\r\n");
-        std::string postBody = (bodyPos != std::string::npos) ? req.substr(bodyPos + 4) : "";
         std::string gameIdStr = extractPostParam(postBody, "game_id");
         int64_t gameId = 0;
         try { gameId = std::stoll(gameIdStr); } catch(...) {}
@@ -785,6 +1539,75 @@ void WebServer::handleClient(int clientFd) {
                           "Content-Length: " + std::to_string(json.length()) + "\r\n"
                           "Connection: close\r\n\r\n" + json;
         send(clientFd, res.c_str(), res.length(), 0);
+    } else if (method == "GET" && path == "/api/storage_info") {
+        auto disk = FileSystemManager::instance().getDiskSpace(AppConfig::instance().getRomsDir());
+        int totalLocal = 0, totalCloud = 0;
+        DatabaseManager::instance().getTotalGameCounts(totalLocal, totalCloud);
+        std::string lastSync = DriveSyncEngine::instance().getLastSyncTime();
+        std::string driveUrl = DatabaseManager::instance().getSetting("drive_folder_url", "");
+
+        uint64_t usedBytes = (disk.totalBytes > disk.availableBytes) ? (disk.totalBytes - disk.availableBytes) : 0;
+        double usedPct = 0.0;
+        if (disk.totalBytes > 0) {
+            usedPct = (static_cast<double>(usedBytes) / static_cast<double>(disk.totalBytes)) * 100.0;
+        }
+
+        std::string json = "{";
+        json += "\"total_bytes\":" + std::to_string(disk.totalBytes) + ",";
+        json += "\"avail_bytes\":" + std::to_string(disk.availableBytes) + ",";
+        json += "\"used_bytes\":" + std::to_string(usedBytes) + ",";
+        json += "\"total_str\":\"" + FileSystemManager::instance().formatBytes(disk.totalBytes) + "\",";
+        json += "\"avail_str\":\"" + FileSystemManager::instance().formatBytes(disk.availableBytes) + "\",";
+        json += "\"used_str\":\"" + FileSystemManager::instance().formatBytes(usedBytes) + "\",";
+        json += "\"used_pct\":" + std::to_string(usedPct) + ",";
+        json += "\"total_local\":" + std::to_string(totalLocal) + ",";
+        json += "\"total_cloud\":" + std::to_string(totalCloud) + ",";
+        json += "\"last_sync\":\"" + escapeJson(lastSync) + "\",";
+        json += "\"drive_url\":\"" + escapeJson(driveUrl) + "\"";
+        json += "}";
+
+        std::string res = "HTTP/1.1 200 OK\r\n"
+                          "Content-Type: application/json; charset=UTF-8\r\n"
+                          "Access-Control-Allow-Origin: *\r\n"
+                          "Content-Length: " + std::to_string(json.length()) + "\r\n"
+                          "Connection: close\r\n\r\n" + json;
+        send(clientFd, res.c_str(), res.length(), 0);
+    } else if (method == "POST" && path == "/api/trigger_sync") {
+        bool started = DriveSyncEngine::instance().startSync();
+        std::string json = "{\"success\":" + std::string(started ? "true" : "false") + "}";
+        std::string res = "HTTP/1.1 200 OK\r\n"
+                          "Content-Type: application/json; charset=UTF-8\r\n"
+                          "Access-Control-Allow-Origin: *\r\n"
+                          "Content-Length: " + std::to_string(json.length()) + "\r\n"
+                          "Connection: close\r\n\r\n" + json;
+        send(clientFd, res.c_str(), res.length(), 0);
+    } else if (method == "GET" && path == "/api/sync_status") {
+        auto prog = DriveSyncEngine::instance().getProgress();
+        bool isSyncing = DriveSyncEngine::instance().isSyncing();
+        std::string statusStr = "IDLE";
+        if (prog.status == SyncStatus::CONNECTING) statusStr = "CONNECTING";
+        else if (prog.status == SyncStatus::DISCOVERING_FOLDERS) statusStr = "DISCOVERING_FOLDERS";
+        else if (prog.status == SyncStatus::SYNCING_FILES) statusStr = "SYNCING_FILES";
+        else if (prog.status == SyncStatus::COMPLETED) statusStr = "COMPLETED";
+        else if (prog.status == SyncStatus::ERROR_OCCURRED) statusStr = "ERROR";
+
+        std::string json = "{";
+        json += "\"is_syncing\":" + std::string(isSyncing ? "true" : "false") + ",";
+        json += "\"status\":\"" + statusStr + "\",";
+        json += "\"current_platform\":\"" + escapeJson(prog.currentPlatform) + "\",";
+        json += "\"games_found\":" + std::to_string(prog.cloudGamesFound) + ",";
+        json += "\"games_indexed\":" + std::to_string(prog.newGamesIndexed) + ",";
+        json += "\"current_system_index\":" + std::to_string(prog.currentSystemIndex) + ",";
+        json += "\"total_systems\":" + std::to_string(prog.totalSystems) + ",";
+        json += "\"error\":\"" + escapeJson(prog.errorMessage) + "\"";
+        json += "}";
+
+        std::string res = "HTTP/1.1 200 OK\r\n"
+                          "Content-Type: application/json; charset=UTF-8\r\n"
+                          "Access-Control-Allow-Origin: *\r\n"
+                          "Content-Length: " + std::to_string(json.length()) + "\r\n"
+                          "Connection: close\r\n\r\n" + json;
+        send(clientFd, res.c_str(), res.length(), 0);
     } else if (method == "POST" && path == "/unlink") {
         AuthManager::instance().logout();
         std::string body = buildSuccessResponse("Đã hủy liên kết Google Drive thành công!");
@@ -794,26 +1617,12 @@ void WebServer::handleClient(int clientFd) {
                           "Connection: close\r\n\r\n" + body;
         send(clientFd, res.c_str(), res.length(), 0);
     } else if (method == "POST" && path == "/connect") {
-        size_t bodyPos = req.find("\r\n\r\n");
-        std::string postBody = (bodyPos != std::string::npos) ? req.substr(bodyPos + 4) : "";
-
         std::string driveUrl = extractPostParam(postBody, "drive_url");
-        std::string apiKey = extractPostParam(postBody, "api_key");
-
-        if (!apiKey.empty()) {
-            DatabaseManager::instance().setSetting("google_api_key", apiKey);
-            Logger::info("Saved google_api_key into settings.");
-        }
-
         std::string folderId = extractFolderId(driveUrl);
         if (folderId.empty()) folderId = driveUrl;
 
         Logger::info("User linked Google Drive folder via Web Portal: " + driveUrl + " (Extracted Folder ID: " + folderId + ")");
-
-        // Save URL / folder to database and link public account
         AuthManager::instance().linkPublicFolder(folderId, driveUrl);
-
-        // Immediately start public Google Drive library sync
         DriveSyncEngine::instance().startSync();
 
         std::string body = buildSuccessResponse("Đã lưu liên kết Google Drive vào máy TrimUI!");
@@ -829,7 +1638,7 @@ void WebServer::handleClient(int clientFd) {
                            "\"current_version\":\"" + UpdateManager::instance().getCurrentVersion() + "\","
                            "\"remote_version\":\"" + info.remoteVersion + "\","
                            "\"release_date\":\"" + info.releaseDate + "\","
-                           "\"changelog\":\"" + info.changelog + "\"}";
+                           "\"changelog\":\"" + escapeJson(info.changelog) + "\"}";
         std::string res = "HTTP/1.1 200 OK\r\n"
                           "Content-Type: application/json; charset=UTF-8\r\n"
                           "Access-Control-Allow-Origin: *\r\n"
@@ -861,7 +1670,7 @@ void WebServer::handleClient(int clientFd) {
                            "\"progress_pct\":" + std::to_string(prog.progressPct) + ","
                            "\"bytes_downloaded\":" + std::to_string(prog.bytesDownloaded) + ","
                            "\"total_bytes\":" + std::to_string(prog.totalBytes) + ","
-                           "\"error\":\"" + prog.errorMessage + "\"}";
+                           "\"error\":\"" + escapeJson(prog.errorMessage) + "\"}";
         std::string res = "HTTP/1.1 200 OK\r\n"
                           "Content-Type: application/json; charset=UTF-8\r\n"
                           "Access-Control-Allow-Origin: *\r\n"
