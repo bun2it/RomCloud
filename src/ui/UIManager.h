@@ -74,6 +74,7 @@ private:
 
     // Settings State
     int m_selectedSettingsRow = 0;
+    int m_settingsScrollOffset = 0;
 
     // Diagnostics scroll state
     int m_diagnosticsScrollOffset = 0;

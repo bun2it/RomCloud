@@ -664,20 +664,46 @@ void UIManager::update() {
         }
 
         case UIState::SETTINGS: {
-            // Navigate settings rows (UP/DOWN)
+            constexpr int totalSettingsRows = 10;
+            constexpr int visibleRows = 9;
+
             if (input.isButtonJustPressed(Button::UP)) {
-                m_selectedSettingsRow = std::max(0, m_selectedSettingsRow - 1);
+                if (m_selectedSettingsRow > 0) {
+                    m_selectedSettingsRow--;
+                    if (m_selectedSettingsRow < m_settingsScrollOffset) {
+                        m_settingsScrollOffset = m_selectedSettingsRow;
+                    }
+                } else {
+                    m_selectedSettingsRow = totalSettingsRows - 1;
+                    m_settingsScrollOffset = std::max(0, totalSettingsRows - visibleRows);
+                }
             } else if (input.isButtonJustPressed(Button::DOWN)) {
-                m_selectedSettingsRow = std::min(7, m_selectedSettingsRow + 1);  // 0-7: rows in settings
+                if (m_selectedSettingsRow < totalSettingsRows - 1) {
+                    m_selectedSettingsRow++;
+                    if (m_selectedSettingsRow >= m_settingsScrollOffset + visibleRows) {
+                        m_settingsScrollOffset = m_selectedSettingsRow - visibleRows + 1;
+                    }
+                } else {
+                    m_selectedSettingsRow = 0;
+                    m_settingsScrollOffset = 0;
+                }
+            } else if (input.isButtonJustPressed(Button::L1)) {
+                m_selectedSettingsRow = std::max(0, m_selectedSettingsRow - 4);
+                m_settingsScrollOffset = std::max(0, m_settingsScrollOffset - 4);
+            } else if (input.isButtonJustPressed(Button::R1)) {
+                m_selectedSettingsRow = std::min(totalSettingsRows - 1, m_selectedSettingsRow + 4);
+                if (m_selectedSettingsRow >= m_settingsScrollOffset + visibleRows) {
+                    m_settingsScrollOffset = std::min(std::max(0, totalSettingsRows - visibleRows), m_selectedSettingsRow - visibleRows + 1);
+                }
             }
 
             if (input.isButtonJustPressed(Button::A)) {
                 if (m_selectedSettingsRow == 0) {
-                    // Backup row - export settings
+                    // Google Drive account row
                     if (!AuthManager::instance().isLinked()) {
                         setState(UIState::DISCLAIMER);
                     }
-                } else if (m_selectedSettingsRow == 6) {
+                } else if (m_selectedSettingsRow == 8) {
                     // Export backup
                     showToast(UiStrings::BACKUP_EXPORTING, {168, 85, 247, 255}, 2000);
                     auto result = BackupManager::instance().exportToSdCard();
@@ -686,7 +712,7 @@ void UIManager::update() {
                     } else {
                         showToast(UiStrings::BACKUP_FAILED, {239, 68, 68, 255}, 4000);
                     }
-                } else if (m_selectedSettingsRow == 7) {
+                } else if (m_selectedSettingsRow == 9) {
                     // Import backup
                     showToast(UiStrings::BACKUP_IMPORTING, {0, 180, 216, 255}, 2000);
                     auto lastBackup = BackupManager::instance().getMostRecentBackup();
@@ -711,6 +737,7 @@ void UIManager::update() {
             } else if (input.isButtonJustPressed(Button::B)) {
                 setState(UIState::MENU);
                 m_selectedSettingsRow = 0;
+                m_settingsScrollOffset = 0;
             }
             break;
         }
@@ -1842,85 +1869,126 @@ void UIManager::renderSettingsState() {
     drawRect(0, 111, 1024, 1, {38, 48, 64, 255}, true);
     drawText(UiStrings::HEADER_SETTINGS, 36, 78, {0, 180, 216, 255}, m_fontLarge);
 
-    int rowY = 126;
-    int stepY = 56;
-    int cardX = 24;
-    int cardW = 976;
-    int rowH = 48;
+    std::string email = AuthManager::instance().getUserEmail();
+    std::string folderId = DatabaseManager::instance().getSetting("drive_folder_id", UiStrings::SETTING_NOT_CONFIGURED);
+    std::string lastSync = DatabaseManager::instance().getSetting("last_cloud_sync_time", UiStrings::SETTING_NEVER_SYNCED);
+    std::string ip = PlatformInfo::instance().getIpAddress("wlan0");
+    std::string webUrl = "http://" + (ip.empty() ? "192.168.1.164" : ip) + ":8080";
 
-    auto drawSettingRowBg = [&](int y, bool alt) {
-        if (alt) {
-            drawRoundedRect(cardX, y - 4, cardW, rowH, 8, {22, 28, 38, 255}, true);
-        }
+    struct SettingItem {
+        std::string label;
+        std::string value;
+        SDL_Color valColor;
+        std::string badgeText;
+        SDL_Color badgeBg;
+        SDL_Color badgeFg;
     };
 
-    // Google Drive Account Section
-    drawSettingRowBg(rowY, false);
-    drawText(UiStrings::SETTING_DRIVE_STATUS, cardX + 24, rowY + 6, {160, 175, 190, 255}, m_fontMedium);
-    if (AuthManager::instance().isLinked()) {
-        std::string email = AuthManager::instance().getUserEmail();
-        drawText(UiStrings::SETTING_CONNECTED, cardX + 340, rowY + 6, {34, 197, 94, 255}, m_fontMedium);
-        drawBadge(cardX + cardW - 210, rowY, 190, 38, UiStrings::SETTING_LOGOUT_BTN, {185, 28, 28, 255}, {255, 255, 255, 255});
-    } else {
-        drawText(UiStrings::SETTING_DISCONNECTED, cardX + 340, rowY + 6, {239, 68, 68, 255}, m_fontMedium);
-        drawBadge(cardX + cardW - 310, rowY, 290, 38, UiStrings::SETTING_CONNECT_WEB_BTN, {30, 58, 138, 255}, {255, 255, 255, 255});
+    std::vector<SettingItem> items;
+    items.reserve(10);
+
+    // 0: Google Drive Account
+    items.push_back({
+        UiStrings::SETTING_DRIVE_STATUS,
+        AuthManager::instance().isLinked() ? (std::string(UiStrings::SETTING_CONNECTED) + " (" + email + ")") : std::string(UiStrings::SETTING_DISCONNECTED),
+        AuthManager::instance().isLinked() ? SDL_Color{34, 197, 94, 255} : SDL_Color{239, 68, 68, 255},
+        AuthManager::instance().isLinked() ? std::string(UiStrings::SETTING_LOGOUT_BTN) : std::string(UiStrings::SETTING_CONNECT_WEB_BTN),
+        AuthManager::instance().isLinked() ? SDL_Color{185, 28, 28, 255} : SDL_Color{30, 58, 138, 255},
+        SDL_Color{255, 255, 255, 255}
+    });
+
+    // 1: Thư mục Drive
+    items.push_back({UiStrings::SETTING_DRIVE_FOLDER, folderId, SDL_Color{0, 180, 216, 255}, "", SDL_Color{0, 0, 0, 0}, SDL_Color{0, 0, 0, 0}});
+
+    // 2: Thư mục ROM trên thẻ nhớ
+    items.push_back({UiStrings::SETTING_ROM_SD_FOLDER, AppConfig::instance().getRomsDir(), SDL_Color{255, 255, 255, 255}, "", SDL_Color{0, 0, 0, 0}, SDL_Color{0, 0, 0, 0}});
+
+    // 3: Đồng bộ cuối
+    items.push_back({UiStrings::SETTING_LAST_SYNC, lastSync, SDL_Color{255, 255, 255, 255}, "", SDL_Color{0, 0, 0, 0}, SDL_Color{0, 0, 0, 0}});
+
+    // 4: Cơ sở dữ liệu SQLite
+    items.push_back({UiStrings::SETTING_SQLITE_DB, AppConfig::instance().getDatabasePath(), SDL_Color{34, 197, 94, 255}, "", SDL_Color{0, 0, 0, 0}, SDL_Color{0, 0, 0, 0}});
+
+    // 5: Chế độ quét thẻ nhớ
+    items.push_back({UiStrings::SETTING_SCAN_MODE, UiStrings::SETTING_SCAN_AUTO, SDL_Color{34, 197, 94, 255}, "", SDL_Color{0, 0, 0, 0}, SDL_Color{0, 0, 0, 0}});
+
+    // 6: Web Portal
+    items.push_back({UiStrings::SETTING_WEB_PORTAL, webUrl, SDL_Color{0, 180, 216, 255}, "", SDL_Color{0, 0, 0, 0}, SDL_Color{0, 0, 0, 0}});
+
+    // 7: Bộ nhớ đệm ảnh bìa
+    items.push_back({UiStrings::SETTING_COVER_CACHE, UiStrings::SETTING_COVER_CACHE_VAL, SDL_Color{34, 197, 94, 255}, "", SDL_Color{0, 0, 0, 0}, SDL_Color{0, 0, 0, 0}});
+
+    // 8: Xuất sao lưu cài đặt
+    items.push_back({UiStrings::BACKUP_EXPORT_BTN, UiStrings::BACKUP_EXPORT_DESC, SDL_Color{168, 85, 247, 255}, "[A] Xuất sao lưu", SDL_Color{88, 28, 135, 255}, SDL_Color{255, 255, 255, 255}});
+
+    // 9: Phục hồi cài đặt
+    items.push_back({UiStrings::BACKUP_IMPORT_BTN, UiStrings::BACKUP_IMPORT_DESC, SDL_Color{0, 180, 216, 255}, "[A] Phục hồi", SDL_Color{21, 94, 117, 255}, SDL_Color{255, 255, 255, 255}});
+
+    int cardX = 24;
+    int cardW = 976;
+    int rowH = 50;
+    int spacing = 6;
+    int stepY = rowH + spacing;
+    int visibleRows = 9;
+
+    int maxScroll = static_cast<int>(items.size()) - visibleRows;
+    if (maxScroll < 0) maxScroll = 0;
+
+    int startY = 122 - (m_settingsScrollOffset * stepY);
+
+    for (size_t i = 0; i < items.size(); ++i) {
+        int y = startY + static_cast<int>(i) * stepY;
+        if (y < 70 || y > 680) continue;
+
+        bool selected = (static_cast<int>(i) == m_selectedSettingsRow);
+
+        SDL_Color bg;
+        if (selected) {
+            bg = SDL_Color{30, 58, 95, 255};
+        } else if (i % 2 == 1) {
+            bg = SDL_Color{22, 28, 38, 255};
+        } else {
+            bg = SDL_Color{16, 20, 28, 255};
+        }
+
+        drawRoundedRect(cardX, y, cardW, rowH, 8, bg, true);
+
+        if (selected) {
+            drawRoundedBorder(cardX, y, cardW, rowH, 8, {0, 180, 216, 255}, 2);
+            // Left neon accent indicator
+            drawRoundedRect(cardX + 4, y + 10, 5, rowH - 20, 2, {0, 180, 216, 255}, true);
+        }
+
+        SDL_Color lblColor = selected ? SDL_Color{255, 255, 255, 255} : SDL_Color{170, 185, 200, 255};
+        drawText(items[i].label, cardX + 24, y + 12, lblColor, m_fontMedium);
+
+        if (!items[i].badgeText.empty()) {
+            // Shortened value to leave room for badge
+            std::string val = items[i].value;
+            if (val.length() > 38) val = val.substr(0, 35) + "...";
+            drawText(val, cardX + 340, y + 15, items[i].valColor, m_fontSmall);
+            drawBadge(cardX + cardW - 190, y + 6, 170, 38, items[i].badgeText, items[i].badgeBg, items[i].badgeFg);
+        } else {
+            std::string val = items[i].value;
+            if (val.length() > 55) val = val.substr(0, 52) + "...";
+            drawText(val, cardX + 340, y + 15, items[i].valColor, m_fontSmall);
+        }
     }
 
-    rowY += stepY;
-    drawSettingRowBg(rowY, true);
-    drawText(UiStrings::SETTING_DRIVE_FOLDER, cardX + 24, rowY + 6, {160, 175, 190, 255}, m_fontMedium);
-    std::string folderId = DatabaseManager::instance().getSetting("drive_folder_id", UiStrings::SETTING_NOT_CONFIGURED);
-    drawText(folderId, cardX + 340, rowY + 10, {0, 180, 216, 255}, m_fontSmall);
+    // Scrollbar indicator
+    if (maxScroll > 0) {
+        int scrollBarX = 1006;
+        int scrollBarY = 122;
+        int scrollBarH = visibleRows * stepY - spacing;
+        int thumbH = scrollBarH * visibleRows / static_cast<int>(items.size());
+        int thumbY = scrollBarY + (m_settingsScrollOffset * (scrollBarH - thumbH) / maxScroll);
 
-    rowY += stepY;
-    drawSettingRowBg(rowY, false);
-    drawText(UiStrings::SETTING_ROM_SD_FOLDER, cardX + 24, rowY + 6, {160, 175, 190, 255}, m_fontMedium);
-    drawText(AppConfig::instance().getRomsDir(), cardX + 340, rowY + 10, {255, 255, 255, 255}, m_fontSmall);
+        drawRoundedRect(scrollBarX, scrollBarY, 6, scrollBarH, 3, {35, 42, 54, 255}, true);
+        drawRoundedRect(scrollBarX, thumbY, 6, thumbH, 3, {0, 180, 216, 255}, true);
+    }
 
-    rowY += stepY;
-    drawSettingRowBg(rowY, true);
-    drawText(UiStrings::SETTING_LAST_SYNC, cardX + 24, rowY + 6, {160, 175, 190, 255}, m_fontMedium);
-    std::string lastSync = DatabaseManager::instance().getSetting("last_cloud_sync_time", UiStrings::SETTING_NEVER_SYNCED);
-    drawText(lastSync, cardX + 340, rowY + 10, {255, 255, 255, 255}, m_fontSmall);
-
-    rowY += stepY;
-    drawSettingRowBg(rowY, false);
-    drawText(UiStrings::SETTING_SQLITE_DB, cardX + 24, rowY + 6, {160, 175, 190, 255}, m_fontMedium);
-    drawText(AppConfig::instance().getDatabasePath(), cardX + 340, rowY + 10, {34, 197, 94, 255}, m_fontSmall);
-
-    rowY += stepY;
-    drawSettingRowBg(rowY, true);
-    drawText(UiStrings::SETTING_SCAN_MODE, cardX + 24, rowY + 6, {160, 175, 190, 255}, m_fontMedium);
-    drawText(UiStrings::SETTING_SCAN_AUTO, cardX + 340, rowY + 10, {34, 197, 94, 255}, m_fontSmall);
-
-    rowY += stepY;
-    drawSettingRowBg(rowY, false);
-    drawText(UiStrings::SETTING_WEB_PORTAL, cardX + 24, rowY + 6, {160, 175, 190, 255}, m_fontMedium);
-    std::string ip = PlatformInfo::instance().getIpAddress("wlan0");
-    drawText("http://" + (ip.empty() ? "192.168.1.164" : ip) + ":8080", cardX + 340, rowY + 6, {0, 180, 216, 255}, m_fontMedium);
-
-    rowY += stepY;
-    drawSettingRowBg(rowY, true);
-    drawText(UiStrings::SETTING_COVER_CACHE, cardX + 24, rowY + 6, {160, 175, 190, 255}, m_fontMedium);
-    drawText(UiStrings::SETTING_COVER_CACHE_VAL, cardX + 340, rowY + 10, {34, 197, 94, 255}, m_fontSmall);
-
-    // Backup & Restore Section
-    rowY += stepY + 16;
-    drawRect(cardX, rowY - 4, cardW, 1, {38, 48, 64, 255}, true);
-
-    rowY += stepY;
-    drawSettingRowBg(rowY, false);
-    drawText(UiStrings::BACKUP_EXPORT_BTN, cardX + 24, rowY + 6, {168, 85, 247, 255}, m_fontMedium);
-    drawText(UiStrings::BACKUP_EXPORT_DESC, cardX + 340, rowY + 10, {140, 155, 175, 255}, m_fontSmall);
-    drawBadge(cardX + cardW - 120, rowY, 100, 38, "[A]", {55, 65, 81, 255}, {255, 255, 255, 255});
-
-    rowY += stepY;
-    drawSettingRowBg(rowY, true);
-    drawText(UiStrings::BACKUP_IMPORT_BTN, cardX + 24, rowY + 6, {0, 180, 216, 255}, m_fontMedium);
-    drawText(UiStrings::BACKUP_IMPORT_DESC, cardX + 340, rowY + 10, {140, 155, 175, 255}, m_fontSmall);
-    drawBadge(cardX + cardW - 120, rowY, 100, 38, "[A]", {55, 65, 81, 255}, {255, 255, 255, 255});
-
-    drawText(UiStrings::BTN_BACK_MAIN_MENU_HINT, 512, 650, {150, 165, 180, 255}, m_fontMedium, true);
+    drawText(UiStrings::BTN_BACK_MAIN_MENU_HINT, 512, 730, {130, 140, 155, 255}, m_fontSmall, true);
+    drawText("▲▼ Di chuyển   [A] Chọn / Thực hiện", 740, 730, {100, 110, 125, 255}, m_fontSmall);
 }
 
 void UIManager::renderCloudLoginState() {
