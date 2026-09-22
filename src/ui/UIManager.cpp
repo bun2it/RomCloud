@@ -1298,21 +1298,21 @@ void UIManager::renderSystemSelectState() {
             drawRoundedRect(rx + 6, y + 12, 5, rowH - 24, 2, {0, 180, 216, 255}, true);
         }
 
-        // System Logo Badge Box with rounded corners
-        drawRoundedRect(rx + 24, y + 14, 110, 60, 8, {16, 20, 28, 255}, true);
-        drawRoundedBorder(rx + 24, y + 14, 110, 60, 8, {0, 180, 216, 255}, 1);
-        drawText(sys.code, rx + 79, y + 28, {0, 180, 216, 255}, m_fontLarge, true);
+        // System code as compact badge
+        int badgeW = 70;
+        int badgeH = 36;
+        drawBadge(rx + 24, y + 26, badgeW, badgeH, sys.code, {22, 101, 52, 255}, {255, 255, 255, 255});
 
-        drawText(sys.name, rx + 154, y + 16, {255, 255, 255, 255}, m_fontLarge);
+        drawText(sys.name, rx + 110, y + 18, {255, 255, 255, 255}, m_fontLarge);
 
-        std::string localBadge = std::string(UiStrings::SYS_BADGE_LOCAL_PREFIX) + std::to_string(sys.localCount);
-        std::string cloudBadge = std::string(UiStrings::SYS_BADGE_CLOUD_PREFIX) + std::to_string(sys.cloudCount);
+        std::string localBadge = std::to_string(sys.localCount) + " local";
+        std::string cloudBadge = std::to_string(sys.cloudCount) + " cloud";
 
-        drawBadge(rx + rowW - 280, y + 24, 130, 40, localBadge, {22, 101, 52, 255}, {255, 255, 255, 255});
-        drawBadge(rx + rowW - 140, y + 24, 130, 40, cloudBadge, {30, 58, 138, 255}, {255, 255, 255, 255});
+        drawBadge(rx + rowW - 200, y + 24, 90, 40, localBadge, {22, 101, 52, 255}, {255, 255, 255, 255});
+        drawBadge(rx + rowW - 100, y + 24, 90, 40, cloudBadge, {30, 58, 138, 255}, {255, 255, 255, 255});
 
-        std::string subtext = std::string(UiStrings::SYS_DIR_PREFIX) + sys.romDir + UiStrings::SYS_EXT_PREFIX + sys.extList;
-        drawText(subtext, rx + 154, y + 52, {140, 155, 175, 255}, m_fontSmall);
+        std::string subtext = std::string("/Roms/") + sys.romDir + "  •  " + sys.extList;
+        drawText(subtext, rx + 110, y + 54, {140, 155, 175, 255}, m_fontSmall);
     }
 }
 
@@ -1441,6 +1441,19 @@ void UIManager::renderGameListState() {
             int badgeY = 8;
             std::string countText = std::to_string(m_selectedGameIds.size()) + " đã chọn";
             drawBadge(badgeX, badgeY, badgeW, badgeH, countText, {107, 33, 168, 255}, {255, 255, 255, 255});
+        }
+
+        // Low storage warning banner
+        auto dlProg = DownloadManager::instance().getProgress();
+        if (dlProg.storageWarning) {
+            float freePct = (dlProg.storageTotal > 0) ?
+                (float)dlProg.storageAvailable * 100.0f / dlProg.storageTotal : 0;
+            int warnW = 400;
+            int warnH = 36;
+            int warnX = (1024 - warnW) / 2;
+            int warnY = 720;
+            std::string warnText = "⚠ Cảnh báo: Thẻ nhớ sắp đầy (" + std::to_string((int)freePct) + "% trống)";
+            drawBadge(warnX, warnY, warnW, warnH, warnText, {185, 28, 28, 255}, {255, 255, 255, 255});
         }
 
         // Scrollbar

@@ -32,6 +32,9 @@ struct DownloadProgress {
     double speedKBps = 0.0;
     int etaSeconds = 0;
     std::string errorMessage;
+    bool storageWarning = false;  // True if storage < 5%
+    uint64_t storageAvailable = 0;
+    uint64_t storageTotal = 0;
 };
 
 struct QueueItem {

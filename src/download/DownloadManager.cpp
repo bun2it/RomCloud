@@ -178,6 +178,18 @@ bool DownloadManager::startDownload(const GameRecord& game, const SystemRecord& 
     // Disk space check: required = game size + 50MB safety buffer
     uint64_t requiredSpace = game.sizeBytes + (50ULL * 1024ULL * 1024ULL);
     auto diskSpace = FileSystemManager::instance().getDiskSpace(AppConfig::instance().getRomsDir());
+
+    // Check for low storage warning (less than 5% free)
+    bool lowStorageWarning = false;
+    if (diskSpace.totalBytes > 0) {
+        float freePercent = (float)diskSpace.availableBytes * 100.0f / diskSpace.totalBytes;
+        if (freePercent < 5.0f && freePercent > 1.0f) {
+            lowStorageWarning = true;
+            Logger::warn("Low storage warning: only " + std::to_string((int)freePercent) + "% free (" +
+                        FileSystemManager::instance().formatBytes(diskSpace.availableBytes) + " available)");
+        }
+    }
+
     if (diskSpace.availableBytes < requiredSpace && diskSpace.availableBytes > 0) {
         std::lock_guard<std::mutex> lock(m_mutex);
         m_progress.state = DownloadState::FAILED;
@@ -212,6 +224,9 @@ bool DownloadManager::startDownload(const GameRecord& game, const SystemRecord& 
         m_progress.systemCode = sys.code;
         m_progress.filename = game.filename;
         m_progress.totalBytes = game.sizeBytes;
+        m_progress.storageWarning = lowStorageWarning;
+        m_progress.storageAvailable = diskSpace.availableBytes;
+        m_progress.storageTotal = diskSpace.totalBytes;
     }
 
     Logger::info("Starting on-demand download for: " + game.title + " (" + game.filename + ")");

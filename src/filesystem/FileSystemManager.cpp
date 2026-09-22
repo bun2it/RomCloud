@@ -92,6 +92,7 @@ bool FileSystemManager::removeFile(const std::string& path) {
 }
 
 std::string FileSystemManager::formatBytes(uint64_t bytes) {
+    if (bytes == 0) return "-";
     const char* units[] = {"B", "KB", "MB", "GB", "TB"};
     int unitIndex = 0;
     double size = static_cast<double>(bytes);

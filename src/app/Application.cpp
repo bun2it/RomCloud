@@ -142,6 +142,8 @@ bool Application::init(int argc, char* argv[]) {
 void Application::run() {
     const int TARGET_FPS = 60;
     const int FRAME_DELAY = 1000 / TARGET_FPS;
+    int frameCount = 0;
+    uint32_t lastPerfLog = SDL_GetTicks();
 
     while (m_running) {
         uint32_t frameStart = SDL_GetTicks();
@@ -167,6 +169,63 @@ void Application::run() {
         uint32_t frameTime = SDL_GetTicks() - frameStart;
         if (frameTime < FRAME_DELAY) {
             SDL_Delay(FRAME_DELAY - frameTime);
+        }
+
+        // Log performance stats every 5 seconds
+        frameCount++;
+        uint32_t now = SDL_GetTicks();
+        if (now - lastPerfLog >= 5000) {
+            float fps = (frameCount * 1000.0f) / (now - lastPerfLog);
+
+            // Get system memory info
+            FILE* memFile = fopen("/proc/meminfo", "r");
+            uint64_t memTotal = 0, memFree = 0, memAvailable = 0;
+            if (memFile) {
+                char line[256];
+                while (fgets(line, sizeof(line), memFile)) {
+                    if (sscanf(line, "MemTotal: %lu kB", &memTotal) == 1) continue;
+                    if (sscanf(line, "MemFree: %lu kB", &memFree) == 1) continue;
+                    if (sscanf(line, "MemAvailable: %lu kB", &memAvailable) == 1) continue;
+                }
+                fclose(memFile);
+            }
+
+            // Calculate memory usage
+            uint64_t memUsed = (memTotal > memAvailable) ? (memTotal - memAvailable) : 0;
+            float memUsedMB = memUsed / 1024.0f;
+            float memTotalMB = memTotal / 1024.0f;
+            float memPct = (memTotal > 0) ? (memUsed * 100.0f / memTotal) : 0;
+
+            // Get CPU usage from /proc/stat
+            static uint64_t lastIdle = 0, lastTotal = 0;
+            uint64_t cpuIdle = 0, cpuTotal = 0;
+            FILE* cpuFile = fopen("/proc/stat", "r");
+            if (cpuFile) {
+                char line[128];
+                if (fgets(line, sizeof(line), cpuFile)) {
+                    uint64_t u, n, s, i, w, irq, softirq;
+                    if (sscanf(line, "cpu %lu %lu %lu %lu %lu %lu %lu",
+                               &u, &n, &s, &i, &w, &irq, &softirq) == 7) {
+                        cpuTotal = u + n + s + i + w + irq + softirq;
+                        cpuIdle = i + w;
+                    }
+                }
+                fclose(cpuFile);
+            }
+
+            float cpuPct = 0;
+            if (cpuTotal > lastTotal) {
+                cpuPct = 100.0f * (1.0f - (float)(cpuIdle - lastIdle) / (cpuTotal - lastTotal));
+                lastIdle = cpuIdle;
+                lastTotal = cpuTotal;
+            }
+
+            Logger::info("[PERF] FPS: " + std::to_string((int)fps) +
+                         " | CPU: " + std::to_string((int)cpuPct) + "%" +
+                         " | RAM: " + std::to_string((int)memUsedMB) + "/" + std::to_string((int)memTotalMB) + " MB (" + std::to_string((int)memPct) + "%)");
+
+            frameCount = 0;
+            lastPerfLog = now;
         }
     }
 }
