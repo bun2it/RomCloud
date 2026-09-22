@@ -740,8 +740,18 @@ void UIManager::update() {
         }
 
         case UIState::DIAGNOSTICS: {
-            if (input.isButtonJustPressed(Button::B)) {
+            // Scroll navigation
+            if (input.isButtonJustPressed(Button::UP)) {
+                m_diagnosticsScrollOffset = std::max(0, m_diagnosticsScrollOffset - 1);
+            } else if (input.isButtonJustPressed(Button::DOWN)) {
+                m_diagnosticsScrollOffset++;
+            } else if (input.isButtonJustPressed(Button::L1)) {
+                m_diagnosticsScrollOffset = std::max(0, m_diagnosticsScrollOffset - 5);
+            } else if (input.isButtonJustPressed(Button::R1)) {
+                m_diagnosticsScrollOffset += 5;
+            } else if (input.isButtonJustPressed(Button::B)) {
                 setState(UIState::MENU);
+                m_diagnosticsScrollOffset = 0;
             }
             break;
         }
@@ -2135,13 +2145,20 @@ void UIManager::renderDiagnosticsState() {
         {UiStrings::DIAG_SAFETY, UiStrings::DIAG_SAFETY_VAL, {34, 197, 94, 255}}
     };
 
-    int startY = 124;
     int rowH = 44;
+    int startY = 124 - (m_diagnosticsScrollOffset * rowH);
     int cardX = 24;
     int cardW = 976;
+    int visibleRows = 14;  // How many rows fit on screen
+
+    int maxScroll = static_cast<int>(rows.size()) - visibleRows;
+    if (maxScroll < 0) maxScroll = 0;
 
     for (size_t i = 0; i < rows.size(); ++i) {
         int y = startY + static_cast<int>(i) * rowH;
+        // Only draw if visible on screen
+        if (y < 60 || y > 720) continue;
+
         if (i % 2 == 1) {
             drawRoundedRect(cardX, y - 4, cardW, rowH, 8, {22, 28, 38, 255}, true);
         }
@@ -2149,7 +2166,20 @@ void UIManager::renderDiagnosticsState() {
         drawText(rows[i].value, cardX + 280, y, rows[i].valColor, m_fontSmall);
     }
 
-    drawText(UiStrings::BTN_BACK_MAIN_MENU_HINT, 512, 650, {130, 140, 155, 255}, m_fontSmall, true);
+    // Scroll indicator
+    if (maxScroll > 0) {
+        int scrollBarX = 990;
+        int scrollBarH = 600;
+        int scrollBarY = 64;
+        int thumbH = scrollBarH * visibleRows / rows.size();
+        int thumbY = scrollBarY + (m_diagnosticsScrollOffset * (scrollBarH - thumbH) / maxScroll);
+
+        drawRoundedRect(scrollBarX, scrollBarY, 8, scrollBarH, 4, {35, 42, 54, 255}, true);
+        drawRoundedRect(scrollBarX, thumbY, 8, thumbH, 4, {0, 180, 216, 255}, true);
+    }
+
+    drawText(UiStrings::BTN_BACK_MAIN_MENU_HINT, 512, 730, {130, 140, 155, 255}, m_fontSmall, true);
+    drawText("▲▼ Cuộn lên/xuống", 880, 730, {100, 110, 125, 255}, m_fontSmall);
 }
 
 void UIManager::renderReverseSyncState() {

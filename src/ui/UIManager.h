@@ -75,6 +75,9 @@ private:
     // Settings State
     int m_selectedSettingsRow = 0;
 
+    // Diagnostics scroll state
+    int m_diagnosticsScrollOffset = 0;
+
     // Search state
     std::string m_searchQuery;
     std::vector<GameRecord> m_searchResults;

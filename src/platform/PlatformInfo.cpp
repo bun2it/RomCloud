@@ -124,23 +124,24 @@ void PlatformInfo::getDisplayMetrics(int& width, int& height, float& aspectRatio
 }
 
 int PlatformInfo::scaleX(int x) {
-    // Scale X based on display width ratio to 1024 base
-    return (int)((float)x * (float)m_displayWidth / 1024.0f);
+    // Base resolution is 1024 - no scaling needed for TrimUI Brick Pro
+    // For future devices with different resolutions, implement actual scaling
+    return x;
 }
 
 int PlatformInfo::scaleY(int y) {
-    // Scale Y based on display height ratio to 768 base
-    return (int)((float)y * (float)m_displayHeight / 768.0f);
+    // Base resolution is 768 - no scaling needed for TrimUI Brick Pro
+    return y;
 }
 
 int PlatformInfo::scaleW(int w) {
-    // Scale width
-    return (int)((float)w * (float)m_displayWidth / 1024.0f);
+    // Base resolution is 1024 - no scaling needed for TrimUI Brick Pro
+    return w;
 }
 
 int PlatformInfo::scaleH(int h) {
-    // Scale height
-    return (int)((float)h * (float)m_displayHeight / 768.0f);
+    // Base resolution is 768 - no scaling needed for TrimUI Brick Pro
+    return h;
 }
 
 std::string PlatformInfo::getIpAddress(const std::string& interfaceName) {
