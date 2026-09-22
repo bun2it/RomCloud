@@ -7,6 +7,7 @@
 
 #include <curl/curl.h>
 #include <sys/stat.h>
+#include <unistd.h>
 #include <sstream>
 #include <vector>
 
@@ -306,32 +307,36 @@ void UpdateManager::runDownloadWorker(UpdateInfo info) {
     // Make executable
     chmod(newBinPath.c_str(), 0755);
 
-    // Atomic replace if supported or move
-    Logger::info("OTA: Replacing old binary...");
+    // Ensure all downloaded data is committed to SD card
+    sync();
+
+    // Try in-place atomic replace (works on ext4/POSIX filesystems)
+    bool replaced = false;
     std::string oldBinPath = binDir + "/RomCloud.old";
     FileSystemManager::instance().removeFile(oldBinPath);
 
-    // Backup current binary
-    if (rename(finalBinPath.c_str(), oldBinPath.c_str()) != 0) {
-        Logger::warn("OTA: Could not backup old binary (may not exist yet)");
-    }
-
-    // Move new binary to final location
-    if (rename(newBinPath.c_str(), finalBinPath.c_str()) != 0) {
-        // Try to restore from backup
-        if (rename(oldBinPath.c_str(), finalBinPath.c_str()) != 0) {
-            std::lock_guard<std::mutex> lock(m_mutex);
-            m_progress.state = UpdateState::FAILED;
-            m_progress.errorMessage = "Không thể ghi đè tập tin nhị phân mới.";
-            Logger::error(m_progress.errorMessage);
-            m_isRunning = false;
-            return;
+    if (rename(finalBinPath.c_str(), oldBinPath.c_str()) == 0) {
+        if (rename(newBinPath.c_str(), finalBinPath.c_str()) == 0) {
+            chmod(finalBinPath.c_str(), 0755);
+            FileSystemManager::instance().removeFile(oldBinPath);
+            replaced = true;
+            Logger::info("OTA: In-place binary replacement succeeded.");
+        } else {
+            // Restore original binary
+            rename(oldBinPath.c_str(), finalBinPath.c_str());
+            Logger::warn("OTA: In-place move failed, restored original binary.");
         }
-        Logger::warn("OTA: Restored old binary after failed move");
     }
-    chmod(finalBinPath.c_str(), 0755);
 
-    Logger::info("OTA update installed successfully! File size: " + std::to_string(FileSystemManager::instance().getFileSize(finalBinPath)) + " bytes");
+    if (!replaced) {
+        // On FAT32/exFAT SD card (TrimUI), the executing binary is locked by Linux kernel.
+        // RomCloud.new is safely preserved; launch.sh will atomically mv it on app exit code 42.
+        Logger::info("OTA: Binary busy on SD card. Replacement deferred to launch.sh upon restart.");
+    }
+
+    sync();
+
+    Logger::info("OTA update ready to install! File size: " + std::to_string(newSize) + " bytes");
     Logger::info("OTA: Ready to restart. App will exit with code 42 for auto-restart.");
 
     {

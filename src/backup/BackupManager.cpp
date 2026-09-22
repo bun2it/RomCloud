@@ -2,6 +2,7 @@
 #include "../database/DatabaseManager.h"
 #include "../config/AppConfig.h"
 #include "../logging/Logger.h"
+#include "../ota/UpdateManager.h"
 
 #include <fstream>
 #include <sstream>
@@ -125,8 +126,8 @@ std::string BackupManager::buildFullBackupJson() const {
     auto now = std::chrono::system_clock::now();
     auto time = std::chrono::system_clock::to_time_t(now);
     std::tm tm = *std::localtime(&time);
-    oss << "  \"version\": \"1.1.1\",\n";
-    oss << "  \"app_version\": \"1.1.1\",\n";
+    oss << "  \"version\": \"" << APP_VERSION << "\",\n";
+    oss << "  \"app_version\": \"" << APP_VERSION << "\",\n";
     oss << "  \"exported_at\": \"" << std::put_time(&tm, "%Y-%m-%dT%H:%M:%SZ") << "\",\n";
 
     // Settings

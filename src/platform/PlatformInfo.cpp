@@ -2,6 +2,7 @@
 #include "../filesystem/FileSystemManager.h"
 #include "../config/AppConfig.h"
 #include "../logging/Logger.h"
+#include "../ota/UpdateManager.h"
 
 #include <sys/utsname.h>
 #include <fstream>
@@ -170,7 +171,7 @@ bool PlatformInfo::isNetworkConnected() {
 
 SystemDiagnostics PlatformInfo::getDiagnostics() {
     SystemDiagnostics diag;
-    diag.appVersion = "1.1.1 (Phase 6 On-Demand DL)";
+    diag.appVersion = std::string(APP_VERSION);
     diag.buildDate = __DATE__ " " __TIME__;
 
     struct utsname uts;
