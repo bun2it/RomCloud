@@ -91,7 +91,20 @@ bool UpdateManager::checkForUpdatesSync(UpdateInfo& outInfo) {
             changelog = JsonHelper::extractString(resp.body, "body");
             relDate = JsonHelper::extractString(resp.body, "published_at");
             if (relDate.length() >= 10) relDate = relDate.substr(0, 10);
-            binUrl = "https://raw.githubusercontent.com/" + std::string(GITHUB_REPO) + "/main/bin/RomCloud";
+
+            // Try to get download URL from release assets
+            auto assets = JsonHelper::extractArrayObjects(resp.body, "assets");
+            for (const auto& asset : assets) {
+                std::string name = JsonHelper::extractString(asset, "name");
+                if (name == "RomCloud" || name == "RomCloud.bin") {
+                    binUrl = JsonHelper::extractString(asset, "browser_download_url");
+                    break;
+                }
+            }
+            // Fallback if no assets found
+            if (binUrl.empty()) {
+                binUrl = "https://github.com/" + std::string(GITHUB_REPO) + "/releases/download/" + tag + "/RomCloud";
+            }
         }
     }
 
