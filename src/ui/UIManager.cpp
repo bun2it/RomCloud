@@ -13,6 +13,7 @@
 #include "../app/Application.h"
 #include "UiStrings.h"
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 
 namespace RomCloud {
@@ -654,8 +655,105 @@ void UIManager::drawBorder(int x, int y, int w, int h, SDL_Color color, int thic
     }
 }
 
+void UIManager::drawRoundedRect(int x, int y, int w, int h, int radius, SDL_Color color, bool filled) {
+    if (w <= 0 || h <= 0) return;
+    int maxR = std::min(w, h) / 2;
+    if (radius > maxR) radius = maxR;
+    if (radius <= 0) {
+        drawRect(x, y, w, h, color, filled);
+        return;
+    }
+
+    SDL_SetRenderDrawBlendMode(m_renderer, SDL_BLENDMODE_BLEND);
+    SDL_SetRenderDrawColor(m_renderer, color.r, color.g, color.b, color.a);
+
+    if (filled) {
+        SDL_Rect centerRect = {x, y + radius, w, h - 2 * radius};
+        if (centerRect.h > 0) {
+            SDL_RenderFillRect(m_renderer, &centerRect);
+        }
+
+        for (int dy = 0; dy < radius; ++dy) {
+            int ry = radius - 1 - dy;
+            int dx = static_cast<int>(std::sqrt(radius * radius - ry * ry));
+            int lineW = w - 2 * (radius - dx);
+            int lineX = x + radius - dx;
+
+            if (lineW > 0) {
+                SDL_RenderDrawLine(m_renderer, lineX, y + dy, lineX + lineW - 1, y + dy);
+                SDL_RenderDrawLine(m_renderer, lineX, y + h - 1 - dy, lineX + lineW - 1, y + h - 1 - dy);
+            }
+        }
+    } else {
+        drawRoundedBorder(x, y, w, h, radius, color, 1);
+    }
+}
+
+void UIManager::drawRoundedBorder(int x, int y, int w, int h, int radius, SDL_Color color, int thickness) {
+    if (w <= 0 || h <= 0) return;
+    int maxR = std::min(w, h) / 2;
+    if (radius > maxR) radius = maxR;
+    if (radius <= 0) {
+        drawBorder(x, y, w, h, color, thickness);
+        return;
+    }
+
+    SDL_SetRenderDrawBlendMode(m_renderer, SDL_BLENDMODE_BLEND);
+    SDL_SetRenderDrawColor(m_renderer, color.r, color.g, color.b, color.a);
+
+    for (int t = 0; t < thickness; ++t) {
+        int cx = x + t;
+        int cy = y + t;
+        int cw = w - 2 * t;
+        int ch = h - 2 * t;
+        int cr = std::max(1, radius - t);
+
+        if (cw <= 0 || ch <= 0) break;
+
+        SDL_RenderDrawLine(m_renderer, cx + cr, cy, cx + cw - 1 - cr, cy);
+        SDL_RenderDrawLine(m_renderer, cx + cr, cy + ch - 1, cx + cw - 1 - cr, cy + ch - 1);
+        SDL_RenderDrawLine(m_renderer, cx, cy + cr, cx, cy + ch - 1 - cr);
+        SDL_RenderDrawLine(m_renderer, cx + cw - 1, cy + cr, cx + cw - 1, cy + ch - 1 - cr);
+
+        int f = 1 - cr;
+        int ddF_x = 1;
+        int ddF_y = -2 * cr;
+        int px = 0;
+        int py = cr;
+
+        auto plotCorners = [&](int ox, int oy) {
+            SDL_RenderDrawPoint(m_renderer, cx + cr - ox, cy + cr - oy);
+            SDL_RenderDrawPoint(m_renderer, cx + cr - oy, cy + cr - ox);
+
+            SDL_RenderDrawPoint(m_renderer, cx + cw - 1 - cr + ox, cy + cr - oy);
+            SDL_RenderDrawPoint(m_renderer, cx + cw - 1 - cr + oy, cy + cr - ox);
+
+            SDL_RenderDrawPoint(m_renderer, cx + cr - ox, cy + ch - 1 - cr + oy);
+            SDL_RenderDrawPoint(m_renderer, cx + cr - oy, cy + ch - 1 - cr + ox);
+
+            SDL_RenderDrawPoint(m_renderer, cx + cw - 1 - cr + ox, cy + ch - 1 - cr + oy);
+            SDL_RenderDrawPoint(m_renderer, cx + cw - 1 - cr + oy, cy + ch - 1 - cr + ox);
+        };
+
+        plotCorners(px, py);
+
+        while (px < py) {
+            if (f >= 0) {
+                py--;
+                ddF_y += 2;
+                f += ddF_y;
+            }
+            px++;
+            ddF_x += 2;
+            f += ddF_x;
+            plotCorners(px, py);
+        }
+    }
+}
+
 void UIManager::drawBadge(int x, int y, int w, int h, const std::string& text, SDL_Color bg, SDL_Color fg) {
-    drawRect(x, y, w, h, bg, true);
+    int rad = std::min(8, h / 2);
+    drawRoundedRect(x, y, w, h, rad, bg, true);
     drawText(text, x + w / 2, y + (h - 16) / 2, fg, m_fontSmall, true);
 }
 
