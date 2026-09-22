@@ -225,6 +225,9 @@ std::string WebServer::buildHtmlResponse() {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
   <title>RomCloud - TrimUI ROM Manager</title>
   <style>
     :root {
@@ -768,11 +771,12 @@ std::string WebServer::buildHtmlResponse() {
             <div id="sync-status-txt">Đang quét thư mục Google Drive...</div>
           </div>
 
-          <form action="/connect" method="POST" style="margin-top: 18px; border-top: 1px solid var(--border); padding-top: 14px;">
+          <form id="form-connect-drive" onsubmit="handleConnectSubmit(event)" autocomplete="off" style="margin-top: 18px; border-top: 1px solid var(--border); padding-top: 14px;">
             <label style="font-size: 12px; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 6px;">URL Thư mục Google Drive Master:</label>
-            <div style="display: flex; gap: 8px;">
-              <input type="text" name="drive_url" value=")HTML" + savedDriveUrl + R"HTML(" placeholder="https://drive.google.com/drive/folders/... (Dán link vào đây)" autocomplete="off" style="flex: 1; padding: 8px 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: #fff; font-size: 12px;" required>
+            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+              <input type="text" id="input-drive-url" name="drive_url" value=")HTML" + savedDriveUrl + R"HTML(" placeholder="https://drive.google.com/drive/folders/... (Dán link vào đây)" autocomplete="off" style="flex: 1; min-width: 220px; padding: 8px 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: #fff; font-size: 12px;" required>
               <button type="submit" class="btn btn-primary">🔗 Kết nối &amp; Quét ngay</button>
+              <button type="button" class="btn btn-secondary" onclick="clearDriveInput()">✕ Xóa trắng</button>
             </div>
           </form>
         </div>
@@ -1130,6 +1134,7 @@ std::string WebServer::buildHtmlResponse() {
         const btnTabLogout = document.getElementById('btn-tab-logout');
         const btnTriggerSync = document.getElementById('btn-trigger-sync');
 
+        const driveInput = document.getElementById('input-drive-url');
         if (data.is_linked) {
           authPill.innerHTML = `Drive: <b style="color:var(--green);">🟢 Đã kết nối</b>`;
           btnHeadLogout.style.display = 'inline-flex';
@@ -1137,6 +1142,7 @@ std::string WebServer::buildHtmlResponse() {
           driveConnStatus.innerHTML = `Trạng thái: <b style="color:var(--green);">🟢 Đã liên kết</b> (${data.user_email || 'Google Drive'})`;
           btnTabLogout.style.display = 'inline-flex';
           btnTriggerSync.disabled = false;
+          if (driveInput && data.drive_url) driveInput.value = data.drive_url;
         } else {
           authPill.innerHTML = `Drive: <b style="color:var(--text-dim);">⚪ Đã đăng xuất</b>`;
           btnHeadLogout.style.display = 'none';
@@ -1144,18 +1150,52 @@ std::string WebServer::buildHtmlResponse() {
           driveConnStatus.innerHTML = `Trạng thái: <b style="color:var(--yellow);">⚪ Chưa liên kết Google Drive (Đã đăng xuất)</b>`;
           btnTabLogout.style.display = 'none';
           btnTriggerSync.disabled = true;
+          if (driveInput) driveInput.value = '';
         }
       } catch (e) {}
     }
 
+    function clearDriveInput() {
+      const el = document.getElementById('input-drive-url');
+      if (el) {
+        el.value = '';
+        el.focus();
+      }
+    }
+
+    async function handleConnectSubmit(e) {
+      e.preventDefault();
+      const input = document.getElementById('input-drive-url');
+      const val = (input ? input.value : '').trim();
+      if (!val) {
+        showToast('Vui lòng dán link thư mục Google Drive trước khi kết nối.');
+        return;
+      }
+      try {
+        const body = 'drive_url=' + encodeURIComponent(val);
+        const res = await fetch('/connect', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: body
+        });
+        showToast('Đã lưu kết nối Google Drive! Đang bắt đầu quét...');
+        await loadStorageInfo();
+        triggerSync();
+      } catch (err) {
+        showToast('Lỗi khi gửi kết nối.');
+      }
+    }
+
     async function logoutGoogleDrive() {
-      if (!confirm("Bạn có chắc chắn muốn ĐĂNG XUẤT khỏi Google Drive?\n\n- Các game đã tải về thẻ nhớ vẫn được giữ nguyên 100%.\n- Danh mục các game cloud chưa tải sẽ được dọn sạch khỏi danh sách.")) {
+      if (!confirm("Bạn có chắc chắn muốn ĐĂNG XUẤT khỏi Google Drive?\\n\\n- Các game đã tải về thẻ nhớ vẫn được giữ nguyên 100%.\\n- Danh mục các game cloud chưa tải sẽ được dọn sạch khỏi danh sách.")) {
         return;
       }
       try {
         const res = await fetch('/api/logout', { method: 'POST' });
         const data = await res.json();
         showToast(data.message || 'Đã đăng xuất khỏi Google Drive.');
+        const driveInput = document.getElementById('input-drive-url');
+        if (driveInput) driveInput.value = '';
         await loadStorageInfo();
         await loadSystems();
         await loadGames();
