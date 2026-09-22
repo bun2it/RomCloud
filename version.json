@@ -1,7 +1,7 @@
 {
-  "version": "1.0.6",
+  "version": "1.0.7",
   "release_date": "2026-09-22",
   "binary_url": "https://raw.githubusercontent.com/bun2it/RomCloud/main/bin/RomCloud",
-  "changelog": "v1.0.6: Khắc phục triệt để lỗi lưu cache Google Drive sau khi đăng xuất. Tự động xóa trắng ô link Drive, chống cache trình duyệt tuyệt đối và đồng bộ trạng thái đăng xuất trên Web Portal."
+  "changelog": "v1.0.7: Đồng bộ triệt để mục Quản lý ROM với trạng thái Google Drive (Chỉ hiển thị ROM khi đang kết nối Drive, ngắt kết nối sẽ làm sạch toàn bộ danh mục và khóa tìm kiếm)."
 }
 

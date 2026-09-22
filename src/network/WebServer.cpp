@@ -218,7 +218,9 @@ std::string WebServer::buildHtmlResponse() {
     std::string lastSyncTime = DriveSyncEngine::instance().getLastSyncTime();
 
     int totalLocal = 0, totalCloud = 0;
-    db.getTotalGameCounts(totalLocal, totalCloud);
+    if (isLinked) {
+        db.getTotalGameCounts(totalLocal, totalCloud);
+    }
 
     std::string html = R"HTML(<!DOCTYPE html>
 <html lang="vi">
@@ -831,6 +833,7 @@ std::string WebServer::buildHtmlResponse() {
 
   <script>
     let currentTab = 'tab-roms';
+    let isDriveLinked = false;
     let currentSystemId = 0;
     let currentStateFilter = -1;
     let currentSearch = '';
@@ -882,6 +885,10 @@ std::string WebServer::buildHtmlResponse() {
 
     function renderSystemPills() {
       const c = document.getElementById('system-pills-container');
+      if (!isDriveLinked) {
+        c.innerHTML = '<span style="font-size: 12px; color: var(--text-dim); padding: 4px 8px;">(Chưa kết nối Google Drive)</span>';
+        return;
+      }
       let html = `<button class="pill-btn ${currentSystemId === 0 ? 'active' : ''}" onclick="setSystemFilter(0)">Tất cả</button>`;
       for (const s of systemsCache) {
         if (s.cloud_count === 0 && s.local_count === 0) continue;
@@ -948,6 +955,20 @@ std::string WebServer::buildHtmlResponse() {
       const pageIndicator = document.getElementById('page-indicator');
       const btnPrev = document.getElementById('btn-prev-page');
       const btnNext = document.getElementById('btn-next-page');
+
+      if (!isDriveLinked) {
+        tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; padding: 50px 20px; color: var(--text-dim);">
+          <div style="font-size: 38px; margin-bottom: 12px;">☁️❌</div>
+          <div style="font-size: 16px; font-weight: 700; color: #fef3c7; margin-bottom: 6px;">Google Drive chưa được kết nối (Đã ngắt kết nối)</div>
+          <div style="font-size: 13px; color: var(--text-muted); margin-bottom: 18px;">Chỉ khi còn kết nối Google Drive thì hệ thống mới hiển thị danh mục ROM game.</div>
+          <button class="btn btn-primary" onclick="switchTab('tab-storage')">🔗 Kết nối Google Drive ngay</button>
+        </td></tr>`;
+        countSpan.innerHTML = `Chưa kết nối Google Drive (<b>0</b> game)`;
+        pageIndicator.textContent = `Trang 0 / 0`;
+        btnPrev.disabled = true;
+        btnNext.disabled = true;
+        return;
+      }
 
       const maxPages = Math.ceil(total / pageSize) || 1;
       countSpan.innerHTML = `Tìm thấy <b>${total.toLocaleString()}</b> game`;
@@ -1146,14 +1167,18 @@ std::string WebServer::buildHtmlResponse() {
         document.getElementById('head-cloud-count').textContent = data.total_cloud || 0;
         if (data.last_sync) document.getElementById('last-sync-time').textContent = data.last_sync;
 
+        const wasLinked = isDriveLinked;
+        isDriveLinked = !!data.is_linked;
+
         const authPill = document.getElementById('head-auth-pill');
         const btnHeadLogout = document.getElementById('btn-head-logout');
         const unlinkedBanner = document.getElementById('unlinked-warning-banner');
         const driveConnStatus = document.getElementById('drive-connection-status');
         const btnTabLogout = document.getElementById('btn-tab-logout');
         const btnTriggerSync = document.getElementById('btn-trigger-sync');
-
         const driveInput = document.getElementById('input-drive-url');
+        const sInput = document.getElementById('rom-search');
+
         if (data.is_linked) {
           authPill.innerHTML = `Drive: <b style="color:var(--green);">🟢 Đã kết nối</b>`;
           btnHeadLogout.style.display = 'inline-flex';
@@ -1162,6 +1187,10 @@ std::string WebServer::buildHtmlResponse() {
           btnTabLogout.style.display = 'inline-flex';
           btnTriggerSync.disabled = false;
           if (driveInput && data.drive_url) driveInput.value = data.drive_url;
+          if (sInput) {
+            sInput.disabled = false;
+            sInput.placeholder = '🔍 Nhập tên game hoặc tên file ROM để tìm kiếm ngay...';
+          }
         } else {
           authPill.innerHTML = `Drive: <b style="color:var(--text-dim);">⚪ Đã đăng xuất</b>`;
           btnHeadLogout.style.display = 'none';
@@ -1169,7 +1198,19 @@ std::string WebServer::buildHtmlResponse() {
           driveConnStatus.innerHTML = `Trạng thái: <b style="color:var(--yellow);">⚪ Chưa liên kết Google Drive (Đã đăng xuất)</b>`;
           btnTabLogout.style.display = 'none';
           btnTriggerSync.disabled = true;
+          document.getElementById('head-local-count').textContent = '0';
+          document.getElementById('head-cloud-count').textContent = '0';
           if (driveInput) driveInput.value = '';
+          if (sInput) {
+            sInput.disabled = true;
+            sInput.value = '';
+            sInput.placeholder = '🔒 Chưa kết nối Google Drive. Vui lòng kết nối để hiển thị ROM...';
+          }
+        }
+
+        if (wasLinked !== isDriveLinked) {
+          renderSystemPills();
+          loadGames();
         }
       } catch (e) {}
     }
@@ -1475,6 +1516,16 @@ void WebServer::handleClient(int clientFd) {
                           "Connection: close\r\n\r\n" + body;
         send(clientFd, res.c_str(), res.length(), 0);
     } else if (method == "GET" && path == "/api/systems") {
+        if (!AuthManager::instance().isLinked()) {
+            std::string res = "HTTP/1.1 200 OK\r\n"
+                              "Content-Type: application/json; charset=UTF-8\r\n"
+                              "Cache-Control: no-cache, no-store, must-revalidate\r\n"
+                              "Access-Control-Allow-Origin: *\r\n"
+                              "Content-Length: 2\r\n"
+                              "Connection: close\r\n\r\n[]";
+            send(clientFd, res.c_str(), res.length(), 0);
+            return;
+        }
         auto systems = DatabaseManager::instance().getSystems(true);
         std::string json = "[";
         for (size_t i = 0; i < systems.size(); ++i) {
@@ -1489,11 +1540,23 @@ void WebServer::handleClient(int clientFd) {
         json += "]";
         std::string res = "HTTP/1.1 200 OK\r\n"
                           "Content-Type: application/json; charset=UTF-8\r\n"
+                          "Cache-Control: no-cache, no-store, must-revalidate\r\n"
                           "Access-Control-Allow-Origin: *\r\n"
                           "Content-Length: " + std::to_string(json.length()) + "\r\n"
                           "Connection: close\r\n\r\n" + json;
         send(clientFd, res.c_str(), res.length(), 0);
     } else if (method == "GET" && path == "/api/games") {
+        if (!AuthManager::instance().isLinked()) {
+            std::string json = "{\"total\":0,\"games\":[]}";
+            std::string res = "HTTP/1.1 200 OK\r\n"
+                              "Content-Type: application/json; charset=UTF-8\r\n"
+                              "Cache-Control: no-cache, no-store, must-revalidate\r\n"
+                              "Access-Control-Allow-Origin: *\r\n"
+                              "Content-Length: " + std::to_string(json.length()) + "\r\n"
+                              "Connection: close\r\n\r\n" + json;
+            send(clientFd, res.c_str(), res.length(), 0);
+            return;
+        }
         std::string sysIdStr = extractQueryParam(queryString, "system_id");
         std::string stateStr = extractQueryParam(queryString, "state");
         std::string q = extractQueryParam(queryString, "q");
@@ -1531,11 +1594,22 @@ void WebServer::handleClient(int clientFd) {
 
         std::string res = "HTTP/1.1 200 OK\r\n"
                           "Content-Type: application/json; charset=UTF-8\r\n"
+                          "Cache-Control: no-cache, no-store, must-revalidate\r\n"
                           "Access-Control-Allow-Origin: *\r\n"
                           "Content-Length: " + std::to_string(json.length()) + "\r\n"
                           "Connection: close\r\n\r\n" + json;
         send(clientFd, res.c_str(), res.length(), 0);
     } else if (method == "GET" && path == "/api/search") {
+        if (!AuthManager::instance().isLinked()) {
+            std::string res = "HTTP/1.1 200 OK\r\n"
+                              "Content-Type: application/json; charset=UTF-8\r\n"
+                              "Cache-Control: no-cache, no-store, must-revalidate\r\n"
+                              "Access-Control-Allow-Origin: *\r\n"
+                              "Content-Length: 2\r\n"
+                              "Connection: close\r\n\r\n[]";
+            send(clientFd, res.c_str(), res.length(), 0);
+            return;
+        }
         std::string q = extractQueryParam(queryString, "q");
         auto games = DatabaseManager::instance().searchAllGames(q, 60);
         std::string json = "[";
@@ -1558,6 +1632,7 @@ void WebServer::handleClient(int clientFd) {
         json += "]";
         std::string res = "HTTP/1.1 200 OK\r\n"
                           "Content-Type: application/json; charset=UTF-8\r\n"
+                          "Cache-Control: no-cache, no-store, must-revalidate\r\n"
                           "Access-Control-Allow-Origin: *\r\n"
                           "Content-Length: " + std::to_string(json.length()) + "\r\n"
                           "Connection: close\r\n\r\n" + json;
@@ -1724,10 +1799,13 @@ void WebServer::handleClient(int clientFd) {
         send(clientFd, res.c_str(), res.length(), 0);
     } else if (method == "GET" && path == "/api/storage_info") {
         auto disk = FileSystemManager::instance().getDiskSpace(AppConfig::instance().getRomsDir());
+        bool isLinked = AuthManager::instance().isLinked();
         int totalLocal = 0, totalCloud = 0;
-        DatabaseManager::instance().getTotalGameCounts(totalLocal, totalCloud);
-        std::string lastSync = DriveSyncEngine::instance().getLastSyncTime();
-        std::string driveUrl = DatabaseManager::instance().getSetting("drive_folder_url", "");
+        if (isLinked) {
+            DatabaseManager::instance().getTotalGameCounts(totalLocal, totalCloud);
+        }
+        std::string lastSync = isLinked ? DriveSyncEngine::instance().getLastSyncTime() : "Chưa kết nối";
+        std::string driveUrl = isLinked ? DatabaseManager::instance().getSetting("drive_folder_url", "") : "";
 
         uint64_t usedBytes = (disk.totalBytes > disk.availableBytes) ? (disk.totalBytes - disk.availableBytes) : 0;
         double usedPct = 0.0;
@@ -1735,8 +1813,7 @@ void WebServer::handleClient(int clientFd) {
             usedPct = (static_cast<double>(usedBytes) / static_cast<double>(disk.totalBytes)) * 100.0;
         }
 
-        bool isLinked = AuthManager::instance().isLinked();
-        std::string userEmail = AuthManager::instance().getUserEmail();
+        std::string userEmail = isLinked ? AuthManager::instance().getUserEmail() : "";
 
         std::string json = "{";
         json += "\"is_linked\":" + std::string(isLinked ? "true" : "false") + ",";
