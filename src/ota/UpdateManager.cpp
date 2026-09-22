@@ -264,6 +264,7 @@ void UpdateManager::runDownloadWorker(UpdateInfo info) {
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 300L); // 5 min timeout
     curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
 
+    Logger::info("OTA: Downloading to " + newBinPath);
     CURLcode res = curl_easy_perform(curl);
     long httpCode = 0;
     curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &httpCode);
@@ -291,6 +292,7 @@ void UpdateManager::runDownloadWorker(UpdateInfo info) {
 
     // Verify downloaded binary: check minimum size (> 1MB)
     size_t newSize = FileSystemManager::instance().getFileSize(newBinPath);
+    Logger::info("OTA: Downloaded file size: " + std::to_string(newSize) + " bytes");
     if (newSize < 1000000) {
         FileSystemManager::instance().removeFile(newBinPath);
         std::lock_guard<std::mutex> lock(m_mutex);
@@ -305,22 +307,32 @@ void UpdateManager::runDownloadWorker(UpdateInfo info) {
     chmod(newBinPath.c_str(), 0755);
 
     // Atomic replace if supported or move
+    Logger::info("OTA: Replacing old binary...");
     std::string oldBinPath = binDir + "/RomCloud.old";
     FileSystemManager::instance().removeFile(oldBinPath);
-    rename(finalBinPath.c_str(), oldBinPath.c_str());
+
+    // Backup current binary
+    if (rename(finalBinPath.c_str(), oldBinPath.c_str()) != 0) {
+        Logger::warn("OTA: Could not backup old binary (may not exist yet)");
+    }
+
+    // Move new binary to final location
     if (rename(newBinPath.c_str(), finalBinPath.c_str()) != 0) {
-        // Fallback: restore old binary
-        rename(oldBinPath.c_str(), finalBinPath.c_str());
-        std::lock_guard<std::mutex> lock(m_mutex);
-        m_progress.state = UpdateState::FAILED;
-        m_progress.errorMessage = "Không thể ghi đè tập tin nhị phân mới.";
-        Logger::error(m_progress.errorMessage);
-        m_isRunning = false;
-        return;
+        // Try to restore from backup
+        if (rename(oldBinPath.c_str(), finalBinPath.c_str()) != 0) {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            m_progress.state = UpdateState::FAILED;
+            m_progress.errorMessage = "Không thể ghi đè tập tin nhị phân mới.";
+            Logger::error(m_progress.errorMessage);
+            m_isRunning = false;
+            return;
+        }
+        Logger::warn("OTA: Restored old binary after failed move");
     }
     chmod(finalBinPath.c_str(), 0755);
 
-    Logger::info("OTA update installed successfully! Ready to restart as v" + info.remoteVersion);
+    Logger::info("OTA update installed successfully! File size: " + std::to_string(FileSystemManager::instance().getFileSize(finalBinPath)) + " bytes");
+    Logger::info("OTA: Ready to restart. App will exit with code 42 for auto-restart.");
 
     {
         std::lock_guard<std::mutex> lock(m_mutex);
