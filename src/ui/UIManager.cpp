@@ -664,10 +664,8 @@ void UIManager::drawRoundedRect(int x, int y, int w, int h, int radius, SDL_Colo
         return;
     }
 
-    SDL_SetRenderDrawBlendMode(m_renderer, SDL_BLENDMODE_BLEND);
-    SDL_SetRenderDrawColor(m_renderer, color.r, color.g, color.b, color.a);
-
     if (filled) {
+        SDL_SetRenderDrawColor(m_renderer, color.r, color.g, color.b, color.a);
         SDL_Rect centerRect = {x, y + radius, w, h - 2 * radius};
         if (centerRect.h > 0) {
             SDL_RenderFillRect(m_renderer, &centerRect);
@@ -680,8 +678,10 @@ void UIManager::drawRoundedRect(int x, int y, int w, int h, int radius, SDL_Colo
             int lineX = x + radius - dx;
 
             if (lineW > 0) {
-                SDL_RenderDrawLine(m_renderer, lineX, y + dy, lineX + lineW - 1, y + dy);
-                SDL_RenderDrawLine(m_renderer, lineX, y + h - 1 - dy, lineX + lineW - 1, y + h - 1 - dy);
+                SDL_Rect topSlice = {lineX, y + dy, lineW, 1};
+                SDL_RenderFillRect(m_renderer, &topSlice);
+                SDL_Rect btmSlice = {lineX, y + h - 1 - dy, lineW, 1};
+                SDL_RenderFillRect(m_renderer, &btmSlice);
             }
         }
     } else {
@@ -698,56 +698,38 @@ void UIManager::drawRoundedBorder(int x, int y, int w, int h, int radius, SDL_Co
         return;
     }
 
-    SDL_SetRenderDrawBlendMode(m_renderer, SDL_BLENDMODE_BLEND);
     SDL_SetRenderDrawColor(m_renderer, color.r, color.g, color.b, color.a);
 
-    for (int t = 0; t < thickness; ++t) {
-        int cx = x + t;
-        int cy = y + t;
-        int cw = w - 2 * t;
-        int ch = h - 2 * t;
-        int cr = std::max(1, radius - t);
+    // Straight bars
+    SDL_Rect topBar = {x + radius, y, w - 2 * radius, thickness};
+    SDL_Rect btmBar = {x + radius, y + h - thickness, w - 2 * radius, thickness};
+    SDL_RenderFillRect(m_renderer, &topBar);
+    SDL_RenderFillRect(m_renderer, &btmBar);
 
-        if (cw <= 0 || ch <= 0) break;
+    SDL_Rect leftBar = {x, y + radius, thickness, h - 2 * radius};
+    SDL_Rect rightBar = {x + w - thickness, y + radius, thickness, h - 2 * radius};
+    SDL_RenderFillRect(m_renderer, &leftBar);
+    SDL_RenderFillRect(m_renderer, &rightBar);
 
-        SDL_RenderDrawLine(m_renderer, cx + cr, cy, cx + cw - 1 - cr, cy);
-        SDL_RenderDrawLine(m_renderer, cx + cr, cy + ch - 1, cx + cw - 1 - cr, cy + ch - 1);
-        SDL_RenderDrawLine(m_renderer, cx, cy + cr, cx, cy + ch - 1 - cr);
-        SDL_RenderDrawLine(m_renderer, cx + cw - 1, cy + cr, cx + cw - 1, cy + ch - 1 - cr);
+    // Corner arcs using 1-px high fill rects
+    for (int dy = 0; dy < radius; ++dy) {
+        int ry = radius - 1 - dy;
+        int outerDx = static_cast<int>(std::sqrt(radius * radius - ry * ry));
+        int innerR = std::max(0, radius - thickness);
+        int innerDx = (ry < innerR) ? static_cast<int>(std::sqrt(innerR * innerR - ry * ry)) : 0;
+        int segW = std::max(thickness, outerDx - innerDx);
 
-        int f = 1 - cr;
-        int ddF_x = 1;
-        int ddF_y = -2 * cr;
-        int px = 0;
-        int py = cr;
+        SDL_Rect tl = {x + radius - outerDx, y + dy, segW, 1};
+        SDL_RenderFillRect(m_renderer, &tl);
 
-        auto plotCorners = [&](int ox, int oy) {
-            SDL_RenderDrawPoint(m_renderer, cx + cr - ox, cy + cr - oy);
-            SDL_RenderDrawPoint(m_renderer, cx + cr - oy, cy + cr - ox);
+        SDL_Rect tr = {x + w - radius + outerDx - segW, y + dy, segW, 1};
+        SDL_RenderFillRect(m_renderer, &tr);
 
-            SDL_RenderDrawPoint(m_renderer, cx + cw - 1 - cr + ox, cy + cr - oy);
-            SDL_RenderDrawPoint(m_renderer, cx + cw - 1 - cr + oy, cy + cr - ox);
+        SDL_Rect bl = {x + radius - outerDx, y + h - 1 - dy, segW, 1};
+        SDL_RenderFillRect(m_renderer, &bl);
 
-            SDL_RenderDrawPoint(m_renderer, cx + cr - ox, cy + ch - 1 - cr + oy);
-            SDL_RenderDrawPoint(m_renderer, cx + cr - oy, cy + ch - 1 - cr + ox);
-
-            SDL_RenderDrawPoint(m_renderer, cx + cw - 1 - cr + ox, cy + ch - 1 - cr + oy);
-            SDL_RenderDrawPoint(m_renderer, cx + cw - 1 - cr + oy, cy + ch - 1 - cr + ox);
-        };
-
-        plotCorners(px, py);
-
-        while (px < py) {
-            if (f >= 0) {
-                py--;
-                ddF_y += 2;
-                f += ddF_y;
-            }
-            px++;
-            ddF_x += 2;
-            f += ddF_x;
-            plotCorners(px, py);
-        }
+        SDL_Rect br = {x + w - radius + outerDx - segW, y + h - 1 - dy, segW, 1};
+        SDL_RenderFillRect(m_renderer, &br);
     }
 }
 
@@ -812,7 +794,7 @@ void UIManager::renderSearchState() {
     // Query bar with rounded corners
     drawRoundedRect(panelX, panelY, panelW, 52, 10, {22, 32, 46, 255}, true);
     drawRoundedBorder(panelX, panelY, panelW, 52, 10, {0, 180, 216, 255}, 2);
-    std::string displayQuery = m_searchQuery.empty() ? "Nhap chu de tim..." : m_searchQuery + "_";
+    std::string displayQuery = m_searchQuery.empty() ? UiStrings::SEARCH_PROMPT_INPUT : m_searchQuery + "_";
     SDL_Color qColor = m_searchQuery.empty() ? SDL_Color{80, 95, 115, 255} : SDL_Color{255, 255, 255, 255};
     drawText(displayQuery, panelX + 16, panelY + 14, qColor, m_fontMedium);
 
@@ -892,16 +874,16 @@ void UIManager::renderSearchState() {
             bool isLocal = (g.localState == GameState::LOCAL);
             SDL_Color badgeBg = isLocal ? SDL_Color{22, 78, 99, 255} : SDL_Color{45, 30, 72, 255};
             SDL_Color badgeFg = isLocal ? SDL_Color{34, 197, 94, 255} : SDL_Color{168, 85, 247, 255};
-            std::string stateLabel = isLocal ? "LOCAL" : "CLOUD";
-            drawBadge(rPanelX + 12, itemY + 12, 68, 28, stateLabel, badgeBg, badgeFg);
+            std::string stateLabel = isLocal ? UiStrings::SEARCH_BADGE_LOCAL : UiStrings::SEARCH_BADGE_CLOUD;
+            drawBadge(rPanelX + 12, itemY + 12, 78, 28, stateLabel, badgeBg, badgeFg);
 
             // Title
             std::string title = g.title;
             if (title.length() > 34) title = title.substr(0, 33) + "...";
-            drawText(title, rPanelX + 92, itemY + 8, {230, 240, 255, 255}, m_fontMedium);
+            drawText(title, rPanelX + 102, itemY + 8, {230, 240, 255, 255}, m_fontMedium);
 
             // System label
-            drawText(g.systemCode, rPanelX + 92, itemY + 34, {100, 115, 135, 255}, m_fontSmall);
+            drawText(g.systemCode, rPanelX + 102, itemY + 34, {100, 115, 135, 255}, m_fontSmall);
         }
 
         // Scroll indicator
@@ -1031,7 +1013,7 @@ void UIManager::renderMenuState() {
 
     std::string otaMenuText = UiStrings::MENU_OTA;
     if (UpdateManager::instance().isUpdateAvailable()) {
-        otaMenuText = std::string(UiStrings::MENU_OTA_NEW_BADGE) + " (v" + UpdateManager::instance().getLatestInfo().remoteVersion + ")";
+        otaMenuText = std::string(UiStrings::MENU_OTA_NEW_BADGE) + UpdateManager::instance().getLatestInfo().remoteVersion;
     }
 
     struct MenuItemDef {
@@ -1040,12 +1022,12 @@ void UIManager::renderMenuState() {
     };
 
     std::vector<MenuItemDef> menuDefs = {
-        {UiStrings::MENU_PLAY, "Kham pha & tai game ve the nho"},
-        {UiStrings::MENU_SYNC, "Dong bo thu vien voi Google Drive"},
-        {otaMenuText, UpdateManager::instance().isUpdateAvailable() ? "Ban nang cap moi da san sang tai" : "Kiem tra phien ban & cap nhat OTA"},
-        {UiStrings::MENU_SETTINGS, "Cau hinh tai khoan & thu muc ROM"},
-        {UiStrings::MENU_DIAG, "Thong so phan cung, RAM & mang"},
-        {UiStrings::MENU_EXIT, "Quay ve giao dien TrimUI"}
+        {UiStrings::MENU_PLAY, UiStrings::MENU_SUB_PLAY},
+        {UiStrings::MENU_SYNC, UiStrings::MENU_SUB_SYNC},
+        {otaMenuText, UpdateManager::instance().isUpdateAvailable() ? UiStrings::MENU_SUB_OTA_NEW : UiStrings::MENU_SUB_OTA},
+        {UiStrings::MENU_SETTINGS, UiStrings::MENU_SUB_SETTINGS},
+        {UiStrings::MENU_DIAG, UiStrings::MENU_SUB_DIAG},
+        {UiStrings::MENU_EXIT, UiStrings::MENU_SUB_EXIT}
     };
 
     for (size_t i = 0; i < menuDefs.size(); ++i) {
@@ -1078,59 +1060,70 @@ void UIManager::renderMenuState() {
     drawRoundedBorder(dashX, dashY, dashW, dashH, 14, {38, 48, 64, 255}, 1);
 
     // Widget Header
-    drawText("TRANG THAI HE THONG", dashX + 24, dashY + 22, {0, 180, 216, 255}, m_fontMedium);
+    drawText(UiStrings::DASH_TITLE, dashX + 24, dashY + 22, {0, 180, 216, 255}, m_fontMedium);
     drawRect(dashX + 24, dashY + 54, dashW - 48, 1, {38, 48, 64, 255}, true);
 
     int rowY = dashY + 74;
     int stepY = 56;
 
     // 1. Device Info
-    drawText("Thiet bi", dashX + 24, rowY, {130, 145, 165, 255}, m_fontSmall);
-    drawText("TrimUI Smart Pro (ARM64)", dashX + 24, rowY + 20, {255, 255, 255, 255}, m_fontMedium);
+    drawText(UiStrings::DASH_DEVICE_LABEL, dashX + 24, rowY, {130, 145, 165, 255}, m_fontSmall);
+    drawText(UiStrings::DASH_DEVICE_VAL, dashX + 24, rowY + 20, {255, 255, 255, 255}, m_fontMedium);
 
     rowY += stepY;
-    // 2. Storage & ROM count
-    int totalLocal = 0, totalCloud = 0;
-    DatabaseManager::instance().getTotalGameCounts(totalLocal, totalCloud);
-    drawText("Bo nho & ROMs", dashX + 24, rowY, {130, 145, 165, 255}, m_fontSmall);
-    std::string countStr = std::to_string(totalLocal) + " ROM the nho  *  " + std::to_string(totalCloud) + " Cloud";
+    // 2. Storage & ROM count (cached every 3 seconds to avoid constant SQLite/disk overhead)
+    static uint32_t lastStatsUpdate = 0;
+    static int cachedLocal = 0, cachedCloud = 0;
+    static std::string cachedSdInfo = "";
+    static std::string cachedIp = "";
+    uint32_t now = SDL_GetTicks();
+    if (now - lastStatsUpdate > 3000 || lastStatsUpdate == 0) {
+        lastStatsUpdate = now;
+        DatabaseManager::instance().getTotalGameCounts(cachedLocal, cachedCloud);
+        auto space = FileSystemManager::instance().getDiskSpace(AppConfig::instance().getAppRoot());
+        cachedSdInfo = FileSystemManager::instance().formatBytes(space.availableBytes) +
+                       UiStrings::DASH_STORAGE_FREE +
+                       FileSystemManager::instance().formatBytes(space.totalBytes);
+        cachedIp = PlatformInfo::instance().getIpAddress("wlan0");
+    }
+
+    drawText(UiStrings::DASH_STORAGE_LABEL, dashX + 24, rowY, {130, 145, 165, 255}, m_fontSmall);
+    std::string countStr = std::to_string(cachedLocal) + " ROM thẻ nhớ  •  " + std::to_string(cachedCloud) + " Cloud";
     drawText(countStr, dashX + 24, rowY + 20, {34, 197, 94, 255}, m_fontMedium);
 
     // Storage progress gauge bar
     rowY += 46;
-    auto diag = PlatformInfo::instance().getDiagnostics();
     int gBarW = dashW - 48;
     int gBarH = 8;
     drawRoundedRect(dashX + 24, rowY, gBarW, gBarH, 4, {32, 40, 54, 255}, true);
     drawRoundedRect(dashX + 24, rowY, (int)(gBarW * 0.45f), gBarH, 4, {34, 197, 94, 255}, true);
-    drawText("The nho: " + diag.sdFreeSpace + " trong / " + diag.sdTotalSpace, dashX + 24, rowY + 14, {120, 135, 155, 255}, m_fontSmall);
+    drawText(std::string(UiStrings::DASH_SD_PREFIX) + cachedSdInfo, dashX + 24, rowY + 14, {120, 135, 155, 255}, m_fontSmall);
 
     rowY += 48;
     // 3. Cloud Sync Account
-    drawText("Google Drive Sync", dashX + 24, rowY, {130, 145, 165, 255}, m_fontSmall);
+    drawText(UiStrings::DASH_DRIVE_LABEL, dashX + 24, rowY, {130, 145, 165, 255}, m_fontSmall);
     if (AuthManager::instance().isLinked()) {
         std::string email = AuthManager::instance().getUserEmail();
         if (email.length() > 26) email = email.substr(0, 23) + "...";
-        drawText("● " + (email.empty() ? "Da ket noi" : email), dashX + 24, rowY + 20, {34, 197, 94, 255}, m_fontMedium);
+        drawText(email.empty() ? UiStrings::DASH_DRIVE_CONNECTED : email, dashX + 24, rowY + 20, {34, 197, 94, 255}, m_fontMedium);
     } else {
-        drawText("o Chua ket noi tai khoan", dashX + 24, rowY + 20, {239, 68, 68, 255}, m_fontMedium);
+        drawText(UiStrings::DASH_DRIVE_DISCONNECTED, dashX + 24, rowY + 20, {239, 68, 68, 255}, m_fontMedium);
     }
 
     rowY += stepY;
     // 4. Web Portal
-    drawText("Web Manager Portal", dashX + 24, rowY, {130, 145, 165, 255}, m_fontSmall);
-    std::string ip = PlatformInfo::instance().getIpAddress("wlan0");
-    std::string webUrl = "http://" + (ip.empty() ? "192.168.1.164" : ip) + ":8080";
+    drawText(UiStrings::DASH_PORTAL_LABEL, dashX + 24, rowY, {130, 145, 165, 255}, m_fontSmall);
+    std::string webUrl = "http://" + (cachedIp.empty() || cachedIp == "Disconnected" ? "192.168.1.164" : cachedIp) + ":8080";
     drawText(webUrl, dashX + 24, rowY + 20, {0, 180, 216, 255}, m_fontMedium);
 
     rowY += stepY;
     // 5. Version & Status
-    drawText("Phien ban", dashX + 24, rowY, {130, 145, 165, 255}, m_fontSmall);
+    drawText(UiStrings::DASH_VERSION_LABEL, dashX + 24, rowY, {130, 145, 165, 255}, m_fontSmall);
     std::string verStr = "RomCloud v" + UpdateManager::instance().getCurrentVersion();
     drawText(verStr, dashX + 24, rowY + 20, {210, 220, 235, 255}, m_fontMedium);
 
     if (UpdateManager::instance().isUpdateAvailable()) {
-        drawBadge(dashX + dashW - 140, rowY + 12, 116, 28, "CO BAN MOI", {180, 83, 9, 255}, {255, 255, 255, 255});
+        drawBadge(dashX + dashW - 140, rowY + 12, 116, 28, UiStrings::DASH_NEW_VERSION_BADGE, {180, 83, 9, 255}, {255, 255, 255, 255});
     }
 }
 
@@ -1179,13 +1172,13 @@ void UIManager::renderSystemSelectState() {
 
         drawText(sys.name, rx + 154, y + 16, {255, 255, 255, 255}, m_fontLarge);
 
-        std::string localBadge = "THE NHO: " + std::to_string(sys.localCount);
-        std::string cloudBadge = "CLOUD: " + std::to_string(sys.cloudCount);
+        std::string localBadge = std::string(UiStrings::SYS_BADGE_LOCAL_PREFIX) + std::to_string(sys.localCount);
+        std::string cloudBadge = std::string(UiStrings::SYS_BADGE_CLOUD_PREFIX) + std::to_string(sys.cloudCount);
 
         drawBadge(rx + rowW - 280, y + 24, 130, 40, localBadge, {22, 101, 52, 255}, {255, 255, 255, 255});
         drawBadge(rx + rowW - 140, y + 24, 130, 40, cloudBadge, {30, 58, 138, 255}, {255, 255, 255, 255});
 
-        std::string subtext = "Thu muc: /Roms/" + sys.romDir + "  |  Dinh dang: " + sys.extList;
+        std::string subtext = std::string(UiStrings::SYS_DIR_PREFIX) + sys.romDir + UiStrings::SYS_EXT_PREFIX + sys.extList;
         drawText(subtext, rx + 154, y + 52, {140, 155, 175, 255}, m_fontSmall);
     }
 }
@@ -1340,9 +1333,9 @@ void UIManager::renderGameListState() {
         metaY += 28;
         drawText(UiStrings::DETAIL_LOCATION_LABEL, detailX + 32, metaY, {140, 155, 175, 255}, m_fontSmall);
         if (selGame->localState == GameState::LOCAL) {
-            drawText("The nho (/Roms/" + m_activeSystem.romDir + ")", detailX + 135, metaY, {34, 197, 94, 255}, m_fontSmall);
+            drawText(std::string(UiStrings::GAME_LOCATION_SD_PREFIX) + m_activeSystem.romDir + ")", detailX + 135, metaY, {34, 197, 94, 255}, m_fontSmall);
         } else {
-            drawText("Google Drive Cloud", detailX + 135, metaY, {0, 180, 216, 255}, m_fontSmall);
+            drawText(UiStrings::GAME_LOCATION_DRIVE, detailX + 135, metaY, {0, 180, 216, 255}, m_fontSmall);
         }
 
         // Action Status Pill & Live Progress
@@ -1356,7 +1349,7 @@ void UIManager::renderGameListState() {
             auto dlp = DownloadManager::instance().getProgress();
             char pctBuf[32];
             std::snprintf(pctBuf, sizeof(pctBuf), "%.1f%%", dlp.progressPct);
-            std::string dlInfo = "DANG TAI... " + std::string(pctBuf);
+            std::string dlInfo = std::string(UiStrings::GAME_DOWNLOADING_PREFIX) + std::string(pctBuf);
             drawBadge(detailX + 32, metaY, detailW - 64, 40, dlInfo, {2, 132, 199, 255}, {255, 255, 255, 255});
 
             int dBarX = detailX + 32;
@@ -1386,11 +1379,11 @@ void UIManager::renderGameListState() {
             metaY += 54;
             std::string qInfo;
             if (isCurrentlyDownloading && queueCount > 0) {
-                qInfo = "Dang tai 1 game, con " + std::to_string(queueCount) + " game cho.";
+                qInfo = std::string(UiStrings::GAME_QUEUE_DOWNLOADING) + std::to_string(queueCount) + UiStrings::GAME_QUEUE_REMAINING;
             } else if (isCurrentlyDownloading) {
                 qInfo = UiStrings::QUEUE_DOWNLOADING_EMPTY;
             } else {
-                qInfo = "Hang tai: " + std::to_string(queueCount) + " game cho.";
+                qInfo = std::string(UiStrings::GAME_QUEUE_WAITING) + std::to_string(queueCount) + UiStrings::GAME_QUEUE_REMAINING;
             }
             drawText(qInfo, detailX + 32, metaY, {168, 85, 247, 255}, m_fontSmall);
         }
@@ -1440,7 +1433,7 @@ void UIManager::renderConfirmDeleteDialog() {
         const auto& game = m_cachedGames[m_selectedGameIndex];
 
         drawText(game.title, dlgX + dlgW / 2, dlgY + 85, {255, 255, 255, 255}, m_fontMedium, true);
-        std::string sizeStr = "Tap tin: " + game.filename + " (" + FileSystemManager::instance().formatBytes(game.sizeBytes) + ")";
+        std::string sizeStr = std::string(UiStrings::DIALOG_DELETE_FILE_PREFIX) + game.filename + " (" + FileSystemManager::instance().formatBytes(game.sizeBytes) + ")";
         drawText(sizeStr, dlgX + dlgW / 2, dlgY + 120, {0, 180, 216, 255}, m_fontSmall, true);
 
         drawText(UiStrings::DIALOG_DELETE_PROMPT, dlgX + dlgW / 2, dlgY + 165, {220, 225, 235, 255}, m_fontSmall, true);
@@ -1797,15 +1790,15 @@ void UIManager::renderDiagnosticsState() {
 
     std::vector<DiagRow> rows = {
         {UiStrings::DIAG_HW_DEVICE, diag.socName, {255, 255, 255, 255}},
-        {UiStrings::DIAG_CPU_ARCH, diag.cpuArch + " (64-bit Little Endian)", {255, 255, 255, 255}},
+        {UiStrings::DIAG_CPU_ARCH, diag.cpuArch + std::string(UiStrings::DIAG_VAL_64BIT), {255, 255, 255, 255}},
         {UiStrings::DIAG_OS_KERNEL, diag.osName + " " + diag.kernelRelease, {255, 255, 255, 255}},
-        {UiStrings::DIAG_RAM, "Con trong " + diag.freeRam + " / Tong " + diag.totalRam, {34, 197, 94, 255}},
+        {UiStrings::DIAG_RAM, std::string(UiStrings::DIAG_FREE_PREFIX) + diag.freeRam + UiStrings::DIAG_TOTAL_SEPARATOR + diag.totalRam, {34, 197, 94, 255}},
         {UiStrings::DIAG_DISPLAY, diag.displayResolution, {0, 180, 216, 255}},
-        {UiStrings::DIAG_SDL2_GFX, "v" + diag.sdlVersion + " (Tang toc phan cung)", {255, 255, 255, 255}},
-        {UiStrings::DIAG_SQLITE_DB, "v" + diag.sqliteVersion + " (Phien ban cau truc v" + std::to_string(CURRENT_SCHEMA_VERSION) + ")", {34, 197, 94, 255}},
-        {UiStrings::DIAG_SD_STORAGE, "Con trong " + diag.sdFreeSpace + " / Tong " + diag.sdTotalSpace, {34, 197, 94, 255}},
+        {UiStrings::DIAG_SDL2_GFX, "v" + diag.sdlVersion + std::string(UiStrings::DIAG_VAL_HW_ACCEL), {255, 255, 255, 255}},
+        {UiStrings::DIAG_SQLITE_DB, "v" + diag.sqliteVersion + std::string(UiStrings::DIAG_VAL_SCHEMA_PREFIX) + std::to_string(CURRENT_SCHEMA_VERSION) + ")", {34, 197, 94, 255}},
+        {UiStrings::DIAG_SD_STORAGE, std::string(UiStrings::DIAG_FREE_PREFIX) + diag.sdFreeSpace + UiStrings::DIAG_TOTAL_SEPARATOR + diag.sdTotalSpace, {34, 197, 94, 255}},
         {UiStrings::DIAG_GAMEPAD, diag.controllerName, {255, 255, 255, 255}},
-        {UiStrings::DIAG_WIFI, diag.networkStatus + " (IP: " + diag.ipAddress + ")", diag.ipAddress != "N/A" ? SDL_Color{34, 197, 94, 255} : SDL_Color{239, 68, 68, 255}},
+        {UiStrings::DIAG_WIFI, diag.networkStatus + (diag.ipAddress != "N/A" ? " (IP: " + diag.ipAddress + ")" : ""), diag.ipAddress != "N/A" ? SDL_Color{34, 197, 94, 255} : SDL_Color{239, 68, 68, 255}},
         {UiStrings::DIAG_SAFETY, UiStrings::DIAG_SAFETY_VAL, {34, 197, 94, 255}}
     };
 
@@ -1838,10 +1831,10 @@ void UIManager::renderOTAUpdateState() {
     int cardX = 24;
     int cardW = 976;
 
-    std::string currentVer = "Phien ban hien tai tren may: v" + UpdateManager::instance().getCurrentVersion();
+    std::string currentVer = std::string(UiStrings::OTA_DEV_CURRENT_VER) + UpdateManager::instance().getCurrentVersion();
     drawText(currentVer, cardX + 20, 126, {210, 220, 235, 255}, m_fontMedium);
 
-    std::string repoSource = "Nguon phat hanh: GitHub @" + std::string(GITHUB_REPO);
+    std::string repoSource = std::string(UiStrings::OTA_DEV_SOURCE_PREFIX) + std::string(GITHUB_REPO);
     drawText(repoSource, cardX + 20, 156, {130, 145, 165, 255}, m_fontSmall);
 
     int contentBoxY = 190;
@@ -1866,7 +1859,7 @@ void UIManager::renderOTAUpdateState() {
         }
         case UpdateState::UPDATE_AVAILABLE: {
             drawBadge(392, contentBoxY + 30, 240, 36, UiStrings::OTA_STATUS_NEW_UPDATE, {180, 83, 9, 255}, {255, 255, 255, 255});
-            std::string newVerTxt = "Phien ban moi: v" + info.remoteVersion + (info.releaseDate.empty() ? "" : " (" + info.releaseDate + ")");
+            std::string newVerTxt = std::string(UiStrings::OTA_DEV_NEW_VER_PREFIX) + info.remoteVersion + (info.releaseDate.empty() ? "" : " (" + info.releaseDate + ")");
             drawText(newVerTxt, 512, contentBoxY + 85, {0, 180, 216, 255}, m_fontLarge, true);
 
             if (!info.changelog.empty()) {
