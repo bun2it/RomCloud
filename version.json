@@ -1,0 +1,7 @@
+{
+  "version": "1.0.4",
+  "release_date": "2026-09-21",
+  "binary_url": "https://raw.githubusercontent.com/bun2it/RomCloud/main/bin/RomCloud",
+  "changelog": "v1.0.4: Thêm TÌM KIẾM GAME ngay trên màn hình TrimUI (bàn phím ảo D-Pad, hiện kết quả 2 panel), ẩn Google Cloud API Key khỏi giao diện Web Portal."
+}
+

@@ -1,0 +1,46 @@
+#!/bin/sh
+cd "$(dirname "$0")"
+
+# Set dynamic library search path (local lib, system SD lib, system usr lib)
+export LD_LIBRARY_PATH="$(dirname "$0")/lib:/mnt/SDCARD/System/lib:/usr/lib:$LD_LIBRARY_PATH"
+
+# Display orientation check for TrimUI Brick Pro / Smart Pro
+if [ -f /etc/trimui_device.txt ]; then
+    read -r Current_device </etc/trimui_device.txt
+    if [ "$Current_device" = "tsps" ]; then
+        echo 1 >/sys/class/drm/card0-DSI-1/rotate 2>/dev/null
+        echo 1 >/sys/class/drm/card0-DSI-1/force_rotate 2>/dev/null
+    fi
+fi
+
+# Clean up any leftover temporary files from prior sessions
+rm -f /tmp/romcloud_*.tmp 2>/dev/null
+
+# Ensure port 8080 is freed if previous instance did not exit cleanly
+fuser -k 8080/tcp 2>/dev/null || true
+
+# Check if an OTA update binary was downloaded
+if [ -f ./bin/RomCloud.new ]; then
+    mv -f ./bin/RomCloud.new ./bin/RomCloud 2>/dev/null
+fi
+
+# Ensure binary is executable
+chmod +x ./bin/RomCloud 2>/dev/null
+
+# Execution loop supporting in-app restart after OTA update (exit code 42)
+while true; do
+    ./bin/RomCloud "$PWD"
+    EXIT_CODE=$?
+    if [ $EXIT_CODE -eq 42 ]; then
+        if [ -f ./bin/RomCloud.new ]; then
+            mv -f ./bin/RomCloud.new ./bin/RomCloud 2>/dev/null
+            chmod +x ./bin/RomCloud 2>/dev/null
+        fi
+        sleep 1
+        continue
+    fi
+    break
+done
+
+# Sync file systems to SD card before returning to TrimUI MainUI
+sync

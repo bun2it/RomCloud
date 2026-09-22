@@ -1,0 +1,10 @@
+.DS_Store
+*.tmp
+*.log
+*.new
+*.old
+library.db*
+build/
+scratch/
+dist/
+*.zip
