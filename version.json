@@ -1,6 +1,6 @@
 {
-  "version": "1.2.0",
+  "version": "1.2.1",
   "release_date": "2026-09-22",
-  "binary_url": "https://github.com/bun2it/RomCloud/releases/download/v1.2.0/RomCloud",
-  "changelog": "v1.2.0: Thêm đồng bộ ngược lên Drive, multi-select batch operations, sao lưu/phục hồi cài đặt, cảnh báo thẻ nhớ sắp đầy, ghi log hiệu năng CPU/RAM, tự động phát hiện thiết bị và aspect ratio, UI scaling."
+  "binary_url": "https://github.com/bun2it/RomCloud/releases/download/v1.2.1/RomCloud",
+  "changelog": "v1.2.1: Sửa lỗi menu, thêm cuộn cho Diagnostics, tắt UI scaling"
 }
