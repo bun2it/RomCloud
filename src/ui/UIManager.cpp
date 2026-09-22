@@ -797,8 +797,9 @@ void UIManager::update() {
                     showToast(UiStrings::TOAST_OTA_CANCELLED, {245, 158, 11, 255});
                 }
             } else if (prog.state == UpdateState::COMPLETED) {
-                // Auto-restart immediately - no need to press A
-                Application::instance().requestRestart();
+                if (input.isButtonJustPressed(Button::A)) {
+                    Application::instance().requestRestart();
+                }
             } else {
                 if (input.isButtonJustPressed(Button::B)) {
                     setState(UIState::MENU);
@@ -1234,8 +1235,8 @@ void UIManager::renderMenuState() {
     int startX = 36;
     int cardW = 484;
     int startY = 100;
-    int itemHeight = 84;
-    int spacing = 14;
+    int itemHeight = 72;
+    int spacing = 10;
 
     std::string otaMenuText = UiStrings::MENU_OTA;
     if (UpdateManager::instance().isUpdateAvailable()) {
@@ -1250,6 +1251,7 @@ void UIManager::renderMenuState() {
     std::vector<MenuItemDef> menuDefs = {
         {UiStrings::MENU_PLAY, UiStrings::MENU_SUB_PLAY},
         {UiStrings::MENU_SYNC, UiStrings::MENU_SUB_SYNC},
+        {UiStrings::MENU_REVERSE_SYNC, UiStrings::MENU_SUB_REVERSE_SYNC},
         {otaMenuText, UpdateManager::instance().isUpdateAvailable() ? UiStrings::MENU_SUB_OTA_NEW : UiStrings::MENU_SUB_OTA},
         {UiStrings::MENU_SETTINGS, UiStrings::MENU_SUB_SETTINGS},
         {UiStrings::MENU_DIAG, UiStrings::MENU_SUB_DIAG},
@@ -1266,14 +1268,14 @@ void UIManager::renderMenuState() {
         if (selected) {
             drawRoundedBorder(startX, y, cardW, itemHeight, 12, {0, 180, 216, 255}, 2);
             // Left neon accent capsule
-            drawRoundedRect(startX + 8, y + 14, 6, itemHeight - 28, 3, {0, 180, 216, 255}, true);
+            drawRoundedRect(startX + 8, y + 12, 6, itemHeight - 24, 3, {0, 180, 216, 255}, true);
         }
 
         SDL_Color titleColor = selected ? SDL_Color{255, 255, 255, 255} : SDL_Color{205, 215, 230, 255};
-        drawText(menuDefs[i].title, startX + 32, y + 16, titleColor, m_fontLarge);
+        drawText(menuDefs[i].title, startX + 32, y + 12, titleColor, m_fontLarge);
 
         SDL_Color subColor = selected ? SDL_Color{140, 205, 245, 255} : SDL_Color{115, 130, 150, 255};
-        drawText(menuDefs[i].subtitle, startX + 32, y + 48, subColor, m_fontSmall);
+        drawText(menuDefs[i].subtitle, startX + 32, y + 42, subColor, m_fontSmall);
     }
 
     // ─── Right Column: Modern Rounded Dashboard Widget ───

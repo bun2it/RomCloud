@@ -321,9 +321,11 @@ void UpdateManager::runDownloadWorker(UpdateInfo info) {
     FILE* scriptFile = fopen(helperScript.c_str(), "w");
     if (scriptFile) {
         fprintf(scriptFile, "#!/bin/sh\n");
-        fprintf(scriptFile, "mv -f '%s' '%s' 2>/dev/null\n", newBinPath.c_str(), finalBinPath.c_str());
+        fprintf(scriptFile, "if [ -f '%s' ]; then\n", newBinPath.c_str());
+        fprintf(scriptFile, "    mv -f '%s' '%s' 2>/dev/null\n", newBinPath.c_str(), finalBinPath.c_str());
+        fprintf(scriptFile, "fi\n");
         fprintf(scriptFile, "chmod +x '%s' 2>/dev/null\n", finalBinPath.c_str());
-        fprintf(scriptFile, "rm -f '%s'\n", helperScript.c_str());
+        fprintf(scriptFile, "rm -f '%s' 2>/dev/null\n", helperScript.c_str());
         fprintf(scriptFile, "echo 'OTA install complete'\n");
         fclose(scriptFile);
         chmod(helperScript.c_str(), 0755);

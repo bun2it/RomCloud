@@ -26,6 +26,7 @@ inline const char* HEADER_OTA                 = "CẬP NHẬT OTA";
 // --- 2. MENU CHÍNH (MAIN MENU) ---
 inline const char* MENU_PLAY                  = "THƯ VIỆN GAME";
 inline const char* MENU_SYNC                  = "ĐỒNG BỘ DỮ LIỆU";
+inline const char* MENU_REVERSE_SYNC          = "ĐỒNG BỘ NGƯỢC LÊN DRIVE";
 inline const char* MENU_OTA                   = "CẬP NHẬT OTA";
 inline const char* MENU_OTA_NEW_BADGE         = "🆕 OTA v";
 inline const char* MENU_SETTINGS              = "CÀI ĐẶT";
@@ -303,6 +304,7 @@ inline const char* TOAST_OTA_CANCELLED        = "Đã hủy cập nhật.";
 // --- 16. GIAO DIỆN HIỆN ĐẠI (BORDERLESS & DASHBOARD) ---
 inline const char* MENU_SUB_PLAY             = "Khám phá & tải game về thẻ nhớ";
 inline const char* MENU_SUB_SYNC             = "Đồng bộ thư viện với Google Drive";
+inline const char* MENU_SUB_REVERSE_SYNC     = "Tải game từ thẻ nhớ lên Google Drive";
 inline const char* MENU_SUB_OTA_NEW          = "Bản nâng cấp mới đã sẵn sàng tải";
 inline const char* MENU_SUB_OTA              = "Kiểm tra phiên bản & cập nhật OTA";
 inline const char* MENU_SUB_SETTINGS         = "Cấu hình tài khoản & thư mục ROM";

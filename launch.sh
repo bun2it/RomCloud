@@ -19,17 +19,16 @@ rm -f /tmp/romcloud_*.tmp 2>/dev/null
 # Ensure port 8080 is freed if previous instance did not exit cleanly
 fuser -k 8080/tcp 2>/dev/null || true
 
-# Check if an OTA update install script exists (for FAT32 SD card compatibility)
+# Check if an OTA update is pending
 if [ -f ./bin/ota_install.sh ]; then
     echo "Running OTA install script..."
-    sh ./bin/ota_install.sh
-    rm -f ./bin/ota_install.sh
-    rm -f ./bin/RomCloud.new
-    echo "OTA install complete."
+    sh ./bin/ota_install.sh 2>/dev/null
+    rm -f ./bin/ota_install.sh 2>/dev/null
 fi
-
-# Clean up old/new binaries from previous failed attempts
-rm -f ./bin/RomCloud.new 2>/dev/null
+if [ -f ./bin/RomCloud.new ]; then
+    echo "Installing RomCloud.new..."
+    mv -f ./bin/RomCloud.new ./bin/RomCloud 2>/dev/null
+fi
 
 # Ensure binary is executable
 chmod +x ./bin/RomCloud 2>/dev/null
@@ -39,13 +38,17 @@ while true; do
     ./bin/RomCloud "$PWD"
     EXIT_CODE=$?
     if [ $EXIT_CODE -eq 42 ]; then
-        # OTA update was downloaded, need to install and restart
+        # OTA update was downloaded, install and restart
         if [ -f ./bin/ota_install.sh ]; then
-            echo "Installing OTA update..."
-            sh ./bin/ota_install.sh
-            rm -f ./bin/ota_install.sh
+            echo "Installing OTA update via script..."
+            sh ./bin/ota_install.sh 2>/dev/null
+            rm -f ./bin/ota_install.sh 2>/dev/null
         fi
-        rm -f ./bin/RomCloud.new 2>/dev/null
+        if [ -f ./bin/RomCloud.new ]; then
+            echo "Installing OTA update via RomCloud.new..."
+            mv -f ./bin/RomCloud.new ./bin/RomCloud 2>/dev/null
+        fi
+        chmod +x ./bin/RomCloud 2>/dev/null
         sleep 1
         continue
     fi
