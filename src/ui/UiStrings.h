@@ -10,11 +10,10 @@ namespace UiStrings {
 // Bạn có thể chỉnh sửa trực tiếp các chuỗi văn bản tại đây và biên dịch lại ứng dụng!
 // ============================================================================
 
-// ----------------------------------------------------------------------------
-// 1. TIÊU ĐỀ CHUNG & HEADER
-// ----------------------------------------------------------------------------
+// --- 1. TIÊU ĐỀ CHUNG & HEADER ---
 inline const char* APP_TITLE                  = "ROMCLOUD";
 inline const char* APP_SUBTITLE               = "TRIMUI BRICK PRO";
+inline const char* SYSTEM_SELECT_TITLE        = "CHỌN HỆ MÁY";
 inline const char* HEADER_SYSTEM_SELECT       = "CHỌN HỆ MÁY";
 inline const char* HEADER_SEARCH              = "TÌM KIẾM";
 inline const char* HEADER_SETTINGS            = "CÀI ĐẶT HỆ THỐNG ROMCLOUD";
@@ -24,9 +23,7 @@ inline const char* HEADER_DOWNLOAD            = "ĐANG TẢI ROM TỪ GOOGLE DRI
 inline const char* HEADER_DIAG                = "THÔNG TIN HỆ THỐNG & PHẦN CỨNG";
 inline const char* HEADER_OTA                 = "CẬP NHẬT PHẦN MỀM (OTA UPDATE)";
 
-// ----------------------------------------------------------------------------
-// 2. MENU CHÍNH (MAIN MENU)
-// ----------------------------------------------------------------------------
+// --- 2. MENU CHÍNH (MAIN MENU) ---
 inline const char* MENU_PLAY                  = "KHO GAME (THƯ VIỆN)";
 inline const char* MENU_SYNC                  = "ĐỒNG BỘ DỮ LIỆU";
 inline const char* MENU_OTA                   = "CẬP NHẬT PHẦN MỀM (OTA)";
@@ -35,9 +32,20 @@ inline const char* MENU_SETTINGS              = "CÀI ĐẶT (SETTINGS)";
 inline const char* MENU_DIAG                  = "THÔNG TIN HỆ THỐNG";
 inline const char* MENU_EXIT                  = "THOÁT (EXIT)";
 
-// ----------------------------------------------------------------------------
-// 3. THANH ĐIỀU KHIỂN & NÚT BẤM (FOOTER CONTROLS)
-// ----------------------------------------------------------------------------
+// --- 3. THANH ĐIỀU KHIỂN & NÚT BẤM (FOOTER CONTROLS) ---
+inline const char* FOOTER_ENTER_SYSTEM        = "VÀO HỆ MÁY";
+inline const char* FOOTER_MAIN_MENU           = "MENU CHÍNH";
+inline const char* FOOTER_SYNC_DRIVE          = "ĐỒNG BỘ DRIVE";
+inline const char* FOOTER_CHANGE_PAGE         = "CHUYỂN TRANG";
+inline const char* FOOTER_ADD_QUEUE           = "+ HÀNG TẢI";
+inline const char* FOOTER_BACK                = "QUAY LẠI";
+inline const char* FOOTER_CANCEL              = "QUAY LẠI / HỦY";
+inline const char* FOOTER_DELETE              = "BỎ HÀNG / XÓA";
+inline const char* FOOTER_SYNC                = "ĐỒNG BỘ";
+inline const char* FOOTER_FILTER              = "BỘ LỌC";
+inline const char* FOOTER_CONFIRM             = "XÁC NHẬN";
+inline const char* FOOTER_SELECT              = "CHỌN";
+
 inline const char* BTN_ENTER_SYSTEM           = "VÀO HỆ MÁY";
 inline const char* BTN_MAIN_MENU              = "MENU CHÍNH";
 inline const char* BTN_SYNC_DRIVE             = "ĐỒNG BỘ DRIVE";
@@ -63,9 +71,7 @@ inline const char* BTN_DOWNLOAD               = "TẢI VỀ";
 inline const char* BTN_CANCEL_ACTION          = "HỦY BỎ";
 inline const char* BTN_BACK_MAIN_MENU_HINT    = "Nhấn [B] để quay lại Menu chính";
 
-// ----------------------------------------------------------------------------
-// 4. MÀN HÌNH CHỌN HỆ MÁY (SYSTEM SELECT)
-// ----------------------------------------------------------------------------
+// --- 4. MÀN HÌNH CHỌN HỆ MÁY (SYSTEM SELECT) ---
 inline const char* SYS_SELECT_TITLE           = "CHỌN HỆ MÁY";
 inline const char* SYS_SELECT_SYSTEMS_LABEL   = " Hệ máy | ";
 inline const char* SYS_SELECT_GAMES_LOCAL     = " Game trên thẻ | ";
@@ -74,18 +80,14 @@ inline const char* SYS_SELECT_SDCARD_PREFIX   = "THẺ NHỚ: ";
 inline const char* SYS_SELECT_FOLDER_PREFIX   = "Thư mục: /Roms/";
 inline const char* SYS_SELECT_EXT_PREFIX      = "  |  Định dạng: ";
 
-// ----------------------------------------------------------------------------
-// 5. MÀN HÌNH TÌM KIẾM (SEARCH SCREEN)
-// ----------------------------------------------------------------------------
+// --- 5. MÀN HÌNH TÌM KIẾM (SEARCH SCREEN) ---
 inline const char* SEARCH_PROMPT_MIN_CHARS    = "Nhập ít nhất 2 ký tự để tìm kiếm...";
 inline const char* SEARCH_NO_RESULTS          = "Không tìm thấy kết quả.";
 inline const char* SEARCH_RESULTS_SUFFIX      = " kết quả";
 inline const char* SEARCH_NAV_UP_HINT         = "◀ Lên để quay lại bàn phím";
 inline const char* SEARCH_NAV_DOWN_HINT       = "▼ Xuống để xem kết quả";
 
-// ----------------------------------------------------------------------------
-// 6. DANH SÁCH GAME & CHI TIẾT GAME (GAME LIST & DETAIL)
-// ----------------------------------------------------------------------------
+// --- 6. DANH SÁCH GAME & CHI TIẾT GAME (GAME LIST & DETAIL) ---
 inline const char* GAME_LIST_EMPTY            = "Không có game nào phù hợp bộ lọc.";
 inline const char* GAME_FILTER_HINT           = "Nhấn [SELECT] để chuyển bộ lọc (TẤT CẢ / THẺ NHỚ / CLOUD)";
 inline const char* FILTER_TAG_ALL             = "[SELECT] LỌC: TẤT CẢ";
@@ -94,32 +96,43 @@ inline const char* FILTER_TAG_CLOUD           = "[SELECT] LỌC: CLOUD";
 inline const char* FILTER_LABEL_ALL           = "Bộ lọc: TẤT CẢ GAME";
 inline const char* FILTER_LABEL_LOCAL         = "Bộ lọc: CHỈ GAME TRÊN THẺ NHỚ";
 inline const char* FILTER_LABEL_CLOUD         = "Bộ lọc: CHỈ GAME TRÊN CLOUD";
+inline const char* BADGE_LOCAL                = "ĐÃ TẢI";
+inline const char* BADGE_CLOUD                = "TRÊN CLOUD";
 inline const char* BADGE_DOWNLOADED           = "✓ ĐÃ TẢI VỀ";
+inline const char* BADGE_DOWNLOADING          = "ĐANG TẢI...";
 inline const char* BADGE_DOWNLOADING_PCT      = "ĐANG TẢI... ";
+inline const char* BADGE_QUEUED               = "CHỜ TẢI...";
 inline const char* BADGE_DELETE_BTN           = "[X] XÓA ROM";
 inline const char* BADGE_CANCEL_DL_BTN        = "[X] HỦY TẢI GAME NÀY";
 inline const char* BADGE_REMOVE_QUEUE_BTN     = "[X] BỎ KHỎI HÀNG TẢI";
 inline const char* BADGE_ADD_QUEUE_BTN        = "[A] THÊM VÀO HÀNG TẢI";
+inline const char* DETAIL_SYSTEM              = "Hệ máy:";
+inline const char* DETAIL_LOCATION            = "Vị trí:";
+inline const char* DETAIL_SIZE                = "Dung lượng:";
+inline const char* DETAIL_FILENAME            = "Tên tệp:";
 inline const char* DETAIL_SYS_LABEL           = "Hệ máy:";
 inline const char* DETAIL_SIZE_LABEL          = "Dung lượng:";
 inline const char* DETAIL_LOCATION_LABEL      = "Vị trí lưu:";
 inline const char* DETAIL_SD_PATH_PREFIX      = "Thẻ nhớ (/Roms/";
+inline const char* DETAIL_LOCAL_STORAGE       = "Thẻ nhớ MicroSD";
+inline const char* DETAIL_CLOUD_STORAGE       = "Google Drive Cloud";
 inline const char* QUEUE_DOWNLOADING_ACTIVE   = "Đang tải 1 game, còn ";
 inline const char* QUEUE_REMAINING_SUFFIX     = " game chờ.";
 inline const char* QUEUE_DOWNLOADING_EMPTY    = "Đang tải... Hàng tải trống.";
 inline const char* QUEUE_WAITING_PREFIX       = "Hàng tải: ";
 
-// ----------------------------------------------------------------------------
-// 7. HỘP THOẠI XÓA ROM (DELETE CONFIRMATION DIALOG)
-// ----------------------------------------------------------------------------
+// --- 7. HỘP THOẠI XÓA ROM (DELETE CONFIRMATION DIALOG) ---
+inline const char* DELETE_TITLE               = "XÓA BẢN SAO TRÊN THẺ NHỚ?";
+inline const char* DELETE_DESC                = "Thao tác này chỉ xóa file ROM khỏi thẻ SD để giải phóng bộ nhớ.";
+inline const char* DELETE_CLOUD_SAFE          = "Bản lưu trên Google Drive vẫn an toàn và có thể tải lại bất cứ lúc nào.";
+inline const char* DELETE_CONFIRM_BTN         = "[A] Xác nhận xóa";
+inline const char* DELETE_CANCEL_BTN          = "[B] Hủy bỏ";
 inline const char* DIALOG_DELETE_TITLE        = "XÁC NHẬN XÓA ROM TRÊN THẺ NHỚ";
 inline const char* DIALOG_DELETE_FILE_LABEL   = "Tập tin: ";
 inline const char* DIALOG_DELETE_PROMPT       = "Bạn có chắc chắn muốn xóa ROM này khỏi thẻ nhớ không?";
 inline const char* DIALOG_DELETE_SAFE_HINT    = "Bản lưu trên Google Drive vẫn an toàn và có thể tải lại bất cứ lúc nào.";
 
-// ----------------------------------------------------------------------------
-// 8. BẢNG TUYÊN BỐ MIỄN TRỪ TRÁCH NHIỆM (DISCLAIMER)
-// ----------------------------------------------------------------------------
+// --- 8. BẢNG TUYÊN BỐ MIỄN TRỪ TRÁCH NHIỆM (DISCLAIMER) ---
 inline const char* DISCLAIMER_TITLE           = "TUYÊN BỐ MIỄN TRỪ TRÁCH NHIỆM BẢN QUYỀN";
 inline const char* DISCLAIMER_SUBTITLE        = "XÁC NHẬN BẢN QUYỀN TRƯỚC KHI KẾT NỐI GOOGLE DRIVE";
 inline const char* DISCLAIMER_SEC1_TITLE      = "1. PHẠM VI ỨNG DỤNG:";
@@ -135,9 +148,7 @@ inline const char* DISCLAIMER_SEC3_LINE3      = "quyền tác giả đối với
 inline const char* DISCLAIMER_AGREE           = "[A] Tôi đồng ý & Tiếp tục";
 inline const char* DISCLAIMER_DECLINE         = "[B] Từ chối & Quay lại";
 
-// ----------------------------------------------------------------------------
-// 9. CÀI ĐẶT HỆ THỐNG (SETTINGS)
-// ----------------------------------------------------------------------------
+// --- 9. CÀI ĐẶT HỆ THỐNG (SETTINGS) ---
 inline const char* SETTING_DRIVE_STATUS       = "Trạng thái Google Drive:";
 inline const char* SETTING_CONNECTED          = "ĐÃ KẾT NỐI";
 inline const char* SETTING_DISCONNECTED       = "CHƯA KẾT NỐI";
@@ -155,14 +166,12 @@ inline const char* SETTING_WEB_PORTAL         = "Trang quản lý nội bộ:";
 inline const char* SETTING_COVER_CACHE        = "Bộ đệm ảnh bìa (Cover):";
 inline const char* SETTING_COVER_CACHE_VAL    = "Phần cứng SDL2_image (Tối đa 64 ảnh)";
 
-// ----------------------------------------------------------------------------
-// 10. HƯỚNG DẪN KẾT NỐI QUA WEB (WEB CONNECTION SCREEN)
-// ----------------------------------------------------------------------------
+// --- 10. HƯỚNG DẪN KẾT NỐI QUA WEB (WEB CONNECTION SCREEN) ---
+inline const char* WEB_CONNECT_TITLE          = "LIÊN KẾT GOOGLE DRIVE QUA TRÌNH DUYỆT (LOCAL WEB)";
 inline const char* WEB_CONNECT_GUIDE_TITLE    = "HƯỚNG DẪN KẾT NỐI TÀI KHOẢN QUA TRÌNH DUYỆT";
 inline const char* WEB_CONNECT_STEP1          = "BƯỚC 1: Kết nối điện thoại hoặc máy tính vào cùng mạng Wi-Fi với TrimUI.";
 inline const char* WEB_CONNECT_STEP2          = "BƯỚC 2: Mở trình duyệt web (Chrome, Safari, Cốc Cốc...) và truy cập địa chỉ:";
-inline const char* WEB_CONNECT_STEP3_PREFIX   = "BƯỚC 3: Trên trang web, bấm "";
-inline const char* WEB_CONNECT_STEP3_SUFFIX   = " hoặc nhập liên kết thư mục Drive.";
+inline const char* WEB_CONNECT_STEP3          = "BƯỚC 3: Trên trang web, bấm \"ĐĂNG NHẬP GOOGLE\" hoặc nhập liên kết thư mục Drive.";
 inline const char* WEB_CONNECT_WAITING        = "* Đang chờ kết nối từ trình duyệt web của bạn...";
 inline const char* WEB_CONNECT_AUTO_HINT      = "Máy sẽ tự động hoàn tất ngay khi bạn đăng nhập thành công trên điện thoại/PC.";
 inline const char* WEB_CONNECT_BACK_BTN       = "[B] Quay lại Cài đặt";
@@ -171,9 +180,11 @@ inline const char* WEB_CONNECT_ACCOUNT_PREFIX = "Tài khoản Google đã liên 
 inline const char* WEB_CONNECT_READY          = "Toàn bộ kho game đã sẵn sàng để tải về máy và chơi.";
 inline const char* WEB_CONNECT_START_BTN      = "[A] / [B] Bắt đầu sử dụng";
 
-// ----------------------------------------------------------------------------
-// 11. ĐỒNG BỘ GOOGLE DRIVE (SYNC SCREEN)
-// ----------------------------------------------------------------------------
+// --- 11. ĐỒNG BỘ GOOGLE DRIVE (SYNC SCREEN) ---
+inline const char* SYNC_TITLE                 = "ĐỒNG BỘ DỮ LIỆU CLOUD";
+inline const char* SYNC_CONNECTING            = "Đang kết nối tới Google Drive API...";
+inline const char* SYNC_SCANNING              = "Đang quét danh mục trò chơi trên Google Drive...";
+inline const char* SYNC_CANCEL_HINT           = "[B] Hủy đồng bộ";
 inline const char* SYNC_API_CONNECTING        = "Đang kết nối tới Google Drive API v3...";
 inline const char* SYNC_AUTH_TOKEN            = "Xác thực mã thông báo OAuth Bearer...";
 inline const char* SYNC_SCANNING_GAMES        = "Đang quét danh mục trò chơi trên Google Drive...";
@@ -185,9 +196,7 @@ inline const char* SYNC_NEW_PREFIX            = "  (Mới: ";
 inline const char* SYNC_UPDATED_PREFIX        = ", Cập nhật: ";
 inline const char* SYNC_CANCEL_BTN            = "[B] Hủy đồng bộ";
 
-// ----------------------------------------------------------------------------
-// 12. TIẾN TRÌNH TẢI ROM (DOWNLOAD SCREEN)
-// ----------------------------------------------------------------------------
+// --- 12. TIẾN TRÌNH TẢI ROM (DOWNLOAD SCREEN) ---
 inline const char* DL_SYS_PREFIX              = "Hệ máy: ";
 inline const char* DL_FILE_PREFIX             = "  |  Tập tin: ";
 inline const char* DL_CONNECTING              = "Đang kết nối...";
@@ -197,9 +206,7 @@ inline const char* DL_REMAINING_QUEUE_PREFIX  = "Còn ";
 inline const char* DL_REMAINING_QUEUE_SUFFIX  = " game trong hàng chờ.";
 inline const char* DL_CANCEL_BTN              = "[B] Hủy tải về";
 
-// ----------------------------------------------------------------------------
-// 13. THÔNG TIN PHẦN CỨNG & HỆ THỐNG (DIAGNOSTICS SCREEN)
-// ----------------------------------------------------------------------------
+// --- 13. THÔNG TIN PHẦN CỨNG & HỆ THỐNG (DIAGNOSTICS SCREEN) ---
 inline const char* DIAG_HW_DEVICE             = "Thiết bị phần cứng";
 inline const char* DIAG_CPU_ARCH              = "Kiến trúc CPU";
 inline const char* DIAG_OS_KERNEL             = "Hệ điều hành & Nhân";
@@ -217,12 +224,16 @@ inline const char* DIAG_WIFI                  = "Kết nối mạng Wi-Fi";
 inline const char* DIAG_SAFETY                = "Độ an toàn hệ thống";
 inline const char* DIAG_SAFETY_VAL            = "100% Lưu trên thẻ nhớ (Không sửa đổi /rom, /usr, /overlay)";
 
-// ----------------------------------------------------------------------------
-// 14. CẬP NHẬT PHẦN MỀM OTA (OTA UPDATE SCREEN)
-// ----------------------------------------------------------------------------
+// --- 14. CẬP NHẬT PHẦN MỀM OTA (OTA UPDATE SCREEN) ---
+inline const char* OTA_TITLE                  = "CẬP NHẬT HỆ THỐNG (OTA)";
+inline const char* OTA_CHECKING               = "Đang kiểm tra cập nhật từ GitHub...";
+inline const char* OTA_UP_TO_DATE             = "Phiên bản hiện tại đã là mới nhất!";
+inline const char* OTA_NEW_VERSION            = "Đã có phiên bản mới!";
+inline const char* OTA_INSTALLING             = "Đang tải và cập nhật RomCloud...";
+inline const char* OTA_SUCCESS                = "Cập nhật thành công! Nhấn [A] để khởi động lại.";
+inline const char* OTA_FAILED                 = "Cập nhật thất bại. Vui lòng kiểm tra kết nối Wi-Fi.";
 inline const char* OTA_CURRENT_VER_PREFIX     = "Phiên bản hiện tại trên máy: v";
 inline const char* OTA_SOURCE_PREFIX          = "Nguồn phát hành: GitHub @";
-inline const char* OTA_CHECKING               = "Đang kiểm tra phiên bản mới từ GitHub...";
 inline const char* OTA_WAITING                = "Vui lòng đợi trong giây lát...";
 inline const char* OTA_STATUS_UP_TO_DATE      = "ĐÃ MỚI NHẤT";
 inline const char* OTA_MSG_UP_TO_DATE         = "Bạn đang sử dụng phiên bản mới nhất!";
@@ -244,9 +255,7 @@ inline const char* OTA_MSG_FAILED             = "Không thể cập nhật phầ
 inline const char* OTA_ERR_NETWORK            = "Lỗi kết nối mạng hoặc GitHub.";
 inline const char* OTA_BTNS_RETRY_BACK        = "[A] Thử lại   |   [B] Quay lại";
 
-// ----------------------------------------------------------------------------
-// 15. THÔNG BÁO TOAST & TRẠNG THÁI (TOAST NOTIFICATIONS)
-// ----------------------------------------------------------------------------
+// --- 15. THÔNG BÁO TOAST & TRẠNG THÁI (TOAST NOTIFICATIONS) ---
 inline const char* TOAST_NEW_OTA_PREFIX       = "Đã có bản cập nhật mới v";
 inline const char* TOAST_SYNCING_DRIVE        = "Đang đồng bộ dữ liệu với Google Drive...";
 inline const char* TOAST_SCANNING_SD          = "Đang quét thẻ nhớ...";
@@ -255,6 +264,7 @@ inline const char* TOAST_DOWNLOAD_COMPLETE    = "Đã tải xong: ";
 inline const char* TOAST_UNKNOWN_ERROR        = "Lỗi không xác định.";
 inline const char* TOAST_DOWNLOAD_FAILED      = "Tải thất bại: ";
 inline const char* TOAST_SYNC_CANCELLED       = "Đã hủy đồng bộ Cloud.";
+inline const char* TOAST_SYNC_NO_DRIVE        = "Chưa liên kết thư mục Google Drive.";
 inline const char* TOAST_SYNC_COMPLETED_PRE   = "Đồng bộ hoàn tất: Đã lưu ";
 inline const char* TOAST_SYNC_COMPLETED_SUF   = " game vào thư viện!";
 inline const char* TOAST_GOOGLE_LOGIN_SUCCESS = "Đăng nhập Google thành công! Bấm [Y] để đồng bộ.";
@@ -266,8 +276,9 @@ inline const char* TOAST_DOWNLOAD_STOPPED     = "Đã dừng tải: ";
 inline const char* TOAST_REMOVED_FROM_QUEUE   = "Đã bỏ khỏi hàng tải: ";
 inline const char* TOAST_GAME_ONLY_ON_DRIVE   = "Game này chưa tải về thẻ nhớ (chỉ có trên Drive).";
 inline const char* TOAST_JUMP_ALPHA_PRE       = "Chuyển đến vần chữ: [ ";
-inline const char* TOAST_DELETED_PRE          = "Đã xóa "";
-inline const char* TOAST_DELETED_SUF          = "" khỏi thẻ nhớ.";
+inline const char* TOAST_DELETED_PRE          = "Đã xóa \"";
+inline const char* TOAST_DELETED_SUF          = "\" khỏi thẻ nhớ.";
+inline const char* TOAST_UNLINK_SUCCESS       = "Đã hủy liên kết Google Drive.";
 inline const char* TOAST_LOGOUT_SUCCESS       = "Đã đăng xuất khỏi Google Drive.";
 inline const char* TOAST_OTA_CANCELLED        = "Đã hủy cập nhật phần mềm.";
 
