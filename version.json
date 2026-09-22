@@ -1,7 +1,7 @@
 {
-  "version": "1.0.7",
+  "version": "1.0.8",
   "release_date": "2026-09-22",
   "binary_url": "https://raw.githubusercontent.com/bun2it/RomCloud/main/bin/RomCloud",
-  "changelog": "v1.0.7: Đồng bộ triệt để mục Quản lý ROM với trạng thái Google Drive (Chỉ hiển thị ROM khi đang kết nối Drive, ngắt kết nối sẽ làm sạch toàn bộ danh mục và khóa tìm kiếm)."
+  "changelog": "v1.0.8: Tối ưu hiển thị ROM số lượng lớn với tùy chọn List View (Bảng chi tiết) & Grid View (Lưới thẻ bìa boxart); bổ sung phân trang linh hoạt (24/48/96/120 ROMs/trang) và nhảy trang nhanh."
 }
 

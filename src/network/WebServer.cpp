@@ -21,6 +21,7 @@
 #include <vector>
 #include <algorithm>
 #include <iomanip>
+#include <fstream>
 
 namespace RomCloud {
 
@@ -518,6 +519,159 @@ std::string WebServer::buildHtmlResponse() {
     .status-cloud { background: #1e293b; color: var(--text-dim); border: 1px solid var(--border); }
     .status-queue { background: var(--yellow-bg); color: var(--yellow); border: 1px solid var(--yellow); }
 
+    /* View Toggle and Page Size Controls */
+    .view-toggle-group {
+      display: inline-flex;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 2px;
+      gap: 2px;
+    }
+    .view-toggle-btn {
+      border: none;
+      background: none;
+      color: var(--text-dim);
+      padding: 5px 12px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      border-radius: 6px;
+      transition: all 0.15s ease;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .view-toggle-btn:hover { color: var(--text); }
+    .view-toggle-btn.active {
+      background: var(--card-alt);
+      color: var(--accent);
+      box-shadow: 0 1px 3px rgba(0,0,0,0.4);
+      font-weight: 700;
+    }
+
+    /* Grid View Styles */
+    .game-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: 16px;
+      padding: 18px;
+    }
+    .game-card {
+      background: var(--card-alt);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+    }
+    .game-card:hover {
+      transform: translateY(-4px);
+      border-color: var(--border-hover);
+      box-shadow: 0 8px 24px rgba(0,0,0,0.45);
+    }
+    .card-cover-wrap {
+      position: relative;
+      width: 100%;
+      height: 160px;
+      background: #0b0f19;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      border-bottom: 1px solid var(--border);
+    }
+    .card-cover-img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      transition: transform 0.25s ease;
+    }
+    .game-card:hover .card-cover-img {
+      transform: scale(1.06);
+    }
+    .card-cover-placeholder {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      width: 100%;
+      height: 100%;
+      background: linear-gradient(135deg, #111827 0%, #1e293b 100%);
+      color: var(--text-dim);
+    }
+    .card-cover-icon {
+      font-size: 38px;
+      opacity: 0.8;
+    }
+    .card-sys-tag {
+      position: absolute;
+      top: 8px;
+      left: 8px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.6);
+      z-index: 2;
+    }
+    .card-status-pill {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      font-size: 10px;
+      padding: 2px 7px;
+      border-radius: 6px;
+      font-weight: 700;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.6);
+      z-index: 2;
+    }
+    .card-body {
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      flex: 1;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .card-title {
+      font-size: 13px;
+      font-weight: 700;
+      color: #fff;
+      line-height: 1.4;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+      min-height: 36px;
+    }
+    .card-file {
+      font-size: 11px;
+      color: var(--text-dim);
+      font-family: monospace;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .card-meta {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+    .card-actions {
+      display: flex;
+      gap: 6px;
+      padding-top: 10px;
+      border-top: 1px solid rgba(255,255,255,0.06);
+    }
+    .card-actions .btn {
+      flex: 1;
+      justify-content: center;
+      padding: 6px 4px;
+      font-size: 11px;
+    }
+
     /* Action Buttons */
     .btn {
       padding: 6px 12px;
@@ -699,27 +853,69 @@ std::string WebServer::buildHtmlResponse() {
 
       <div class="game-list-container">
         <div class="game-list-header">
-          <span id="game-results-count">Đang tải danh sách game...</span>
-          <span id="active-filters-desc" style="font-weight:400;">Tất cả hệ máy</span>
+          <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+            <span id="game-results-count">Đang tải danh sách game...</span>
+            <span id="active-filters-desc" style="font-weight:400; font-size: 12px; color: var(--text-dim);">Tất cả hệ máy</span>
+          </div>
+
+          <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+            <div style="display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-dim);">
+              <span>Mỗi trang:</span>
+              <select id="select-page-size" onchange="changePageSize(this.value)" style="background: var(--bg); border: 1px solid var(--border); color: #fff; border-radius: 6px; padding: 4px 6px; font-size: 12px;">
+                <option value="24">24</option>
+                <option value="48" selected>48</option>
+                <option value="96">96</option>
+                <option value="120">120</option>
+              </select>
+            </div>
+
+            <div class="view-toggle-group">
+              <button class="view-toggle-btn active" id="btn-view-list" onclick="setViewMode('list')" title="Chế độ Danh sách (List View)">☰ Bảng</button>
+              <button class="view-toggle-btn" id="btn-view-grid" onclick="setViewMode('grid')" title="Chế độ Lưới bìa game (Grid View)">☷ Lưới thẻ</button>
+            </div>
+          </div>
         </div>
-        <table class="game-table">
-          <thead>
-            <tr>
-              <th style="width: 100px;">Hệ máy</th>
-              <th>Tên game / Tên file</th>
-              <th style="width: 110px;">Dung lượng</th>
-              <th style="width: 130px;">Trạng thái</th>
-              <th style="width: 160px; text-align: right;">Thao tác</th>
-            </tr>
-          </thead>
-          <tbody id="game-table-body">
-            <tr><td colspan="5" style="text-align: center; padding: 30px; color: var(--text-dim);">Đang tải dữ liệu từ máy TrimUI...</td></tr>
-          </tbody>
-        </table>
-        <div class="pagination">
-          <button class="btn btn-secondary" id="btn-prev-page" onclick="changePage(-1)">&larr; Trang trước</button>
-          <span id="page-indicator" style="font-size: 13px; color: var(--text-muted);">Trang 1</span>
-          <button class="btn btn-secondary" id="btn-next-page" onclick="changePage(1)">Trang sau &rarr;</button>
+
+        <!-- List View Table -->
+        <div id="game-table-wrap" style="overflow-x: auto;">
+          <table class="game-table">
+            <thead>
+              <tr>
+                <th style="width: 100px;">Hệ máy</th>
+                <th>Tên game / Tên file</th>
+                <th style="width: 110px;">Dung lượng</th>
+                <th style="width: 130px;">Trạng thái</th>
+                <th style="width: 160px; text-align: right;">Thao tác</th>
+              </tr>
+            </thead>
+            <tbody id="game-table-body">
+              <tr><td colspan="5" style="text-align: center; padding: 30px; color: var(--text-dim);">Đang tải dữ liệu từ máy TrimUI...</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Grid View Cards -->
+        <div id="game-grid-wrap" class="game-grid" style="display: none;">
+          <!-- Rendered by JS -->
+        </div>
+
+        <!-- Pagination Controls -->
+        <div class="pagination" style="display: flex; justify-content: space-between; align-items: center; padding: 12px 18px; border-top: 1px solid var(--border); flex-wrap: wrap; gap: 10px;">
+          <div style="display: flex; gap: 6px;">
+            <button class="btn btn-secondary" id="btn-first-page" onclick="goToPage(1)" title="Về trang đầu">&laquo;</button>
+            <button class="btn btn-secondary" id="btn-prev-page" onclick="changePage(-1)">&larr; Trang trước</button>
+          </div>
+
+          <div style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-muted);">
+            <span>Trang</span>
+            <input type="number" id="input-jump-page" min="1" max="1" value="1" onchange="goToPage(parseInt(this.value))" onkeydown="if(event.key==='Enter') goToPage(parseInt(this.value))" style="width: 55px; text-align: center; background: var(--bg); border: 1px solid var(--border); color: #fff; border-radius: 6px; padding: 4px; font-size: 13px;">
+            <span id="page-total-indicator">/ 1</span>
+          </div>
+
+          <div style="display: flex; gap: 6px;">
+            <button class="btn btn-secondary" id="btn-next-page" onclick="changePage(1)">Trang sau &rarr;</button>
+            <button class="btn btn-secondary" id="btn-last-page" onclick="goToPage(maxPagesCache)" title="Tới trang cuối">&raquo;</button>
+          </div>
         </div>
       </div>
     </div>
@@ -834,17 +1030,23 @@ std::string WebServer::buildHtmlResponse() {
   <script>
     let currentTab = 'tab-roms';
     let isDriveLinked = false;
+    let currentViewMode = localStorage.getItem('romcloud_view_mode') || 'grid';
     let currentSystemId = 0;
     let currentStateFilter = -1;
     let currentSearch = '';
     let currentPage = 1;
-    const pageSize = 50;
+    let pageSize = parseInt(localStorage.getItem('romcloud_page_size')) || 48;
+    let maxPagesCache = 1;
     let searchDebounceTimer = null;
     let dlPollTimer = null;
     let systemsCache = [];
+    let lastLoadedGames = null;
 
     // Init
     window.addEventListener('DOMContentLoaded', () => {
+      const pSel = document.getElementById('select-page-size');
+      if (pSel) pSel.value = pageSize;
+      setViewMode(currentViewMode, false);
       loadSystems();
       loadStorageInfo();
       loadGames();
@@ -852,6 +1054,36 @@ std::string WebServer::buildHtmlResponse() {
       setTimeout(() => checkOtaUpdate(true), 1200);
       setInterval(() => checkOtaUpdate(true), 180000);
     });
+
+    function setViewMode(mode, reload = true) {
+      currentViewMode = mode;
+      localStorage.setItem('romcloud_view_mode', mode);
+      const btnList = document.getElementById('btn-view-list');
+      const btnGrid = document.getElementById('btn-view-grid');
+      const tableWrap = document.getElementById('game-table-wrap');
+      const gridWrap = document.getElementById('game-grid-wrap');
+      if (btnList) btnList.classList.toggle('active', mode === 'list');
+      if (btnGrid) btnGrid.classList.toggle('active', mode === 'grid');
+      if (tableWrap) tableWrap.style.display = (mode === 'list') ? 'block' : 'none';
+      if (gridWrap) gridWrap.style.display = (mode === 'grid') ? 'grid' : 'none';
+      if (reload && lastLoadedGames) {
+        renderGames(lastLoadedGames.games, lastLoadedGames.total);
+      }
+    }
+
+    function changePageSize(sz) {
+      pageSize = parseInt(sz) || 48;
+      localStorage.setItem('romcloud_page_size', pageSize);
+      currentPage = 1;
+      loadGames();
+    }
+
+    function goToPage(p) {
+      if (isNaN(p) || p < 1) p = 1;
+      if (p > maxPagesCache) p = maxPagesCache;
+      currentPage = p;
+      loadGames();
+    }
 
     function showToast(msg) {
       const t = document.getElementById('toast');
@@ -935,7 +1167,9 @@ std::string WebServer::buildHtmlResponse() {
 
     async function loadGames() {
       const tbody = document.getElementById('game-table-body');
-      tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; padding: 25px; color: var(--text-dim);">Đang tải danh sách game...</td></tr>`;
+      const gridWrap = document.getElementById('game-grid-wrap');
+      if (tbody) tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; padding: 25px; color: var(--text-dim);">Đang tải danh sách game...</td></tr>`;
+      if (gridWrap) gridWrap.innerHTML = `<div style="grid-column: 1 / -1; text-align: center; padding: 40px; color: var(--text-dim);">Đang tải danh sách game...</div>`;
 
       const offset = (currentPage - 1) * pageSize;
       const url = `/api/games?system_id=${currentSystemId}&state=${currentStateFilter}&q=${encodeURIComponent(currentSearch)}&limit=${pageSize}&offset=${offset}`;
@@ -943,84 +1177,150 @@ std::string WebServer::buildHtmlResponse() {
       try {
         const res = await fetch(url);
         const data = await res.json();
-        renderGameTable(data.games, data.total);
+        lastLoadedGames = { games: data.games, total: data.total };
+        renderGames(data.games, data.total);
       } catch (e) {
-        tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; padding: 25px; color: var(--red);">Lỗi nạp dữ liệu. Vui lòng thử lại.</td></tr>`;
+        if (tbody) tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; padding: 25px; color: var(--red);">Lỗi nạp dữ liệu. Vui lòng thử lại.</td></tr>`;
+        if (gridWrap) gridWrap.innerHTML = `<div style="grid-column: 1 / -1; text-align: center; padding: 40px; color: var(--red);">Lỗi nạp dữ liệu. Vui lòng thử lại.</div>`;
       }
     }
 
-    function renderGameTable(games, total) {
+    function renderGames(games, total) {
       const tbody = document.getElementById('game-table-body');
+      const gridWrap = document.getElementById('game-grid-wrap');
       const countSpan = document.getElementById('game-results-count');
-      const pageIndicator = document.getElementById('page-indicator');
+      const jumpInput = document.getElementById('input-jump-page');
+      const totalInd = document.getElementById('page-total-indicator');
+      const btnFirst = document.getElementById('btn-first-page');
       const btnPrev = document.getElementById('btn-prev-page');
       const btnNext = document.getElementById('btn-next-page');
+      const btnLast = document.getElementById('btn-last-page');
 
       if (!isDriveLinked) {
-        tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; padding: 50px 20px; color: var(--text-dim);">
+        const unlinkedMsg = `
           <div style="font-size: 38px; margin-bottom: 12px;">☁️❌</div>
           <div style="font-size: 16px; font-weight: 700; color: #fef3c7; margin-bottom: 6px;">Google Drive chưa được kết nối (Đã ngắt kết nối)</div>
           <div style="font-size: 13px; color: var(--text-muted); margin-bottom: 18px;">Chỉ khi còn kết nối Google Drive thì hệ thống mới hiển thị danh mục ROM game.</div>
           <button class="btn btn-primary" onclick="switchTab('tab-storage')">🔗 Kết nối Google Drive ngay</button>
-        </td></tr>`;
-        countSpan.innerHTML = `Chưa kết nối Google Drive (<b>0</b> game)`;
-        pageIndicator.textContent = `Trang 0 / 0`;
-        btnPrev.disabled = true;
-        btnNext.disabled = true;
+        `;
+        if (tbody) tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; padding: 50px 20px; color: var(--text-dim);">${unlinkedMsg}</td></tr>`;
+        if (gridWrap) gridWrap.innerHTML = `<div style="grid-column: 1 / -1; text-align: center; padding: 60px 20px; color: var(--text-dim);">${unlinkedMsg}</div>`;
+        if (countSpan) countSpan.innerHTML = `Chưa kết nối Google Drive (<b>0</b> game)`;
+        if (jumpInput) { jumpInput.value = 1; jumpInput.max = 1; }
+        if (totalInd) totalInd.textContent = `/ 1`;
+        if (btnFirst) btnFirst.disabled = true;
+        if (btnPrev) btnPrev.disabled = true;
+        if (btnNext) btnNext.disabled = true;
+        if (btnLast) btnLast.disabled = true;
         return;
       }
 
       const maxPages = Math.ceil(total / pageSize) || 1;
-      countSpan.innerHTML = `Tìm thấy <b>${total.toLocaleString()}</b> game`;
-      pageIndicator.textContent = `Trang ${currentPage} / ${maxPages}`;
-      btnPrev.disabled = (currentPage <= 1);
-      btnNext.disabled = (currentPage >= maxPages);
+      maxPagesCache = maxPages;
+      if (countSpan) countSpan.innerHTML = `Tìm thấy <b>${total.toLocaleString()}</b> game`;
+      if (jumpInput) { jumpInput.value = currentPage; jumpInput.max = maxPages; }
+      if (totalInd) totalInd.textContent = `/ ${maxPages}`;
+      if (btnFirst) btnFirst.disabled = (currentPage <= 1);
+      if (btnPrev) btnPrev.disabled = (currentPage <= 1);
+      if (btnNext) btnNext.disabled = (currentPage >= maxPages);
+      if (btnLast) btnLast.disabled = (currentPage >= maxPages);
 
       if (!games || games.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; padding: 30px; color: var(--text-dim);">Không tìm thấy game nào phù hợp với bộ lọc.</td></tr>`;
+        if (tbody) tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; padding: 30px; color: var(--text-dim);">Không tìm thấy game nào phù hợp với bộ lọc.</td></tr>`;
+        if (gridWrap) gridWrap.innerHTML = `<div style="grid-column: 1 / -1; text-align: center; padding: 40px 20px; color: var(--text-dim);">Không tìm thấy game nào phù hợp với bộ lọc.</div>`;
         return;
       }
 
-      let html = '';
+      let tableHtml = '';
+      let gridHtml = '';
       for (const g of games) {
         const sysClass = 'sys-' + (g.sys_code || 'default');
         let statusBadge = '';
-        let actionButtons = '';
+        let statusPillClass = '';
+        let statusPillText = '';
+        let tableActions = '';
+        let gridActions = '';
 
         if (g.local_state === 1) {
           statusBadge = `<span class="status-badge status-local">🟢 Đã tải</span>`;
-          actionButtons = `
+          statusPillClass = 'status-local';
+          statusPillText = '🟢 Đã tải';
+          tableActions = `
+            <button class="btn btn-secondary" onclick="scrapeBoxart(${g.id})" title="Tải ảnh bìa">🖼️ Bìa</button>
+            <button class="btn btn-danger" onclick="deleteRom(${g.id}, '${escapeHtml(g.title)}')">🗑️ Xóa</button>
+          `;
+          gridActions = `
             <button class="btn btn-secondary" onclick="scrapeBoxart(${g.id})" title="Tải ảnh bìa">🖼️ Bìa</button>
             <button class="btn btn-danger" onclick="deleteRom(${g.id}, '${escapeHtml(g.title)}')">🗑️ Xóa</button>
           `;
         } else if (g.in_queue) {
           statusBadge = `<span class="status-badge status-queue">⏳ Hàng đợi</span>`;
-          actionButtons = `<button class="btn btn-secondary" onclick="removeFromQueue(${g.id})">✕ Bỏ</button>`;
+          statusPillClass = 'status-queue';
+          statusPillText = '⏳ Hàng đợi';
+          tableActions = `<button class="btn btn-secondary" onclick="removeFromQueue(${g.id})">✕ Bỏ</button>`;
+          gridActions = `<button class="btn btn-secondary" onclick="removeFromQueue(${g.id})">✕ Bỏ</button>`;
         } else {
           statusBadge = `<span class="status-badge status-cloud">☁️ Cloud</span>`;
-          actionButtons = `<button class="btn btn-primary" onclick="downloadGame(${g.id})">📥 Tải về</button>`;
+          statusPillClass = 'status-cloud';
+          statusPillText = '☁️ Cloud';
+          tableActions = `<button class="btn btn-primary" onclick="downloadGame(${g.id})">📥 Tải về</button>`;
+          gridActions = `<button class="btn btn-primary" onclick="downloadGame(${g.id})">📥 Tải về</button>`;
         }
 
-        html += `
+        let coverHtml = '';
+        if (g.has_cover) {
+          coverHtml = `<img class="card-cover-img" src="/api/cover?game_id=${g.id}" alt="${escapeHtml(g.title)}" loading="lazy" onerror="this.onerror=null;this.parentElement.innerHTML='<div class=\\'card-cover-placeholder\\'><div class=\\'card-cover-icon\\'>🎮</div><span style=\\'font-size:11px;\\'>${escapeHtml(g.sys_code || 'GAME')}</span></div>';">`;
+        } else {
+          coverHtml = `
+            <div class="card-cover-placeholder">
+              <div class="card-cover-icon">🎮</div>
+              <span style="font-size: 11px; font-weight: 600; letter-spacing: 0.5px;">${escapeHtml(g.sys_code || 'GAME')}</span>
+            </div>
+          `;
+        }
+
+        tableHtml += `
           <tr>
-            <td><span class="sys-tag ${sysClass}">${g.sys_code || 'GAME'}</span></td>
+            <td><span class="sys-tag ${sysClass}">${escapeHtml(g.sys_code || 'GAME')}</span></td>
             <td>
               <span class="game-title">${escapeHtml(g.title)}</span>
               <span class="game-file">${escapeHtml(g.filename)}</span>
             </td>
             <td>${g.size_str || '0 B'}</td>
             <td>${statusBadge}</td>
-            <td style="text-align: right;">${actionButtons}</td>
+            <td style="text-align: right;">${tableActions}</td>
           </tr>
         `;
+
+        gridHtml += `
+          <div class="game-card">
+            <div class="card-cover-wrap">
+              <span class="sys-tag ${sysClass} card-sys-tag">${escapeHtml(g.sys_code || 'GAME')}</span>
+              <span class="card-status-pill ${statusPillClass}">${statusPillText}</span>
+              ${coverHtml}
+            </div>
+            <div class="card-body">
+              <div>
+                <div class="card-title" title="${escapeHtml(g.title)}">${escapeHtml(g.title)}</div>
+                <div class="card-file" title="${escapeHtml(g.filename)}">${escapeHtml(g.filename)}</div>
+                <div class="card-meta">
+                  <span>💾 ${g.size_str || '0 B'}</span>
+                </div>
+              </div>
+              <div class="card-actions">
+                ${gridActions}
+              </div>
+            </div>
+          </div>
+        `;
       }
-      tbody.innerHTML = html;
+
+      if (tbody) tbody.innerHTML = tableHtml;
+      if (gridWrap) gridWrap.innerHTML = gridHtml;
     }
 
     function changePage(delta) {
-      currentPage += delta;
-      if (currentPage < 1) currentPage = 1;
-      loadGames();
+      goToPage(currentPage + delta);
     }
 
     function escapeHtml(s) {
@@ -1637,6 +1937,38 @@ void WebServer::handleClient(int clientFd) {
                           "Content-Length: " + std::to_string(json.length()) + "\r\n"
                           "Connection: close\r\n\r\n" + json;
         send(clientFd, res.c_str(), res.length(), 0);
+    } else if (method == "GET" && path == "/api/cover") {
+        std::string gameIdStr = extractQueryParam(queryString, "game_id");
+        int64_t gameId = 0;
+        try { if (!gameIdStr.empty()) gameId = std::stoll(gameIdStr); } catch(...) {}
+
+        GameRecord game;
+        bool found = (gameId > 0 && DatabaseManager::instance().getGameById(gameId, game) && !game.coverPath.empty());
+        if (found) {
+            std::ifstream file(game.coverPath, std::ios::binary);
+            if (file.is_open()) {
+                std::string content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+                file.close();
+                std::string mime = "image/png";
+                if (game.coverPath.rfind(".jpg") != std::string::npos || game.coverPath.rfind(".jpeg") != std::string::npos) {
+                    mime = "image/jpeg";
+                } else if (game.coverPath.rfind(".webp") != std::string::npos) {
+                    mime = "image/webp";
+                }
+                std::string header = "HTTP/1.1 200 OK\r\n"
+                                     "Content-Type: " + mime + "\r\n"
+                                     "Cache-Control: public, max-age=86400\r\n"
+                                     "Access-Control-Allow-Origin: *\r\n"
+                                     "Content-Length: " + std::to_string(content.size()) + "\r\n"
+                                     "Connection: close\r\n\r\n";
+                send(clientFd, header.c_str(), header.length(), 0);
+                send(clientFd, content.data(), content.size(), 0);
+                return;
+            }
+        }
+        std::string notFound = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+        send(clientFd, notFound.c_str(), notFound.length(), 0);
+        return;
     } else if (method == "GET" && path == "/api/download_status") {
         auto prog = DownloadManager::instance().getProgress();
         auto queue = DownloadManager::instance().getQueue();
