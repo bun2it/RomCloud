@@ -936,7 +936,7 @@ void UIManager::renderMenuState() {
 
     std::string otaMenuText = UiStrings::MENU_OTA;
     if (UpdateManager::instance().isUpdateAvailable()) {
-        otaMenuText = "🚀 Cập nhật OTA [BẢN MỚI: v" + UpdateManager::instance().getLatestInfo().remoteVersion + "]";
+        otaMenuText = std::string(UiStrings::MENU_OTA_NEW_BADGE) + " (v" + UpdateManager::instance().getLatestInfo().remoteVersion + ")";
     }
 
     std::vector<std::string> currentMenu = {
