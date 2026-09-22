@@ -282,5 +282,53 @@ inline const char* TOAST_UNLINK_SUCCESS       = "Đã hủy liên kết Google D
 inline const char* TOAST_LOGOUT_SUCCESS       = "Đã đăng xuất khỏi Drive.";
 inline const char* TOAST_OTA_CANCELLED        = "Đã hủy cập nhật.";
 
+
+// --- 16. GIAO DIỆN HIỆN ĐẠI (BORDERLESS & DASHBOARD) ---
+inline const char* MENU_SUB_PLAY             = "Khám phá & tải game về thẻ nhớ";
+inline const char* MENU_SUB_SYNC             = "Đồng bộ thư viện với Google Drive";
+inline const char* MENU_SUB_OTA_NEW          = "Bản nâng cấp mới đã sẵn sàng tải";
+inline const char* MENU_SUB_OTA              = "Kiểm tra phiên bản & cập nhật OTA";
+inline const char* MENU_SUB_SETTINGS         = "Cấu hình tài khoản & thư mục ROM";
+inline const char* MENU_SUB_DIAG             = "Thông số phần cứng, RAM & mạng";
+inline const char* MENU_SUB_EXIT             = "Quay về giao diện TrimUI";
+
+inline const char* DASH_TITLE                = "TRẠNG THÁI HỆ THỐNG";
+inline const char* DASH_DEVICE_LABEL         = "Thiết bị";
+inline const char* DASH_DEVICE_VAL           = "TrimUI Smart Pro (ARM64)";
+inline const char* DASH_STORAGE_LABEL        = "Bộ nhớ & ROMs";
+inline const char* DASH_STORAGE_FREE         = " trống / ";
+inline const char* DASH_SD_PREFIX            = "Thẻ nhớ: ";
+inline const char* DASH_DRIVE_LABEL          = "Google Drive Sync";
+inline const char* DASH_DRIVE_CONNECTED      = "Đã kết nối";
+inline const char* DASH_DRIVE_DISCONNECTED   = "Chưa kết nối tài khoản";
+inline const char* DASH_PORTAL_LABEL         = "Web Manager Portal";
+inline const char* DASH_VERSION_LABEL        = "Phiên bản";
+inline const char* DASH_NEW_VERSION_BADGE    = "CÓ BẢN MỚI";
+
+inline const char* SYS_BADGE_LOCAL_PREFIX    = "THẺ NHỚ: ";
+inline const char* SYS_BADGE_CLOUD_PREFIX    = "CLOUD: ";
+inline const char* SYS_DIR_PREFIX            = "Thư mục: /Roms/";
+inline const char* SYS_EXT_PREFIX            = "  |  Định dạng: ";
+
+inline const char* GAME_LOCATION_SD_PREFIX   = "Thẻ nhớ (/Roms/";
+inline const char* GAME_LOCATION_DRIVE       = "Google Drive Cloud";
+inline const char* GAME_DOWNLOADING_PREFIX   = "ĐANG TẢI... ";
+inline const char* GAME_QUEUE_DOWNLOADING    = "Đang tải 1 game, còn ";
+inline const char* GAME_QUEUE_REMAINING      = " game chờ.";
+inline const char* GAME_QUEUE_WAITING        = "Hàng tải: ";
+
+inline const char* SEARCH_PROMPT_INPUT       = "Nhập từ khóa tìm kiếm...";
+inline const char* SEARCH_BADGE_LOCAL        = "THẺ NHỚ";
+inline const char* SEARCH_BADGE_CLOUD        = "CLOUD";
+
+inline const char* DIALOG_DELETE_FILE_PREFIX = "Tập tin: ";
+
+inline const char* OTA_DEV_CURRENT_VER       = "Phiên bản hiện tại trên máy: v";
+inline const char* OTA_DEV_SOURCE_PREFIX     = "Nguồn phát hành: GitHub @";
+inline const char* OTA_DEV_NEW_VER_PREFIX    = "Phiên bản mới: v";
+
+inline const char* DIAG_VAL_64BIT            = " (64-bit Little Endian)";
+inline const char* DIAG_VAL_HW_ACCEL         = " (Tăng tốc phần cứng)";
+inline const char* DIAG_VAL_SCHEMA_PREFIX    = " (Phiên bản cấu trúc v";
 } // namespace UiStrings
 } // namespace RomCloud
