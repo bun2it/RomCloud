@@ -1,6 +1,6 @@
 {
-  "version": "1.1.1",
+  "version": "1.2.0",
   "release_date": "2026-09-22",
   "binary_url": "https://raw.githubusercontent.com/bun2it/RomCloud/main/bin/RomCloud",
-  "changelog": "v1.1.1: Khắc phục lỗi khởi động ứng dụng trên máy TrimUI; sửa và bổ sung đầy đủ dấu tiếng Việt chuẩn cho toàn bộ giao diện, thẻ menu và bảng điều khiển."
+  "changelog": "v1.2.0: Thêm đồng bộ ngược lên Drive, multi-select batch operations, sao lưu/phục hồi cài đặt, cảnh báo thẻ nhớ sắp đầy, ghi log hiệu năng CPU/RAM, phát hiện thiết bị và aspect ratio tự động."
 }

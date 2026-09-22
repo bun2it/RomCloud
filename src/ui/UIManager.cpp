@@ -804,6 +804,11 @@ void UIManager::update() {
 
 void UIManager::drawText(const std::string& text, int x, int y, SDL_Color color, TTF_Font* font, bool centered) {
     if (!font || text.empty()) return;
+
+    // Scale coordinates based on device
+    int sx = PlatformInfo::instance().scaleX(x);
+    int sy = PlatformInfo::instance().scaleY(y);
+
     SDL_Surface* surface = TTF_RenderUTF8_Blended(font, text.c_str(), color);
     if (!surface) return;
     SDL_Texture* texture = SDL_CreateTextureFromSurface(m_renderer, surface);
@@ -812,8 +817,8 @@ void UIManager::drawText(const std::string& text, int x, int y, SDL_Color color,
         return;
     }
 
-    int drawX = centered ? (x - surface->w / 2) : x;
-    int drawY = y;
+    int drawX = centered ? (sx - surface->w / 2) : sx;
+    int drawY = sy;
     SDL_Rect dstRect = {drawX, drawY, surface->w, surface->h};
     SDL_RenderCopy(m_renderer, texture, nullptr, &dstRect);
 
@@ -822,8 +827,14 @@ void UIManager::drawText(const std::string& text, int x, int y, SDL_Color color,
 }
 
 void UIManager::drawRect(int x, int y, int w, int h, SDL_Color color, bool filled) {
+    // Scale coordinates and dimensions
+    int sx = PlatformInfo::instance().scaleX(x);
+    int sy = PlatformInfo::instance().scaleY(y);
+    int sw = PlatformInfo::instance().scaleW(w);
+    int sh = PlatformInfo::instance().scaleH(h);
+
     SDL_SetRenderDrawColor(m_renderer, color.r, color.g, color.b, color.a);
-    SDL_Rect rect = {x, y, w, h};
+    SDL_Rect rect = {sx, sy, sw, sh};
     if (filled) {
         SDL_RenderFillRect(m_renderer, &rect);
     } else {
@@ -832,87 +843,109 @@ void UIManager::drawRect(int x, int y, int w, int h, SDL_Color color, bool fille
 }
 
 void UIManager::drawBorder(int x, int y, int w, int h, SDL_Color color, int thickness) {
+    // Scale coordinates, dimensions, and thickness
+    int sx = PlatformInfo::instance().scaleX(x);
+    int sy = PlatformInfo::instance().scaleY(y);
+    int sw = PlatformInfo::instance().scaleW(w);
+    int sh = PlatformInfo::instance().scaleH(h);
+    int st = PlatformInfo::instance().scaleW(thickness);
+
     SDL_SetRenderDrawColor(m_renderer, color.r, color.g, color.b, color.a);
-    for (int i = 0; i < thickness; ++i) {
-        SDL_Rect rect = {x + i, y + i, w - 2 * i, h - 2 * i};
+    for (int i = 0; i < st; ++i) {
+        SDL_Rect rect = {sx + i, sy + i, sw - 2 * i, sh - 2 * i};
         SDL_RenderDrawRect(m_renderer, &rect);
     }
 }
 
 void UIManager::drawRoundedRect(int x, int y, int w, int h, int radius, SDL_Color color, bool filled) {
-    if (w <= 0 || h <= 0) return;
-    int maxR = std::min(w, h) / 2;
-    if (radius > maxR) radius = maxR;
-    if (radius <= 0) {
-        drawRect(x, y, w, h, color, filled);
+    // Scale coordinates, dimensions, and radius
+    int sx = PlatformInfo::instance().scaleX(x);
+    int sy = PlatformInfo::instance().scaleY(y);
+    int sw = PlatformInfo::instance().scaleW(w);
+    int sh = PlatformInfo::instance().scaleH(h);
+    int sr = PlatformInfo::instance().scaleW(radius);
+
+    if (sw <= 0 || sh <= 0) return;
+    int maxR = std::min(sw, sh) / 2;
+    if (sr > maxR) sr = maxR;
+    if (sr <= 0) {
+        drawRect(sx, sy, sw, sh, color, filled);
         return;
     }
 
     if (filled) {
         SDL_SetRenderDrawColor(m_renderer, color.r, color.g, color.b, color.a);
-        SDL_Rect centerRect = {x, y + radius, w, h - 2 * radius};
+        SDL_Rect centerRect = {sx, sy + sr, sw, sh - 2 * sr};
         if (centerRect.h > 0) {
             SDL_RenderFillRect(m_renderer, &centerRect);
         }
 
-        for (int dy = 0; dy < radius; ++dy) {
-            int ry = radius - 1 - dy;
-            int dx = static_cast<int>(std::sqrt(radius * radius - ry * ry));
-            int lineW = w - 2 * (radius - dx);
-            int lineX = x + radius - dx;
+        for (int dy = 0; dy < sr; ++dy) {
+            int ry = sr - 1 - dy;
+            int dx = static_cast<int>(std::sqrt(sr * sr - ry * ry));
+            int lineW = sw - 2 * (sr - dx);
+            int lineX = sx + sr - dx;
 
             if (lineW > 0) {
-                SDL_Rect topSlice = {lineX, y + dy, lineW, 1};
+                SDL_Rect topSlice = {lineX, sy + dy, lineW, 1};
                 SDL_RenderFillRect(m_renderer, &topSlice);
-                SDL_Rect btmSlice = {lineX, y + h - 1 - dy, lineW, 1};
+                SDL_Rect btmSlice = {lineX, sy + sh - 1 - dy, lineW, 1};
                 SDL_RenderFillRect(m_renderer, &btmSlice);
             }
         }
     } else {
-        drawRoundedBorder(x, y, w, h, radius, color, 1);
+        drawRoundedBorder(sx, sy, sw, sh, sr, color, 1);
     }
 }
 
 void UIManager::drawRoundedBorder(int x, int y, int w, int h, int radius, SDL_Color color, int thickness) {
-    if (w <= 0 || h <= 0) return;
-    int maxR = std::min(w, h) / 2;
-    if (radius > maxR) radius = maxR;
-    if (radius <= 0) {
-        drawBorder(x, y, w, h, color, thickness);
+    // Scale coordinates, dimensions, radius, and thickness
+    int sx = PlatformInfo::instance().scaleX(x);
+    int sy = PlatformInfo::instance().scaleY(y);
+    int sw = PlatformInfo::instance().scaleW(w);
+    int sh = PlatformInfo::instance().scaleH(h);
+    int sr = PlatformInfo::instance().scaleW(radius);
+    int st = PlatformInfo::instance().scaleW(thickness);
+
+    if (sw <= 0 || sh <= 0) return;
+    int maxR = std::min(sw, sh) / 2;
+    if (sr > maxR) sr = maxR;
+    if (sr <= 0) {
+        drawBorder(sx, sy, sw, sh, color, st);
         return;
     }
 
     SDL_SetRenderDrawColor(m_renderer, color.r, color.g, color.b, color.a);
 
     // Straight bars
-    SDL_Rect topBar = {x + radius, y, w - 2 * radius, thickness};
-    SDL_Rect btmBar = {x + radius, y + h - thickness, w - 2 * radius, thickness};
+    SDL_Rect topBar = {sx + sr, sy, sw - 2 * sr, st};
+    SDL_Rect btmBar = {sx + sr, sy + sh - st, sw - 2 * sr, st};
     SDL_RenderFillRect(m_renderer, &topBar);
     SDL_RenderFillRect(m_renderer, &btmBar);
 
-    SDL_Rect leftBar = {x, y + radius, thickness, h - 2 * radius};
-    SDL_Rect rightBar = {x + w - thickness, y + radius, thickness, h - 2 * radius};
+    SDL_Rect leftBar = {sx, sy + sr, st, sh - 2 * sr};
+    SDL_Rect rightBar = {sx + sw - st, sy + sr, st, sh - 2 * sr};
     SDL_RenderFillRect(m_renderer, &leftBar);
     SDL_RenderFillRect(m_renderer, &rightBar);
 
     // Corner arcs using 1-px high fill rects
-    for (int dy = 0; dy < radius; ++dy) {
-        int ry = radius - 1 - dy;
-        int outerDx = static_cast<int>(std::sqrt(radius * radius - ry * ry));
-        int innerR = std::max(0, radius - thickness);
+    for (int dy = 0; dy < sr; ++dy) {
+        int ry = sr - 1 - dy;
+        int outerDx = static_cast<int>(std::sqrt(sr * sr - ry * ry));
+        int innerR = std::max(0, sr - st);
         int innerDx = (ry < innerR) ? static_cast<int>(std::sqrt(innerR * innerR - ry * ry)) : 0;
-        int segW = std::max(thickness, outerDx - innerDx);
+        int segW = std::max(st, outerDx - innerDx);
 
-        SDL_Rect tl = {x + radius - outerDx, y + dy, segW, 1};
+        SDL_Rect tl = {sx + sr - outerDx, sy + dy, segW, 1};
         SDL_RenderFillRect(m_renderer, &tl);
 
-        SDL_Rect tr = {x + w - radius + outerDx - segW, y + dy, segW, 1};
+        SDL_Rect tr = {sx + sw - sr + outerDx - segW, sy + dy, segW, 1};
         SDL_RenderFillRect(m_renderer, &tr);
 
-        SDL_Rect bl = {x + radius - outerDx, y + h - 1 - dy, segW, 1};
+        SDL_Rect bl = {sx + sr - outerDx, sy + sh - 1 - dy, segW, 1};
         SDL_RenderFillRect(m_renderer, &bl);
 
-        SDL_Rect br = {x + w - radius + outerDx - segW, y + h - 1 - dy, segW, 1};
+        SDL_Rect br = {sx + sw - sr + outerDx - segW, sy + sh - 1 - dy, segW, 1};
         SDL_RenderFillRect(m_renderer, &br);
     }
 }
