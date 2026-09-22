@@ -797,9 +797,8 @@ void UIManager::update() {
                     showToast(UiStrings::TOAST_OTA_CANCELLED, {245, 158, 11, 255});
                 }
             } else if (prog.state == UpdateState::COMPLETED) {
-                if (input.isButtonJustPressed(Button::A)) {
-                    Application::instance().requestRestart();
-                }
+                // Auto-restart immediately - no need to press A
+                Application::instance().requestRestart();
             } else {
                 if (input.isButtonJustPressed(Button::B)) {
                     setState(UIState::MENU);
