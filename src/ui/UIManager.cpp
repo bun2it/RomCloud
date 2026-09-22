@@ -670,13 +670,13 @@ void UIManager::renderHeader() {
         std::string sysTitle = m_activeSystem.code + " - " + m_activeSystem.name;
         drawText(sysTitle, 512, 18, {255, 255, 255, 255}, m_fontLarge, true);
 
-        std::string filterLabel = "[SELECT] LỌC: TẤT CẢ";
+        std::string filterLabel = UiStrings::FILTER_TAG_ALL;
         SDL_Color filterBg = {107, 33, 168, 255};
         if (m_filterMode == GameFilterMode::LOCAL_ONLY) {
-            filterLabel = "[SELECT] LỌC: THẺ NHỚ";
+            filterLabel = UiStrings::FILTER_TAG_LOCAL;
             filterBg = {22, 101, 52, 255};
         } else if (m_filterMode == GameFilterMode::CLOUD_ONLY) {
-            filterLabel = "[SELECT] LỌC: CLOUD";
+            filterLabel = UiStrings::FILTER_TAG_CLOUD;
             filterBg = {30, 58, 138, 255};
         }
         drawBadge(790, 14, 205, 38, filterLabel, filterBg, {255, 255, 255, 255});
@@ -1044,8 +1044,8 @@ void UIManager::renderGameListState() {
     int rowW = listW - 30;
 
     if (totalGames == 0) {
-        drawText("Không có game nào phù hợp bộ lọc.", listX + listW / 2, listY + 280, {140, 150, 165, 255}, m_fontLarge, true);
-        drawText("Nhấn [SELECT] để chuyển bộ lọc (TẤT CẢ / THẺ NHỚ / CLOUD)", listX + listW / 2, listY + 325, {0, 180, 216, 255}, m_fontSmall, true);
+        drawText(UiStrings::GAME_LIST_EMPTY, listX + listW / 2, listY + 280, {140, 150, 165, 255}, m_fontLarge, true);
+        drawText(UiStrings::GAME_FILTER_HINT, listX + listW / 2, listY + 325, {0, 180, 216, 255}, m_fontSmall, true);
     } else {
         for (int i = 0; i < pageSize && (m_gameScrollOffset + i) < totalGames; ++i) {
             int gameIdx = m_gameScrollOffset + i;
@@ -1179,8 +1179,8 @@ void UIManager::renderGameListState() {
         metaY += 46;
         if (selGame->localState == GameState::LOCAL) {
             int halfW = (detailW - 58) / 2;
-            drawBadge(detailX + 25, metaY, halfW, 46, "✓ ĐÃ TẢI VỀ", {22, 101, 52, 255}, {255, 255, 255, 255});
-            drawBadge(detailX + 33 + halfW, metaY, halfW, 46, "[X] XÓA ROM", {185, 28, 28, 255}, {255, 255, 255, 255});
+            drawBadge(detailX + 25, metaY, halfW, 46, UiStrings::BADGE_DOWNLOADED, {22, 101, 52, 255}, {255, 255, 255, 255});
+            drawBadge(detailX + 33 + halfW, metaY, halfW, 46, UiStrings::BADGE_DELETE_BTN, {185, 28, 28, 255}, {255, 255, 255, 255});
         } else if (DownloadManager::instance().isDownloading() &&
                    DownloadManager::instance().getProgress().gameId == selGame->id) {
             auto dlp = DownloadManager::instance().getProgress();
@@ -1201,12 +1201,12 @@ void UIManager::renderGameListState() {
                                    " / " + FileSystemManager::instance().formatBytes(dlp.totalBytes);
             drawText(dSizeStr, detailX + detailW / 2, dBarY + 16, {200, 220, 240, 255}, m_fontSmall, true);
 
-            drawBadge(detailX + 25, dBarY + 38, detailW - 50, 36, "[X] HỦY TẢI GAME NÀY", {185, 28, 28, 255}, {255, 255, 255, 255});
+            drawBadge(detailX + 25, dBarY + 38, detailW - 50, 36, UiStrings::BADGE_CANCEL_DL_BTN, {185, 28, 28, 255}, {255, 255, 255, 255});
             metaY += 56;
         } else if (DownloadManager::instance().isInQueue(selGame->id)) {
-            drawBadge(detailX + 25, metaY, detailW - 50, 46, "[X] BỎ KHỎI HÀNG TẢI", {107, 33, 168, 255}, {255, 255, 255, 255});
+            drawBadge(detailX + 25, metaY, detailW - 50, 46, UiStrings::BADGE_REMOVE_QUEUE_BTN, {107, 33, 168, 255}, {255, 255, 255, 255});
         } else {
-            drawBadge(detailX + 25, metaY, detailW - 50, 46, "[A] THÊM VÀO HÀNG TẢI", {2, 132, 199, 255}, {255, 255, 255, 255});
+            drawBadge(detailX + 25, metaY, detailW - 50, 46, UiStrings::BADGE_ADD_QUEUE_BTN, {2, 132, 199, 255}, {255, 255, 255, 255});
         }
 
         // Queue info panel below action pill
@@ -1218,7 +1218,7 @@ void UIManager::renderGameListState() {
             if (isCurrentlyDownloading && queueCount > 0) {
                 qInfo = "Đang tải 1 game, còn " + std::to_string(queueCount) + " game chờ.";
             } else if (isCurrentlyDownloading) {
-                qInfo = "Đang tải... Hàng tải trống.";
+                qInfo = UiStrings::QUEUE_DOWNLOADING_EMPTY;
             } else {
                 qInfo = "Hàng tải: " + std::to_string(queueCount) + " game chờ.";
             }
@@ -1263,7 +1263,7 @@ void UIManager::renderConfirmDeleteDialog() {
 
     // Title Banner
     drawRect(dlgX, dlgY, dlgW, 55, {185, 28, 28, 255}, true);
-    drawText("XÁC NHẬN XÓA ROM TRÊN THẺ NHỚ", dlgX + dlgW / 2, dlgY + 16, {255, 255, 255, 255}, m_fontLarge, true);
+    drawText(UiStrings::DIALOG_DELETE_TITLE, dlgX + dlgW / 2, dlgY + 16, {255, 255, 255, 255}, m_fontLarge, true);
 
     if (m_selectedGameIndex >= 0 && m_selectedGameIndex < static_cast<int>(m_cachedGames.size())) {
         const auto& game = m_cachedGames[m_selectedGameIndex];
@@ -1272,15 +1272,15 @@ void UIManager::renderConfirmDeleteDialog() {
         std::string sizeStr = "Tập tin: " + game.filename + " (" + FileSystemManager::instance().formatBytes(game.sizeBytes) + ")";
         drawText(sizeStr, dlgX + dlgW / 2, dlgY + 120, {0, 180, 216, 255}, m_fontSmall, true);
 
-        drawText("Bạn có chắc chắn muốn xóa ROM này khỏi thẻ nhớ không?", dlgX + dlgW / 2, dlgY + 165, {220, 225, 235, 255}, m_fontSmall, true);
-        drawText("Bản lưu trên Google Drive vẫn an toàn và có thể tải lại bất cứ lúc nào.", dlgX + dlgW / 2, dlgY + 195, {34, 197, 94, 255}, m_fontSmall, true);
+        drawText(UiStrings::DIALOG_DELETE_PROMPT, dlgX + dlgW / 2, dlgY + 165, {220, 225, 235, 255}, m_fontSmall, true);
+        drawText(UiStrings::DIALOG_DELETE_SAFE_HINT, dlgX + dlgW / 2, dlgY + 195, {34, 197, 94, 255}, m_fontSmall, true);
     }
 
     // Action buttons
     int btnW = 220;
     int btnH = 50;
-    drawBadge(dlgX + 60, dlgY + 250, btnW, btnH, "[A] Xác nhận xóa", {185, 28, 28, 255}, {255, 255, 255, 255});
-    drawBadge(dlgX + dlgW - 60 - btnW, dlgY + 250, btnW, btnH, "[B] / [X] Hủy bỏ", {55, 65, 81, 255}, {255, 255, 255, 255});
+    drawBadge(dlgX + 60, dlgY + 250, btnW, btnH, UiStrings::BTN_CONFIRM_DELETE, {185, 28, 28, 255}, {255, 255, 255, 255});
+    drawBadge(dlgX + dlgW - 60 - btnW, dlgY + 250, btnW, btnH, UiStrings::BTN_CANCEL_DELETE, {55, 65, 81, 255}, {255, 255, 255, 255});
 }
 
 void UIManager::renderDisclaimerState() {
@@ -1353,54 +1353,54 @@ void UIManager::renderSettingsState() {
     drawRect(cardX, cardY, cardW, cardH, {25, 30, 38, 255}, true);
     drawBorder(cardX, cardY, cardW, cardH, {0, 180, 216, 255}, 2);
 
-    drawText("CÀI ĐẶT HỆ THỐNG ROMCLOUD", 512, cardY + 22, {0, 180, 216, 255}, m_fontTitle ? m_fontTitle : m_fontLarge, true);
+    drawText(UiStrings::HEADER_SETTINGS, 512, cardY + 22, {0, 180, 216, 255}, m_fontTitle ? m_fontTitle : m_fontLarge, true);
 
     int rowY = cardY + 80;
     int stepY = 52;
 
     // Google Drive Account Section
-    drawText("Trạng thái Google Drive:", cardX + 40, rowY, {160, 175, 190, 255}, m_fontMedium);
+    drawText(UiStrings::SETTING_DRIVE_STATUS, cardX + 40, rowY, {160, 175, 190, 255}, m_fontMedium);
     if (AuthManager::instance().isLinked()) {
         std::string email = AuthManager::instance().getUserEmail();
         drawText(UiStrings::SETTING_CONNECTED, cardX + 320, rowY, {34, 197, 94, 255}, m_fontMedium);
-        drawBadge(cardX + 610, rowY - 6, 190, 38, "[X] Đăng xuất", {185, 28, 28, 255}, {255, 255, 255, 255});
+        drawBadge(cardX + 610, rowY - 6, 190, 38, UiStrings::SETTING_LOGOUT_BTN, {185, 28, 28, 255}, {255, 255, 255, 255});
     } else {
         drawText(UiStrings::SETTING_DISCONNECTED, cardX + 320, rowY, {239, 68, 68, 255}, m_fontMedium);
-        drawBadge(cardX + 510, rowY - 6, 290, 38, "[A] Kết nối qua Web Local", {30, 58, 138, 255}, {255, 255, 255, 255});
+        drawBadge(cardX + 510, rowY - 6, 290, 38, UiStrings::SETTING_CONNECT_WEB_BTN, {30, 58, 138, 255}, {255, 255, 255, 255});
     }
 
     rowY += stepY;
-    drawText("Thư mục Google Drive:", cardX + 40, rowY, {160, 175, 190, 255}, m_fontMedium);
-    std::string folderId = DatabaseManager::instance().getSetting("drive_folder_id", "Chưa thiết lập");
+    drawText(UiStrings::SETTING_DRIVE_FOLDER, cardX + 40, rowY, {160, 175, 190, 255}, m_fontMedium);
+    std::string folderId = DatabaseManager::instance().getSetting("drive_folder_id", UiStrings::SETTING_NOT_CONFIGURED);
     drawText(folderId, cardX + 320, rowY, {0, 180, 216, 255}, m_fontSmall);
 
     rowY += stepY;
-    drawText("Thư mục ROM trên thẻ:", cardX + 40, rowY, {160, 175, 190, 255}, m_fontMedium);
+    drawText(UiStrings::SETTING_ROM_SD_FOLDER, cardX + 40, rowY, {160, 175, 190, 255}, m_fontMedium);
     drawText(AppConfig::instance().getRomsDir(), cardX + 320, rowY, {255, 255, 255, 255}, m_fontSmall);
 
     rowY += stepY;
-    drawText("Đồng bộ lần cuối:", cardX + 40, rowY, {160, 175, 190, 255}, m_fontMedium);
-    std::string lastSync = DatabaseManager::instance().getSetting("last_cloud_sync_time", "Chưa đồng bộ");
+    drawText(UiStrings::SETTING_LAST_SYNC, cardX + 40, rowY, {160, 175, 190, 255}, m_fontMedium);
+    std::string lastSync = DatabaseManager::instance().getSetting("last_cloud_sync_time", UiStrings::SETTING_NEVER_SYNCED);
     drawText(lastSync, cardX + 320, rowY, {255, 255, 255, 255}, m_fontSmall);
 
     rowY += stepY;
-    drawText("Cơ sở dữ liệu SQLite:", cardX + 40, rowY, {160, 175, 190, 255}, m_fontMedium);
+    drawText(UiStrings::SETTING_SQLITE_DB, cardX + 40, rowY, {160, 175, 190, 255}, m_fontMedium);
     drawText(AppConfig::instance().getDatabasePath(), cardX + 320, rowY, {34, 197, 94, 255}, m_fontSmall);
 
     rowY += stepY;
-    drawText("Chế độ quét Drive:", cardX + 40, rowY, {160, 175, 190, 255}, m_fontMedium);
-    drawText("Tự động (Quét toàn bộ danh mục game)", cardX + 320, rowY, {34, 197, 94, 255}, m_fontSmall);
+    drawText(UiStrings::SETTING_SCAN_MODE, cardX + 40, rowY, {160, 175, 190, 255}, m_fontMedium);
+    drawText(UiStrings::SETTING_SCAN_AUTO, cardX + 320, rowY, {34, 197, 94, 255}, m_fontSmall);
 
     rowY += stepY;
-    drawText("Trang quản lý nội bộ:", cardX + 40, rowY, {160, 175, 190, 255}, m_fontMedium);
+    drawText(UiStrings::SETTING_WEB_PORTAL, cardX + 40, rowY, {160, 175, 190, 255}, m_fontMedium);
     std::string ip = PlatformInfo::instance().getIpAddress("wlan0");
     drawText("http://" + (ip.empty() ? "192.168.1.164" : ip) + ":8080", cardX + 320, rowY, {0, 180, 216, 255}, m_fontMedium);
 
     rowY += stepY;
-    drawText("Bộ đệm ảnh bìa (Cover):", cardX + 40, rowY, {160, 175, 190, 255}, m_fontMedium);
-    drawText("Phần cứng SDL2_image (Tối đa 64 ảnh)", cardX + 320, rowY, {34, 197, 94, 255}, m_fontSmall);
+    drawText(UiStrings::SETTING_COVER_CACHE, cardX + 40, rowY, {160, 175, 190, 255}, m_fontMedium);
+    drawText(UiStrings::SETTING_COVER_CACHE_VAL, cardX + 320, rowY, {34, 197, 94, 255}, m_fontSmall);
 
-    drawText("Nhấn [B] để quay lại Menu chính", 512, cardY + 560, {150, 165, 180, 255}, m_fontMedium, true);
+    drawText(UiStrings::BTN_BACK_MAIN_MENU_HINT, 512, cardY + 560, {150, 165, 180, 255}, m_fontMedium, true);
 }
 
 void UIManager::renderCloudLoginState() {
@@ -1412,7 +1412,7 @@ void UIManager::renderCloudLoginState() {
     drawRect(cardX, cardY, cardW, cardH, {22, 27, 36, 255}, true);
     drawBorder(cardX, cardY, cardW, cardH, {0, 180, 216, 255}, 2);
 
-    drawText("LIÊN KẾT GOOGLE DRIVE QUA TRÌNH DUYỆT (LOCAL WEB)", 512, cardY + 22, {0, 180, 216, 255}, m_fontTitle ? m_fontTitle : m_fontLarge, true);
+    drawText(UiStrings::HEADER_WEB_CONNECT, 512, cardY + 22, {0, 180, 216, 255}, m_fontTitle ? m_fontTitle : m_fontLarge, true);
 
     if (AuthManager::instance().isLinked()) {
         int boxW = 680;
@@ -1424,13 +1424,13 @@ void UIManager::renderCloudLoginState() {
         drawBorder(boxX, boxY, boxW, boxH, {34, 197, 94, 255}, 3);
 
         drawRect(boxX, boxY, boxW, 60, {22, 101, 52, 255}, true);
-        drawText("ĐÃ KẾT NỐI THÀNH CÔNG!", boxX + boxW / 2, boxY + 16, {255, 255, 255, 255}, m_fontLarge, true);
+        drawText(UiStrings::WEB_CONNECT_SUCCESS, boxX + boxW / 2, boxY + 16, {255, 255, 255, 255}, m_fontLarge, true);
 
-        drawText("Tài khoản Google đã liên kết:", boxX + boxW / 2, boxY + 95, {150, 165, 180, 255}, m_fontMedium, true);
+        drawText(UiStrings::WEB_CONNECT_ACCOUNT_PREFIX, boxX + boxW / 2, boxY + 95, {150, 165, 180, 255}, m_fontMedium, true);
         drawText(AuthManager::instance().getUserEmail(), boxX + boxW / 2, boxY + 135, {0, 180, 216, 255}, m_fontLarge, true);
-        drawText("Toàn bộ kho game đã sẵn sàng để tải về máy và chơi.", boxX + boxW / 2, boxY + 195, {200, 210, 220, 255}, m_fontMedium, true);
+        drawText(UiStrings::WEB_CONNECT_READY, boxX + boxW / 2, boxY + 195, {200, 210, 220, 255}, m_fontMedium, true);
 
-        drawBadge(boxX + (boxW - 280) / 2, boxY + 250, 280, 52, "[A] / [B] Bắt đầu sử dụng", {22, 101, 52, 255}, {255, 255, 255, 255});
+        drawBadge(boxX + (boxW - 280) / 2, boxY + 250, 280, 52, UiStrings::WEB_CONNECT_START_BTN, {22, 101, 52, 255}, {255, 255, 255, 255});
     } else {
         std::string ip = PlatformInfo::instance().getIpAddress("wlan0");
         if (ip.empty()) ip = "192.168.1.164";
@@ -1446,14 +1446,14 @@ void UIManager::renderCloudLoginState() {
 
         int textY = innerY + 30;
 
-        drawText("HƯỚNG DẪN KẾT NỐI TÀI KHOẢN QUA TRÌNH DUYỆT", 512, textY, {255, 255, 255, 255}, m_fontMedium, true);
+        drawText(UiStrings::WEB_CONNECT_GUIDE_TITLE, 512, textY, {255, 255, 255, 255}, m_fontMedium, true);
         drawRect(innerX + 50, textY + 32, innerW - 100, 1, {60, 72, 90, 255}, true);
 
         textY += 55;
-        drawText("BƯỚC 1: Kết nối điện thoại hoặc máy tính vào cùng mạng Wi-Fi với TrimUI.", innerX + 40, textY, {200, 215, 230, 255}, m_fontMedium);
+        drawText(UiStrings::WEB_CONNECT_STEP1, innerX + 40, textY, {200, 215, 230, 255}, m_fontMedium);
 
         textY += 45;
-        drawText("BƯỚC 2: Mở trình duyệt web (Chrome, Safari, Cốc Cốc...) và truy cập địa chỉ:", innerX + 40, textY, {200, 215, 230, 255}, m_fontMedium);
+        drawText(UiStrings::WEB_CONNECT_STEP2, innerX + 40, textY, {200, 215, 230, 255}, m_fontMedium);
 
         // Prominent glowing URL box in center
         textY += 38;
@@ -1465,16 +1465,16 @@ void UIManager::renderCloudLoginState() {
         drawText(portalUrl, urlBoxX + urlBoxW / 2, textY + 18, {0, 180, 216, 255}, m_fontTitle ? m_fontTitle : m_fontLarge, true);
 
         textY += urlBoxH + 34;
-        drawText("BƯỚC 3: Trên trang web, bấm \"ĐĂNG NHẬP GOOGLE\" hoặc nhập liên kết thư mục Drive.", innerX + 40, textY, {200, 215, 230, 255}, m_fontMedium);
+        drawText(UiStrings::WEB_CONNECT_STEP3, innerX + 40, textY, {200, 215, 230, 255}, m_fontMedium);
 
         textY += 42;
-        drawText("* Đang chờ kết nối từ trình duyệt web của bạn...", 512, textY, {245, 158, 11, 255}, m_fontMedium, true);
+        drawText(UiStrings::WEB_CONNECT_WAITING, 512, textY, {245, 158, 11, 255}, m_fontMedium, true);
 
         textY += 28;
-        drawText("Máy sẽ tự động hoàn tất ngay khi bạn đăng nhập thành công trên điện thoại/PC.", 512, textY, {140, 155, 170, 255}, m_fontSmall, true);
+        drawText(UiStrings::WEB_CONNECT_AUTO_HINT, 512, textY, {140, 155, 170, 255}, m_fontSmall, true);
 
         // Bottom action button
-        drawBadge(512 - 130, cardY + cardH - 68, 260, 48, "[B] Quay lại Cài đặt", {55, 65, 81, 255}, {255, 255, 255, 255});
+        drawBadge(512 - 130, cardY + cardH - 68, 260, 48, UiStrings::WEB_CONNECT_BACK_BTN, {55, 65, 81, 255}, {255, 255, 255, 255});
     }
 }
 
@@ -1494,17 +1494,17 @@ void UIManager::renderSyncOverlay() {
 
     // Title banner
     drawRect(boxX, boxY, boxW, 55, {18, 55, 95, 255}, true);
-    drawText("ĐỒNG BỘ KHO GAME GOOGLE DRIVE", boxX + boxW / 2, boxY + 16, {0, 180, 216, 255}, m_fontLarge, true);
+    drawText(UiStrings::HEADER_SYNC, boxX + boxW / 2, boxY + 16, {0, 180, 216, 255}, m_fontLarge, true);
 
     auto prog = DriveSyncEngine::instance().getProgress();
 
     int contentY = boxY + 85;
     if (prog.status == SyncStatus::CONNECTING) {
-        drawText("Đang kết nối tới Google Drive API v3...", boxX + boxW / 2, contentY, {255, 255, 255, 255}, m_fontMedium, true);
-        drawText("Xác thực mã thông báo OAuth Bearer...", boxX + boxW / 2, contentY + 35, {150, 165, 180, 255}, m_fontSmall, true);
+        drawText(UiStrings::SYNC_API_CONNECTING, boxX + boxW / 2, contentY, {255, 255, 255, 255}, m_fontMedium, true);
+        drawText(UiStrings::SYNC_AUTH_TOKEN, boxX + boxW / 2, contentY + 35, {150, 165, 180, 255}, m_fontSmall, true);
     } else if (prog.status == SyncStatus::DISCOVERING_FOLDERS) {
-        drawText("Đang quét danh mục trò chơi trên Google Drive...", boxX + boxW / 2, contentY, {255, 255, 255, 255}, m_fontMedium, true);
-        drawText("Tìm kiếm thư mục /RomCloud hoặc /Roms...", boxX + boxW / 2, contentY + 35, {150, 165, 180, 255}, m_fontSmall, true);
+        drawText(UiStrings::SYNC_SCANNING_GAMES, boxX + boxW / 2, contentY, {255, 255, 255, 255}, m_fontMedium, true);
+        drawText(UiStrings::SYNC_SEARCH_FOLDERS, boxX + boxW / 2, contentY + 35, {150, 165, 180, 255}, m_fontSmall, true);
     } else if (prog.status == SyncStatus::SYNCING_FILES) {
         std::string platText = "Đang quét hệ máy: " + prog.currentPlatform;
         drawText(platText, boxX + boxW / 2, contentY, {255, 255, 255, 255}, m_fontMedium, true);
@@ -1530,7 +1530,7 @@ void UIManager::renderSyncOverlay() {
         drawText(stats, boxX + boxW / 2, statY, {34, 197, 94, 255}, m_fontSmall, true);
     }
 
-    drawBadge(boxX + (boxW - 220) / 2, boxY + 295, 220, 50, "[B] Hủy đồng bộ", {55, 65, 81, 255}, {255, 255, 255, 255});
+    drawBadge(boxX + (boxW - 220) / 2, boxY + 295, 220, 50, UiStrings::SYNC_CANCEL_BTN, {55, 65, 81, 255}, {255, 255, 255, 255});
 }
 
 void UIManager::renderDownloadOverlay() {
@@ -1549,7 +1549,7 @@ void UIManager::renderDownloadOverlay() {
 
     // Title banner
     drawRect(boxX, boxY, boxW, 55, {18, 55, 95, 255}, true);
-    drawText("ĐANG TẢI ROM TỪ GOOGLE DRIVE", boxX + boxW / 2, boxY + 16, {0, 180, 216, 255}, m_fontLarge, true);
+    drawText(UiStrings::HEADER_DOWNLOAD, boxX + boxW / 2, boxY + 16, {0, 180, 216, 255}, m_fontLarge, true);
 
     auto prog = DownloadManager::instance().getProgress();
 
@@ -1562,11 +1562,11 @@ void UIManager::renderDownloadOverlay() {
     drawText(sysSub, boxX + boxW / 2, contentY + 38, {0, 180, 216, 255}, m_fontSmall, true);
 
     // State text
-    std::string statusMsg = "Đang tải từ Google Drive...";
+    std::string statusMsg = UiStrings::DL_FROM_DRIVE;
     if (prog.state == DownloadState::INITIALIZING) {
-        statusMsg = "Đang chuẩn bị kết nối...";
+        statusMsg = UiStrings::DL_CONNECTING;
     } else if (prog.state == DownloadState::VERIFYING) {
-        statusMsg = "Đang kiểm tra tập tin...";
+        statusMsg = UiStrings::DL_CHECKING_FILE;
     }
     drawText(statusMsg, boxX + boxW / 2, contentY + 75, {245, 158, 11, 255}, m_fontSmall, true);
 
@@ -1595,7 +1595,7 @@ void UIManager::renderDownloadOverlay() {
         drawText(qStr, boxX + boxW / 2, barY + 56, {168, 85, 247, 255}, m_fontSmall, true);
     }
 
-    drawBadge(boxX + (boxW - 220) / 2, boxY + 320, 220, 50, "[B] Hủy tải về", {55, 65, 81, 255}, {255, 255, 255, 255});
+    drawBadge(boxX + (boxW - 220) / 2, boxY + 320, 220, 50, UiStrings::DL_CANCEL_BTN, {55, 65, 81, 255}, {255, 255, 255, 255});
 }
 
 void UIManager::renderDiagnosticsState() {
@@ -1607,7 +1607,7 @@ void UIManager::renderDiagnosticsState() {
     drawRect(cardX, cardY, cardW, cardH, {22, 27, 34, 255}, true);
     drawBorder(cardX, cardY, cardW, cardH, {0, 180, 216, 255}, 2);
 
-    drawText("THÔNG TIN HỆ THỐNG & PHẦN CỨNG", 512, cardY + 22, {0, 180, 216, 255}, m_fontLarge, true);
+    drawText(UiStrings::HEADER_DIAG, 512, cardY + 22, {0, 180, 216, 255}, m_fontLarge, true);
 
     auto diag = PlatformInfo::instance().getDiagnostics();
 
@@ -1618,17 +1618,17 @@ void UIManager::renderDiagnosticsState() {
     };
 
     std::vector<DiagRow> rows = {
-        {"Thiết bị phần cứng", diag.socName, {255, 255, 255, 255}},
-        {"Kiến trúc CPU", diag.cpuArch + " (64-bit Little Endian)", {255, 255, 255, 255}},
-        {"Hệ điều hành & Nhân", diag.osName + " " + diag.kernelRelease, {255, 255, 255, 255}},
-        {"Bộ nhớ RAM", "Còn trống " + diag.freeRam + " / Tổng " + diag.totalRam, {34, 197, 94, 255}},
-        {"Màn hình hiển thị", diag.displayResolution, {0, 180, 216, 255}},
-        {"Thư viện đồ họa SDL2", "v" + diag.sdlVersion + " (Tăng tốc phần cứng)", {255, 255, 255, 255}},
-        {"Cơ sở dữ liệu SQLite3", "v" + diag.sqliteVersion + " (Phiên bản cấu trúc v" + std::to_string(CURRENT_SCHEMA_VERSION) + ")", {34, 197, 94, 255}},
-        {"Dung lượng thẻ nhớ SD", "Còn trống " + diag.sdFreeSpace + " / Tổng " + diag.sdTotalSpace, {34, 197, 94, 255}},
-        {"Cụm phím điều khiển", diag.controllerName, {255, 255, 255, 255}},
-        {"Kết nối mạng Wi-Fi", diag.networkStatus + " (IP: " + diag.ipAddress + ")", diag.ipAddress != "N/A" ? SDL_Color{34, 197, 94, 255} : SDL_Color{239, 68, 68, 255}},
-        {"Độ an toàn hệ thống", "100% Lưu trên thẻ nhớ (Không sửa đổi /rom, /usr, /overlay)", {34, 197, 94, 255}}
+        {UiStrings::DIAG_HW_DEVICE, diag.socName, {255, 255, 255, 255}},
+        {UiStrings::DIAG_CPU_ARCH, diag.cpuArch + " (64-bit Little Endian)", {255, 255, 255, 255}},
+        {UiStrings::DIAG_OS_KERNEL, diag.osName + " " + diag.kernelRelease, {255, 255, 255, 255}},
+        {UiStrings::DIAG_RAM, "Còn trống " + diag.freeRam + " / Tổng " + diag.totalRam, {34, 197, 94, 255}},
+        {UiStrings::DIAG_DISPLAY, diag.displayResolution, {0, 180, 216, 255}},
+        {UiStrings::DIAG_SDL2_GFX, "v" + diag.sdlVersion + " (Tăng tốc phần cứng)", {255, 255, 255, 255}},
+        {UiStrings::DIAG_SQLITE_DB, "v" + diag.sqliteVersion + " (Phiên bản cấu trúc v" + std::to_string(CURRENT_SCHEMA_VERSION) + ")", {34, 197, 94, 255}},
+        {UiStrings::DIAG_SD_STORAGE, "Còn trống " + diag.sdFreeSpace + " / Tổng " + diag.sdTotalSpace, {34, 197, 94, 255}},
+        {UiStrings::DIAG_GAMEPAD, diag.controllerName, {255, 255, 255, 255}},
+        {UiStrings::DIAG_WIFI, diag.networkStatus + " (IP: " + diag.ipAddress + ")", diag.ipAddress != "N/A" ? SDL_Color{34, 197, 94, 255} : SDL_Color{239, 68, 68, 255}},
+        {UiStrings::DIAG_SAFETY, UiStrings::DIAG_SAFETY_VAL, {34, 197, 94, 255}}
     };
 
     int startY = cardY + 70;
@@ -1643,7 +1643,7 @@ void UIManager::renderDiagnosticsState() {
         drawText(rows[i].value, cardX + 270, y, rows[i].valColor, m_fontSmall);
     }
 
-    drawText("Nhấn [B] để quay lại Menu chính", 512, cardY + 560, {130, 140, 155, 255}, m_fontSmall, true);
+    drawText(UiStrings::BTN_BACK_MAIN_MENU_HINT, 512, cardY + 560, {130, 140, 155, 255}, m_fontSmall, true);
 }
 
 void UIManager::renderOTAUpdateState() {
@@ -1655,7 +1655,7 @@ void UIManager::renderOTAUpdateState() {
     drawRect(cardX, cardY, cardW, cardH, {22, 27, 34, 255}, true);
     drawBorder(cardX, cardY, cardW, cardH, {0, 180, 216, 255}, 2);
 
-    drawText("CẬP NHẬT PHẦN MỀM (OTA UPDATE)", 512, cardY + 22, {0, 180, 216, 255}, m_fontLarge, true);
+    drawText(UiStrings::HEADER_OTA, 512, cardY + 22, {0, 180, 216, 255}, m_fontLarge, true);
 
     auto prog = UpdateManager::instance().getProgress();
     auto info = UpdateManager::instance().getLatestInfo();
@@ -1674,34 +1674,34 @@ void UIManager::renderOTAUpdateState() {
     switch (prog.state) {
         case UpdateState::IDLE:
         case UpdateState::CHECKING: {
-            drawText("Đang kiểm tra phiên bản mới từ GitHub...", 512, contentBoxY + 130, {245, 158, 11, 255}, m_fontLarge, true);
-            drawText("Vui lòng đợi trong giây lát...", 512, contentBoxY + 175, {150, 165, 180, 255}, m_fontSmall, true);
+            drawText(UiStrings::OTA_CHECKING, 512, contentBoxY + 130, {245, 158, 11, 255}, m_fontLarge, true);
+            drawText(UiStrings::OTA_WAITING, 512, contentBoxY + 175, {150, 165, 180, 255}, m_fontSmall, true);
             break;
         }
         case UpdateState::UP_TO_DATE: {
-            drawBadge(420, contentBoxY + 50, 184, 40, "ĐÃ MỚI NHẤT", {22, 101, 52, 255}, {34, 197, 94, 255});
-            drawText("Bạn đang sử dụng phiên bản mới nhất!", 512, contentBoxY + 120, {34, 197, 94, 255}, m_fontLarge, true);
-            drawText("Không có bản cập nhật mới nào trên GitHub repository.", 512, contentBoxY + 165, {170, 180, 195, 255}, m_fontSmall, true);
+            drawBadge(420, contentBoxY + 50, 184, 40, UiStrings::OTA_STATUS_UP_TO_DATE, {22, 101, 52, 255}, {34, 197, 94, 255});
+            drawText(UiStrings::OTA_MSG_UP_TO_DATE, 512, contentBoxY + 120, {34, 197, 94, 255}, m_fontLarge, true);
+            drawText(UiStrings::OTA_NO_NEW_UPDATE, 512, contentBoxY + 165, {170, 180, 195, 255}, m_fontSmall, true);
 
-            drawBadge(362, contentBoxY + 235, 300, 48, "[A] Kiểm tra lại   |   [B] Quay lại", {35, 45, 60, 255}, {255, 255, 255, 255});
+            drawBadge(362, contentBoxY + 235, 300, 48, UiStrings::OTA_BTNS_CHECK_BACK, {35, 45, 60, 255}, {255, 255, 255, 255});
             break;
         }
         case UpdateState::UPDATE_AVAILABLE: {
-            drawBadge(392, contentBoxY + 25, 240, 36, "CÓ BẢN CẬP NHẬT MỚI", {180, 83, 9, 255}, {255, 255, 255, 255});
+            drawBadge(392, contentBoxY + 25, 240, 36, UiStrings::OTA_STATUS_NEW_UPDATE, {180, 83, 9, 255}, {255, 255, 255, 255});
             std::string newVerTxt = "Phiên bản mới: v" + info.remoteVersion + (info.releaseDate.empty() ? "" : " (" + info.releaseDate + ")");
             drawText(newVerTxt, 512, contentBoxY + 80, {0, 180, 216, 255}, m_fontLarge, true);
 
             if (!info.changelog.empty()) {
-                drawText("Nội dung cập nhật:", cardX + 70, contentBoxY + 125, {255, 255, 255, 255}, m_fontSmall);
+                drawText(UiStrings::OTA_CHANGELOG_TITLE, cardX + 70, contentBoxY + 125, {255, 255, 255, 255}, m_fontSmall);
                 drawText(info.changelog, cardX + 70, contentBoxY + 155, {170, 180, 195, 255}, m_fontSmall);
             }
 
-            drawBadge(337, contentBoxY + 245, 350, 52, "[A] TẢI VỀ VÀ CẬP NHẬT NGAY", {34, 197, 94, 255}, {0, 0, 0, 255});
+            drawBadge(337, contentBoxY + 245, 350, 52, UiStrings::OTA_BTN_INSTALL_NOW, {34, 197, 94, 255}, {0, 0, 0, 255});
             break;
         }
         case UpdateState::DOWNLOADING:
         case UpdateState::VERIFYING: {
-            drawText("ĐANG TẢI BẢN CẬP NHẬT TỪ GITHUB...", 512, contentBoxY + 50, {0, 180, 216, 255}, m_fontLarge, true);
+            drawText(UiStrings::OTA_DOWNLOADING_TITLE, 512, contentBoxY + 50, {0, 180, 216, 255}, m_fontLarge, true);
 
             int barW = 560;
             int barH = 22;
@@ -1719,31 +1719,31 @@ void UIManager::renderOTAUpdateState() {
             drawText(progressInfo, 512, barY + 34, {255, 255, 255, 255}, m_fontSmall, true);
 
             if (prog.state == UpdateState::VERIFYING) {
-                drawText("Đang kiểm tra tính toàn vẹn tập tin nhị phân...", 512, contentBoxY + 190, {245, 158, 11, 255}, m_fontSmall, true);
+                drawText(UiStrings::OTA_VERIFYING_FILE, 512, contentBoxY + 190, {245, 158, 11, 255}, m_fontSmall, true);
             }
-            drawBadge(422, contentBoxY + 255, 180, 44, "[B] Hủy cập nhật", {55, 65, 81, 255}, {255, 255, 255, 255});
+            drawBadge(422, contentBoxY + 255, 180, 44, UiStrings::OTA_BTN_CANCEL_DOWNLOAD, {55, 65, 81, 255}, {255, 255, 255, 255});
             break;
         }
         case UpdateState::COMPLETED: {
-            drawBadge(412, contentBoxY + 35, 200, 40, "HOÀN TẤT!", {22, 101, 52, 255}, {34, 197, 94, 255});
-            drawText("Cập nhật hoàn tất thành công!", 512, contentBoxY + 105, {34, 197, 94, 255}, m_fontLarge, true);
-            drawText("Bản cập nhật sẽ có hiệu lực ngay sau khi khởi động lại.", 512, contentBoxY + 150, {255, 255, 255, 255}, m_fontSmall, true);
+            drawBadge(412, contentBoxY + 35, 200, 40, UiStrings::OTA_STATUS_COMPLETED, {22, 101, 52, 255}, {34, 197, 94, 255});
+            drawText(UiStrings::OTA_MSG_COMPLETED, 512, contentBoxY + 105, {34, 197, 94, 255}, m_fontLarge, true);
+            drawText(UiStrings::OTA_MSG_RESTART_HINT, 512, contentBoxY + 150, {255, 255, 255, 255}, m_fontSmall, true);
 
-            drawBadge(327, contentBoxY + 235, 370, 52, "[A] KHỞI ĐỘNG LẠI NGAY (RESTART)", {34, 197, 94, 255}, {0, 0, 0, 255});
+            drawBadge(327, contentBoxY + 235, 370, 52, UiStrings::OTA_BTN_RESTART_NOW, {34, 197, 94, 255}, {0, 0, 0, 255});
             break;
         }
         case UpdateState::FAILED: {
-            drawBadge(422, contentBoxY + 35, 180, 40, "THẤT BÀI", {153, 27, 27, 255}, {248, 113, 113, 255});
-            drawText("Không thể cập nhật phần mềm!", 512, contentBoxY + 105, {239, 68, 68, 255}, m_fontLarge, true);
-            std::string err = prog.errorMessage.empty() ? "Lỗi kết nối mạng hoặc GitHub." : prog.errorMessage;
+            drawBadge(422, contentBoxY + 35, 180, 40, UiStrings::OTA_STATUS_FAILED, {153, 27, 27, 255}, {248, 113, 113, 255});
+            drawText(UiStrings::OTA_MSG_FAILED, 512, contentBoxY + 105, {239, 68, 68, 255}, m_fontLarge, true);
+            std::string err = prog.errorMessage.empty() ? UiStrings::OTA_ERR_NETWORK : prog.errorMessage;
             drawText(err, 512, contentBoxY + 150, {245, 158, 11, 255}, m_fontSmall, true);
 
-            drawBadge(362, contentBoxY + 235, 300, 48, "[A] Thử lại   |   [B] Quay lại", {35, 45, 60, 255}, {255, 255, 255, 255});
+            drawBadge(362, contentBoxY + 235, 300, 48, UiStrings::OTA_BTNS_RETRY_BACK, {35, 45, 60, 255}, {255, 255, 255, 255});
             break;
         }
     }
 
-    drawText("Nhấn [B] để quay lại Menu chính", 512, cardY + 560, {130, 140, 155, 255}, m_fontSmall, true);
+    drawText(UiStrings::BTN_BACK_MAIN_MENU_HINT, 512, cardY + 560, {130, 140, 155, 255}, m_fontSmall, true);
 }
 
 void UIManager::render() {
