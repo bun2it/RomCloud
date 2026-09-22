@@ -796,7 +796,6 @@ void UIManager::renderHeader() {
 }
 
 void UIManager::renderSearchState() {
-    // ─── On-screen keyboard layout ─────────────────────────────────────────
     static const char* kbRows[] = {
         "ABCDEFGHIJ",
         "KLMNOPQRST",
@@ -805,30 +804,30 @@ void UIManager::renderSearchState() {
     };
     static const int kbRowCount = 4;
 
-    // ─── Left panel: keyboard + query bar ─────────────────────────────────
-    int panelW = 420;
-    int panelX = 18;
-    int panelY = 72;
+    // ─── Left panel: keyboard + query bar (Borderless) ───
+    int panelW = 430;
+    int panelX = 24;
+    int panelY = 74;
 
-    // Query bar
-    drawRect(panelX, panelY, panelW, 50, {22, 32, 46, 255}, true);
-    drawBorder(panelX, panelY, panelW, 50, {0, 180, 216, 255}, 2);
+    // Query bar with rounded corners
+    drawRoundedRect(panelX, panelY, panelW, 52, 10, {22, 32, 46, 255}, true);
+    drawRoundedBorder(panelX, panelY, panelW, 52, 10, {0, 180, 216, 255}, 2);
     std::string displayQuery = m_searchQuery.empty() ? "Nhap chu de tim..." : m_searchQuery + "_";
     SDL_Color qColor = m_searchQuery.empty() ? SDL_Color{80, 95, 115, 255} : SDL_Color{255, 255, 255, 255};
-    drawText(displayQuery, panelX + 12, panelY + 12, qColor, m_fontMedium);
+    drawText(displayQuery, panelX + 16, panelY + 14, qColor, m_fontMedium);
 
-    // Keyboard
-    int kbStartY = panelY + 62;
+    // Keyboard with rounded keycaps
+    int kbStartY = panelY + 68;
     int cellW = 38;
-    int cellH = 40;
+    int cellH = 42;
     int kbPadX = 12;
 
     for (int row = 0; row < kbRowCount; row++) {
         const char* rowStr = kbRows[row];
         int len = static_cast<int>(strlen(rowStr));
         for (int col = 0; col < len; col++) {
-            int cx = panelX + kbPadX + col * (cellW + 2);
-            int cy = kbStartY + row * (cellH + 4);
+            int cx = panelX + kbPadX + col * (cellW + 3);
+            int cy = kbStartY + row * (cellH + 6);
             bool isSel = (!m_kbInResults && m_kbCursorRow == row && m_kbCursorCol == col);
 
             char ch = rowStr[col];
@@ -836,48 +835,45 @@ void UIManager::renderSearchState() {
             if (ch == '<') label = "DEL";
             else if (ch == 'O' && col < len - 1 && rowStr[col + 1] == 'K') {
                 label = "OK";
-                // Skip 'K' next iteration handled by drawing "OK" on O cell
             } else if (ch == 'K' && col > 0 && rowStr[col - 1] == 'O') {
-                continue; // Skip K, already drawn as part of OK
+                continue;
             } else if (ch == ' ') {
                 label = "SPC";
             } else {
                 label = std::string(1, ch);
             }
 
-            // Special wider cells
             int thisW = cellW;
-            if (label == "DEL" || label == "OK" || label == "SPC") thisW = cellW * 2 + 2;
+            if (label == "DEL" || label == "OK" || label == "SPC") thisW = cellW * 2 + 3;
 
             SDL_Color bg = isSel ? SDL_Color{0, 180, 216, 255} : SDL_Color{28, 38, 55, 255};
             SDL_Color fg = isSel ? SDL_Color{0, 0, 0, 255} : SDL_Color{220, 230, 240, 255};
-            drawRect(cx, cy, thisW, cellH, bg, true);
-            drawBorder(cx, cy, thisW, cellH, isSel ? SDL_Color{255, 255, 255, 255} : SDL_Color{40, 55, 75, 255}, 1);
+            drawRoundedRect(cx, cy, thisW, cellH, 6, bg, true);
+            drawRoundedBorder(cx, cy, thisW, cellH, 6, isSel ? SDL_Color{255, 255, 255, 255} : SDL_Color{40, 55, 75, 255}, 1);
             drawText(label, cx + thisW / 2, cy + cellH / 2 - 10, fg, m_fontSmall, true);
         }
     }
 
-    // ─── Right panel: results ─────────────────────────────────────────────
-    int rPanelX = panelX + panelW + 16;
-    int rPanelW = 1024 - rPanelX - 12;
-    int rPanelY = panelY;
-    int rPanelH = 625;
+    // ─── Divider line ───
+    drawRect(476, 64, 1, 651, {38, 48, 64, 255}, true);
 
-    drawRect(rPanelX, rPanelY, rPanelW, rPanelH, {16, 22, 33, 255}, true);
-    drawBorder(rPanelX, rPanelY, rPanelW, rPanelH,
-               m_kbInResults ? SDL_Color{0, 180, 216, 255} : SDL_Color{40, 52, 68, 255}, 2);
+    // ─── Right panel: results (Borderless) ───
+    int rPanelX = 496;
+    int rPanelW = 1024 - rPanelX - 24;
+    int rPanelY = panelY;
+    int rPanelH = 630;
 
     int numResults = static_cast<int>(m_searchResults.size());
     if (m_searchQuery.length() < 2) {
-        drawText(UiStrings::SEARCH_PROMPT_MIN_CHARS, rPanelX + rPanelW / 2, rPanelY + 30, {80, 95, 115, 255}, m_fontSmall, true);
+        drawText(UiStrings::SEARCH_PROMPT_MIN_CHARS, rPanelX + rPanelW / 2, rPanelY + 60, {80, 95, 115, 255}, m_fontSmall, true);
     } else if (numResults == 0) {
-        drawText(UiStrings::SEARCH_NO_RESULTS, rPanelX + rPanelW / 2, rPanelY + 30, {239, 68, 68, 255}, m_fontSmall, true);
+        drawText(UiStrings::SEARCH_NO_RESULTS, rPanelX + rPanelW / 2, rPanelY + 60, {239, 68, 68, 255}, m_fontSmall, true);
     } else {
-        std::string countStr = std::to_string(numResults) + " kết quả";
-        drawText(countStr, rPanelX + rPanelW / 2, rPanelY + 12, {100, 115, 135, 255}, m_fontSmall, true);
+        std::string countStr = std::to_string(numResults) + UiStrings::SEARCH_RESULTS_SUFFIX;
+        drawText(countStr, rPanelX + rPanelW / 2, rPanelY + 8, {100, 115, 135, 255}, m_fontSmall, true);
 
         int pageSize = 10;
-        int itemH = 57;
+        int itemH = 58;
         int listStartY = rPanelY + 36;
 
         for (int i = 0; i < pageSize && (m_searchScrollOffset + i) < numResults; i++) {
@@ -887,25 +883,25 @@ void UIManager::renderSearchState() {
 
             int itemY = listStartY + i * itemH;
             SDL_Color rowBg = isSel ? SDL_Color{2, 55, 82, 255} : SDL_Color{20, 28, 42, 255};
-            drawRect(rPanelX + 4, itemY, rPanelW - 8, itemH - 2, rowBg, true);
+            drawRoundedRect(rPanelX, itemY, rPanelW, itemH - 4, 8, rowBg, true);
             if (isSel) {
-                drawBorder(rPanelX + 4, itemY, rPanelW - 8, itemH - 2, {0, 180, 216, 255}, 2);
+                drawRoundedBorder(rPanelX, itemY, rPanelW, itemH - 4, 8, {0, 180, 216, 255}, 2);
             }
 
-            // State badge
+            // State badge (pill)
             bool isLocal = (g.localState == GameState::LOCAL);
             SDL_Color badgeBg = isLocal ? SDL_Color{22, 78, 99, 255} : SDL_Color{45, 30, 72, 255};
             SDL_Color badgeFg = isLocal ? SDL_Color{34, 197, 94, 255} : SDL_Color{168, 85, 247, 255};
             std::string stateLabel = isLocal ? "LOCAL" : "CLOUD";
-            drawBadge(rPanelX + 8, itemY + 8, 62, 24, stateLabel, badgeBg, badgeFg);
+            drawBadge(rPanelX + 12, itemY + 12, 68, 28, stateLabel, badgeBg, badgeFg);
 
             // Title
             std::string title = g.title;
-            if (title.length() > 32) title = title.substr(0, 31) + "…";
-            drawText(title, rPanelX + 80, itemY + 8, {230, 240, 255, 255}, m_fontMedium);
+            if (title.length() > 34) title = title.substr(0, 33) + "...";
+            drawText(title, rPanelX + 92, itemY + 8, {230, 240, 255, 255}, m_fontMedium);
 
             // System label
-            drawText(g.systemCode, rPanelX + 80, itemY + 34, {100, 115, 135, 255}, m_fontSmall);
+            drawText(g.systemCode, rPanelX + 92, itemY + 34, {100, 115, 135, 255}, m_fontSmall);
         }
 
         // Scroll indicator
@@ -914,13 +910,13 @@ void UIManager::renderSearchState() {
             int scrollBarH = rPanelH - 46;
             int thumbH = std::max(24, scrollBarH / (numResults / pageSize + 1));
             int thumbY = rPanelY + 38 + static_cast<int>(scrollFrac * (scrollBarH - thumbH));
-            drawRect(rPanelX + rPanelW - 8, rPanelY + 38, 4, scrollBarH, {30, 42, 58, 255}, true);
-            drawRect(rPanelX + rPanelW - 8, thumbY, 4, thumbH, {0, 180, 216, 255}, true);
+            drawRoundedRect(rPanelX + rPanelW - 6, rPanelY + 38, 4, scrollBarH, 2, {30, 42, 58, 255}, true);
+            drawRoundedRect(rPanelX + rPanelW - 6, thumbY, 4, thumbH, 2, {0, 180, 216, 255}, true);
         }
     }
 
     // Hint: which panel is active
-    std::string hint = m_kbInResults ? "◀ Lên để quay lại bàn phím" : "▼ Xuống để xem kết quả";
+    std::string hint = m_kbInResults ? UiStrings::SEARCH_NAV_UP_HINT : UiStrings::SEARCH_NAV_DOWN_HINT;
     drawText(hint, 512, 705, {60, 75, 95, 255}, m_fontSmall, true);
 }
 
@@ -1014,63 +1010,134 @@ void UIManager::renderFooter() {
 void UIManager::renderToast() {
     uint32_t now = SDL_GetTicks();
     if (now < m_toastExpiry && !m_toastMessage.empty()) {
-        int toastW = 600;
+        int toastW = 620;
         int toastH = 48;
         int toastX = (1024 - toastW) / 2;
-        int toastY = 650;
+        int toastY = 645;
 
-        drawRect(toastX, toastY, toastW, toastH, {20, 24, 32, 240}, true);
-        drawBorder(toastX, toastY, toastW, toastH, m_toastColor, 2);
+        drawRoundedRect(toastX, toastY, toastW, toastH, 24, {20, 24, 32, 245}, true);
+        drawRoundedBorder(toastX, toastY, toastW, toastH, 24, m_toastColor, 2);
         drawText(m_toastMessage, 512, toastY + 14, {255, 255, 255, 255}, m_fontSmall, true);
     }
 }
 
 void UIManager::renderMenuState() {
-    int startY = 125;
-    int itemHeight = 68;
-    int itemWidth = 580;
-    int spacing = 16;
-    int startX = (1024 - itemWidth) / 2;
+    // ─── Left Column: Modern Rounded Menu Cards (Borderless) ───
+    int startX = 36;
+    int cardW = 484;
+    int startY = 100;
+    int itemHeight = 84;
+    int spacing = 14;
 
     std::string otaMenuText = UiStrings::MENU_OTA;
     if (UpdateManager::instance().isUpdateAvailable()) {
         otaMenuText = std::string(UiStrings::MENU_OTA_NEW_BADGE) + " (v" + UpdateManager::instance().getLatestInfo().remoteVersion + ")";
     }
 
-    std::vector<std::string> currentMenu = {
-        UiStrings::MENU_PLAY,
-        UiStrings::MENU_SYNC,
-        otaMenuText,
-        UiStrings::MENU_SETTINGS,
-        UiStrings::MENU_DIAG,
-        UiStrings::MENU_EXIT
+    struct MenuItemDef {
+        std::string title;
+        std::string subtitle;
     };
 
-    for (size_t i = 0; i < currentMenu.size(); ++i) {
+    std::vector<MenuItemDef> menuDefs = {
+        {UiStrings::MENU_PLAY, "Kham pha & tai game ve the nho"},
+        {UiStrings::MENU_SYNC, "Dong bo thu vien voi Google Drive"},
+        {otaMenuText, UpdateManager::instance().isUpdateAvailable() ? "Ban nang cap moi da san sang tai" : "Kiem tra phien ban & cap nhat OTA"},
+        {UiStrings::MENU_SETTINGS, "Cau hinh tai khoan & thu muc ROM"},
+        {UiStrings::MENU_DIAG, "Thong so phan cung, RAM & mang"},
+        {UiStrings::MENU_EXIT, "Quay ve giao dien TrimUI"}
+    };
+
+    for (size_t i = 0; i < menuDefs.size(); ++i) {
         int y = startY + static_cast<int>(i) * (itemHeight + spacing);
         bool selected = (static_cast<int>(i) == m_selectedMenuIndex);
 
-        SDL_Color bg = selected ? SDL_Color{30, 58, 95, 255} : SDL_Color{25, 30, 38, 255};
-        drawRect(startX, y, itemWidth, itemHeight, bg, true);
+        SDL_Color bg = selected ? SDL_Color{30, 58, 95, 255} : SDL_Color{22, 28, 38, 255};
+        drawRoundedRect(startX, y, cardW, itemHeight, 12, bg, true);
 
         if (selected) {
-            drawBorder(startX, y, itemWidth, itemHeight, {0, 180, 216, 255}, 3);
-            drawRect(startX + 6, y + 6, 8, itemHeight - 12, {0, 180, 216, 255}, true);
+            drawRoundedBorder(startX, y, cardW, itemHeight, 12, {0, 180, 216, 255}, 2);
+            // Left neon accent capsule
+            drawRoundedRect(startX + 8, y + 14, 6, itemHeight - 28, 3, {0, 180, 216, 255}, true);
         }
 
-        SDL_Color textColor = selected ? SDL_Color{255, 255, 255, 255} : SDL_Color{170, 180, 195, 255};
-        drawText(currentMenu[i], startX + 45, y + 18, textColor, m_fontLarge);
+        SDL_Color titleColor = selected ? SDL_Color{255, 255, 255, 255} : SDL_Color{205, 215, 230, 255};
+        drawText(menuDefs[i].title, startX + 32, y + 16, titleColor, m_fontLarge);
+
+        SDL_Color subColor = selected ? SDL_Color{140, 205, 245, 255} : SDL_Color{115, 130, 150, 255};
+        drawText(menuDefs[i].subtitle, startX + 32, y + 48, subColor, m_fontSmall);
+    }
+
+    // ─── Right Column: Modern Rounded Dashboard Widget ───
+    int dashX = 544;
+    int dashY = 100;
+    int dashW = 444;
+    int dashH = 574;
+
+    drawRoundedRect(dashX, dashY, dashW, dashH, 14, {20, 26, 36, 255}, true);
+    drawRoundedBorder(dashX, dashY, dashW, dashH, 14, {38, 48, 64, 255}, 1);
+
+    // Widget Header
+    drawText("TRANG THAI HE THONG", dashX + 24, dashY + 22, {0, 180, 216, 255}, m_fontMedium);
+    drawRect(dashX + 24, dashY + 54, dashW - 48, 1, {38, 48, 64, 255}, true);
+
+    int rowY = dashY + 74;
+    int stepY = 56;
+
+    // 1. Device Info
+    drawText("Thiet bi", dashX + 24, rowY, {130, 145, 165, 255}, m_fontSmall);
+    drawText("TrimUI Smart Pro (ARM64)", dashX + 24, rowY + 20, {255, 255, 255, 255}, m_fontMedium);
+
+    rowY += stepY;
+    // 2. Storage & ROM count
+    int totalLocal = 0, totalCloud = 0;
+    DatabaseManager::instance().getTotalGameCounts(totalLocal, totalCloud);
+    drawText("Bo nho & ROMs", dashX + 24, rowY, {130, 145, 165, 255}, m_fontSmall);
+    std::string countStr = std::to_string(totalLocal) + " ROM the nho  *  " + std::to_string(totalCloud) + " Cloud";
+    drawText(countStr, dashX + 24, rowY + 20, {34, 197, 94, 255}, m_fontMedium);
+
+    // Storage progress gauge bar
+    rowY += 46;
+    auto diag = PlatformInfo::instance().getDiagnostics();
+    int gBarW = dashW - 48;
+    int gBarH = 8;
+    drawRoundedRect(dashX + 24, rowY, gBarW, gBarH, 4, {32, 40, 54, 255}, true);
+    drawRoundedRect(dashX + 24, rowY, (int)(gBarW * 0.45f), gBarH, 4, {34, 197, 94, 255}, true);
+    drawText("The nho: " + diag.sdFreeSpace + " trong / " + diag.sdTotalSpace, dashX + 24, rowY + 14, {120, 135, 155, 255}, m_fontSmall);
+
+    rowY += 48;
+    // 3. Cloud Sync Account
+    drawText("Google Drive Sync", dashX + 24, rowY, {130, 145, 165, 255}, m_fontSmall);
+    if (AuthManager::instance().isLinked()) {
+        std::string email = AuthManager::instance().getUserEmail();
+        if (email.length() > 26) email = email.substr(0, 23) + "...";
+        drawText("● " + (email.empty() ? "Da ket noi" : email), dashX + 24, rowY + 20, {34, 197, 94, 255}, m_fontMedium);
+    } else {
+        drawText("o Chua ket noi tai khoan", dashX + 24, rowY + 20, {239, 68, 68, 255}, m_fontMedium);
+    }
+
+    rowY += stepY;
+    // 4. Web Portal
+    drawText("Web Manager Portal", dashX + 24, rowY, {130, 145, 165, 255}, m_fontSmall);
+    std::string ip = PlatformInfo::instance().getIpAddress("wlan0");
+    std::string webUrl = "http://" + (ip.empty() ? "192.168.1.164" : ip) + ":8080";
+    drawText(webUrl, dashX + 24, rowY + 20, {0, 180, 216, 255}, m_fontMedium);
+
+    rowY += stepY;
+    // 5. Version & Status
+    drawText("Phien ban", dashX + 24, rowY, {130, 145, 165, 255}, m_fontSmall);
+    std::string verStr = "RomCloud v" + UpdateManager::instance().getCurrentVersion();
+    drawText(verStr, dashX + 24, rowY + 20, {210, 220, 235, 255}, m_fontMedium);
+
+    if (UpdateManager::instance().isUpdateAvailable()) {
+        drawBadge(dashX + dashW - 140, rowY + 12, 116, 28, "CO BAN MOI", {180, 83, 9, 255}, {255, 255, 255, 255});
     }
 }
 
 void UIManager::renderSystemSelectState() {
-    int cardX = 30;
-    int cardY = 75;
-    int cardW = 964;
-    int cardH = 630;
-
-    drawRect(cardX, cardY, cardW, cardH, {20, 25, 32, 255}, true);
-    drawBorder(cardX, cardY, cardW, cardH, {40, 50, 65, 255}, 2);
+    // ─── Borderless Full-Width Sub-Header ───
+    drawRect(0, 64, 1024, 48, {16, 20, 28, 255}, true);
+    drawRect(0, 111, 1024, 1, {38, 48, 64, 255}, true);
 
     int totalLocal = 0, totalCloud = 0;
     DatabaseManager::instance().getTotalGameCounts(totalLocal, totalCloud);
@@ -1078,7 +1145,7 @@ void UIManager::renderSystemSelectState() {
     std::string summary = std::string(UiStrings::SYSTEM_SELECT_TITLE) + " (" + std::to_string(m_cachedSystems.size()) + UiStrings::SYS_SELECT_SYSTEMS_LABEL +
                           std::to_string(totalLocal) + UiStrings::SYS_SELECT_GAMES_LOCAL +
                           std::to_string(totalCloud) + UiStrings::SYS_SELECT_GAMES_CLOUD;
-    drawText(summary, cardX + 30, cardY + 16, {0, 180, 216, 255}, m_fontLarge);
+    drawText(summary, 24, 78, {0, 180, 216, 255}, m_fontLarge);
 
     int visibleCount = 6;
     int startIdx = 0;
@@ -1086,60 +1153,64 @@ void UIManager::renderSystemSelectState() {
         startIdx = m_selectedSystemIndex - visibleCount + 1;
     }
 
-    int rowY = cardY + 58;
-    int rowH = 84;
-    int rowW = cardW - 60;
+    int rowY = 122;
+    int rowH = 88;
+    int rowW = 976;
+    int rx = 24;
 
     for (int i = startIdx; i < static_cast<int>(m_cachedSystems.size()) && (i - startIdx) < visibleCount; ++i) {
         const auto& sys = m_cachedSystems[i];
         bool selected = (i == m_selectedSystemIndex);
         int y = rowY + (i - startIdx) * (rowH + 10);
 
-        SDL_Color bg = selected ? SDL_Color{30, 58, 95, 255} : SDL_Color{28, 34, 44, 255};
-        drawRect(cardX + 30, y, rowW, rowH, bg, true);
+        SDL_Color bg = selected ? SDL_Color{30, 58, 95, 255} : SDL_Color{22, 28, 38, 255};
+        drawRoundedRect(rx, y, rowW, rowH, 10, bg, true);
 
         if (selected) {
-            drawBorder(cardX + 30, y, rowW, rowH, {0, 180, 216, 255}, 2);
-            drawRect(cardX + 34, y + 4, 6, rowH - 8, {0, 180, 216, 255}, true);
+            drawRoundedBorder(rx, y, rowW, rowH, 10, {0, 180, 216, 255}, 2);
+            // Left neon accent
+            drawRoundedRect(rx + 6, y + 12, 5, rowH - 24, 2, {0, 180, 216, 255}, true);
         }
 
-        // System Logo Badge Box
-        drawRect(cardX + 45, y + 14, 110, 56, {18, 22, 30, 255}, true);
-        drawBorder(cardX + 45, y + 14, 110, 56, {0, 180, 216, 255}, 1);
-        drawText(sys.code, cardX + 100, y + 26, {0, 180, 216, 255}, m_fontLarge, true);
+        // System Logo Badge Box with rounded corners
+        drawRoundedRect(rx + 24, y + 14, 110, 60, 8, {16, 20, 28, 255}, true);
+        drawRoundedBorder(rx + 24, y + 14, 110, 60, 8, {0, 180, 216, 255}, 1);
+        drawText(sys.code, rx + 79, y + 28, {0, 180, 216, 255}, m_fontLarge, true);
 
-        drawText(sys.name, cardX + 175, y + 16, {255, 255, 255, 255}, m_fontLarge);
+        drawText(sys.name, rx + 154, y + 16, {255, 255, 255, 255}, m_fontLarge);
 
-        std::string localBadge = "THẺ NHỚ: " + std::to_string(sys.localCount);
+        std::string localBadge = "THE NHO: " + std::to_string(sys.localCount);
         std::string cloudBadge = "CLOUD: " + std::to_string(sys.cloudCount);
 
-        drawBadge(cardX + 650, y + 22, 125, 38, localBadge, {22, 101, 52, 255}, {255, 255, 255, 255});
-        drawBadge(cardX + 785, y + 22, 125, 38, cloudBadge, {30, 58, 138, 255}, {255, 255, 255, 255});
+        drawBadge(rx + rowW - 280, y + 24, 130, 40, localBadge, {22, 101, 52, 255}, {255, 255, 255, 255});
+        drawBadge(rx + rowW - 140, y + 24, 130, 40, cloudBadge, {30, 58, 138, 255}, {255, 255, 255, 255});
 
-        std::string subtext = "Thư mục: /Roms/" + sys.romDir + "  |  Định dạng: " + sys.extList;
-        drawText(subtext, cardX + 175, y + 50, {140, 155, 175, 255}, m_fontSmall);
+        std::string subtext = "Thu muc: /Roms/" + sys.romDir + "  |  Dinh dang: " + sys.extList;
+        drawText(subtext, rx + 154, y + 52, {140, 155, 175, 255}, m_fontSmall);
     }
 }
 
 void UIManager::renderGameListState() {
-    int listX = 30;
-    int listY = 75;
-    int listW = 540;
-    int listH = 630;
+    int listX = 0;
+    int listY = 64;
+    int listW = 590;
+    int listH = 651;
 
-    int detailX = 590;
-    int detailY = 75;
-    int detailW = 404;
-    int detailH = 630;
+    int detailX = 592;
+    int detailY = 64;
+    int detailW = 432;
+    int detailH = 651;
+
+    // Subtle 1px vertical divider between panes
+    drawRect(591, 64, 1, 651, {38, 48, 64, 255}, true);
 
     // 1. Render Left Games List
-    drawRect(listX, listY, listW, listH, {20, 25, 32, 255}, true);
-    drawBorder(listX, listY, listW, listH, {40, 50, 65, 255}, 2);
-
     int totalGames = static_cast<int>(m_cachedGames.size());
     int pageSize = 6;
-    int rowH = 88;
-    int rowW = listW - 30;
+    int rowH = 92;
+    int rowW = 560;
+    int rowX = 16;
+    int listStartY = listY + 12;
 
     if (totalGames == 0) {
         drawText(UiStrings::GAME_LIST_EMPTY, listX + listW / 2, listY + 280, {140, 150, 165, 255}, m_fontLarge, true);
@@ -1149,14 +1220,15 @@ void UIManager::renderGameListState() {
             int gameIdx = m_gameScrollOffset + i;
             const auto& game = m_cachedGames[gameIdx];
             bool selected = (gameIdx == m_selectedGameIndex);
-            int y = listY + 15 + i * (rowH + 12);
+            int y = listStartY + i * (rowH + 12);
 
-            SDL_Color bg = selected ? SDL_Color{30, 58, 95, 255} : SDL_Color{28, 34, 44, 255};
-            drawRect(listX + 15, y, rowW, rowH, bg, true);
+            SDL_Color bg = selected ? SDL_Color{30, 58, 95, 255} : SDL_Color{22, 28, 38, 255};
+            drawRoundedRect(rowX, y, rowW, rowH, 10, bg, true);
 
             if (selected) {
-                drawBorder(listX + 15, y, rowW, rowH, {0, 180, 216, 255}, 2);
-                drawRect(listX + 18, y + 4, 6, rowH - 8, {0, 180, 216, 255}, true);
+                drawRoundedBorder(rowX, y, rowW, rowH, 10, {0, 180, 216, 255}, 2);
+                // Left neon accent
+                drawRoundedRect(rowX + 5, y + 12, 5, rowH - 24, 2, {0, 180, 216, 255}, true);
             }
 
             // State Pill Badge
@@ -1165,87 +1237,87 @@ void UIManager::renderGameListState() {
             auto dlp = DownloadManager::instance().getProgress();
 
             if (game.localState == GameState::LOCAL) {
-                drawBadge(listX + 25, y + 26, 82, 36, UiStrings::BADGE_DOWNLOADED, {22, 101, 52, 255}, {255, 255, 255, 255});
+                drawBadge(rowX + 18, y + 27, 86, 38, UiStrings::BADGE_DOWNLOADED, {22, 101, 52, 255}, {255, 255, 255, 255});
             } else if (isThisDownloading) {
                 char pctBuf[16];
                 std::snprintf(pctBuf, sizeof(pctBuf), "%.0f%%", dlp.progressPct);
-                drawBadge(listX + 25, y + 26, 82, 36, std::string(pctBuf), {2, 132, 199, 255}, {255, 255, 255, 255});
+                drawBadge(rowX + 18, y + 27, 86, 38, std::string(pctBuf), {2, 132, 199, 255}, {255, 255, 255, 255});
             } else if (DownloadManager::instance().isInQueue(game.id)) {
-                // In queue — find position
                 auto q = DownloadManager::instance().getQueue();
                 int pos = 1;
                 for (const auto& qi : q) {
                     if (qi.game.id == game.id) break;
                     pos++;
                 }
-                drawBadge(listX + 25, y + 26, 82, 36, "#" + std::to_string(pos), {107, 33, 168, 255}, {255, 255, 255, 255});
+                drawBadge(rowX + 18, y + 27, 86, 38, "#" + std::to_string(pos), {107, 33, 168, 255}, {255, 255, 255, 255});
             } else if (game.localState == GameState::CLOUD) {
-                drawBadge(listX + 25, y + 26, 82, 36, "CLOUD", {30, 58, 138, 255}, {255, 255, 255, 255});
+                drawBadge(rowX + 18, y + 27, 86, 38, "CLOUD", {30, 58, 138, 255}, {255, 255, 255, 255});
             } else {
-                drawBadge(listX + 25, y + 26, 82, 36, UiStrings::BTN_SYNC, {217, 119, 6, 255}, {255, 255, 255, 255});
+                drawBadge(rowX + 18, y + 27, 86, 38, UiStrings::BTN_SYNC, {217, 119, 6, 255}, {255, 255, 255, 255});
             }
 
-            // Title truncated if too long
+            // Title allowed up to 34 chars
             std::string title = game.title;
-            if (title.length() > 26) {
-                title = title.substr(0, 23) + "...";
+            if (title.length() > 34) {
+                title = title.substr(0, 31) + "...";
             }
             SDL_Color titleCol = isThisDownloading ? SDL_Color{0, 180, 216, 255} : (selected ? SDL_Color{255, 255, 255, 255} : SDL_Color{210, 220, 230, 255});
 
             if (isThisDownloading) {
-                drawText(title, listX + 120, y + 12, titleCol, m_fontLarge);
+                drawText(title, rowX + 118, y + 14, titleCol, m_fontLarge);
 
                 char pctBuf[16];
                 std::snprintf(pctBuf, sizeof(pctBuf), "%.1f%%", dlp.progressPct);
                 std::string dlSub = FileSystemManager::instance().formatBytes(dlp.bytesDownloaded) + " / " +
                                     FileSystemManager::instance().formatBytes(dlp.totalBytes) + "  (" + pctBuf + ")";
-                drawText(dlSub, listX + 120, y + 42, {140, 205, 245, 255}, m_fontSmall);
+                drawText(dlSub, rowX + 118, y + 44, {140, 205, 245, 255}, m_fontSmall);
 
-                // Live in-row progress bar
-                int pBarX = listX + 120;
-                int pBarY = y + 68;
+                // Live in-row rounded progress bar
+                int pBarX = rowX + 118;
+                int pBarY = y + 70;
                 int pBarW = rowW - 135;
                 int pBarH = 6;
-                drawRect(pBarX, pBarY, pBarW, pBarH, {35, 45, 60, 255}, true);
+                drawRoundedRect(pBarX, pBarY, pBarW, pBarH, 3, {35, 45, 60, 255}, true);
                 float pct = std::max(0.0, std::min(100.0, dlp.progressPct));
-                drawRect(pBarX, pBarY, (int)(pBarW * (pct / 100.0)), pBarH, {34, 197, 94, 255}, true);
+                drawRoundedRect(pBarX, pBarY, (int)(pBarW * (pct / 100.0)), pBarH, 3, {34, 197, 94, 255}, true);
             } else {
-                drawText(title, listX + 120, y + 16, titleCol, m_fontLarge);
+                drawText(title, rowX + 118, y + 18, titleCol, m_fontLarge);
 
                 std::string sizeStr = FileSystemManager::instance().formatBytes(game.sizeBytes);
                 std::string sub = game.filename + "  (" + sizeStr + ")";
-                if (sub.length() > 34) {
-                    sub = sub.substr(0, 31) + "... (" + sizeStr + ")";
+                if (sub.length() > 38) {
+                    sub = sub.substr(0, 35) + "... (" + sizeStr + ")";
                 }
-                drawText(sub, listX + 120, y + 50, {140, 155, 175, 255}, m_fontSmall);
+                drawText(sub, rowX + 118, y + 52, {140, 155, 175, 255}, m_fontSmall);
             }
         }
 
         // Scrollbar
         if (totalGames > pageSize) {
-            int barX = listX + listW - 10;
-            int barTrackH = listH - 30;
-            drawRect(barX, listY + 15, 4, barTrackH, {35, 42, 54, 255}, true);
+            int barX = 582;
+            int barTrackH = listH - 24;
+            drawRoundedRect(barX, listY + 12, 4, barTrackH, 2, {35, 42, 54, 255}, true);
 
             float ratio = (float)pageSize / (float)totalGames;
             int thumbH = std::max(24, (int)(barTrackH * ratio));
             float scrollRatio = (float)m_gameScrollOffset / (float)(totalGames - pageSize);
-            int thumbY = listY + 15 + (int)((barTrackH - thumbH) * scrollRatio);
-            drawRect(barX, thumbY, 4, thumbH, {0, 180, 216, 255}, true);
+            int thumbY = listY + 12 + (int)((barTrackH - thumbH) * scrollRatio);
+            drawRoundedRect(barX, thumbY, 4, thumbH, 2, {0, 180, 216, 255}, true);
         }
     }
 
-    // 2. Render Right Details & Cover Panel
-    drawRect(detailX, detailY, detailW, detailH, {20, 25, 32, 255}, true);
-    drawBorder(detailX, detailY, detailW, detailH, {40, 50, 65, 255}, 2);
-
+    // 2. Render Right Details & Cover Panel (Borderless)
     const GameRecord* selGame = (totalGames > 0 && m_selectedGameIndex < totalGames) ? &m_cachedGames[m_selectedGameIndex] : nullptr;
 
     // Cover Art Box
-    int coverBoxW = 340;
-    int coverBoxH = 280;
+    int coverBoxW = 360;
+    int coverBoxH = 290;
     int coverBoxX = detailX + (detailW - coverBoxW) / 2;
-    int coverBoxY = detailY + 20;
+    int coverBoxY = detailY + 14;
+
+    // Rounded backdrop for cover art container
+    drawRoundedRect(coverBoxX - 4, coverBoxY - 4, coverBoxW + 8, coverBoxH + 8, 12, {16, 20, 28, 255}, true);
+    drawRoundedBorder(coverBoxX - 4, coverBoxY - 4, coverBoxW + 8, coverBoxH + 8, 12, {38, 48, 64, 255}, 1);
 
     CoverManager::instance().renderCoverBox(coverBoxX, coverBoxY, coverBoxW, coverBoxH, selGame, &m_activeSystem, m_fontMedium);
 
@@ -1254,57 +1326,57 @@ void UIManager::renderGameListState() {
         int metaY = coverBoxY + coverBoxH + 18;
 
         std::string title = selGame->title;
-        if (title.length() > 24) title = title.substr(0, 21) + "...";
-        drawText(title, detailX + 25, metaY, {255, 255, 255, 255}, m_fontLarge);
+        if (title.length() > 26) title = title.substr(0, 23) + "...";
+        drawText(title, detailX + 32, metaY, {255, 255, 255, 255}, m_fontLarge);
 
-        metaY += 38;
-        drawText(UiStrings::DETAIL_SYS_LABEL, detailX + 25, metaY, {140, 155, 175, 255}, m_fontSmall);
-        drawText(m_activeSystem.name + " (" + m_activeSystem.code + ")", detailX + 130, metaY, {0, 180, 216, 255}, m_fontSmall);
+        metaY += 36;
+        drawText(UiStrings::DETAIL_SYS_LABEL, detailX + 32, metaY, {140, 155, 175, 255}, m_fontSmall);
+        drawText(m_activeSystem.name + " (" + m_activeSystem.code + ")", detailX + 135, metaY, {0, 180, 216, 255}, m_fontSmall);
 
-        metaY += 30;
-        drawText(UiStrings::DETAIL_SIZE_LABEL, detailX + 25, metaY, {140, 155, 175, 255}, m_fontSmall);
-        drawText(FileSystemManager::instance().formatBytes(selGame->sizeBytes), detailX + 130, metaY, {255, 255, 255, 255}, m_fontSmall);
+        metaY += 28;
+        drawText(UiStrings::DETAIL_SIZE_LABEL, detailX + 32, metaY, {140, 155, 175, 255}, m_fontSmall);
+        drawText(FileSystemManager::instance().formatBytes(selGame->sizeBytes), detailX + 135, metaY, {255, 255, 255, 255}, m_fontSmall);
 
-        metaY += 30;
-        drawText(UiStrings::DETAIL_LOCATION_LABEL, detailX + 25, metaY, {140, 155, 175, 255}, m_fontSmall);
+        metaY += 28;
+        drawText(UiStrings::DETAIL_LOCATION_LABEL, detailX + 32, metaY, {140, 155, 175, 255}, m_fontSmall);
         if (selGame->localState == GameState::LOCAL) {
-            drawText("Thẻ nhớ (/Roms/" + m_activeSystem.romDir + ")", detailX + 130, metaY, {34, 197, 94, 255}, m_fontSmall);
+            drawText("The nho (/Roms/" + m_activeSystem.romDir + ")", detailX + 135, metaY, {34, 197, 94, 255}, m_fontSmall);
         } else {
-            drawText("Google Drive Cloud", detailX + 130, metaY, {0, 180, 216, 255}, m_fontSmall);
+            drawText("Google Drive Cloud", detailX + 135, metaY, {0, 180, 216, 255}, m_fontSmall);
         }
 
         // Action Status Pill & Live Progress
-        metaY += 46;
+        metaY += 42;
         if (selGame->localState == GameState::LOCAL) {
-            int halfW = (detailW - 58) / 2;
-            drawBadge(detailX + 25, metaY, halfW, 46, UiStrings::BADGE_DOWNLOADED, {22, 101, 52, 255}, {255, 255, 255, 255});
-            drawBadge(detailX + 33 + halfW, metaY, halfW, 46, UiStrings::BADGE_DELETE_BTN, {185, 28, 28, 255}, {255, 255, 255, 255});
+            int halfW = (detailW - 72) / 2;
+            drawBadge(detailX + 32, metaY, halfW, 46, UiStrings::BADGE_DOWNLOADED, {22, 101, 52, 255}, {255, 255, 255, 255});
+            drawBadge(detailX + 40 + halfW, metaY, halfW, 46, UiStrings::BADGE_DELETE_BTN, {185, 28, 28, 255}, {255, 255, 255, 255});
         } else if (DownloadManager::instance().isDownloading() &&
                    DownloadManager::instance().getProgress().gameId == selGame->id) {
             auto dlp = DownloadManager::instance().getProgress();
             char pctBuf[32];
             std::snprintf(pctBuf, sizeof(pctBuf), "%.1f%%", dlp.progressPct);
-            std::string dlInfo = "ĐANG TẢI... " + std::string(pctBuf);
-            drawBadge(detailX + 25, metaY, detailW - 50, 40, dlInfo, {2, 132, 199, 255}, {255, 255, 255, 255});
+            std::string dlInfo = "DANG TAI... " + std::string(pctBuf);
+            drawBadge(detailX + 32, metaY, detailW - 64, 40, dlInfo, {2, 132, 199, 255}, {255, 255, 255, 255});
 
-            int dBarX = detailX + 25;
+            int dBarX = detailX + 32;
             int dBarY = metaY + 46;
-            int dBarW = detailW - 50;
+            int dBarW = detailW - 64;
             int dBarH = 10;
-            drawRect(dBarX, dBarY, dBarW, dBarH, {35, 45, 60, 255}, true);
+            drawRoundedRect(dBarX, dBarY, dBarW, dBarH, 5, {35, 45, 60, 255}, true);
             float pct = std::max(0.0, std::min(100.0, dlp.progressPct));
-            drawRect(dBarX, dBarY, (int)(dBarW * (pct / 100.0)), dBarH, {34, 197, 94, 255}, true);
+            drawRoundedRect(dBarX, dBarY, (int)(dBarW * (pct / 100.0)), dBarH, 5, {34, 197, 94, 255}, true);
 
             std::string dSizeStr = FileSystemManager::instance().formatBytes(dlp.bytesDownloaded) +
                                    " / " + FileSystemManager::instance().formatBytes(dlp.totalBytes);
             drawText(dSizeStr, detailX + detailW / 2, dBarY + 16, {200, 220, 240, 255}, m_fontSmall, true);
 
-            drawBadge(detailX + 25, dBarY + 38, detailW - 50, 36, UiStrings::BADGE_CANCEL_DL_BTN, {185, 28, 28, 255}, {255, 255, 255, 255});
+            drawBadge(detailX + 32, dBarY + 38, detailW - 64, 36, UiStrings::BADGE_CANCEL_DL_BTN, {185, 28, 28, 255}, {255, 255, 255, 255});
             metaY += 56;
         } else if (DownloadManager::instance().isInQueue(selGame->id)) {
-            drawBadge(detailX + 25, metaY, detailW - 50, 46, UiStrings::BADGE_REMOVE_QUEUE_BTN, {107, 33, 168, 255}, {255, 255, 255, 255});
+            drawBadge(detailX + 32, metaY, detailW - 64, 46, UiStrings::BADGE_REMOVE_QUEUE_BTN, {107, 33, 168, 255}, {255, 255, 255, 255});
         } else {
-            drawBadge(detailX + 25, metaY, detailW - 50, 46, UiStrings::BADGE_ADD_QUEUE_BTN, {2, 132, 199, 255}, {255, 255, 255, 255});
+            drawBadge(detailX + 32, metaY, detailW - 64, 46, UiStrings::BADGE_ADD_QUEUE_BTN, {2, 132, 199, 255}, {255, 255, 255, 255});
         }
 
         // Queue info panel below action pill
@@ -1314,13 +1386,13 @@ void UIManager::renderGameListState() {
             metaY += 54;
             std::string qInfo;
             if (isCurrentlyDownloading && queueCount > 0) {
-                qInfo = "Đang tải 1 game, còn " + std::to_string(queueCount) + " game chờ.";
+                qInfo = "Dang tai 1 game, con " + std::to_string(queueCount) + " game cho.";
             } else if (isCurrentlyDownloading) {
                 qInfo = UiStrings::QUEUE_DOWNLOADING_EMPTY;
             } else {
-                qInfo = "Hàng tải: " + std::to_string(queueCount) + " game chờ.";
+                qInfo = "Hang tai: " + std::to_string(queueCount) + " game cho.";
             }
-            drawText(qInfo, detailX + 25, metaY, {168, 85, 247, 255}, m_fontSmall);
+            drawText(qInfo, detailX + 32, metaY, {168, 85, 247, 255}, m_fontSmall);
         }
     }
 
@@ -1329,21 +1401,21 @@ void UIManager::renderGameListState() {
         (!selGame || DownloadManager::instance().getProgress().gameId != selGame->id)) {
         auto activeProg = DownloadManager::instance().getProgress();
         int bY = detailY + detailH - 74;
-        drawRect(detailX + 15, bY, detailW - 30, 60, {18, 28, 44, 255}, true);
-        drawBorder(detailX + 15, bY, detailW - 30, 60, {0, 180, 216, 255}, 1);
+        drawRoundedRect(detailX + 24, bY, detailW - 48, 62, 10, {18, 28, 44, 255}, true);
+        drawRoundedBorder(detailX + 24, bY, detailW - 48, 62, 10, {0, 180, 216, 255}, 1);
 
         char pBuf[16];
         std::snprintf(pBuf, sizeof(pBuf), "%.0f%%", activeProg.progressPct);
         std::string tTrunc = activeProg.gameTitle;
         if (tTrunc.length() > 18) tTrunc = tTrunc.substr(0, 15) + "...";
-        drawText("⬇ " + tTrunc, detailX + 25, bY + 8, {0, 180, 216, 255}, m_fontSmall);
-        drawText(std::string(pBuf), detailX + detailW - 65, bY + 8, {34, 197, 94, 255}, m_fontSmall);
+        drawText("v " + tTrunc, detailX + 36, bY + 8, {0, 180, 216, 255}, m_fontSmall);
+        drawText(std::string(pBuf), detailX + detailW - 75, bY + 8, {34, 197, 94, 255}, m_fontSmall);
 
-        int aBarW = detailW - 50;
+        int aBarW = detailW - 72;
         int aBarH = 6;
-        drawRect(detailX + 25, bY + 36, aBarW, aBarH, {30, 40, 55, 255}, true);
+        drawRoundedRect(detailX + 36, bY + 38, aBarW, aBarH, 3, {30, 40, 55, 255}, true);
         float aPct = std::max(0.0, std::min(100.0, activeProg.progressPct));
-        drawRect(detailX + 25, bY + 36, (int)(aBarW * (aPct / 100.0)), aBarH, {34, 197, 94, 255}, true);
+        drawRoundedRect(detailX + 36, bY + 38, (int)(aBarW * (aPct / 100.0)), aBarH, 3, {34, 197, 94, 255}, true);
     }
 }
 
@@ -1356,25 +1428,26 @@ void UIManager::renderConfirmDeleteDialog() {
     int dlgX = (1024 - dlgW) / 2;
     int dlgY = (768 - dlgH) / 2;
 
-    drawRect(dlgX, dlgY, dlgW, dlgH, {24, 28, 38, 255}, true);
-    drawBorder(dlgX, dlgY, dlgW, dlgH, {239, 68, 68, 255}, 3);
+    drawRoundedRect(dlgX, dlgY, dlgW, dlgH, 16, {24, 28, 38, 255}, true);
+    drawRoundedBorder(dlgX, dlgY, dlgW, dlgH, 16, {239, 68, 68, 255}, 2);
 
-    // Title Banner
-    drawRect(dlgX, dlgY, dlgW, 55, {185, 28, 28, 255}, true);
+    // Title Banner with top rounded corners
+    drawRoundedRect(dlgX + 1, dlgY + 1, dlgW - 2, 54, 15, {185, 28, 28, 255}, true);
+    drawRect(dlgX + 1, dlgY + 35, dlgW - 2, 20, {185, 28, 28, 255}, true);
     drawText(UiStrings::DIALOG_DELETE_TITLE, dlgX + dlgW / 2, dlgY + 16, {255, 255, 255, 255}, m_fontLarge, true);
 
     if (m_selectedGameIndex >= 0 && m_selectedGameIndex < static_cast<int>(m_cachedGames.size())) {
         const auto& game = m_cachedGames[m_selectedGameIndex];
 
         drawText(game.title, dlgX + dlgW / 2, dlgY + 85, {255, 255, 255, 255}, m_fontMedium, true);
-        std::string sizeStr = "Tập tin: " + game.filename + " (" + FileSystemManager::instance().formatBytes(game.sizeBytes) + ")";
+        std::string sizeStr = "Tap tin: " + game.filename + " (" + FileSystemManager::instance().formatBytes(game.sizeBytes) + ")";
         drawText(sizeStr, dlgX + dlgW / 2, dlgY + 120, {0, 180, 216, 255}, m_fontSmall, true);
 
         drawText(UiStrings::DIALOG_DELETE_PROMPT, dlgX + dlgW / 2, dlgY + 165, {220, 225, 235, 255}, m_fontSmall, true);
         drawText(UiStrings::DIALOG_DELETE_SAFE_HINT, dlgX + dlgW / 2, dlgY + 195, {34, 197, 94, 255}, m_fontSmall, true);
     }
 
-    // Action buttons
+    // Action buttons (pill shaped badges)
     int btnW = 220;
     int btnH = 50;
     drawBadge(dlgX + 60, dlgY + 250, btnW, btnH, UiStrings::BTN_CONFIRM_DELETE, {185, 28, 28, 255}, {255, 255, 255, 255});
@@ -1443,62 +1516,74 @@ void UIManager::renderDisclaimerState() {
 }
 
 void UIManager::renderSettingsState() {
-    int cardX = 90;
-    int cardY = 80;
-    int cardW = 844;
-    int cardH = 610;
+    // ─── Borderless Full-Width Sub-Header ───
+    drawRect(0, 64, 1024, 48, {16, 20, 28, 255}, true);
+    drawRect(0, 111, 1024, 1, {38, 48, 64, 255}, true);
+    drawText(UiStrings::HEADER_SETTINGS, 36, 78, {0, 180, 216, 255}, m_fontLarge);
 
-    drawRect(cardX, cardY, cardW, cardH, {25, 30, 38, 255}, true);
-    drawBorder(cardX, cardY, cardW, cardH, {0, 180, 216, 255}, 2);
+    int rowY = 126;
+    int stepY = 56;
+    int cardX = 24;
+    int cardW = 976;
+    int rowH = 48;
 
-    drawText(UiStrings::HEADER_SETTINGS, 512, cardY + 22, {0, 180, 216, 255}, m_fontTitle ? m_fontTitle : m_fontLarge, true);
-
-    int rowY = cardY + 80;
-    int stepY = 52;
+    auto drawSettingRowBg = [&](int y, bool alt) {
+        if (alt) {
+            drawRoundedRect(cardX, y - 4, cardW, rowH, 8, {22, 28, 38, 255}, true);
+        }
+    };
 
     // Google Drive Account Section
-    drawText(UiStrings::SETTING_DRIVE_STATUS, cardX + 40, rowY, {160, 175, 190, 255}, m_fontMedium);
+    drawSettingRowBg(rowY, false);
+    drawText(UiStrings::SETTING_DRIVE_STATUS, cardX + 24, rowY + 6, {160, 175, 190, 255}, m_fontMedium);
     if (AuthManager::instance().isLinked()) {
         std::string email = AuthManager::instance().getUserEmail();
-        drawText(UiStrings::SETTING_CONNECTED, cardX + 320, rowY, {34, 197, 94, 255}, m_fontMedium);
-        drawBadge(cardX + 610, rowY - 6, 190, 38, UiStrings::SETTING_LOGOUT_BTN, {185, 28, 28, 255}, {255, 255, 255, 255});
+        drawText(UiStrings::SETTING_CONNECTED, cardX + 340, rowY + 6, {34, 197, 94, 255}, m_fontMedium);
+        drawBadge(cardX + cardW - 210, rowY, 190, 38, UiStrings::SETTING_LOGOUT_BTN, {185, 28, 28, 255}, {255, 255, 255, 255});
     } else {
-        drawText(UiStrings::SETTING_DISCONNECTED, cardX + 320, rowY, {239, 68, 68, 255}, m_fontMedium);
-        drawBadge(cardX + 510, rowY - 6, 290, 38, UiStrings::SETTING_CONNECT_WEB_BTN, {30, 58, 138, 255}, {255, 255, 255, 255});
+        drawText(UiStrings::SETTING_DISCONNECTED, cardX + 340, rowY + 6, {239, 68, 68, 255}, m_fontMedium);
+        drawBadge(cardX + cardW - 310, rowY, 290, 38, UiStrings::SETTING_CONNECT_WEB_BTN, {30, 58, 138, 255}, {255, 255, 255, 255});
     }
 
     rowY += stepY;
-    drawText(UiStrings::SETTING_DRIVE_FOLDER, cardX + 40, rowY, {160, 175, 190, 255}, m_fontMedium);
+    drawSettingRowBg(rowY, true);
+    drawText(UiStrings::SETTING_DRIVE_FOLDER, cardX + 24, rowY + 6, {160, 175, 190, 255}, m_fontMedium);
     std::string folderId = DatabaseManager::instance().getSetting("drive_folder_id", UiStrings::SETTING_NOT_CONFIGURED);
-    drawText(folderId, cardX + 320, rowY, {0, 180, 216, 255}, m_fontSmall);
+    drawText(folderId, cardX + 340, rowY + 10, {0, 180, 216, 255}, m_fontSmall);
 
     rowY += stepY;
-    drawText(UiStrings::SETTING_ROM_SD_FOLDER, cardX + 40, rowY, {160, 175, 190, 255}, m_fontMedium);
-    drawText(AppConfig::instance().getRomsDir(), cardX + 320, rowY, {255, 255, 255, 255}, m_fontSmall);
+    drawSettingRowBg(rowY, false);
+    drawText(UiStrings::SETTING_ROM_SD_FOLDER, cardX + 24, rowY + 6, {160, 175, 190, 255}, m_fontMedium);
+    drawText(AppConfig::instance().getRomsDir(), cardX + 340, rowY + 10, {255, 255, 255, 255}, m_fontSmall);
 
     rowY += stepY;
-    drawText(UiStrings::SETTING_LAST_SYNC, cardX + 40, rowY, {160, 175, 190, 255}, m_fontMedium);
+    drawSettingRowBg(rowY, true);
+    drawText(UiStrings::SETTING_LAST_SYNC, cardX + 24, rowY + 6, {160, 175, 190, 255}, m_fontMedium);
     std::string lastSync = DatabaseManager::instance().getSetting("last_cloud_sync_time", UiStrings::SETTING_NEVER_SYNCED);
-    drawText(lastSync, cardX + 320, rowY, {255, 255, 255, 255}, m_fontSmall);
+    drawText(lastSync, cardX + 340, rowY + 10, {255, 255, 255, 255}, m_fontSmall);
 
     rowY += stepY;
-    drawText(UiStrings::SETTING_SQLITE_DB, cardX + 40, rowY, {160, 175, 190, 255}, m_fontMedium);
-    drawText(AppConfig::instance().getDatabasePath(), cardX + 320, rowY, {34, 197, 94, 255}, m_fontSmall);
+    drawSettingRowBg(rowY, false);
+    drawText(UiStrings::SETTING_SQLITE_DB, cardX + 24, rowY + 6, {160, 175, 190, 255}, m_fontMedium);
+    drawText(AppConfig::instance().getDatabasePath(), cardX + 340, rowY + 10, {34, 197, 94, 255}, m_fontSmall);
 
     rowY += stepY;
-    drawText(UiStrings::SETTING_SCAN_MODE, cardX + 40, rowY, {160, 175, 190, 255}, m_fontMedium);
-    drawText(UiStrings::SETTING_SCAN_AUTO, cardX + 320, rowY, {34, 197, 94, 255}, m_fontSmall);
+    drawSettingRowBg(rowY, true);
+    drawText(UiStrings::SETTING_SCAN_MODE, cardX + 24, rowY + 6, {160, 175, 190, 255}, m_fontMedium);
+    drawText(UiStrings::SETTING_SCAN_AUTO, cardX + 340, rowY + 10, {34, 197, 94, 255}, m_fontSmall);
 
     rowY += stepY;
-    drawText(UiStrings::SETTING_WEB_PORTAL, cardX + 40, rowY, {160, 175, 190, 255}, m_fontMedium);
+    drawSettingRowBg(rowY, false);
+    drawText(UiStrings::SETTING_WEB_PORTAL, cardX + 24, rowY + 6, {160, 175, 190, 255}, m_fontMedium);
     std::string ip = PlatformInfo::instance().getIpAddress("wlan0");
-    drawText("http://" + (ip.empty() ? "192.168.1.164" : ip) + ":8080", cardX + 320, rowY, {0, 180, 216, 255}, m_fontMedium);
+    drawText("http://" + (ip.empty() ? "192.168.1.164" : ip) + ":8080", cardX + 340, rowY + 6, {0, 180, 216, 255}, m_fontMedium);
 
     rowY += stepY;
-    drawText(UiStrings::SETTING_COVER_CACHE, cardX + 40, rowY, {160, 175, 190, 255}, m_fontMedium);
-    drawText(UiStrings::SETTING_COVER_CACHE_VAL, cardX + 320, rowY, {34, 197, 94, 255}, m_fontSmall);
+    drawSettingRowBg(rowY, true);
+    drawText(UiStrings::SETTING_COVER_CACHE, cardX + 24, rowY + 6, {160, 175, 190, 255}, m_fontMedium);
+    drawText(UiStrings::SETTING_COVER_CACHE_VAL, cardX + 340, rowY + 10, {34, 197, 94, 255}, m_fontSmall);
 
-    drawText(UiStrings::BTN_BACK_MAIN_MENU_HINT, 512, cardY + 560, {150, 165, 180, 255}, m_fontMedium, true);
+    drawText(UiStrings::BTN_BACK_MAIN_MENU_HINT, 512, 650, {150, 165, 180, 255}, m_fontMedium, true);
 }
 
 void UIManager::renderCloudLoginState() {
@@ -1697,15 +1782,10 @@ void UIManager::renderDownloadOverlay() {
 }
 
 void UIManager::renderDiagnosticsState() {
-    int cardX = 72;
-    int cardY = 85;
-    int cardW = 880;
-    int cardH = 605;
-
-    drawRect(cardX, cardY, cardW, cardH, {22, 27, 34, 255}, true);
-    drawBorder(cardX, cardY, cardW, cardH, {0, 180, 216, 255}, 2);
-
-    drawText(UiStrings::HEADER_DIAG, 512, cardY + 22, {0, 180, 216, 255}, m_fontLarge, true);
+    // ─── Borderless Full-Width Sub-Header ───
+    drawRect(0, 64, 1024, 48, {16, 20, 28, 255}, true);
+    drawRect(0, 111, 1024, 1, {38, 48, 64, 255}, true);
+    drawText(UiStrings::HEADER_DIAG, 36, 78, {0, 180, 216, 255}, m_fontLarge);
 
     auto diag = PlatformInfo::instance().getDiagnostics();
 
@@ -1719,55 +1799,55 @@ void UIManager::renderDiagnosticsState() {
         {UiStrings::DIAG_HW_DEVICE, diag.socName, {255, 255, 255, 255}},
         {UiStrings::DIAG_CPU_ARCH, diag.cpuArch + " (64-bit Little Endian)", {255, 255, 255, 255}},
         {UiStrings::DIAG_OS_KERNEL, diag.osName + " " + diag.kernelRelease, {255, 255, 255, 255}},
-        {UiStrings::DIAG_RAM, "Còn trống " + diag.freeRam + " / Tổng " + diag.totalRam, {34, 197, 94, 255}},
+        {UiStrings::DIAG_RAM, "Con trong " + diag.freeRam + " / Tong " + diag.totalRam, {34, 197, 94, 255}},
         {UiStrings::DIAG_DISPLAY, diag.displayResolution, {0, 180, 216, 255}},
-        {UiStrings::DIAG_SDL2_GFX, "v" + diag.sdlVersion + " (Tăng tốc phần cứng)", {255, 255, 255, 255}},
-        {UiStrings::DIAG_SQLITE_DB, "v" + diag.sqliteVersion + " (Phiên bản cấu trúc v" + std::to_string(CURRENT_SCHEMA_VERSION) + ")", {34, 197, 94, 255}},
-        {UiStrings::DIAG_SD_STORAGE, "Còn trống " + diag.sdFreeSpace + " / Tổng " + diag.sdTotalSpace, {34, 197, 94, 255}},
+        {UiStrings::DIAG_SDL2_GFX, "v" + diag.sdlVersion + " (Tang toc phan cung)", {255, 255, 255, 255}},
+        {UiStrings::DIAG_SQLITE_DB, "v" + diag.sqliteVersion + " (Phien ban cau truc v" + std::to_string(CURRENT_SCHEMA_VERSION) + ")", {34, 197, 94, 255}},
+        {UiStrings::DIAG_SD_STORAGE, "Con trong " + diag.sdFreeSpace + " / Tong " + diag.sdTotalSpace, {34, 197, 94, 255}},
         {UiStrings::DIAG_GAMEPAD, diag.controllerName, {255, 255, 255, 255}},
         {UiStrings::DIAG_WIFI, diag.networkStatus + " (IP: " + diag.ipAddress + ")", diag.ipAddress != "N/A" ? SDL_Color{34, 197, 94, 255} : SDL_Color{239, 68, 68, 255}},
         {UiStrings::DIAG_SAFETY, UiStrings::DIAG_SAFETY_VAL, {34, 197, 94, 255}}
     };
 
-    int startY = cardY + 70;
-    int rowH = 40;
+    int startY = 124;
+    int rowH = 44;
+    int cardX = 24;
+    int cardW = 976;
 
     for (size_t i = 0; i < rows.size(); ++i) {
         int y = startY + static_cast<int>(i) * rowH;
         if (i % 2 == 1) {
-            drawRect(cardX + 20, y - 4, cardW - 40, rowH, {28, 34, 44, 255}, true);
+            drawRoundedRect(cardX, y - 4, cardW, rowH, 8, {22, 28, 38, 255}, true);
         }
-        drawText(rows[i].label, cardX + 35, y, {150, 165, 180, 255}, m_fontSmall);
-        drawText(rows[i].value, cardX + 270, y, rows[i].valColor, m_fontSmall);
+        drawText(rows[i].label, cardX + 24, y, {150, 165, 180, 255}, m_fontSmall);
+        drawText(rows[i].value, cardX + 280, y, rows[i].valColor, m_fontSmall);
     }
 
-    drawText(UiStrings::BTN_BACK_MAIN_MENU_HINT, 512, cardY + 560, {130, 140, 155, 255}, m_fontSmall, true);
+    drawText(UiStrings::BTN_BACK_MAIN_MENU_HINT, 512, 650, {130, 140, 155, 255}, m_fontSmall, true);
 }
 
 void UIManager::renderOTAUpdateState() {
-    int cardX = 72;
-    int cardY = 85;
-    int cardW = 880;
-    int cardH = 605;
-
-    drawRect(cardX, cardY, cardW, cardH, {22, 27, 34, 255}, true);
-    drawBorder(cardX, cardY, cardW, cardH, {0, 180, 216, 255}, 2);
-
-    drawText(UiStrings::HEADER_OTA, 512, cardY + 22, {0, 180, 216, 255}, m_fontLarge, true);
+    // ─── Borderless Full-Width Sub-Header ───
+    drawRect(0, 64, 1024, 48, {16, 20, 28, 255}, true);
+    drawRect(0, 111, 1024, 1, {38, 48, 64, 255}, true);
+    drawText(UiStrings::HEADER_OTA, 36, 78, {0, 180, 216, 255}, m_fontLarge);
 
     auto prog = UpdateManager::instance().getProgress();
     auto info = UpdateManager::instance().getLatestInfo();
 
-    std::string currentVer = "Phiên bản hiện tại trên máy: v" + UpdateManager::instance().getCurrentVersion();
-    drawText(currentVer, cardX + 45, cardY + 70, {210, 220, 235, 255}, m_fontMedium);
+    int cardX = 24;
+    int cardW = 976;
 
-    std::string repoSource = "Nguồn phát hành: GitHub @" + std::string(GITHUB_REPO);
-    drawText(repoSource, cardX + 45, cardY + 105, {130, 145, 165, 255}, m_fontSmall);
+    std::string currentVer = "Phien ban hien tai tren may: v" + UpdateManager::instance().getCurrentVersion();
+    drawText(currentVer, cardX + 20, 126, {210, 220, 235, 255}, m_fontMedium);
 
-    int contentBoxY = cardY + 145;
-    int contentBoxH = 345;
-    drawRect(cardX + 40, contentBoxY, cardW - 80, contentBoxH, {16, 20, 26, 255}, true);
-    drawBorder(cardX + 40, contentBoxY, cardW - 80, contentBoxH, {40, 50, 68, 255}, 1);
+    std::string repoSource = "Nguon phat hanh: GitHub @" + std::string(GITHUB_REPO);
+    drawText(repoSource, cardX + 20, 156, {130, 145, 165, 255}, m_fontSmall);
+
+    int contentBoxY = 190;
+    int contentBoxH = 360;
+    drawRoundedRect(cardX, contentBoxY, cardW, contentBoxH, 14, {18, 24, 34, 255}, true);
+    drawRoundedBorder(cardX, contentBoxY, cardW, contentBoxH, 14, {38, 48, 64, 255}, 1);
 
     switch (prog.state) {
         case UpdateState::IDLE:
@@ -1785,29 +1865,29 @@ void UIManager::renderOTAUpdateState() {
             break;
         }
         case UpdateState::UPDATE_AVAILABLE: {
-            drawBadge(392, contentBoxY + 25, 240, 36, UiStrings::OTA_STATUS_NEW_UPDATE, {180, 83, 9, 255}, {255, 255, 255, 255});
-            std::string newVerTxt = "Phiên bản mới: v" + info.remoteVersion + (info.releaseDate.empty() ? "" : " (" + info.releaseDate + ")");
-            drawText(newVerTxt, 512, contentBoxY + 80, {0, 180, 216, 255}, m_fontLarge, true);
+            drawBadge(392, contentBoxY + 30, 240, 36, UiStrings::OTA_STATUS_NEW_UPDATE, {180, 83, 9, 255}, {255, 255, 255, 255});
+            std::string newVerTxt = "Phien ban moi: v" + info.remoteVersion + (info.releaseDate.empty() ? "" : " (" + info.releaseDate + ")");
+            drawText(newVerTxt, 512, contentBoxY + 85, {0, 180, 216, 255}, m_fontLarge, true);
 
             if (!info.changelog.empty()) {
-                drawText(UiStrings::OTA_CHANGELOG_TITLE, cardX + 70, contentBoxY + 125, {255, 255, 255, 255}, m_fontSmall);
-                drawText(info.changelog, cardX + 70, contentBoxY + 155, {170, 180, 195, 255}, m_fontSmall);
+                drawText(UiStrings::OTA_CHANGELOG_TITLE, cardX + 40, contentBoxY + 130, {255, 255, 255, 255}, m_fontSmall);
+                drawText(info.changelog, cardX + 40, contentBoxY + 160, {170, 180, 195, 255}, m_fontSmall);
             }
 
-            drawBadge(337, contentBoxY + 245, 350, 52, UiStrings::OTA_BTN_INSTALL_NOW, {34, 197, 94, 255}, {0, 0, 0, 255});
+            drawBadge(337, contentBoxY + 260, 350, 52, UiStrings::OTA_BTN_INSTALL_NOW, {34, 197, 94, 255}, {0, 0, 0, 255});
             break;
         }
         case UpdateState::DOWNLOADING:
         case UpdateState::VERIFYING: {
             drawText(UiStrings::OTA_DOWNLOADING_TITLE, 512, contentBoxY + 50, {0, 180, 216, 255}, m_fontLarge, true);
 
-            int barW = 560;
+            int barW = 580;
             int barH = 22;
             int barX = 512 - barW / 2;
             int barY = contentBoxY + 115;
-            drawRect(barX, barY, barW, barH, {35, 42, 54, 255}, true);
+            drawRoundedRect(barX, barY, barW, barH, 10, {35, 42, 54, 255}, true);
             float pct = std::max(0.0, std::min(100.0, prog.progressPct));
-            drawRect(barX, barY, (int)(barW * (pct / 100.0)), barH, {34, 197, 94, 255}, true);
+            drawRoundedRect(barX, barY, (int)(barW * (pct / 100.0)), barH, 10, {34, 197, 94, 255}, true);
 
             char pctBuf[32];
             std::snprintf(pctBuf, sizeof(pctBuf), "%.1f%%", pct);
@@ -1819,7 +1899,7 @@ void UIManager::renderOTAUpdateState() {
             if (prog.state == UpdateState::VERIFYING) {
                 drawText(UiStrings::OTA_VERIFYING_FILE, 512, contentBoxY + 190, {245, 158, 11, 255}, m_fontSmall, true);
             }
-            drawBadge(422, contentBoxY + 255, 180, 44, UiStrings::OTA_BTN_CANCEL_DOWNLOAD, {55, 65, 81, 255}, {255, 255, 255, 255});
+            drawBadge(422, contentBoxY + 265, 180, 44, UiStrings::OTA_BTN_CANCEL_DOWNLOAD, {55, 65, 81, 255}, {255, 255, 255, 255});
             break;
         }
         case UpdateState::COMPLETED: {
@@ -1827,7 +1907,7 @@ void UIManager::renderOTAUpdateState() {
             drawText(UiStrings::OTA_MSG_COMPLETED, 512, contentBoxY + 105, {34, 197, 94, 255}, m_fontLarge, true);
             drawText(UiStrings::OTA_MSG_RESTART_HINT, 512, contentBoxY + 150, {255, 255, 255, 255}, m_fontSmall, true);
 
-            drawBadge(327, contentBoxY + 235, 370, 52, UiStrings::OTA_BTN_RESTART_NOW, {34, 197, 94, 255}, {0, 0, 0, 255});
+            drawBadge(327, contentBoxY + 245, 370, 52, UiStrings::OTA_BTN_RESTART_NOW, {34, 197, 94, 255}, {0, 0, 0, 255});
             break;
         }
         case UpdateState::FAILED: {
@@ -1836,12 +1916,12 @@ void UIManager::renderOTAUpdateState() {
             std::string err = prog.errorMessage.empty() ? UiStrings::OTA_ERR_NETWORK : prog.errorMessage;
             drawText(err, 512, contentBoxY + 150, {245, 158, 11, 255}, m_fontSmall, true);
 
-            drawBadge(362, contentBoxY + 235, 300, 48, UiStrings::OTA_BTNS_RETRY_BACK, {35, 45, 60, 255}, {255, 255, 255, 255});
+            drawBadge(362, contentBoxY + 245, 300, 48, UiStrings::OTA_BTNS_RETRY_BACK, {35, 45, 60, 255}, {255, 255, 255, 255});
             break;
         }
     }
 
-    drawText(UiStrings::BTN_BACK_MAIN_MENU_HINT, 512, cardY + 560, {130, 140, 155, 255}, m_fontSmall, true);
+    drawText(UiStrings::BTN_BACK_MAIN_MENU_HINT, 512, 650, {130, 140, 155, 255}, m_fontSmall, true);
 }
 
 void UIManager::render() {

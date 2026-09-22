@@ -1,6 +1,6 @@
 {
-  "version": "1.0.9",
+  "version": "1.1.0",
   "release_date": "2026-09-22",
   "binary_url": "https://raw.githubusercontent.com/bun2it/RomCloud/main/bin/RomCloud",
-  "changelog": "v1.0.9: Tinh chỉnh câu chữ hiển thị trên máy TrimUI ngắn gọn, tối ưu nhãn nút bấm và trạng thái tải game dễ nhìn hơn."
+  "changelog": "v1.1.0: Giao diện tràn viền (Borderless) hiện đại, tận dụng 100% không gian hiển thị trên màn hình TrimUI; thiết kế viền bo tròn mềm mại cho các thẻ danh mục, nút bấm và huy hiệu trạng thái."
 }
