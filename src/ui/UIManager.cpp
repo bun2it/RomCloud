@@ -107,10 +107,10 @@ void UIManager::refreshGames() {
 
 void UIManager::triggerManualSync() {
     if (DriveSyncEngine::instance().isSyncing()) {
-        showToast("Đang đồng bộ dữ liệu với Google Drive...", {245, 158, 11, 255});
+        showToast(UiStrings::TOAST_SYNCING_DRIVE, {245, 158, 11, 255});
         return;
     }
-    showToast("Đang quét thẻ nhớ...", {0, 180, 216, 255}, 1500);
+    showToast(UiStrings::TOAST_SCANNING_SD, {0, 180, 216, 255}, 1500);
     RomIndexer::instance().scanAllSystems(AppConfig::instance().getRomsDir());
     refreshSystems();
     refreshGames();
@@ -118,7 +118,7 @@ void UIManager::triggerManualSync() {
     if (AuthManager::instance().isLinked()) {
         DriveSyncEngine::instance().startSync();
     } else {
-        showToast("Đã quét xong thẻ nhớ (Chưa liên kết Drive).", {34, 197, 94, 255}, 3000);
+        showToast(UiStrings::TOAST_SD_SCANNED_NO_DRIVE, {34, 197, 94, 255}, 3000);
     }
 }
 
@@ -136,7 +136,7 @@ void UIManager::update() {
         // Auto-start next item in queue
         DownloadManager::instance().processNextInQueue();
     } else if (dlProg.state == DownloadState::FAILED) {
-        std::string err = dlProg.errorMessage.empty() ? "Lỗi không xác định." : dlProg.errorMessage;
+        std::string err = dlProg.errorMessage.empty() ? UiStrings::TOAST_UNKNOWN_ERROR : dlProg.errorMessage;
         DownloadManager::instance().resetProgress();
         refreshSystems();
         refreshGames();
@@ -149,7 +149,7 @@ void UIManager::update() {
     if (DriveSyncEngine::instance().isSyncing()) {
         if (input.isButtonJustPressed(Button::B)) {
             DriveSyncEngine::instance().cancelSync();
-            showToast("Đã hủy đồng bộ Cloud.", {245, 158, 11, 255});
+            showToast(UiStrings::TOAST_SYNC_CANCELLED, {245, 158, 11, 255});
         }
         return;
     }
@@ -166,7 +166,7 @@ void UIManager::update() {
     static AuthState lastAuthState = AuthManager::instance().getState();
     AuthState curAuthState = AuthManager::instance().getState();
     if (curAuthState == AuthState::LINKED && lastAuthState != AuthState::LINKED) {
-        showToast("Đăng nhập Google thành công! Bấm [Y] để đồng bộ.", {34, 197, 94, 255}, 4000);
+        showToast(UiStrings::TOAST_GOOGLE_LOGIN_SUCCESS, {34, 197, 94, 255}, 4000);
         refreshSystems();
     }
     lastAuthState = curAuthState;
@@ -257,7 +257,7 @@ void UIManager::update() {
                 } else if (input.isButtonJustPressed(Button::A)) {
                     const auto& g = m_cachedGames[m_selectedGameIndex];
                     if (g.localState == GameState::LOCAL) {
-                        showToast("Game đã có trên thẻ nhớ. Nhấn [X] để XÓA ROM khỏi thẻ.", {34, 197, 94, 255}, 3000);
+                        showToast(UiStrings::TOAST_GAME_EXISTS_DELETE, {34, 197, 94, 255}, 3000);
                     } else if (DownloadManager::instance().isInQueue(g.id)) {
                         showToast("\"" + g.title + "\" đã có trong danh sách tải.", {245, 158, 11, 255});
                     } else {
@@ -272,7 +272,7 @@ void UIManager::update() {
                                 refreshGames();
                             }
                         } else {
-                            showToast("Kết nối Google Drive trước!", {245, 158, 11, 255});
+                            showToast(UiStrings::TOAST_CONNECT_DRIVE_FIRST, {245, 158, 11, 255});
                         }
                     }
                 } else if (input.isButtonJustPressed(Button::X)) {
@@ -289,7 +289,7 @@ void UIManager::update() {
                     } else if (g.localState == GameState::LOCAL) {
                         setState(UIState::CONFIRM_DELETE);
                     } else {
-                        showToast("Game này chưa tải về thẻ nhớ (chỉ có trên Drive).", {245, 158, 11, 255});
+                        showToast(UiStrings::TOAST_GAME_ONLY_ON_DRIVE, {245, 158, 11, 255});
                     }
                 } else if (input.isButtonJustPressed(Button::Y)) {
                     // Quick Alphabet Jump across large game library
@@ -326,13 +326,13 @@ void UIManager::update() {
             if (input.isButtonJustPressed(Button::SELECT)) {
                 if (m_filterMode == GameFilterMode::ALL) {
                     m_filterMode = GameFilterMode::LOCAL_ONLY;
-                    showToast("Bộ lọc: CHỈ GAME TRÊN THẺ NHỚ", {34, 197, 94, 255});
+                    showToast(UiStrings::FILTER_LABEL_LOCAL, {34, 197, 94, 255});
                 } else if (m_filterMode == GameFilterMode::LOCAL_ONLY) {
                     m_filterMode = GameFilterMode::CLOUD_ONLY;
-                    showToast("Bộ lọc: CHỈ GAME TRÊN CLOUD", {0, 180, 216, 255});
+                    showToast(UiStrings::FILTER_LABEL_CLOUD, {0, 180, 216, 255});
                 } else {
                     m_filterMode = GameFilterMode::ALL;
-                    showToast("Bộ lọc: TẤT CẢ GAME", {168, 85, 247, 255});
+                    showToast(UiStrings::FILTER_LABEL_ALL, {168, 85, 247, 255});
                 }
                 m_selectedGameIndex = 0;
                 m_gameScrollOffset = 0;
@@ -472,9 +472,9 @@ void UIManager::update() {
                     if (m_searchSelectedIndex >= 0 && m_searchSelectedIndex < numResults) {
                         const auto& g = m_searchResults[m_searchSelectedIndex];
                         if (g.localState == GameState::LOCAL) {
-                            showToast("Game đã có trên thẻ nhớ. Nhấn [X] để XÓA.", {34, 197, 94, 255}, 2500);
+                            showToast(UiStrings::TOAST_GAME_EXISTS_DELETE, {34, 197, 94, 255}, 2500);
                         } else if (!AuthManager::instance().isLinked()) {
-                            showToast("Kết nối Google Drive trước!", {245, 158, 11, 255});
+                            showToast(UiStrings::TOAST_CONNECT_DRIVE_FIRST, {245, 158, 11, 255});
                         } else {
                             // Find system for this game
                             SystemRecord sys;
@@ -516,7 +516,7 @@ void UIManager::update() {
                                 setState(UIState::CONFIRM_DELETE);
                             }
                         } else {
-                            showToast("Game này chưa tải về thẻ nhớ.", {245, 158, 11, 255});
+                            showToast(UiStrings::TOAST_GAME_ONLY_ON_DRIVE, {245, 158, 11, 255});
                         }
                     }
                 }
@@ -543,7 +543,7 @@ void UIManager::update() {
                     AuthManager::instance().logout();
                     refreshSystems();
                     refreshGames();
-                    showToast("Đã đăng xuất khỏi Google Drive.", {245, 158, 11, 255});
+                    showToast(UiStrings::TOAST_LOGOUT_SUCCESS, {245, 158, 11, 255});
                 }
             } else if (input.isButtonJustPressed(Button::B)) {
                 setState(UIState::MENU);
@@ -599,7 +599,7 @@ void UIManager::update() {
             } else if (prog.state == UpdateState::DOWNLOADING || prog.state == UpdateState::VERIFYING) {
                 if (input.isButtonJustPressed(Button::B)) {
                     UpdateManager::instance().cancelUpdate();
-                    showToast("Đã hủy cập nhật phần mềm.", {245, 158, 11, 255});
+                    showToast(UiStrings::TOAST_OTA_CANCELLED, {245, 158, 11, 255});
                 }
             } else if (prog.state == UpdateState::COMPLETED) {
                 if (input.isButtonJustPressed(Button::A)) {
@@ -1067,7 +1067,7 @@ void UIManager::renderGameListState() {
             auto dlp = DownloadManager::instance().getProgress();
 
             if (game.localState == GameState::LOCAL) {
-                drawBadge(listX + 25, y + 26, 82, 36, "ĐÃ TẢI", {22, 101, 52, 255}, {255, 255, 255, 255});
+                drawBadge(listX + 25, y + 26, 82, 36, UiStrings::BADGE_DOWNLOADED, {22, 101, 52, 255}, {255, 255, 255, 255});
             } else if (isThisDownloading) {
                 char pctBuf[16];
                 std::snprintf(pctBuf, sizeof(pctBuf), "%.0f%%", dlp.progressPct);
@@ -1084,7 +1084,7 @@ void UIManager::renderGameListState() {
             } else if (game.localState == GameState::CLOUD) {
                 drawBadge(listX + 25, y + 26, 82, 36, "CLOUD", {30, 58, 138, 255}, {255, 255, 255, 255});
             } else {
-                drawBadge(listX + 25, y + 26, 82, 36, "ĐỒNG BỘ", {217, 119, 6, 255}, {255, 255, 255, 255});
+                drawBadge(listX + 25, y + 26, 82, 36, UiStrings::BTN_SYNC, {217, 119, 6, 255}, {255, 255, 255, 255});
             }
 
             // Title truncated if too long
@@ -1160,15 +1160,15 @@ void UIManager::renderGameListState() {
         drawText(title, detailX + 25, metaY, {255, 255, 255, 255}, m_fontLarge);
 
         metaY += 38;
-        drawText("Hệ máy:", detailX + 25, metaY, {140, 155, 175, 255}, m_fontSmall);
+        drawText(UiStrings::DETAIL_SYS_LABEL, detailX + 25, metaY, {140, 155, 175, 255}, m_fontSmall);
         drawText(m_activeSystem.name + " (" + m_activeSystem.code + ")", detailX + 130, metaY, {0, 180, 216, 255}, m_fontSmall);
 
         metaY += 30;
-        drawText("Dung lượng:", detailX + 25, metaY, {140, 155, 175, 255}, m_fontSmall);
+        drawText(UiStrings::DETAIL_SIZE_LABEL, detailX + 25, metaY, {140, 155, 175, 255}, m_fontSmall);
         drawText(FileSystemManager::instance().formatBytes(selGame->sizeBytes), detailX + 130, metaY, {255, 255, 255, 255}, m_fontSmall);
 
         metaY += 30;
-        drawText("Vị trí lưu:", detailX + 25, metaY, {140, 155, 175, 255}, m_fontSmall);
+        drawText(UiStrings::DETAIL_LOCATION_LABEL, detailX + 25, metaY, {140, 155, 175, 255}, m_fontSmall);
         if (selGame->localState == GameState::LOCAL) {
             drawText("Thẻ nhớ (/Roms/" + m_activeSystem.romDir + ")", detailX + 130, metaY, {34, 197, 94, 255}, m_fontSmall);
         } else {
