@@ -42,6 +42,11 @@ public:
     void linkPublicFolder(const std::string& folderId, const std::string& folderUrl);
     bool exchangeAuthCode(const std::string& code, const std::string& redirectUri);
 
+    // Personal token and upload permission check
+    bool canUpload() const;
+    bool isPublicOnly() const;
+    void setPersonalTokens(const std::string& accessToken, const std::string& refreshToken = "", const std::string& userEmail = "");
+
     // Get current device flow prompt data
     DeviceCodeResponse getDeviceCodeInfo() const;
 

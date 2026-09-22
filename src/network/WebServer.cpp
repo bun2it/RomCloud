@@ -987,13 +987,26 @@ std::string WebServer::buildHtmlResponse() {
           </div>
 
           <form id="form-connect-drive" onsubmit="handleConnectSubmit(event)" autocomplete="off" style="margin-top: 18px; border-top: 1px solid var(--border); padding-top: 14px;">
-            <label style="font-size: 12px; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 6px;">URL Thư mục Google Drive Master:</label>
+            <label style="font-size: 12px; font-weight: 600; color: var(--accent); display: block; margin-bottom: 4px;">📥 1. Kho ROM Tải về (Link Google Drive Công khai):</label>
+            <p style="font-size: 11px; color: var(--text-muted); margin-bottom: 8px;">Dán link thư mục Google Drive chứa game để duyệt và tải ROM về máy TrimUI (hoàn toàn miễn phí, không cần đăng nhập).</p>
             <div style="display: flex; gap: 8px; flex-wrap: wrap;">
               <input type="text" id="input-drive-url" name="drive_url" value=")HTML" + savedDriveUrl + R"HTML(" placeholder="https://drive.google.com/drive/folders/... (Dán link vào đây)" autocomplete="off" style="flex: 1; min-width: 220px; padding: 8px 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: #fff; font-size: 12px;" required>
               <button type="submit" class="btn btn-primary">🔗 Kết nối &amp; Quét ngay</button>
               <button type="button" class="btn btn-secondary" onclick="clearDriveInput()">✕ Xóa trắng</button>
             </div>
           </form>
+
+          <div style="margin-top: 20px; border-top: 1px solid var(--border); padding-top: 16px;">
+            <label style="font-size: 12px; font-weight: 600; color: var(--purple); display: block; margin-bottom: 4px;">📤 2. Nơi Sao lưu Cá nhân (Upload / Backup lên Google Drive):</label>
+            <p style="font-size: 11px; color: var(--text-muted); margin-bottom: 8px;">Thư mục công cộng chỉ cho phép tải về. Để sao lưu ROM từ thẻ nhớ lên Drive của riêng bạn, hãy dán Google Access Token hoặc Refresh Token vào đây:</p>
+            <div id="backup-perm-status" style="font-size: 12px; margin-bottom: 8px; color: var(--text-muted);">
+              Trạng thái quyền sao lưu: <b id="backup-perm-badge" style="color:var(--yellow);">Đang kiểm tra...</b>
+            </div>
+            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+              <input type="text" id="input-personal-token" placeholder="Dán Google OAuth Access Token hoặc Refresh Token vào đây" autocomplete="off" style="flex: 1; min-width: 220px; padding: 8px 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: #fff; font-size: 12px;">
+              <button type="button" class="btn btn-primary" onclick="savePersonalToken()" style="background: var(--purple);">💾 Kích hoạt Sao lưu</button>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -1491,6 +1504,16 @@ std::string WebServer::buildHtmlResponse() {
             sInput.disabled = false;
             sInput.placeholder = '🔍 Nhập tên game hoặc tên file ROM để tìm kiếm ngay...';
           }
+        }
+
+        const backupBadge = document.getElementById('backup-perm-badge');
+        if (backupBadge) {
+          if (data.can_upload) {
+            backupBadge.innerHTML = `<span style="color:var(--green);">🟢 Đã kích hoạt</span> (Tự động sao lưu vào thư mục /RomCloud_Backup)`;
+          } else {
+            backupBadge.innerHTML = `<span style="color:var(--yellow);">⚪ Chưa kích hoạt</span> (Chế độ hiện tại chỉ cho phép tải về)`;
+          }
+        }
         } else {
           authPill.innerHTML = `Drive: <b style="color:var(--text-dim);">⚪ Đã đăng xuất</b>`;
           btnHeadLogout.style.display = 'none';
@@ -2132,6 +2155,8 @@ void WebServer::handleClient(int clientFd) {
     } else if (method == "GET" && path == "/api/storage_info") {
         auto disk = FileSystemManager::instance().getDiskSpace(AppConfig::instance().getRomsDir());
         bool isLinked = AuthManager::instance().isLinked();
+        bool canUpload = AuthManager::instance().canUpload();
+        bool isPublicOnly = AuthManager::instance().isPublicOnly();
         int totalLocal = 0, totalCloud = 0;
         if (isLinked) {
             DatabaseManager::instance().getTotalGameCounts(totalLocal, totalCloud);
@@ -2149,6 +2174,8 @@ void WebServer::handleClient(int clientFd) {
 
         std::string json = "{";
         json += "\"is_linked\":" + std::string(isLinked ? "true" : "false") + ",";
+        json += "\"can_upload\":" + std::string(canUpload ? "true" : "false") + ",";
+        json += "\"is_public_only\":" + std::string(isPublicOnly ? "true" : "false") + ",";
         json += "\"user_email\":\"" + escapeJson(userEmail) + "\",";
         json += "\"total_bytes\":" + std::to_string(disk.totalBytes) + ",";
         json += "\"avail_bytes\":" + std::to_string(disk.availableBytes) + ",";
@@ -2237,6 +2264,28 @@ void WebServer::handleClient(int clientFd) {
                           "Content-Type: text/html; charset=UTF-8\r\n"
                           "Content-Length: " + std::to_string(body.length()) + "\r\n"
                           "Connection: close\r\n\r\n" + body;
+        send(clientFd, res.c_str(), res.length(), 0);
+    } else if (method == "POST" && path == "/api/set_personal_auth") {
+        std::string token = extractPostParam(postBody, "token");
+        std::string refreshToken = extractPostParam(postBody, "refresh_token");
+        std::string email = extractPostParam(postBody, "email");
+        if (token.empty() && refreshToken.empty()) {
+            std::string json = "{\"success\":false,\"error\":\"Token không được để trống.\"}";
+            std::string res = "HTTP/1.1 400 Bad Request\r\n"
+                              "Content-Type: application/json; charset=UTF-8\r\n"
+                              "Access-Control-Allow-Origin: *\r\n"
+                              "Content-Length: " + std::to_string(json.length()) + "\r\n"
+                              "Connection: close\r\n\r\n" + json;
+            send(clientFd, res.c_str(), res.length(), 0);
+            return;
+        }
+        AuthManager::instance().setPersonalTokens(token, refreshToken, email);
+        std::string json = "{\"success\":true,\"message\":\"Đã kích hoạt sao lưu Drive cá nhân thành công!\"}";
+        std::string res = "HTTP/1.1 200 OK\r\n"
+                          "Content-Type: application/json; charset=UTF-8\r\n"
+                          "Access-Control-Allow-Origin: *\r\n"
+                          "Content-Length: " + std::to_string(json.length()) + "\r\n"
+                          "Connection: close\r\n\r\n" + json;
         send(clientFd, res.c_str(), res.length(), 0);
     } else if (method == "GET" && path == "/ota_check") {
         UpdateInfo info;

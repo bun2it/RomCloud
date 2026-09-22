@@ -119,6 +119,45 @@ bool AuthManager::isLinked() const {
     return m_state == AuthState::LINKED;
 }
 
+bool AuthManager::canUpload() const {
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
+    auto& db = DatabaseManager::instance();
+    std::string token = db.getSetting("auth_access_token", "");
+    std::string refresh = db.getSetting("auth_refresh_token", "");
+    return (!token.empty() || !refresh.empty());
+}
+
+bool AuthManager::isPublicOnly() const {
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
+    auto& db = DatabaseManager::instance();
+    std::string token = db.getSetting("auth_access_token", "");
+    std::string refresh = db.getSetting("auth_refresh_token", "");
+    std::string folderId = db.getSetting("drive_folder_id", "");
+    return (token.empty() && refresh.empty() && !folderId.empty());
+}
+
+void AuthManager::setPersonalTokens(const std::string& accessToken, const std::string& refreshToken, const std::string& userEmail) {
+    cancelDeviceFlow();
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
+    auto& db = DatabaseManager::instance();
+    db.setSetting("auth_access_token", accessToken);
+    if (!refreshToken.empty()) {
+        db.setSetting("auth_refresh_token", refreshToken);
+    }
+    uint64_t nowSec = static_cast<uint64_t>(std::time(nullptr));
+    db.setSetting("auth_expires_at", std::to_string(nowSec + 3600));
+
+    std::string email = userEmail;
+    if (email.empty()) {
+        email = fetchUserEmail(accessToken);
+    }
+    db.setSetting("auth_user_email", email);
+    db.setSetting("auth_is_linked", "1");
+    m_userEmail = email;
+    m_state = AuthState::LINKED;
+    Logger::info("Personal Google Drive tokens set successfully for: " + email);
+}
+
 std::string AuthManager::getUserEmail() const {
     std::lock_guard<std::recursive_mutex> lock(m_mutex);
     return m_userEmail.empty() ? "Connected" : m_userEmail;

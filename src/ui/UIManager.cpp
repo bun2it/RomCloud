@@ -186,9 +186,11 @@ void UIManager::update() {
                 } else if (m_selectedMenuIndex == 1) {
                     triggerManualSync();
                 } else if (m_selectedMenuIndex == 2) {
-                    // Reverse sync to Drive
+                    // Reverse sync / Backup to Drive
                     if (!AuthManager::instance().isLinked()) {
                         showToast(UiStrings::TOAST_CONNECT_DRIVE_FIRST, {245, 158, 11, 255});
+                    } else if (!AuthManager::instance().canUpload()) {
+                        showToast(UiStrings::TOAST_CONNECT_PERSONAL_DRIVE, {245, 158, 11, 255}, 4000);
                     } else {
                         UploadManager::instance().startReverseSync();
                         setState(UIState::REVERSE_SYNC);
@@ -311,23 +313,27 @@ void UIManager::update() {
                         refreshGames();
                     }
                 } else if (input.isButtonJustPressed(Button::L1) && !m_selectedGameIds.empty()) {
-                    // Start reverse sync (upload selected games to cloud)
+                    // Start upload of selected games to cloud
                     if (!AuthManager::instance().isLinked()) {
                         showToast(UiStrings::TOAST_CONNECT_DRIVE_FIRST, {245, 158, 11, 255});
+                    } else if (!AuthManager::instance().canUpload()) {
+                        showToast(UiStrings::TOAST_CONNECT_PERSONAL_DRIVE, {245, 158, 11, 255}, 4000);
                     } else {
-                        // Count games that can be uploaded (local but not on cloud)
-                        int uploadCount = 0;
+                        // Gather games to upload (local but not on cloud)
+                        std::vector<int64_t> uploadIds;
                         for (int64_t gameId : m_selectedGameIds) {
                             for (const auto& g : m_cachedGames) {
                                 if (g.id == gameId && g.localState == GameState::LOCAL && g.cloudFileId.empty()) {
-                                    uploadCount++;
+                                    uploadIds.push_back(gameId);
                                     break;
                                 }
                             }
                         }
-                        if (uploadCount > 0) {
-                            showToast("Đang quét game để tải lên...", {168, 85, 247, 255}, 2000);
-                            UploadManager::instance().startReverseSync();
+                        if (!uploadIds.empty()) {
+                            showToast("Bắt đầu sao lưu " + std::to_string(uploadIds.size()) + " game lên Drive...", {168, 85, 247, 255}, 2000);
+                            UploadManager::instance().startUploadGames(uploadIds);
+                            m_multiSelectMode = false;
+                            m_selectedGameIds.clear();
                             setState(UIState::REVERSE_SYNC);
                         } else {
                             showToast("Không có game nào cần tải lên (đã có trên Cloud)", {245, 158, 11, 255}, 3000);
@@ -2299,11 +2305,26 @@ void UIManager::renderReverseSyncState() {
             float pct = std::max(0.0f, std::min(100.0f, (float)prog.progressPct));
             drawRoundedRect(barX, barY, (int)(barW * (pct / 100.0)), barH, 10, {168, 85, 247, 255}, true);
 
-            // Stats
+            // Stats & speed
+            std::string speedStr = "";
+            if (prog.speedKBps >= 1024.0) {
+                char sBuf[32];
+                std::snprintf(sBuf, sizeof(sBuf), "  •  %.1f MB/s", prog.speedKBps / 1024.0);
+                speedStr = sBuf;
+            } else if (prog.speedKBps > 0.0) {
+                char sBuf[32];
+                std::snprintf(sBuf, sizeof(sBuf), "  •  %.0f KB/s", prog.speedKBps);
+                speedStr = sBuf;
+            }
+
+            char pctBuf[16];
+            std::snprintf(pctBuf, sizeof(pctBuf), " (%.1f%%)", prog.progressPct);
+
             std::string stats = UiStrings::REVERSE_SYNC_STATS +
                                std::to_string(prog.currentIndex) + " / " + std::to_string(prog.totalGames) +
                                "  •  " + FileSystemManager::instance().formatBytes(prog.bytesUploaded) +
-                               " / " + FileSystemManager::instance().formatBytes(prog.totalBytes);
+                               " / " + FileSystemManager::instance().formatBytes(prog.totalBytes) +
+                               pctBuf + speedStr;
             drawText(stats, cardX + cardW / 2, barY + 50, {200, 210, 225, 255}, m_fontMedium, true);
 
             // Success/fail counts
@@ -2323,8 +2344,15 @@ void UIManager::renderReverseSyncState() {
         }
 
         case UploadState::FAILED: {
-            drawText("THẤT BẠI", cardX + cardW / 2, contentY + 80, {239, 68, 68, 255}, m_fontLarge, true);
-            drawText(prog.errorMessage, cardX + cardW / 2, contentY + 130, {200, 210, 225, 255}, m_fontSmall, true);
+            drawText("THẤT BẠI", cardX + cardW / 2, contentY + 60, {239, 68, 68, 255}, m_fontLarge, true);
+            // Multi-line error message display
+            std::istringstream errStream(prog.errorMessage);
+            std::string errLine;
+            int errY = contentY + 110;
+            while (std::getline(errStream, errLine)) {
+                drawText(errLine, cardX + cardW / 2, errY, {200, 210, 225, 255}, m_fontSmall, true);
+                errY += 28;
+            }
             break;
         }
 

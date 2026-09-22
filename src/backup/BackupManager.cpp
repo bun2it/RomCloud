@@ -226,6 +226,7 @@ bool BackupManager::applySettingsFromJson(const std::string& json) {
 }
 
 bool BackupManager::applySystemsFromJson(const std::string& json) {
+    (void)json;
     // Simplified - systems are seeded from code, skip restore
     Logger::info("BackupManager: Systems restoration skipped (seeded from code)");
     return true;

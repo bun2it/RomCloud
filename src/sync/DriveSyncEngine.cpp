@@ -803,6 +803,7 @@ void DriveSyncEngine::runSyncWorker() {
     }
 
     DatabaseManager::instance().commitTransaction();
+    Logger::info("DriveSyncEngine: Library sync complete. Total files processed: " + std::to_string(totalSynced));
 
     auto now = std::chrono::system_clock::now();
     auto in_time_t = std::chrono::system_clock::to_time_t(now);

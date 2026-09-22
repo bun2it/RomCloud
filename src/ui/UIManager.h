@@ -69,9 +69,6 @@ private:
     bool m_multiSelectMode = false;
     std::vector<int64_t> m_selectedGameIds;
 
-    // Reverse Sync State
-    bool m_reverseSyncActive = false;
-
     // Settings State
     int m_selectedSettingsRow = 0;
     int m_settingsScrollOffset = 0;
