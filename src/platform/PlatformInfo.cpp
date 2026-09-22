@@ -1,6 +1,7 @@
 #include "PlatformInfo.h"
 #include "../filesystem/FileSystemManager.h"
 #include "../config/AppConfig.h"
+#include "../logging/Logger.h"
 
 #include <sys/utsname.h>
 #include <fstream>
@@ -14,9 +15,132 @@
 
 namespace RomCloud {
 
+PlatformInfo::PlatformInfo() {
+    // Detect display resolution from SDL
+    if (SDL_Init(SDL_INIT_VIDEO) == 0) {
+        SDL_DisplayMode mode;
+        if (SDL_GetDesktopDisplayMode(0, &mode) == 0) {
+            m_displayWidth = mode.w;
+            m_displayHeight = mode.h;
+            Logger::info("Detected display: " + std::to_string(m_displayWidth) + "x" + std::to_string(m_displayHeight));
+        }
+    }
+
+    // Calculate aspect ratio as float
+    AspectRatio ratio = calculateAspectRatio(m_displayWidth, m_displayHeight);
+    switch (ratio) {
+        case AspectRatio::RATIO_4_3: m_aspectRatio = 4.0f / 3.0f; break;
+        case AspectRatio::RATIO_3_2: m_aspectRatio = 3.0f / 2.0f; break;
+        case AspectRatio::RATIO_16_9: m_aspectRatio = 16.0f / 9.0f; break;
+        default: m_aspectRatio = 4.0f / 3.0f; break;
+    }
+
+    // Detect device type based on resolution
+    m_deviceType = detectDeviceType();
+
+    // Get device name
+    std::string deviceName = getDeviceName();
+    Logger::info("Detected device: " + deviceName);
+
+    m_initialized = true;
+}
+
 PlatformInfo& PlatformInfo::instance() {
     static PlatformInfo instance;
     return instance;
+}
+
+DeviceType PlatformInfo::detectDeviceType() {
+    // TrimUI Brick Pro: 1024x768
+    if (m_displayWidth == 1024 && m_displayHeight == 768) {
+        return DeviceType::TRIMUI_BRICK_PRO;
+    }
+    // TrimUI Smart Pro: 640x480
+    if (m_displayWidth == 640 && m_displayHeight == 480) {
+        return DeviceType::TRIMUI_SMART_PRO;
+    }
+    // TrimUI Beta: 480x320
+    if (m_displayWidth == 480 && m_displayHeight == 320) {
+        return DeviceType::TRIMUI_BETA;
+    }
+    // PocketGo: 320x240
+    if (m_displayWidth == 320 && m_displayHeight == 240) {
+        return DeviceType::POCKETGO;
+    }
+
+    // Try to detect from /proc/device-tree/model
+    std::ifstream modelFile("/proc/device-tree/model");
+    if (modelFile.is_open()) {
+        std::string model;
+        std::getline(modelFile, model);
+        modelFile.close();
+
+        if (model.find("Brick") != std::string::npos || model.find("brick") != std::string::npos) {
+            return DeviceType::TRIMUI_BRICK_PRO;
+        }
+        if (model.find("Smart") != std::string::npos || model.find("smart") != std::string::npos) {
+            return DeviceType::TRIMUI_SMART_PRO;
+        }
+    }
+
+    return DeviceType::UNKNOWN;
+}
+
+AspectRatio PlatformInfo::calculateAspectRatio(int width, int height) {
+    if (height == 0) return AspectRatio::RATIO_OTHER;
+
+    float ratio = (float)width / (float)height;
+
+    // Allow small tolerance for floating point
+    if (ratio >= 1.3f && ratio <= 1.4f) return AspectRatio::RATIO_3_2;
+    if (ratio >= 1.7f && ratio <= 1.8f) return AspectRatio::RATIO_16_9;
+    if (ratio >= 1.25f && ratio <= 1.4f) return AspectRatio::RATIO_4_3;
+
+    return AspectRatio::RATIO_OTHER;
+}
+
+DeviceType PlatformInfo::getDeviceType() {
+    return m_deviceType;
+}
+
+AspectRatio PlatformInfo::getAspectRatio() {
+    return calculateAspectRatio(m_displayWidth, m_displayHeight);
+}
+
+std::string PlatformInfo::getDeviceName() {
+    switch (m_deviceType) {
+        case DeviceType::TRIMUI_BRICK_PRO:  return "TrimUI Brick Pro";
+        case DeviceType::TRIMUI_SMART_PRO:  return "TrimUI Smart Pro";
+        case DeviceType::TRIMUI_BETA:       return "TrimUI Beta";
+        case DeviceType::POCKETGO:          return "PocketGo";
+        default:                            return "Unknown Device";
+    }
+}
+
+void PlatformInfo::getDisplayMetrics(int& width, int& height, float& aspectRatio) {
+    width = m_displayWidth;
+    height = m_displayHeight;
+    aspectRatio = m_aspectRatio;
+}
+
+int PlatformInfo::scaleX(int x) {
+    // Scale X based on display width ratio to 1024 base
+    return (int)((float)x * (float)m_displayWidth / 1024.0f);
+}
+
+int PlatformInfo::scaleY(int y) {
+    // Scale Y based on display height ratio to 768 base
+    return (int)((float)y * (float)m_displayHeight / 768.0f);
+}
+
+int PlatformInfo::scaleW(int w) {
+    // Scale width
+    return (int)((float)w * (float)m_displayWidth / 1024.0f);
+}
+
+int PlatformInfo::scaleH(int h) {
+    // Scale height
+    return (int)((float)h * (float)m_displayHeight / 768.0f);
 }
 
 std::string PlatformInfo::getIpAddress(const std::string& interfaceName) {
@@ -45,7 +169,7 @@ bool PlatformInfo::isNetworkConnected() {
 
 SystemDiagnostics PlatformInfo::getDiagnostics() {
     SystemDiagnostics diag;
-    diag.appVersion = "1.0.0 (Phase 2 SQLite)";
+    diag.appVersion = "1.1.1 (Phase 6 On-Demand DL)";
     diag.buildDate = __DATE__ " " __TIME__;
 
     struct utsname uts;
@@ -58,7 +182,18 @@ SystemDiagnostics PlatformInfo::getDiagnostics() {
         diag.kernelRelease = "Unknown";
         diag.cpuArch = "aarch64";
     }
-    diag.socName = "Allwinner A133P (4x Cortex-A53)";
+
+    // SOC name based on device type
+    switch (m_deviceType) {
+        case DeviceType::TRIMUI_BRICK_PRO:
+            diag.socName = "Allwinner A133P (4x Cortex-A53)"; break;
+        case DeviceType::TRIMUI_SMART_PRO:
+            diag.socName = "Allwinner R528 (ARM9)"; break;
+        case DeviceType::TRIMUI_BETA:
+            diag.socName = "Allwinner F1C100s"; break;
+        default:
+            diag.socName = "Unknown SoC"; break;
+    }
 
     std::ifstream meminfo("/proc/meminfo");
     if (meminfo.is_open()) {
@@ -84,7 +219,15 @@ SystemDiagnostics PlatformInfo::getDiagnostics() {
         diag.freeRam = "Available";
     }
 
-    diag.displayResolution = "1024 x 768 (4:3 @ 60Hz)";
+    // Dynamic display resolution
+    std::string ratioStr;
+    switch (getAspectRatio()) {
+        case AspectRatio::RATIO_4_3: ratioStr = "4:3"; break;
+        case AspectRatio::RATIO_3_2: ratioStr = "3:2"; break;
+        case AspectRatio::RATIO_16_9: ratioStr = "16:9"; break;
+        default: ratioStr = "Custom"; break;
+    }
+    diag.displayResolution = std::to_string(m_displayWidth) + " x " + std::to_string(m_displayHeight) + " (" + ratioStr + ")";
 
     SDL_version sdlVer;
     SDL_GetVersion(&sdlVer);

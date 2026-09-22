@@ -20,6 +20,7 @@ enum class UIState {
     SETTINGS,
     DIAGNOSTICS,
     OTA_UPDATE,
+    REVERSE_SYNC,
     EXIT_REQUESTED
 };
 
@@ -52,7 +53,7 @@ private:
 
     UIState m_currentState = UIState::MENU;
     int m_selectedMenuIndex = 0;
-    std::vector<std::string> m_menuItems = {"KHO GAME (THƯ VIỆN)", "ĐỒNG BỘ DỮ LIỆU", "CẬP NHẬT PHẦN MỀM (OTA)", "CÀI ĐẶT (SETTINGS)", "THÔNG TIN HỆ THỐNG", "THOÁT (EXIT)"};
+    std::vector<std::string> m_menuItems = {"KHO GAME (THƯ VIỆN)", "ĐỒNG BỘ DỮ LIỆU", "ĐỒNG BỘ NGƯỢC LÊN DRIVE", "CẬP NHẬT PHẦN MỀM (OTA)", "CÀI ĐẶT (SETTINGS)", "THÔNG TIN HỆ THỐNG", "THOÁT (EXIT)"};
 
     // System Selection State
     int m_selectedSystemIndex = 0;
@@ -67,6 +68,9 @@ private:
     // Multi-Select State
     bool m_multiSelectMode = false;
     std::vector<int64_t> m_selectedGameIds;
+
+    // Reverse Sync State
+    bool m_reverseSyncActive = false;
 
     // Settings State
     int m_selectedSettingsRow = 0;
@@ -109,6 +113,8 @@ private:
     void renderSettingsState();
     void renderDiagnosticsState();
     void renderOTAUpdateState();
+    void renderReverseSyncState();
+    void renderUploadOverlay();
     void renderToast();
 
     // Primitive drawing

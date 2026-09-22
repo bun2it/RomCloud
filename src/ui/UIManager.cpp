@@ -12,6 +12,7 @@
 #include "../ota/UpdateManager.h"
 #include "../app/Application.h"
 #include "../backup/BackupManager.h"
+#include "../sync/UploadManager.h"
 #include "UiStrings.h"
 #include <algorithm>
 #include <cmath>
@@ -185,13 +186,21 @@ void UIManager::update() {
                 } else if (m_selectedMenuIndex == 1) {
                     triggerManualSync();
                 } else if (m_selectedMenuIndex == 2) {
+                    // Reverse sync to Drive
+                    if (!AuthManager::instance().isLinked()) {
+                        showToast(UiStrings::TOAST_CONNECT_DRIVE_FIRST, {245, 158, 11, 255});
+                    } else {
+                        UploadManager::instance().startReverseSync();
+                        setState(UIState::REVERSE_SYNC);
+                    }
+                } else if (m_selectedMenuIndex == 3) {
                     setState(UIState::OTA_UPDATE);
                     UpdateManager::instance().checkForUpdatesAsync();
-                } else if (m_selectedMenuIndex == 3) {
-                    setState(UIState::SETTINGS);
                 } else if (m_selectedMenuIndex == 4) {
-                    setState(UIState::DIAGNOSTICS);
+                    setState(UIState::SETTINGS);
                 } else if (m_selectedMenuIndex == 5) {
+                    setState(UIState::DIAGNOSTICS);
+                } else if (m_selectedMenuIndex == 6) {
                     setState(UIState::EXIT_REQUESTED);
                 }
             }
@@ -260,7 +269,7 @@ void UIManager::update() {
                     } else if (m_selectedGameIndex >= m_gameScrollOffset + pageSize) {
                         m_gameScrollOffset = m_selectedGameIndex - pageSize + 1;
                     }
-                } else if (input.isButtonJustPressed(Button::A)) {
+                } else if (input.isButtonJustPressed(Button::Y)) {
                     // Toggle selection on current game
                     const auto& g = m_cachedGames[m_selectedGameIndex];
                     auto it = std::find(m_selectedGameIds.begin(), m_selectedGameIds.end(), g.id);
@@ -274,7 +283,7 @@ void UIManager::update() {
                 } else if (input.isButtonJustPressed(Button::X) && !m_selectedGameIds.empty()) {
                     // Batch delete - show confirmation
                     setState(UIState::CONFIRM_BATCH_DELETE);
-                } else if (input.isButtonJustPressed(Button::Y) && !m_selectedGameIds.empty()) {
+                } else if (input.isButtonJustPressed(Button::R2)) {
                     // Add all selected to download queue
                     if (!AuthManager::instance().isLinked()) {
                         showToast(UiStrings::TOAST_CONNECT_DRIVE_FIRST, {245, 158, 11, 255});
@@ -300,6 +309,29 @@ void UIManager::update() {
                             showToast("Không có game nào được thêm (đã tải hoặc đang chờ)", {245, 158, 11, 255}, 3000);
                         }
                         refreshGames();
+                    }
+                } else if (input.isButtonJustPressed(Button::L1) && !m_selectedGameIds.empty()) {
+                    // Start reverse sync (upload selected games to cloud)
+                    if (!AuthManager::instance().isLinked()) {
+                        showToast(UiStrings::TOAST_CONNECT_DRIVE_FIRST, {245, 158, 11, 255});
+                    } else {
+                        // Count games that can be uploaded (local but not on cloud)
+                        int uploadCount = 0;
+                        for (int64_t gameId : m_selectedGameIds) {
+                            for (const auto& g : m_cachedGames) {
+                                if (g.id == gameId && g.localState == GameState::LOCAL && g.cloudFileId.empty()) {
+                                    uploadCount++;
+                                    break;
+                                }
+                            }
+                        }
+                        if (uploadCount > 0) {
+                            showToast("Đang quét game để tải lên...", {168, 85, 247, 255}, 2000);
+                            UploadManager::instance().startReverseSync();
+                            setState(UIState::REVERSE_SYNC);
+                        } else {
+                            showToast("Không có game nào cần tải lên (đã có trên Cloud)", {245, 158, 11, 255}, 3000);
+                        }
                     }
                 } else if (input.isButtonJustPressed(Button::B)) {
                     // Exit multi-select mode
@@ -400,39 +432,37 @@ void UIManager::update() {
                         }
                         showToast(std::string("Chuyển đến vần chữ: [ ") + newL + " ]", {234, 179, 8, 255}, 1500);
                     }
+                } else if (input.isButtonJustPressed(Button::SELECT)) {
+                    if (m_filterMode == GameFilterMode::ALL) {
+                        m_filterMode = GameFilterMode::LOCAL_ONLY;
+                        showToast(UiStrings::FILTER_LABEL_LOCAL, {34, 197, 94, 255});
+                    } else if (m_filterMode == GameFilterMode::LOCAL_ONLY) {
+                        m_filterMode = GameFilterMode::CLOUD_ONLY;
+                        showToast(UiStrings::FILTER_LABEL_CLOUD, {0, 180, 216, 255});
+                    } else {
+                        m_filterMode = GameFilterMode::ALL;
+                        showToast(UiStrings::FILTER_LABEL_ALL, {168, 85, 247, 255});
+                    }
+                    m_selectedGameIndex = 0;
+                    m_gameScrollOffset = 0;
+                    refreshGames();
                 }
-            }
 
-            if (input.isButtonJustPressed(Button::SELECT)) {
-                if (m_filterMode == GameFilterMode::ALL) {
-                    m_filterMode = GameFilterMode::LOCAL_ONLY;
-                    showToast(UiStrings::FILTER_LABEL_LOCAL, {34, 197, 94, 255});
-                } else if (m_filterMode == GameFilterMode::LOCAL_ONLY) {
-                    m_filterMode = GameFilterMode::CLOUD_ONLY;
-                    showToast(UiStrings::FILTER_LABEL_CLOUD, {0, 180, 216, 255});
-                } else {
-                    m_filterMode = GameFilterMode::ALL;
-                    showToast(UiStrings::FILTER_LABEL_ALL, {168, 85, 247, 255});
+                if (input.isButtonJustPressed(Button::START)) {
+                    // Open on-device search
+                    m_searchQuery.clear();
+                    m_searchResults.clear();
+                    m_searchSelectedIndex = 0;
+                    m_searchScrollOffset = 0;
+                    m_kbCursorRow = 0;
+                    m_kbCursorCol = 0;
+                    m_kbInResults = false;
+                    setState(UIState::SEARCH);
                 }
-                m_selectedGameIndex = 0;
-                m_gameScrollOffset = 0;
-                refreshGames();
-            }
 
-            if (input.isButtonJustPressed(Button::START)) {
-                // Open on-device search
-                m_searchQuery.clear();
-                m_searchResults.clear();
-                m_searchSelectedIndex = 0;
-                m_searchScrollOffset = 0;
-                m_kbCursorRow = 0;
-                m_kbCursorCol = 0;
-                m_kbInResults = false;
-                setState(UIState::SEARCH);
-            }
-
-            if (input.isButtonJustPressed(Button::B)) {
-                setState(UIState::SYSTEM_SELECT);
+                if (input.isButtonJustPressed(Button::B)) {
+                    setState(UIState::SYSTEM_SELECT);
+                }
             }
             break;
         }
@@ -712,6 +742,27 @@ void UIManager::update() {
         case UIState::DIAGNOSTICS: {
             if (input.isButtonJustPressed(Button::B)) {
                 setState(UIState::MENU);
+            }
+            break;
+        }
+
+        case UIState::REVERSE_SYNC: {
+            auto prog = UploadManager::instance().getProgress();
+            if (prog.state == UploadState::IDLE || prog.state == UploadState::PREPARING) {
+                if (input.isButtonJustPressed(Button::B)) {
+                    UploadManager::instance().cancel();
+                    setState(UIState::MENU);
+                }
+            } else if (prog.state == UploadState::UPLOADING) {
+                if (input.isButtonJustPressed(Button::B)) {
+                    UploadManager::instance().cancel();
+                    showToast(UiStrings::REVERSE_SYNC_CANCELLED, {245, 158, 11, 255});
+                    setState(UIState::MENU);
+                }
+            } else if (prog.state == UploadState::COMPLETED || prog.state == UploadState::FAILED || prog.state == UploadState::CANCELLED) {
+                if (input.isButtonJustPressed(Button::A) || input.isButtonJustPressed(Button::B)) {
+                    setState(UIState::MENU);
+                }
             }
             break;
         }
@@ -2068,6 +2119,121 @@ void UIManager::renderDiagnosticsState() {
     drawText(UiStrings::BTN_BACK_MAIN_MENU_HINT, 512, 650, {130, 140, 155, 255}, m_fontSmall, true);
 }
 
+void UIManager::renderReverseSyncState() {
+    // ─── Borderless Full-Width Sub-Header ───
+    drawRect(0, 64, 1024, 48, {16, 20, 28, 255}, true);
+    drawRect(0, 111, 1024, 1, {38, 48, 64, 255}, true);
+    drawText(UiStrings::REVERSE_SYNC_TITLE, 36, 78, {168, 85, 247, 255}, m_fontLarge);
+
+    auto prog = UploadManager::instance().getProgress();
+
+    int cardX = 100;
+    int cardW = 824;
+    int cardY = 126;
+    int cardH = 480;
+
+    drawRoundedRect(cardX, cardY, cardW, cardH, 16, {22, 28, 38, 255}, true);
+    drawRoundedBorder(cardX, cardY, cardW, cardH, 16, {168, 85, 247, 255}, 2);
+
+    int contentY = cardY + 30;
+
+    switch (prog.state) {
+        case UploadState::IDLE: {
+            drawText(UiStrings::REVERSE_SYNC_PREPARING, cardX + cardW / 2, contentY + 100, {255, 255, 255, 255}, m_fontLarge, true);
+            break;
+        }
+
+        case UploadState::PREPARING: {
+            drawText(UiStrings::REVERSE_SYNC_PREPARING, cardX + cardW / 2, contentY + 100, {0, 180, 216, 255}, m_fontLarge, true);
+            break;
+        }
+
+        case UploadState::UPLOADING: {
+            // Game title
+            std::string titleText = UiStrings::REVERSE_SYNC_UPLOADING;
+            drawText(titleText, cardX + cardW / 2, contentY + 20, {255, 255, 255, 255}, m_fontMedium, true);
+
+            // Current file
+            std::string gameName = prog.gameTitle;
+            if (gameName.length() > 50) gameName = gameName.substr(0, 47) + "...";
+            drawText(gameName, cardX + cardW / 2, contentY + 60, {0, 180, 216, 255}, m_fontLarge, true);
+
+            // Progress
+            int barW = 600;
+            int barH = 20;
+            int barX = cardX + (cardW - barW) / 2;
+            int barY = contentY + 120;
+            drawRoundedRect(barX, barY, barW, barH, 10, {35, 45, 60, 255}, true);
+            float pct = std::max(0.0f, std::min(100.0f, (float)prog.progressPct));
+            drawRoundedRect(barX, barY, (int)(barW * (pct / 100.0)), barH, 10, {168, 85, 247, 255}, true);
+
+            // Stats
+            std::string stats = UiStrings::REVERSE_SYNC_STATS +
+                               std::to_string(prog.currentIndex) + " / " + std::to_string(prog.totalGames) +
+                               "  •  " + FileSystemManager::instance().formatBytes(prog.bytesUploaded) +
+                               " / " + FileSystemManager::instance().formatBytes(prog.totalBytes);
+            drawText(stats, cardX + cardW / 2, barY + 50, {200, 210, 225, 255}, m_fontMedium, true);
+
+            // Success/fail counts
+            int statY = barY + 90;
+            drawText("✓ " + std::to_string(prog.gamesUploaded) + " thành công", cardX + 100, statY, {34, 197, 94, 255}, m_fontMedium);
+            drawText("✗ " + std::to_string(prog.gamesFailed) + " thất bại", cardX + cardW - 200, statY, {239, 68, 68, 255}, m_fontMedium);
+            break;
+        }
+
+        case UploadState::COMPLETED: {
+            drawText(UiStrings::REVERSE_SYNC_SUCCESS, cardX + cardW / 2, contentY + 80, {34, 197, 94, 255}, m_fontLarge, true);
+            drawText(std::to_string(prog.gamesUploaded) + UiStrings::REVERSE_SYNC_SUCCESS_SUF, cardX + cardW / 2, contentY + 130, {255, 255, 255, 255}, m_fontMedium, true);
+            if (prog.gamesFailed > 0) {
+                drawText(std::to_string(prog.gamesFailed) + " game thất bại.", cardX + cardW / 2, contentY + 170, {239, 68, 68, 255}, m_fontSmall, true);
+            }
+            break;
+        }
+
+        case UploadState::FAILED: {
+            drawText("THẤT BẠI", cardX + cardW / 2, contentY + 80, {239, 68, 68, 255}, m_fontLarge, true);
+            drawText(prog.errorMessage, cardX + cardW / 2, contentY + 130, {200, 210, 225, 255}, m_fontSmall, true);
+            break;
+        }
+
+        case UploadState::CANCELLED: {
+            drawText("ĐÃ HỦY", cardX + cardW / 2, contentY + 80, {245, 158, 11, 255}, m_fontLarge, true);
+            drawText("Đã tải lên " + std::to_string(prog.gamesUploaded) + " game trước khi hủy.", cardX + cardW / 2, contentY + 130, {200, 210, 225, 255}, m_fontSmall, true);
+            break;
+        }
+    }
+
+    // Cancel button
+    if (prog.state == UploadState::UPLOADING || prog.state == UploadState::PREPARING) {
+        drawBadge(cardX + (cardW - 180) / 2, cardY + cardH - 70, 180, 46, UiStrings::REVERSE_SYNC_CANCEL_BTN, {55, 65, 81, 255}, {255, 255, 255, 255});
+    } else {
+        drawBadge(cardX + (cardW - 180) / 2, cardY + cardH - 70, 180, 46, "[A] / [B] Quay lại", {55, 65, 81, 255}, {255, 255, 255, 255});
+    }
+}
+
+void UIManager::renderUploadOverlay() {
+    // If reverse sync is active, show persistent overlay
+    if (!UploadManager::instance().isUploading()) return;
+
+    auto prog = UploadManager::instance().getProgress();
+    if (prog.state != UploadState::UPLOADING) return;
+
+    // Small persistent banner at bottom
+    int bannerW = 500;
+    int bannerH = 40;
+    int bannerX = (1024 - bannerW) / 2;
+    int bannerY = 720;
+
+    drawRoundedRect(bannerX, bannerY, bannerW, bannerH, 8, {30, 20, 45, 255}, true);
+    drawRoundedBorder(bannerX, bannerY, bannerW, bannerH, 8, {168, 85, 247, 255}, 1);
+
+    char pctBuf[16];
+    std::snprintf(pctBuf, sizeof(pctBuf), "%.0f%%", prog.progressPct);
+    std::string text = std::string(UiStrings::REVERSE_SYNC_UPLOADING) + prog.gameTitle + " " + pctBuf;
+    if (text.length() > 55) text = text.substr(0, 52) + "...";
+    drawText(text, bannerX + bannerW / 2, bannerY + 10, {200, 210, 225, 255}, m_fontSmall, true);
+}
+
 void UIManager::renderOTAUpdateState() {
     // ─── Borderless Full-Width Sub-Header ───
     drawRect(0, 64, 1024, 48, {16, 20, 28, 255}, true);
@@ -2184,12 +2350,14 @@ void UIManager::render() {
         case UIState::SETTINGS:         renderSettingsState(); break;
         case UIState::DIAGNOSTICS:      renderDiagnosticsState(); break;
         case UIState::OTA_UPDATE:       renderOTAUpdateState(); break;
+        case UIState::REVERSE_SYNC:     renderReverseSyncState(); break;
         default: break;
     }
 
     renderFooter();
     renderToast();
     renderSyncOverlay();
+    renderUploadOverlay();
     SDL_RenderPresent(m_renderer);
 }
 

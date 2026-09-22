@@ -196,6 +196,23 @@ inline const char* SYNC_NEW_PREFIX            = " (Mới: ";
 inline const char* SYNC_UPDATED_PREFIX        = ", Cập nhật: ";
 inline const char* SYNC_CANCEL_BTN            = "[B] Hủy đồng bộ";
 
+// --- 11B. REVERSE SYNC (UPLOAD) ---
+inline const char* REVERSE_SYNC_TITLE         = "ĐỒNG BỘ NGƯỢC LÊN DRIVE";
+inline const char* REVERSE_SYNC_PREPARING     = "Đang quét game trên thẻ nhớ...";
+inline const char* REVERSE_SYNC_UPLOADING      = "Đang tải lên Drive...";
+inline const char* REVERSE_SYNC_GAME_PROGRESS  = "Đang tải: ";
+inline const char* REVERSE_SYNC_STATS          = "Đã tải: ";
+inline const char* REVERSE_SYNC_SUCCESS       = "Hoàn tất! Đã tải lên ";
+inline const char* REVERSE_SYNC_SUCCESS_SUF   = " game.";
+inline const char* REVERSE_SYNC_FAILED         = "Thất bại: ";
+inline const char* REVERSE_SYNC_CANCELLED      = "Đã hủy đồng bộ ngược.";
+inline const char* REVERSE_SYNC_NO_GAMES       = "Không có game cần tải lên.";
+inline const char* REVERSE_SYNC_NOT_LINKED     = "Chưa kết nối Drive. Vào Cài đặt để kết nối.";
+inline const char* REVERSE_SYNC_BTN            = "[Y] Đồng bộ ngược";
+inline const char* REVERSE_SYNC_CANCEL_BTN    = "[B] Hủy";
+inline const char* REVERSE_SYNC_GAMES_FOUND    = "Tìm thấy ";  // + count + " game trên thẻ"
+inline const char* REVERSE_SYNC_GAMES_SUF     = " game trên thẻ chưa có trên Cloud.";
+
 // --- 12. TIẾN TRÌNH TẢI ROM ---
 inline const char* DL_SYS_PREFIX              = "Hệ máy: ";
 inline const char* DL_FILE_PREFIX             = " | Tập tin: ";
