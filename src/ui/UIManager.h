@@ -14,6 +14,7 @@ enum class UIState {
     GAME_LIST,
     SEARCH,
     CONFIRM_DELETE,
+    CONFIRM_BATCH_DELETE,
     DISCLAIMER,
     CLOUD_LOGIN,
     SETTINGS,
@@ -63,6 +64,13 @@ private:
     int m_gameScrollOffset = 0;
     GameFilterMode m_filterMode = GameFilterMode::ALL;
 
+    // Multi-Select State
+    bool m_multiSelectMode = false;
+    std::vector<int64_t> m_selectedGameIds;
+
+    // Settings State
+    int m_selectedSettingsRow = 0;
+
     // Search state
     std::string m_searchQuery;
     std::vector<GameRecord> m_searchResults;
@@ -93,6 +101,7 @@ private:
     void renderGameListState();
     void renderSearchState();
     void renderConfirmDeleteDialog();
+    void renderConfirmBatchDeleteDialog();
     void renderDisclaimerState();
     void renderCloudLoginState();
     void renderSyncOverlay();

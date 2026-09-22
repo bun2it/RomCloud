@@ -11,6 +11,7 @@
 #include "../database/RomIndexer.h"
 #include "../ota/UpdateManager.h"
 #include "../app/Application.h"
+#include "../backup/BackupManager.h"
 #include "UiStrings.h"
 #include <algorithm>
 #include <cmath>
@@ -228,7 +229,85 @@ void UIManager::update() {
             int total = static_cast<int>(m_cachedGames.size());
             int pageSize = 7;
 
-            if (total > 0) {
+            // Multi-select mode handling
+            if (input.isButtonJustPressed(Button::L2)) {
+                m_multiSelectMode = !m_multiSelectMode;
+                if (!m_multiSelectMode) {
+                    m_selectedGameIds.clear();
+                    showToast(UiStrings::MULTI_SELECT_DISABLED, {168, 85, 247, 255}, 2000);
+                } else {
+                    showToast(std::string(UiStrings::MULTI_SELECT_ENABLED) + ". " + UiStrings::MULTI_SELECT_HINT, {168, 85, 247, 255}, 3000);
+                }
+            }
+
+            if (m_multiSelectMode && total > 0) {
+                // Multi-select mode: different controls
+                if (input.isButtonJustPressed(Button::UP) || input.isButtonJustPressed(Button::DOWN) ||
+                    input.isButtonJustPressed(Button::L1) || input.isButtonJustPressed(Button::R1)) {
+                    // Normal navigation while in multi-select mode
+                    if (input.isButtonJustPressed(Button::UP)) {
+                        m_selectedGameIndex = std::max(0, m_selectedGameIndex - 1);
+                    } else if (input.isButtonJustPressed(Button::DOWN)) {
+                        m_selectedGameIndex = std::min(total - 1, m_selectedGameIndex + 1);
+                    } else if (input.isButtonJustPressed(Button::L1)) {
+                        m_selectedGameIndex = std::max(0, m_selectedGameIndex - pageSize);
+                    } else if (input.isButtonJustPressed(Button::R1)) {
+                        m_selectedGameIndex = std::min(total - 1, m_selectedGameIndex + pageSize);
+                    }
+                    // Update scroll offset
+                    if (m_selectedGameIndex < m_gameScrollOffset) {
+                        m_gameScrollOffset = m_selectedGameIndex;
+                    } else if (m_selectedGameIndex >= m_gameScrollOffset + pageSize) {
+                        m_gameScrollOffset = m_selectedGameIndex - pageSize + 1;
+                    }
+                } else if (input.isButtonJustPressed(Button::A)) {
+                    // Toggle selection on current game
+                    const auto& g = m_cachedGames[m_selectedGameIndex];
+                    auto it = std::find(m_selectedGameIds.begin(), m_selectedGameIds.end(), g.id);
+                    if (it != m_selectedGameIds.end()) {
+                        m_selectedGameIds.erase(it);
+                        showToast("Đã bỏ chọn: " + g.title, {245, 158, 11, 255}, 1500);
+                    } else {
+                        m_selectedGameIds.push_back(g.id);
+                        showToast("Đã chọn: " + g.title, {34, 197, 94, 255}, 1500);
+                    }
+                } else if (input.isButtonJustPressed(Button::X) && !m_selectedGameIds.empty()) {
+                    // Batch delete - show confirmation
+                    setState(UIState::CONFIRM_BATCH_DELETE);
+                } else if (input.isButtonJustPressed(Button::Y) && !m_selectedGameIds.empty()) {
+                    // Add all selected to download queue
+                    if (!AuthManager::instance().isLinked()) {
+                        showToast(UiStrings::TOAST_CONNECT_DRIVE_FIRST, {245, 158, 11, 255});
+                    } else {
+                        int addedCount = 0;
+                        for (int64_t gameId : m_selectedGameIds) {
+                            // Find the game record
+                            for (const auto& g : m_cachedGames) {
+                                if (g.id == gameId && g.localState != GameState::LOCAL &&
+                                    !DownloadManager::instance().isInQueue(g.id)) {
+                                    if (DownloadManager::instance().addToQueue(g, m_activeSystem)) {
+                                        addedCount++;
+                                    }
+                                }
+                            }
+                        }
+                        if (addedCount > 0) {
+                            showToast("Đã thêm " + std::to_string(addedCount) + " game vào hàng tải!", {34, 197, 94, 255}, 3000);
+                            if (!DownloadManager::instance().isDownloading()) {
+                                DownloadManager::instance().processNextInQueue();
+                            }
+                        } else {
+                            showToast("Không có game nào được thêm (đã tải hoặc đang chờ)", {245, 158, 11, 255}, 3000);
+                        }
+                        refreshGames();
+                    }
+                } else if (input.isButtonJustPressed(Button::B)) {
+                    // Exit multi-select mode
+                    m_multiSelectMode = false;
+                    m_selectedGameIds.clear();
+                    showToast(UiStrings::MULTI_SELECT_DISABLED, {168, 85, 247, 255}, 2000);
+                }
+            } else if (total > 0) {
                 if (input.isButtonJustPressed(Button::UP)) {
                     if (m_selectedGameIndex > 0) {
                         m_selectedGameIndex--;
@@ -367,6 +446,26 @@ void UIManager::update() {
                     refreshGames();
                     showToast("Đã xóa \"" + g.title + "\" khỏi thẻ nhớ.", {239, 68, 68, 255}, 3000);
                 }
+                setState(UIState::GAME_LIST);
+            } else if (input.isButtonJustPressed(Button::B) || input.isButtonJustPressed(Button::X)) {
+                setState(UIState::GAME_LIST);
+            }
+            break;
+        }
+
+        case UIState::CONFIRM_BATCH_DELETE: {
+            if (input.isButtonJustPressed(Button::A)) {
+                // Confirm batch delete
+                int deletedCount = 0;
+                for (int64_t gameId : m_selectedGameIds) {
+                    DatabaseManager::instance().markGameDeletedLocally(gameId);
+                    deletedCount++;
+                }
+                refreshSystems();
+                refreshGames();
+                showToast("Đã xóa " + std::to_string(deletedCount) + " game khỏi thẻ nhớ.", {239, 68, 68, 255}, 4000);
+                m_multiSelectMode = false;
+                m_selectedGameIds.clear();
                 setState(UIState::GAME_LIST);
             } else if (input.isButtonJustPressed(Button::B) || input.isButtonJustPressed(Button::X)) {
                 setState(UIState::GAME_LIST);
@@ -535,12 +634,45 @@ void UIManager::update() {
         }
 
         case UIState::SETTINGS: {
+            // Navigate settings rows (UP/DOWN)
+            if (input.isButtonJustPressed(Button::UP)) {
+                m_selectedSettingsRow = std::max(0, m_selectedSettingsRow - 1);
+            } else if (input.isButtonJustPressed(Button::DOWN)) {
+                m_selectedSettingsRow = std::min(7, m_selectedSettingsRow + 1);  // 0-7: rows in settings
+            }
+
             if (input.isButtonJustPressed(Button::A)) {
-                if (!AuthManager::instance().isLinked()) {
-                    setState(UIState::DISCLAIMER);
+                if (m_selectedSettingsRow == 0) {
+                    // Backup row - export settings
+                    if (!AuthManager::instance().isLinked()) {
+                        setState(UIState::DISCLAIMER);
+                    }
+                } else if (m_selectedSettingsRow == 6) {
+                    // Export backup
+                    showToast(UiStrings::BACKUP_EXPORTING, {168, 85, 247, 255}, 2000);
+                    auto result = BackupManager::instance().exportToSdCard();
+                    if (result.success) {
+                        showToast(UiStrings::BACKUP_SUCCESS, {34, 197, 94, 255}, 4000);
+                    } else {
+                        showToast(UiStrings::BACKUP_FAILED, {239, 68, 68, 255}, 4000);
+                    }
+                } else if (m_selectedSettingsRow == 7) {
+                    // Import backup
+                    showToast(UiStrings::BACKUP_IMPORTING, {0, 180, 216, 255}, 2000);
+                    auto lastBackup = BackupManager::instance().getMostRecentBackup();
+                    if (lastBackup.empty()) {
+                        showToast(UiStrings::BACKUP_NO_FILE, {245, 158, 11, 255}, 4000);
+                    } else {
+                        auto result = BackupManager::instance().importFromFile(lastBackup);
+                        if (result.success) {
+                            showToast(UiStrings::BACKUP_RESTORE_SUCCESS, {34, 197, 94, 255}, 4000);
+                        } else {
+                            showToast(UiStrings::BACKUP_RESTORE_FAILED, {239, 68, 68, 255}, 4000);
+                        }
+                    }
                 }
             } else if (input.isButtonJustPressed(Button::X)) {
-                if (AuthManager::instance().isLinked()) {
+                if (m_selectedSettingsRow == 0 && AuthManager::instance().isLinked()) {
                     AuthManager::instance().logout();
                     refreshSystems();
                     refreshGames();
@@ -548,6 +680,7 @@ void UIManager::update() {
                 }
             } else if (input.isButtonJustPressed(Button::B)) {
                 setState(UIState::MENU);
+                m_selectedSettingsRow = 0;
             }
             break;
         }
@@ -1283,6 +1416,31 @@ void UIManager::renderGameListState() {
                 }
                 drawText(sub, rowX + 118, y + 52, {140, 155, 175, 255}, m_fontSmall);
             }
+
+            // Multi-select checkbox
+            if (m_multiSelectMode) {
+                auto it = std::find(m_selectedGameIds.begin(), m_selectedGameIds.end(), game.id);
+                bool isSelected = (it != m_selectedGameIds.end());
+
+                // Checkbox background
+                SDL_Color cbBg = isSelected ? SDL_Color{34, 197, 94, 255} : SDL_Color{50, 60, 75, 255};
+                drawRoundedRect(rowX + rowW - 40, y + 35, 24, 24, 4, cbBg, true);
+
+                // Checkmark
+                if (isSelected) {
+                    drawText("✓", rowX + rowW - 40 + 3, y + 33, {255, 255, 255, 255}, m_fontMedium);
+                }
+            }
+        }
+
+        // Multi-select mode header badge
+        if (m_multiSelectMode && !m_selectedGameIds.empty()) {
+            int badgeW = 180;
+            int badgeH = 36;
+            int badgeX = 512 - badgeW / 2;
+            int badgeY = 8;
+            std::string countText = std::to_string(m_selectedGameIds.size()) + " đã chọn";
+            drawBadge(badgeX, badgeY, badgeW, badgeH, countText, {107, 33, 168, 255}, {255, 255, 255, 255});
         }
 
         // Scrollbar
@@ -1447,6 +1605,68 @@ void UIManager::renderConfirmDeleteDialog() {
     drawBadge(dlgX + dlgW - 60 - btnW, dlgY + 250, btnW, btnH, UiStrings::BTN_CANCEL_DELETE, {55, 65, 81, 255}, {255, 255, 255, 255});
 }
 
+void UIManager::renderConfirmBatchDeleteDialog() {
+    // Dim background overlay
+    drawRect(0, 0, 1024, 768, {0, 0, 0, 190}, true);
+
+    int dlgW = 680;
+    int dlgH = 400;
+    int dlgX = (1024 - dlgW) / 2;
+    int dlgY = (768 - dlgH) / 2;
+
+    drawRoundedRect(dlgX, dlgY, dlgW, dlgH, 16, {24, 28, 38, 255}, true);
+    drawRoundedBorder(dlgX, dlgY, dlgW, dlgH, 16, {239, 68, 68, 255}, 2);
+
+    // Title Banner
+    drawRoundedRect(dlgX + 1, dlgY + 1, dlgW - 2, 54, 15, {185, 28, 28, 255}, true);
+    drawRect(dlgX + 1, dlgY + 35, dlgW - 2, 20, {185, 28, 28, 255}, true);
+    drawText(UiStrings::MULTI_BATCH_DELETE_TITLE, dlgX + dlgW / 2, dlgY + 16, {255, 255, 255, 255}, m_fontLarge, true);
+
+    // Count of selected games
+    int selCount = static_cast<int>(m_selectedGameIds.size());
+
+    // Calculate total size
+    uint64_t totalSize = 0;
+    for (int64_t gameId : m_selectedGameIds) {
+        for (const auto& g : m_cachedGames) {
+            if (g.id == gameId) {
+                totalSize += g.sizeBytes;
+                break;
+            }
+        }
+    }
+
+    drawText("Bạn muốn xóa " + std::to_string(selCount) + " game khỏi thẻ nhớ?", dlgX + dlgW / 2, dlgY + 80, {220, 225, 235, 255}, m_fontMedium, true);
+    drawText("Tổng dung lượng: " + FileSystemManager::instance().formatBytes(totalSize), dlgX + dlgW / 2, dlgY + 115, {0, 180, 216, 255}, m_fontSmall, true);
+
+    // Show selected game names (up to 5)
+    int nameY = dlgY + 155;
+    int shownCount = 0;
+    for (const auto& g : m_cachedGames) {
+        if (shownCount >= 5) break;
+        auto it = std::find(m_selectedGameIds.begin(), m_selectedGameIds.end(), g.id);
+        if (it != m_selectedGameIds.end()) {
+            std::string title = g.title;
+            if (title.length() > 40) title = title.substr(0, 37) + "...";
+            drawText("- " + title, dlgX + 60, nameY, {200, 210, 225, 255}, m_fontSmall);
+            nameY += 28;
+            shownCount++;
+        }
+    }
+
+    if (selCount > 5) {
+        drawText("... và " + std::to_string(selCount - 5) + " game khác", dlgX + 60, nameY, {140, 155, 170, 255}, m_fontSmall);
+    }
+
+    drawText(UiStrings::MULTI_BATCH_DELETE_SAFE, dlgX + dlgW / 2, dlgY + dlgH - 100, {34, 197, 94, 255}, m_fontSmall, true);
+
+    // Action buttons
+    int btnW = 240;
+    int btnH = 50;
+    drawBadge(dlgX + 60, dlgY + dlgH - 70, btnW, btnH, UiStrings::MULTI_BATCH_DELETE_CONFIRM, {185, 28, 28, 255}, {255, 255, 255, 255});
+    drawBadge(dlgX + dlgW - 60 - btnW, dlgY + dlgH - 70, btnW, btnH, UiStrings::BTN_CANCEL_DELETE, {55, 65, 81, 255}, {255, 255, 255, 255});
+}
+
 void UIManager::renderDisclaimerState() {
     int cardX = 80;
     int cardY = 80;
@@ -1575,6 +1795,22 @@ void UIManager::renderSettingsState() {
     drawSettingRowBg(rowY, true);
     drawText(UiStrings::SETTING_COVER_CACHE, cardX + 24, rowY + 6, {160, 175, 190, 255}, m_fontMedium);
     drawText(UiStrings::SETTING_COVER_CACHE_VAL, cardX + 340, rowY + 10, {34, 197, 94, 255}, m_fontSmall);
+
+    // Backup & Restore Section
+    rowY += stepY + 16;
+    drawRect(cardX, rowY - 4, cardW, 1, {38, 48, 64, 255}, true);
+
+    rowY += stepY;
+    drawSettingRowBg(rowY, false);
+    drawText(UiStrings::BACKUP_EXPORT_BTN, cardX + 24, rowY + 6, {168, 85, 247, 255}, m_fontMedium);
+    drawText(UiStrings::BACKUP_EXPORT_DESC, cardX + 340, rowY + 10, {140, 155, 175, 255}, m_fontSmall);
+    drawBadge(cardX + cardW - 120, rowY, 100, 38, "[A]", {55, 65, 81, 255}, {255, 255, 255, 255});
+
+    rowY += stepY;
+    drawSettingRowBg(rowY, true);
+    drawText(UiStrings::BACKUP_IMPORT_BTN, cardX + 24, rowY + 6, {0, 180, 216, 255}, m_fontMedium);
+    drawText(UiStrings::BACKUP_IMPORT_DESC, cardX + 340, rowY + 10, {140, 155, 175, 255}, m_fontSmall);
+    drawBadge(cardX + cardW - 120, rowY, 100, 38, "[A]", {55, 65, 81, 255}, {255, 255, 255, 255});
 
     drawText(UiStrings::BTN_BACK_MAIN_MENU_HINT, 512, 650, {150, 165, 180, 255}, m_fontMedium, true);
 }
@@ -1929,6 +2165,7 @@ void UIManager::render() {
         case UIState::GAME_LIST:        renderGameListState(); break;
         case UIState::SEARCH:           renderSearchState(); break;
         case UIState::CONFIRM_DELETE:   renderGameListState(); renderConfirmDeleteDialog(); break;
+        case UIState::CONFIRM_BATCH_DELETE: renderGameListState(); renderConfirmBatchDeleteDialog(); break;
         case UIState::DISCLAIMER:       renderDisclaimerState(); break;
         case UIState::CLOUD_LOGIN:      renderCloudLoginState(); break;
         case UIState::SETTINGS:         renderSettingsState(); break;

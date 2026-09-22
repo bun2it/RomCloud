@@ -330,5 +330,36 @@ inline const char* OTA_DEV_NEW_VER_PREFIX    = "Phiên bản mới: v";
 inline const char* DIAG_VAL_64BIT            = " (64-bit Little Endian)";
 inline const char* DIAG_VAL_HW_ACCEL         = " (Tăng tốc phần cứng)";
 inline const char* DIAG_VAL_SCHEMA_PREFIX    = " (Phiên bản cấu trúc v";
+
+// --- 17. BACKUP & RESTORE ---
+inline const char* BACKUP_TITLE              = "SAO LƯU & PHỤC HỒI";
+inline const char* BACKUP_EXPORT_BTN         = "Sao lưu cài đặt";
+inline const char* BACKUP_IMPORT_BTN        = "Phục hồi cài đặt";
+inline const char* BACKUP_EXPORT_DESC        = "Xuất cài đặt ra file JSON";
+inline const char* BACKUP_IMPORT_DESC        = "Nhập cài đặt từ file backup";
+inline const char* BACKUP_EXPORTING          = "Đang sao lưu...";
+inline const char* BACKUP_IMPORTING          = "Đang phục hồi...";
+inline const char* BACKUP_SUCCESS            = "Sao lưu thành công!";
+inline const char* BACKUP_FAILED             = "Sao lưu thất bại.";
+inline const char* BACKUP_RESTORE_SUCCESS    = "Phục hồi thành công!";
+inline const char* BACKUP_RESTORE_FAILED     = "Phục hồi thất bại.";
+inline const char* BACKUP_NO_FILE            = "Không tìm thấy file backup.";
+inline const char* BACKUP_LAST_EXPORT        = "Backup gần nhất:";
+inline const char* BACKUP_FILE_SAVED         = "Đã lưu:";
+inline const char* BACKUP_PRESS_BACK         = "[B] Quay lại";
+
+// --- 18. MULTI-SELECT MODE ---
+inline const char* MULTI_SELECT_ENABLED      = "Đã bật chọn nhiều";
+inline const char* MULTI_SELECT_DISABLED     = "Đã tắt chọn nhiều";
+inline const char* MULTI_SELECT_HINT         = "Dùng A/X để chọn/bỏ chọn game";
+inline const char* MULTI_SELECT_COUNT_PRE    = "Đã chọn: ";
+inline const char* MULTI_SELECT_COUNT_SUF    = " game";
+inline const char* MULTI_BATCH_DELETE_TITLE  = "XÓA NHIỀU GAME?";
+inline const char* MULTI_BATCH_DELETE_PROMPT = "Bạn muốn xóa các game đã chọn?";
+inline const char* MULTI_BATCH_DELETE_SAFE   = "Bản trên Drive vẫn an toàn.";
+inline const char* MULTI_BATCH_DELETE_CONFIRM = "[A] Xóa tất cả";
+inline const char* MULTI_BATCH_QUEUE_TITLE   = "THÊM VÀO HÀNG TẢI";
+inline const char* MULTI_BATCH_QUEUE_PROMPT  = "Thêm các game đã chọn vào hàng chờ?";
+inline const char* MULTI_BATCH_QUEUE_CONFIRM = "[A] Thêm vào hàng";
 } // namespace UiStrings
 } // namespace RomCloud

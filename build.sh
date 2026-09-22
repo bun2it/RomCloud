@@ -40,6 +40,7 @@ $ZIG c++ \
     src/config/AppConfig.cpp \
     src/database/DatabaseManager.cpp \
     src/database/RomIndexer.cpp \
+    src/backup/BackupManager.cpp \
     -Lsysroot/lib \
     -lSDL2 \
     -lSDL2_image \
