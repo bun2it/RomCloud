@@ -106,6 +106,8 @@ private:
     void drawText(const std::string& text, int x, int y, SDL_Color color, TTF_Font* font, bool centered = false);
     void drawRect(int x, int y, int w, int h, SDL_Color color, bool filled = true);
     void drawBorder(int x, int y, int w, int h, SDL_Color color, int thickness = 2);
+    void drawRoundedRect(int x, int y, int w, int h, int radius, SDL_Color color, bool filled = true);
+    void drawRoundedBorder(int x, int y, int w, int h, int radius, SDL_Color color, int thickness = 1);
     void drawBadge(int x, int y, int w, int h, const std::string& text, SDL_Color bg, SDL_Color fg);
 };
 
