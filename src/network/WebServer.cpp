@@ -648,12 +648,29 @@ std::string WebServer::buildHtmlResponse() {
       ⚠️ <b>Thiết bị TrimUI đang ở chế độ Đăng xuất / Offline:</b> Chỉ hiển thị các game ĐÃ TẢI về thẻ nhớ. Để tìm kiếm và tải thêm kho game từ Google Drive, vui lòng <a href="javascript:void(0)" onclick="switchTab('tab-storage')" style="color: #38bdf8; font-weight: 700; text-decoration: underline;">bấm vào đây để kết nối lại Google Drive</a>.
     </div>
 
+    <!-- OTA Push Notification Banner -->
+    <div id="ota-push-banner" style="display: none; background: linear-gradient(135deg, #1e1b4b, #312e81, #1e40af); border: 1px solid #6366f1; border-radius: var(--radius); padding: 14px 20px; margin-bottom: 20px; box-shadow: 0 4px 20px rgba(99, 102, 241, 0.35);">
+      <div style="display: flex; justify-content: space-between; align-items: center; gap: 15px; flex-wrap: wrap;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <span style="font-size: 26px;">🎉</span>
+          <div>
+            <div style="font-weight: 700; font-size: 15px; color: #fff;">ĐÃ CÓ BẢN CẬP NHẬT MỚI: <span id="ota-push-version" style="color: #38bdf8;">v1.0.x</span>!</div>
+            <div id="ota-push-notes" style="font-size: 12px; color: #cbd5e1; margin-top: 2px;">Bản cập nhật chứa các tính năng và sửa lỗi mới nhất.</div>
+          </div>
+        </div>
+        <div style="display: flex; gap: 8px;">
+          <button class="btn btn-primary" onclick="quickApplyOta()" style="background: var(--green); border-color: var(--green-border); font-weight: 700;">🚀 Cập nhật ngay</button>
+          <button class="btn btn-secondary" onclick="document.getElementById('ota-push-banner').style.display='none';" style="padding: 6px 12px;">✕ Đóng</button>
+        </div>
+      </div>
+    </div>
+
     <!-- Navigation Tabs -->
     <div class="tab-bar">
       <button class="tab-btn active" onclick="switchTab('tab-roms')">🎮 Quản lý ROM</button>
       <button class="tab-btn" onclick="switchTab('tab-queue')">📥 Hàng đợi tải <span class="badge" id="nav-queue-badge">0</span></button>
       <button class="tab-btn" onclick="switchTab('tab-storage')">☁️ Đồng bộ &amp; Thẻ nhớ</button>
-      <button class="tab-btn" onclick="switchTab('tab-ota')">🚀 Cập nhật OTA</button>
+      <button class="tab-btn" onclick="switchTab('tab-ota')" id="nav-tab-ota">🚀 Cập nhật OTA <span class="badge" id="ota-nav-badge" style="display: none; background: #ef4444; color: #fff; margin-left: 4px; padding: 2px 6px; border-radius: 8px; font-size: 10px;">NEW</span></button>
     </div>
 
     <!-- TAB 1: ROM MANAGER -->
@@ -829,6 +846,8 @@ std::string WebServer::buildHtmlResponse() {
       loadStorageInfo();
       loadGames();
       startPolling();
+      setTimeout(() => checkOtaUpdate(true), 1200);
+      setInterval(() => checkOtaUpdate(true), 180000);
     });
 
     function showToast(msg) {
@@ -1262,34 +1281,104 @@ std::string WebServer::buildHtmlResponse() {
       }, 1500);
     }
 
+    function compareVer(v1, v2) {
+      const p1 = (v1 || '').replace(/^v/i, '').split('.').map(n => parseInt(n) || 0);
+      const p2 = (v2 || '').replace(/^v/i, '').split('.').map(n => parseInt(n) || 0);
+      for (let i = 0; i < Math.max(p1.length, p2.length); i++) {
+        const n1 = p1[i] || 0, n2 = p2[i] || 0;
+        if (n1 > n2) return 1;
+        if (n1 < n2) return -1;
+      }
+      return 0;
+    }
+
+    function quickApplyOta() {
+      switchTab('tab-ota');
+      const box = document.getElementById('ota-info-box');
+      if (box) box.style.display = 'block';
+      startOtaUpdate();
+    }
+
     // OTA
     let otaPollTimer = null;
-    async function checkOtaUpdate() {
+    async function checkOtaUpdate(silent = false) {
       const btn = document.getElementById('btn-ota-check');
-      btn.disabled = true;
-      btn.textContent = 'Đang kiểm tra...';
+      if (!silent && btn) {
+        btn.disabled = true;
+        btn.textContent = 'Đang kiểm tra...';
+      }
       try {
         const res = await fetch('/ota_check');
         const data = await res.json();
-        btn.disabled = false;
-        btn.textContent = 'Kiểm tra lại';
+
+        let hasUpdate = data.has_update;
+        let remoteVer = data.remote_version;
+        let changelog = data.changelog;
+        let curVer = data.current_version;
+
+        // Query GitHub API directly in browser for real-time instant notification
+        try {
+          const ghRes = await fetch('https://api.github.com/repos/bun2it/RomCloud/releases/latest');
+          if (ghRes.ok) {
+            const gh = await ghRes.json();
+            const tagVer = (gh.tag_name || '').replace(/^v/i, '');
+            if (tagVer && compareVer(tagVer, curVer) > 0) {
+              hasUpdate = true;
+              remoteVer = tagVer;
+              if (gh.body) changelog = gh.body;
+            }
+          }
+        } catch(e) {}
+
+        if (!silent && btn) {
+          btn.disabled = false;
+          btn.textContent = 'Kiểm tra lại';
+        }
 
         const box = document.getElementById('ota-info-box');
-        box.style.display = 'block';
-        if (data.has_update) {
-          document.getElementById('ota-version-title').innerHTML = `🎉 Có bản cập nhật mới: v${data.remote_version}`;
-          document.getElementById('ota-release-date').textContent = `Ngày phát hành: ${data.release_date}`;
-          document.getElementById('ota-changelog').textContent = data.changelog;
-          document.getElementById('btn-ota-install').style.display = 'inline-flex';
+        if (box && !silent) box.style.display = 'block';
+
+        if (hasUpdate) {
+          // Push banner at top
+          const banner = document.getElementById('ota-push-banner');
+          if (banner) {
+            banner.style.display = 'block';
+            document.getElementById('ota-push-version').textContent = 'v' + remoteVer;
+            if (changelog) {
+              const shortChg = changelog.split('\n')[0] || changelog;
+              document.getElementById('ota-push-notes').textContent = shortChg;
+            }
+          }
+          // OTA tab badge
+          const badge = document.getElementById('ota-nav-badge');
+          if (badge) {
+            badge.style.display = 'inline-block';
+            badge.textContent = 'v' + remoteVer;
+          }
+
+          if (box) {
+            document.getElementById('ota-version-title').innerHTML = `🎉 Có bản cập nhật mới: v${remoteVer}`;
+            document.getElementById('ota-release-date').textContent = `Ngày phát hành: ${data.release_date || 'Mới nhất'}`;
+            document.getElementById('ota-changelog').textContent = changelog;
+            document.getElementById('btn-ota-install').style.display = 'inline-flex';
+          }
+
+          if (silent) {
+            showToast(`🎉 Phát hiện bản cập nhật mới v${remoteVer}!`);
+          }
         } else {
-          document.getElementById('ota-version-title').innerHTML = `✅ Bạn đang sử dụng bản mới nhất (v${data.current_version})`;
-          document.getElementById('ota-release-date').textContent = '';
-          document.getElementById('ota-changelog').textContent = 'Không có bản cập nhật nào mới hơn.';
-          document.getElementById('btn-ota-install').style.display = 'none';
+          if (box) {
+            document.getElementById('ota-version-title').innerHTML = `✅ Bạn đang sử dụng bản mới nhất (v${data.current_version})`;
+            document.getElementById('ota-release-date').textContent = '';
+            document.getElementById('ota-changelog').textContent = 'Không có bản cập nhật nào mới hơn.';
+            document.getElementById('btn-ota-install').style.display = 'none';
+          }
         }
       } catch (e) {
-        btn.disabled = false;
-        btn.textContent = 'Kiểm tra lại';
+        if (!silent && btn) {
+          btn.disabled = false;
+          btn.textContent = 'Kiểm tra lại';
+        }
       }
     }
 

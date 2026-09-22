@@ -65,29 +65,55 @@ bool UpdateManager::isVersionNewer(const std::string& remote, const std::string&
 }
 
 bool UpdateManager::checkForUpdatesSync(UpdateInfo& outInfo) {
-    Logger::info("Checking for OTA updates from GitHub: " + std::string(VERSION_MANIFEST_URL));
+    Logger::info("Checking for OTA updates from GitHub Releases API...");
 
     std::vector<std::string> headers = {
-        "User-Agent: RomCloud-OTA/1.0 (TrimUI Brick Pro)"
+        "User-Agent: RomCloud-OTA/1.0 (TrimUI Brick Pro)",
+        "Accept: application/vnd.github.v3+json"
     };
 
-    HttpResponse resp = HttpClient::instance().get(VERSION_MANIFEST_URL, headers);
-    if (!resp.success || resp.body.empty()) {
-        Logger::warn("OTA check failed: " + resp.error);
-        return false;
+    // 1. Try GitHub Releases API first (instant, real-time, no CDN cache delay)
+    std::string apiEndpoint = "https://api.github.com/repos/" + std::string(GITHUB_REPO) + "/releases/latest";
+    HttpResponse resp = HttpClient::instance().get(apiEndpoint, headers);
+    
+    std::string remoteVer = "";
+    std::string changelog = "";
+    std::string relDate = "";
+    std::string binUrl = "";
+
+    if (resp.success && !resp.body.empty() && resp.statusCode == 200) {
+        std::string tag = JsonHelper::extractString(resp.body, "tag_name");
+        if (!tag.empty()) {
+            remoteVer = tag;
+            if (remoteVer.front() == 'v' || remoteVer.front() == 'V') {
+                remoteVer.erase(0, 1);
+            }
+            changelog = JsonHelper::extractString(resp.body, "body");
+            relDate = JsonHelper::extractString(resp.body, "published_at");
+            if (relDate.length() >= 10) relDate = relDate.substr(0, 10);
+            binUrl = "https://raw.githubusercontent.com/" + std::string(GITHUB_REPO) + "/main/bin/RomCloud";
+        }
     }
 
-    std::string remoteVer = JsonHelper::extractString(resp.body, "version");
-    std::string binUrl = JsonHelper::extractString(resp.body, "binary_url");
+    // 2. Fallback to version.json manifest if API failed or rate-limited
+    if (remoteVer.empty()) {
+        Logger::info("Falling back to version.json manifest: " + std::string(VERSION_MANIFEST_URL));
+        HttpResponse mResp = HttpClient::instance().get(VERSION_MANIFEST_URL, headers);
+        if (mResp.success && !mResp.body.empty()) {
+            remoteVer = JsonHelper::extractString(mResp.body, "version");
+            binUrl = JsonHelper::extractString(mResp.body, "binary_url");
+            if (binUrl.empty()) binUrl = JsonHelper::extractString(mResp.body, "download_url");
+            changelog = JsonHelper::extractString(mResp.body, "changelog");
+            relDate = JsonHelper::extractString(mResp.body, "release_date");
+        }
+    }
+
+    if (remoteVer.empty()) {
+        Logger::warn("OTA check failed to obtain remote version.");
+        return false;
+    }
     if (binUrl.empty()) {
-        binUrl = JsonHelper::extractString(resp.body, "download_url");
-    }
-    std::string changelog = JsonHelper::extractString(resp.body, "changelog");
-    std::string relDate = JsonHelper::extractString(resp.body, "release_date");
-
-    if (remoteVer.empty() || binUrl.empty()) {
-        Logger::warn("Invalid version.json received from GitHub.");
-        return false;
+        binUrl = "https://raw.githubusercontent.com/" + std::string(GITHUB_REPO) + "/main/bin/RomCloud";
     }
 
     outInfo.remoteVersion = remoteVer;

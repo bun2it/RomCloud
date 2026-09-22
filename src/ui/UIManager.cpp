@@ -59,6 +59,13 @@ bool UIManager::init(SDL_Window* window, SDL_Renderer* renderer) {
     CoverManager::instance().init(m_renderer);
     refreshSystems();
 
+    // Auto-check for OTA updates in background on launch
+    UpdateManager::instance().checkForUpdatesAsync([this](bool hasUpdate, const UpdateInfo& info) {
+        if (hasUpdate) {
+            showToast("Đã có bản cập nhật mới v" + info.remoteVersion + "!", {34, 197, 94, 255}, 6000);
+        }
+    });
+
     return true;
 }
 
@@ -927,10 +934,15 @@ void UIManager::renderMenuState() {
     int spacing = 16;
     int startX = (1024 - itemWidth) / 2;
 
+    std::string otaMenuText = UiStrings::MENU_OTA;
+    if (UpdateManager::instance().isUpdateAvailable()) {
+        otaMenuText = "🚀 Cập nhật OTA [BẢN MỚI: v" + UpdateManager::instance().getLatestInfo().remoteVersion + "]";
+    }
+
     std::vector<std::string> currentMenu = {
         UiStrings::MENU_PLAY,
         UiStrings::MENU_SYNC,
-        UiStrings::MENU_OTA,
+        otaMenuText,
         UiStrings::MENU_SETTINGS,
         UiStrings::MENU_DIAG,
         UiStrings::MENU_EXIT
