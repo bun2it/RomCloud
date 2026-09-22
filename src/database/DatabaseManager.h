@@ -72,6 +72,7 @@ public:
     bool updateGameLocalState(int64_t gameId, GameState state, const std::string& localPath = "");
     bool updateGameCover(int64_t gameId, const std::string& coverPath);
     bool markGameDeletedLocally(int64_t gameId);
+    bool clearCloudGames();
 
     bool getGameCountsBySystem(int systemId, int& outLocal, int& outCloud);
     bool getTotalGameCounts(int& outLocal, int& outCloud);

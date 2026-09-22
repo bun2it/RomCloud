@@ -843,6 +843,16 @@ bool DatabaseManager::markGameDeletedLocally(int64_t gameId) {
     return false;
 }
 
+bool DatabaseManager::clearCloudGames() {
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
+    if (!m_db) return false;
+    executeSimpleQuery("DELETE FROM games WHERE local_state = 0;");
+    executeSimpleQuery("UPDATE sync_state SET total_cloud_games = 0;");
+    executeSimpleQuery("UPDATE settings SET value = 'Never' WHERE key = 'last_cloud_sync_time';");
+    Logger::info("DatabaseManager: Cleared all un-downloaded cloud game records.");
+    return true;
+}
+
 bool DatabaseManager::getGameCountsBySystem(int systemId, int& outLocal, int& outCloud) {
     std::lock_guard<std::recursive_mutex> lock(m_mutex);
     outLocal = 0;

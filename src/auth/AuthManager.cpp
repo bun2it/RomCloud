@@ -234,10 +234,12 @@ void AuthManager::logout() {
     db.setSetting("auth_refresh_token", "");
     db.setSetting("auth_expires_at", "0");
     db.setSetting("auth_user_email", "");
+    db.setSetting("drive_folder_id", "");
+    db.clearCloudGames();
 
     m_state = AuthState::UNLINKED;
     m_userEmail = "";
-    Logger::info("User logged out. Google Drive credentials cleared.");
+    Logger::info("User logged out. Google Drive credentials and cloud index cleared.");
 }
 
 void AuthManager::pollTokenWorker() {

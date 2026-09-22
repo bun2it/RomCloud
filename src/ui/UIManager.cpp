@@ -534,6 +534,8 @@ void UIManager::update() {
             } else if (input.isButtonJustPressed(Button::X)) {
                 if (AuthManager::instance().isLinked()) {
                     AuthManager::instance().logout();
+                    refreshSystems();
+                    refreshGames();
                     showToast("Đã đăng xuất khỏi Google Drive.", {245, 158, 11, 255});
                 }
             } else if (input.isButtonJustPressed(Button::B)) {

@@ -632,10 +632,17 @@ std::string WebServer::buildHtmlResponse() {
         </div>
       </div>
       <div class="header-stats">
+        <div class="stat-pill" id="head-auth-pill">Drive: <b>Đang tải...</b></div>
         <div class="stat-pill" id="head-storage-pill">SD: <b>Đang tải...</b></div>
         <div class="stat-pill">Games: <b id="head-local-count">)HTML" + std::to_string(totalLocal) + R"HTML(</b> thẻ / <b id="head-cloud-count">)HTML" + std::to_string(totalCloud) + R"HTML(</b> cloud</div>
+        <button class="btn btn-danger hide-mobile" id="btn-head-logout" onclick="logoutGoogleDrive()" style="display:none; padding: 4px 10px; font-size: 11px;">🚪 Đăng xuất</button>
       </div>
     </header>
+
+    <!-- Offline / Unlinked Warning Banner -->
+    <div id="unlinked-warning-banner" style="display: none; padding: 12px 18px; background: rgba(245, 158, 11, 0.12); border: 1px solid #f59e0b; border-radius: var(--radius); margin-bottom: 20px; font-size: 13px; color: #fef3c7;">
+      ⚠️ <b>Thiết bị TrimUI đang ở chế độ Đăng xuất / Offline:</b> Chỉ hiển thị các game ĐÃ TẢI về thẻ nhớ. Để tìm kiếm và tải thêm kho game từ Google Drive, vui lòng <a href="javascript:void(0)" onclick="switchTab('tab-storage')" style="color: #38bdf8; font-weight: 700; text-decoration: underline;">bấm vào đây để kết nối lại Google Drive</a>.
+    </div>
 
     <!-- Navigation Tabs -->
     <div class="tab-bar">
@@ -746,11 +753,15 @@ std::string WebServer::buildHtmlResponse() {
 
         <div class="card">
           <h3>☁️ Đồng bộ Google Drive</h3>
+          <div id="drive-connection-status" style="margin-bottom: 12px; font-size: 13px;">
+            Trạng thái: <b style="color:var(--text-dim);">Đang kiểm tra...</b>
+          </div>
           <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 14px;">
             Lần đồng bộ gần nhất: <b id="last-sync-time">)HTML" + lastSyncTime + R"HTML(</b>
           </p>
-          <div style="display: flex; gap: 10px; margin-bottom: 16px;">
+          <div style="display: flex; gap: 10px; margin-bottom: 16px; flex-wrap: wrap;">
             <button class="btn btn-primary" id="btn-trigger-sync" onclick="triggerSync()">🔄 Quét &amp; Đồng bộ lại ngay</button>
+            <button class="btn btn-danger" id="btn-tab-logout" onclick="logoutGoogleDrive()" style="display: none;">🚪 Đăng xuất khỏi Google Drive</button>
           </div>
           <div id="sync-status-box" style="display: none; padding: 12px; background: var(--card-alt); border-radius: 8px; font-size: 13px; margin-top: 10px;">
             <div id="sync-status-txt">Đang quét thư mục Google Drive...</div>
@@ -1110,7 +1121,46 @@ std::string WebServer::buildHtmlResponse() {
         document.getElementById('head-local-count').textContent = data.total_local || 0;
         document.getElementById('head-cloud-count').textContent = data.total_cloud || 0;
         if (data.last_sync) document.getElementById('last-sync-time').textContent = data.last_sync;
+
+        const authPill = document.getElementById('head-auth-pill');
+        const btnHeadLogout = document.getElementById('btn-head-logout');
+        const unlinkedBanner = document.getElementById('unlinked-warning-banner');
+        const driveConnStatus = document.getElementById('drive-connection-status');
+        const btnTabLogout = document.getElementById('btn-tab-logout');
+        const btnTriggerSync = document.getElementById('btn-trigger-sync');
+
+        if (data.is_linked) {
+          authPill.innerHTML = `Drive: <b style="color:var(--green);">🟢 Đã kết nối</b>`;
+          btnHeadLogout.style.display = 'inline-flex';
+          unlinkedBanner.style.display = 'none';
+          driveConnStatus.innerHTML = `Trạng thái: <b style="color:var(--green);">🟢 Đã liên kết</b> (${data.user_email || 'Google Drive'})`;
+          btnTabLogout.style.display = 'inline-flex';
+          btnTriggerSync.disabled = false;
+        } else {
+          authPill.innerHTML = `Drive: <b style="color:var(--text-dim);">⚪ Đã đăng xuất</b>`;
+          btnHeadLogout.style.display = 'none';
+          unlinkedBanner.style.display = 'block';
+          driveConnStatus.innerHTML = `Trạng thái: <b style="color:var(--yellow);">⚪ Chưa liên kết Google Drive (Đã đăng xuất)</b>`;
+          btnTabLogout.style.display = 'none';
+          btnTriggerSync.disabled = true;
+        }
       } catch (e) {}
+    }
+
+    async function logoutGoogleDrive() {
+      if (!confirm("Bạn có chắc chắn muốn ĐĂNG XUẤT khỏi Google Drive?\n\n- Các game đã tải về thẻ nhớ vẫn được giữ nguyên 100%.\n- Danh mục các game cloud chưa tải sẽ được dọn sạch khỏi danh sách.")) {
+        return;
+      }
+      try {
+        const res = await fetch('/api/logout', { method: 'POST' });
+        const data = await res.json();
+        showToast(data.message || 'Đã đăng xuất khỏi Google Drive.');
+        await loadStorageInfo();
+        await loadSystems();
+        await loadGames();
+      } catch(e) {
+        showToast('Lỗi khi đăng xuất.');
+      }
     }
 
     async function updateDownloadQueueUI() {
@@ -1552,7 +1602,12 @@ void WebServer::handleClient(int clientFd) {
             usedPct = (static_cast<double>(usedBytes) / static_cast<double>(disk.totalBytes)) * 100.0;
         }
 
+        bool isLinked = AuthManager::instance().isLinked();
+        std::string userEmail = AuthManager::instance().getUserEmail();
+
         std::string json = "{";
+        json += "\"is_linked\":" + std::string(isLinked ? "true" : "false") + ",";
+        json += "\"user_email\":\"" + escapeJson(userEmail) + "\",";
         json += "\"total_bytes\":" + std::to_string(disk.totalBytes) + ",";
         json += "\"avail_bytes\":" + std::to_string(disk.availableBytes) + ",";
         json += "\"used_bytes\":" + std::to_string(usedBytes) + ",";
@@ -1608,14 +1663,24 @@ void WebServer::handleClient(int clientFd) {
                           "Content-Length: " + std::to_string(json.length()) + "\r\n"
                           "Connection: close\r\n\r\n" + json;
         send(clientFd, res.c_str(), res.length(), 0);
-    } else if (method == "POST" && path == "/unlink") {
+    } else if (method == "POST" && (path == "/api/logout" || path == "/unlink")) {
         AuthManager::instance().logout();
-        std::string body = buildSuccessResponse("Đã hủy liên kết Google Drive thành công!");
-        std::string res = "HTTP/1.1 200 OK\r\n"
-                          "Content-Type: text/html; charset=UTF-8\r\n"
-                          "Content-Length: " + std::to_string(body.length()) + "\r\n"
-                          "Connection: close\r\n\r\n" + body;
-        send(clientFd, res.c_str(), res.length(), 0);
+        if (path == "/api/logout") {
+            std::string json = "{\"success\":true,\"message\":\"Đã đăng xuất khỏi Google Drive thành công!\"}";
+            std::string res = "HTTP/1.1 200 OK\r\n"
+                              "Content-Type: application/json; charset=UTF-8\r\n"
+                              "Access-Control-Allow-Origin: *\r\n"
+                              "Content-Length: " + std::to_string(json.length()) + "\r\n"
+                              "Connection: close\r\n\r\n" + json;
+            send(clientFd, res.c_str(), res.length(), 0);
+        } else {
+            std::string body = buildSuccessResponse("Đã hủy liên kết Google Drive thành công!");
+            std::string res = "HTTP/1.1 200 OK\r\n"
+                              "Content-Type: text/html; charset=UTF-8\r\n"
+                              "Content-Length: " + std::to_string(body.length()) + "\r\n"
+                              "Connection: close\r\n\r\n" + body;
+            send(clientFd, res.c_str(), res.length(), 0);
+        }
     } else if (method == "POST" && path == "/connect") {
         std::string driveUrl = extractPostParam(postBody, "drive_url");
         std::string folderId = extractFolderId(driveUrl);
