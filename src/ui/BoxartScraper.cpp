@@ -453,7 +453,7 @@ bool BoxartScraper::scrapeCover(const GameRecord& game, const SystemRecord& sys,
         return true;
     }
 
-    // 3. Fallback to Libretro Thumbnails CDN with Smart Multi-Candidate Matching
+    // 3. Fallback to Libretro Thumbnails GitHub with Smart Multi-Candidate Matching
     std::string libretroSys = getLibretroSystemName(sys.code);
     if (!libretroSys.empty()) {
         std::string rawName = game.filename.empty() ? game.title : game.filename;
@@ -465,10 +465,11 @@ bool BoxartScraper::scrapeCover(const GameRecord& game, const SystemRecord& sys,
         for (const auto& cand : candidates) {
             std::string encodedCand = HttpClient::instance().urlEncode(cand);
             for (const char* subdir : subdirs) {
-                std::string url = "https://thumbnails.libretro.com/" + encodedSys + "/" + subdir + "/" + encodedCand + ".png";
+                // Use GitHub raw URL instead of CDN (CDN may have issues)
+                std::string url = "https://raw.githubusercontent.com/libretro/libretro-thumbnails/master/" + encodedSys + "/" + subdir + "/" + encodedCand + ".png";
                 if (downloadCoverFromUrl(url, targetPath)) {
                     outCoverPath = targetPath;
-                    Logger::info("BoxartScraper: Match found on Libretro CDN (" + cand + ") -> " + targetPath);
+                    Logger::info("BoxartScraper: Match found on Libretro GitHub (" + cand + ") -> " + targetPath);
                     return true;
                 }
             }
@@ -752,7 +753,7 @@ std::vector<ScrapeCandidate> BoxartScraper::searchCandidates(const std::string& 
         }
     }
 
-    // 2. Generate Libretro CDN Candidates
+    // 2. Generate Libretro GitHub Candidates
     std::string libretroSys = getLibretroSystemName(systemCode);
     if (!libretroSys.empty()) {
         std::vector<std::string> cands = generateLibretroCandidates(query, systemCode);
@@ -761,7 +762,8 @@ std::vector<ScrapeCandidate> BoxartScraper::searchCandidates(const std::string& 
         for (const auto& candName : cands) {
             if (results.size() >= 8) break;
             std::string encodedCand = HttpClient::instance().urlEncode(candName);
-            std::string url = "https://thumbnails.libretro.com/" + encodedSys + "/Named_Boxarts/" + encodedCand + ".png";
+            // Use GitHub raw URL instead of CDN
+            std::string url = "https://raw.githubusercontent.com/libretro/libretro-thumbnails/master/" + encodedSys + "/Named_Boxarts/" + encodedCand + ".png";
 
             ScrapeCandidate cand;
             cand.title = candName;
