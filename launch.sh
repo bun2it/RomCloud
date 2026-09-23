@@ -19,6 +19,12 @@ rm -f /tmp/romcloud_*.tmp 2>/dev/null
 # Ensure port 8080 is freed if previous instance did not exit cleanly
 fuser -k 8080/tcp 2>/dev/null || true
 
+# Ensure config.json uses only icontop to prevent dual stacked icons in TrimUI launcher
+if [ -f "./config.json" ]; then
+    sed -i 's/"icon": *"icon.png"/"icon": ""/g' ./config.json 2>/dev/null || true
+    sed -i 's/"iconsel": *"icon.png"/"iconsel": ""/g' ./config.json 2>/dev/null || true
+fi
+
 install_pending_ota() {
     NEW_BIN="./bin/RomCloud.new"
     TARGET_BIN="./bin/RomCloud"

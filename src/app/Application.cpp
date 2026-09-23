@@ -151,6 +151,41 @@ bool Application::init(int argc, char* argv[]) {
         sync();
     }
 
+    // Ensure config.json uses only icontop to prevent dual stacked icons in TrimUI
+    std::string configPath = appRoot + "/config.json";
+    std::ifstream cfgIn(configPath);
+    if (cfgIn.is_open()) {
+        std::string content((std::istreambuf_iterator<char>(cfgIn)), std::istreambuf_iterator<char>());
+        cfgIn.close();
+        bool changed = false;
+        size_t p = 0;
+        while ((p = content.find("\"icon\": \"icon.png\"")) != std::string::npos) {
+            content.replace(p, 18, "\"icon\": \"\"");
+            changed = true;
+        }
+        while ((p = content.find("\"icon\":\"icon.png\"")) != std::string::npos) {
+            content.replace(p, 17, "\"icon\":\"\"");
+            changed = true;
+        }
+        while ((p = content.find("\"iconsel\": \"icon.png\"")) != std::string::npos) {
+            content.replace(p, 21, "\"iconsel\": \"\"");
+            changed = true;
+        }
+        while ((p = content.find("\"iconsel\":\"icon.png\"")) != std::string::npos) {
+            content.replace(p, 20, "\"iconsel\":\"\"");
+            changed = true;
+        }
+        if (changed) {
+            std::ofstream cfgOut(configPath, std::ios::trunc);
+            if (cfgOut.is_open()) {
+                cfgOut << content;
+                cfgOut.close();
+                sync();
+                Logger::info("Sanitized config.json: removed background icon, kept icontop foreground logo");
+            }
+        }
+    }
+
     // Initialize Network, OAuth, Sync & Download
     HttpClient::instance().init();
     WebServer::instance().start(8080);

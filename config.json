@@ -1,8 +1,8 @@
 {
   "label": "RomCloud",
   "label.ch.lang": "RomCloud云端",
-  "icon": "icon.png",
-  "iconsel": "icon.png",
+  "icon": "",
+  "iconsel": "",
   "icontop": "icon.png",
   "launch": "launch.sh",
   "description": "Google Drive ROM Cloud Library for TrimUI Brick Pro"
