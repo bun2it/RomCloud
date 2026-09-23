@@ -15,6 +15,7 @@
 #include "../sync/UploadManager.h"
 #include "BoxartScraper.h"
 #include "UiStrings.h"
+#include <SDL2/SDL_image.h>
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -1001,6 +1002,31 @@ void UIManager::drawBadge(int x, int y, int w, int h, const std::string& text, S
     drawText(text, x + w / 2, y + (h - 16) / 2, fg, m_fontSmall, true);
 }
 
+void UIManager::drawIcon(const std::string& iconName, int x, int y, int w, int h) {
+    std::string iconsDir = AppConfig::instance().getAssetsDir() + "/icons";
+    std::string iconPath = iconsDir + "/" + iconName + ".png";
+
+    SDL_Surface* surface = IMG_Load(iconPath.c_str());
+    if (!surface) {
+        // Fallback: draw a colored rectangle if icon not found
+        drawRect(x, y, w, h, {60, 70, 85, 255}, true);
+        return;
+    }
+
+    SDL_Texture* texture = SDL_CreateTextureFromSurface(m_renderer, surface);
+    if (!texture) {
+        SDL_FreeSurface(surface);
+        drawRect(x, y, w, h, {60, 70, 85, 255}, true);
+        return;
+    }
+
+    SDL_Rect dst = {x, y, w, h};
+    SDL_RenderCopy(m_renderer, texture, nullptr, &dst);
+
+    SDL_DestroyTexture(texture);
+    SDL_FreeSurface(surface);
+}
+
 void UIManager::renderHeader() {
     drawRect(0, 0, 1024, 64, {18, 22, 30, 255}, true);
     drawRect(0, 63, 1024, 1, {40, 48, 62, 255}, true);
@@ -1428,12 +1454,11 @@ void UIManager::renderSystemSelectState() {
             drawRoundedRect(rx + 6, y + 12, 5, rowH - 24, 2, {0, 180, 216, 255}, true);
         }
 
-        // System code as compact badge
-        int badgeW = 70;
-        int badgeH = 36;
-        drawBadge(rx + 24, y + 26, badgeW, badgeH, sys.code, {22, 101, 52, 255}, {255, 255, 255, 255});
+        // System icon
+        int iconSize = 64;
+        drawIcon(sys.code, rx + 16, y + (rowH - iconSize) / 2, iconSize, iconSize);
 
-        drawText(sys.name, rx + 110, y + 18, {255, 255, 255, 255}, m_fontLarge);
+        drawText(sys.name, rx + 96, y + 18, {255, 255, 255, 255}, m_fontLarge);
 
         std::string localBadge = std::to_string(sys.localCount) + " local";
         std::string cloudBadge = std::to_string(sys.cloudCount) + " cloud";

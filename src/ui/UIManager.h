@@ -1,130 +1,139 @@
 #pragma once
+#include "../database/DatabaseManager.h"
+#include "CoverManager.h"
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_ttf.h>
 #include <string>
 #include <vector>
-#include "../database/DatabaseManager.h"
-#include "CoverManager.h"
 
 namespace RomCloud {
 
 enum class UIState {
-    MENU,
-    SYSTEM_SELECT,
-    GAME_LIST,
-    SEARCH,
-    CONFIRM_DELETE,
-    CONFIRM_BATCH_DELETE,
-    DISCLAIMER,
-    CLOUD_LOGIN,
-    SETTINGS,
-    DIAGNOSTICS,
-    OTA_UPDATE,
-    REVERSE_SYNC,
-    EXIT_REQUESTED
+  MENU,
+  SYSTEM_SELECT,
+  GAME_LIST,
+  SEARCH,
+  CONFIRM_DELETE,
+  CONFIRM_BATCH_DELETE,
+  DISCLAIMER,
+  CLOUD_LOGIN,
+  SETTINGS,
+  DIAGNOSTICS,
+  OTA_UPDATE,
+  REVERSE_SYNC,
+  EXIT_REQUESTED
 };
 
-enum class GameFilterMode {
-    ALL = -1,
-    LOCAL_ONLY = 1,
-    CLOUD_ONLY = 0
-};
+enum class GameFilterMode { ALL = -1, LOCAL_ONLY = 1, CLOUD_ONLY = 0 };
 
 class UIManager {
 public:
-    static UIManager& instance();
-    bool init(SDL_Window* window, SDL_Renderer* renderer);
-    void shutdown();
-    void update();
-    void render();
+  static UIManager &instance();
+  bool init(SDL_Window *window, SDL_Renderer *renderer);
+  void shutdown();
+  void update();
+  void render();
 
-    UIState getState() const { return m_currentState; }
-    void setState(UIState state);
+  UIState getState() const { return m_currentState; }
+  void setState(UIState state);
 
 private:
-    UIManager() = default;
+  UIManager() = default;
 
-    SDL_Window* m_window = nullptr;
-    SDL_Renderer* m_renderer = nullptr;
-    TTF_Font* m_fontTitle = nullptr;
-    TTF_Font* m_fontLarge = nullptr;
-    TTF_Font* m_fontMedium = nullptr;
-    TTF_Font* m_fontSmall = nullptr;
+  SDL_Window *m_window = nullptr;
+  SDL_Renderer *m_renderer = nullptr;
+  TTF_Font *m_fontTitle = nullptr;
+  TTF_Font *m_fontLarge = nullptr;
+  TTF_Font *m_fontMedium = nullptr;
+  TTF_Font *m_fontSmall = nullptr;
 
-    UIState m_currentState = UIState::MENU;
-    int m_selectedMenuIndex = 0;
-    std::vector<std::string> m_menuItems = {"KHO GAME (THƯ VIỆN)", "ĐỒNG BỘ DỮ LIỆU", "ĐỒNG BỘ NGƯỢC LÊN DRIVE", "CẬP NHẬT PHẦN MỀM (OTA)", "CÀI ĐẶT (SETTINGS)", "THÔNG TIN HỆ THỐNG", "THOÁT (EXIT)"};
+  UIState m_currentState = UIState::MENU;
+  int m_selectedMenuIndex = 0;
+  std::vector<std::string> m_menuItems = {
+      "KHO GAME (THƯ VIỆN)", "ĐỒNG BỘ DỮ LIỆU",
+      "UPLOAD LÊN DRIVE",    "CẬP NHẬT PHẦN MỀM (OTA)",
+      "CÀI ĐẶT (SETTINGS)",  "THÔNG TIN HỆ THỐNG",
+      "THOÁT (EXIT)"};
 
-    // System Selection State
-    int m_selectedSystemIndex = 0;
-    std::vector<SystemRecord> m_cachedSystems;
+  // System Selection State
+  int m_selectedSystemIndex = 0;
+  std::vector<SystemRecord> m_cachedSystems;
 
-    // Game List State
-    SystemRecord m_activeSystem;
-    int m_selectedGameIndex = 0;
-    int m_gameScrollOffset = 0;
-    GameFilterMode m_filterMode = GameFilterMode::ALL;
+  // Game List State
+  SystemRecord m_activeSystem;
+  int m_selectedGameIndex = 0;
+  int m_gameScrollOffset = 0;
+  GameFilterMode m_filterMode = GameFilterMode::ALL;
 
-    // Multi-Select State
-    bool m_multiSelectMode = false;
-    std::vector<int64_t> m_selectedGameIds;
+  // Multi-Select State
+  bool m_multiSelectMode = false;
+  std::vector<int64_t> m_selectedGameIds;
 
-    // Settings State
-    int m_selectedSettingsRow = 0;
-    int m_settingsScrollOffset = 0;
+  // Settings State
+  int m_selectedSettingsRow = 0;
+  int m_settingsScrollOffset = 0;
 
-    // Diagnostics scroll state
-    int m_diagnosticsScrollOffset = 0;
+  // Diagnostics scroll state
+  int m_diagnosticsScrollOffset = 0;
 
-    // Search state
-    std::string m_searchQuery;
-    std::vector<GameRecord> m_searchResults;
-    int m_searchSelectedIndex = 0;
-    int m_searchScrollOffset = 0;
-    // On-screen keyboard
-    int m_kbCursorRow = 0;
-    int m_kbCursorCol = 0;
-    bool m_kbInResults = false; // false=typing, true=browsing results
-    std::vector<GameRecord> m_cachedGames;
+  // Search state
+  std::string m_searchQuery;
+  std::vector<GameRecord> m_searchResults;
+  int m_searchSelectedIndex = 0;
+  int m_searchScrollOffset = 0;
+  // On-screen keyboard
+  int m_kbCursorRow = 0;
+  int m_kbCursorCol = 0;
+  bool m_kbInResults = false; // false=typing, true=browsing results
+  std::vector<GameRecord> m_cachedGames;
 
-    // Notification toast
-    std::string m_toastMessage;
-    uint32_t m_toastExpiry = 0;
-    SDL_Color m_toastColor = {0, 180, 216, 255};
+  // Notification toast
+  std::string m_toastMessage;
+  uint32_t m_toastExpiry = 0;
+  SDL_Color m_toastColor = {0, 180, 216, 255};
 
-    void showToast(const std::string& message, SDL_Color color = {0, 180, 216, 255}, uint32_t durationMs = 2500);
+  void showToast(const std::string &message,
+                 SDL_Color color = {0, 180, 216, 255},
+                 uint32_t durationMs = 2500);
 
-    void refreshSystems();
-    void refreshGames();
-    void triggerManualSync();
+  void refreshSystems();
+  void refreshGames();
+  void triggerManualSync();
 
-    // Render helpers
-    void renderHeader();
-    void renderFooter();
-    void renderMenuState();
-    void renderSystemSelectState();
-    void renderGameListState();
-    void renderSearchState();
-    void renderConfirmDeleteDialog();
-    void renderConfirmBatchDeleteDialog();
-    void renderDisclaimerState();
-    void renderCloudLoginState();
-    void renderSyncOverlay();
-    void renderDownloadOverlay();
-    void renderSettingsState();
-    void renderDiagnosticsState();
-    void renderOTAUpdateState();
-    void renderReverseSyncState();
-    void renderUploadOverlay();
-    void renderToast();
+  // Render helpers
+  void renderHeader();
+  void renderFooter();
+  void renderMenuState();
+  void renderSystemSelectState();
+  void renderGameListState();
+  void renderSearchState();
+  void renderConfirmDeleteDialog();
+  void renderConfirmBatchDeleteDialog();
+  void renderDisclaimerState();
+  void renderCloudLoginState();
+  void renderSyncOverlay();
+  void renderDownloadOverlay();
+  void renderSettingsState();
+  void renderDiagnosticsState();
+  void renderOTAUpdateState();
+  void renderReverseSyncState();
+  void renderUploadOverlay();
+  void renderToast();
 
-    // Primitive drawing
-    void drawText(const std::string& text, int x, int y, SDL_Color color, TTF_Font* font, bool centered = false);
-    void drawRect(int x, int y, int w, int h, SDL_Color color, bool filled = true);
-    void drawBorder(int x, int y, int w, int h, SDL_Color color, int thickness = 2);
-    void drawRoundedRect(int x, int y, int w, int h, int radius, SDL_Color color, bool filled = true);
-    void drawRoundedBorder(int x, int y, int w, int h, int radius, SDL_Color color, int thickness = 1);
-    void drawBadge(int x, int y, int w, int h, const std::string& text, SDL_Color bg, SDL_Color fg);
+  // Primitive drawing
+  void drawText(const std::string &text, int x, int y, SDL_Color color,
+                TTF_Font *font, bool centered = false);
+  void drawRect(int x, int y, int w, int h, SDL_Color color,
+                bool filled = true);
+  void drawBorder(int x, int y, int w, int h, SDL_Color color,
+                  int thickness = 2);
+  void drawRoundedRect(int x, int y, int w, int h, int radius, SDL_Color color,
+                       bool filled = true);
+  void drawRoundedBorder(int x, int y, int w, int h, int radius,
+                         SDL_Color color, int thickness = 1);
+  void drawBadge(int x, int y, int w, int h, const std::string &text,
+                 SDL_Color bg, SDL_Color fg);
+  void drawIcon(const std::string &iconName, int x, int y, int w, int h);
 };
 
 } // namespace RomCloud

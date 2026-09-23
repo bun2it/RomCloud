@@ -18,6 +18,7 @@ ZIP_NAME="RomCloud-v${VERSION}.zip"
 rm -rf "$STAGING_DIR"
 mkdir -p "$STAGING_DIR/Apps/RomCloud/bin"
 mkdir -p "$STAGING_DIR/Apps/RomCloud/assets/fonts"
+mkdir -p "$STAGING_DIR/Apps/RomCloud/assets/icons"
 mkdir -p "$STAGING_DIR/Apps/RomCloud/config"
 
 # Copy essential runtime files
@@ -26,6 +27,7 @@ cp icon.png "$STAGING_DIR/Apps/RomCloud/"
 cp launch.sh "$STAGING_DIR/Apps/RomCloud/"
 cp bin/RomCloud "$STAGING_DIR/Apps/RomCloud/bin/"
 cp assets/fonts/font.ttf "$STAGING_DIR/Apps/RomCloud/assets/fonts/"
+cp assets/icons/*.png "$STAGING_DIR/Apps/RomCloud/assets/icons/"
 cp config/settings.json "$STAGING_DIR/Apps/RomCloud/config/"
 
 # Ensure execution permissions
