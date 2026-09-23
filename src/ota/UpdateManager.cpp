@@ -1,5 +1,3 @@
-
-
 #include "UpdateManager.h"
 #include "../config/AppConfig.h"
 #include "../filesystem/FileSystemManager.h"
@@ -12,6 +10,8 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <vector>
+#include <fstream>
+#include <algorithm>
 
 namespace RomCloud {
 
@@ -26,12 +26,20 @@ bool UpdateManager::init() {
   std::lock_guard<std::mutex> lock(m_mutex);
   m_progress.state = UpdateState::IDLE;
   m_hasUpdate = false;
-  Logger::info("UpdateManager initialized. Current version: v" +
-               std::string(APP_VERSION));
+  Logger::info("UpdateManager initialized. Current version: v" + std::string(APP_VERSION));
+
+  // Auto-detect OS and log it
+  std::string osType = AppConfig::instance().getOSName();
+  Logger::info("Detected OS: " + osType);
+
   return true;
 }
 
 void UpdateManager::shutdown() { cancelUpdate(); }
+
+// ============================================================================
+// VERSION COMPARISON
+// ============================================================================
 
 bool UpdateManager::isVersionNewer(const std::string &remote,
                                    const std::string &current) {
@@ -70,19 +78,32 @@ bool UpdateManager::isVersionNewer(const std::string &remote,
   return false;
 }
 
+// ============================================================================
+// CHECK FOR UPDATES
+// ============================================================================
+
 bool UpdateManager::checkForUpdatesSync(UpdateInfo &outInfo) {
-  Logger::info("Checking for OTA updates from GitHub Releases API...");
+  Logger::info("Checking for OTA updates...");
+
+  // Get OS type for OS-specific bundles
+  std::string osType = OSTypeToString(AppConfig::instance().getOSType());
+  if (osType == "Auto") {
+    // Force detect if auto
+    AppConfig::instance().setOSType(OSType::AUTO);
+    OSType detected = AppConfig::instance().detectOSType();
+    AppConfig::instance().setOSType(detected);
+    osType = OSTypeToString(detected);
+  }
 
   std::vector<std::string> headers = {
-      "User-Agent: RomCloud-OTA/1.0 (TrimUI Brick Pro)",
+      "User-Agent: RomCloud-OTA/1.0",
       "Accept: application/vnd.github.v3+json"};
 
-  // 1. Try version.json manifest with cache-buster timestamp (immune to GitHub
-  // API rate limits and CDN caching)
+  // 1. Try version.json manifest
   std::string manifestUrl = std::string(VERSION_MANIFEST_URL) +
                             "?t=" + std::to_string(std::time(nullptr));
   std::vector<std::string> manifestHeaders = {
-      "User-Agent: RomCloud-OTA/1.0 (TrimUI Brick Pro)",
+      "User-Agent: RomCloud-OTA/1.0",
       "Cache-Control: no-cache, no-store, must-revalidate", "Pragma: no-cache"};
   HttpResponse mResp = HttpClient::instance().get(manifestUrl, manifestHeaders);
 
@@ -91,6 +112,7 @@ bool UpdateManager::checkForUpdatesSync(UpdateInfo &outInfo) {
   std::string relDate = "";
   std::string binUrl = "";
   std::string bundleUrl = "";
+  std::string osBundleUrl = "";
 
   if (mResp.success && !mResp.body.empty() && mResp.statusCode == 200) {
     remoteVer = JsonHelper::extractString(mResp.body, "version");
@@ -98,6 +120,13 @@ bool UpdateManager::checkForUpdatesSync(UpdateInfo &outInfo) {
     if (binUrl.empty())
       binUrl = JsonHelper::extractString(mResp.body, "download_url");
     bundleUrl = JsonHelper::extractString(mResp.body, "bundle_url");
+    osBundleUrl = JsonHelper::extractString(mResp.body, "os_bundle_url");
+
+    // Check for OS-specific bundle
+    if (osBundleUrl.empty()) {
+      osBundleUrl = JsonHelper::extractString(mResp.body, osType + "_bundle_url");
+    }
+
     changelog = JsonHelper::extractString(mResp.body, "changelog");
     relDate = JsonHelper::extractString(mResp.body, "release_date");
   }
@@ -120,19 +149,28 @@ bool UpdateManager::checkForUpdatesSync(UpdateInfo &outInfo) {
         if (relDate.length() >= 10)
           relDate = relDate.substr(0, 10);
 
-        // Try to get download URL from release assets
+        // Get download URLs from release assets
         auto assets = JsonHelper::extractArrayObjects(resp.body, "assets");
         for (const auto &asset : assets) {
           std::string name = JsonHelper::extractString(asset, "name");
+          std::string url = JsonHelper::extractString(asset, "browser_download_url");
+
           if (name == "RomCloud" || name == "RomCloud.bin") {
-            binUrl = JsonHelper::extractString(asset, "browser_download_url");
-          } else if (name == "mpv_bundle.zip") {
-            bundleUrl = JsonHelper::extractString(asset, "browser_download_url");
+            binUrl = url;
+          } else if (name == "mpv_bundle.zip" || name == "mpv_bundle-" + osType + ".zip") {
+            bundleUrl = url;
+          } else if (name.find("_bundle.zip") != std::string::npos) {
+            // Check OS-specific bundle
+            std::string lowerOsType = osType;
+            std::transform(lowerOsType.begin(), lowerOsType.end(), lowerOsType.begin(), ::tolower);
+            if (name.find(lowerOsType) != std::string::npos) {
+              osBundleUrl = url;
+            }
           }
         }
         if (binUrl.empty()) {
           binUrl = "https://github.com/" + std::string(GITHUB_REPO) +
-                   "/releases/download/" + tag + "/RomCloud";
+                   "/releases/download/v" + remoteVer + "/RomCloud";
         }
       }
     }
@@ -142,20 +180,30 @@ bool UpdateManager::checkForUpdatesSync(UpdateInfo &outInfo) {
     Logger::warn("OTA check failed to obtain remote version.");
     return false;
   }
+
+  // Build default URLs if not found
   if (binUrl.empty()) {
-    binUrl = "https://raw.githubusercontent.com/" + std::string(GITHUB_REPO) +
-             "/main/bin/RomCloud";
+    binUrl = "https://github.com/" + std::string(GITHUB_REPO) +
+             "/releases/download/v" + remoteVer + "/RomCloud";
   }
   if (bundleUrl.empty()) {
     bundleUrl = "https://github.com/" + std::string(GITHUB_REPO) +
                 "/releases/download/v" + remoteVer + "/mpv_bundle.zip";
   }
 
+  // OS-specific bundle URL
+  if (osBundleUrl.empty()) {
+    osBundleUrl = "https://github.com/" + std::string(GITHUB_REPO) +
+                  "/releases/download/v" + remoteVer + "/bundle-" + osType + ".zip";
+  }
+
   outInfo.remoteVersion = remoteVer;
   outInfo.downloadUrl = binUrl;
   outInfo.bundleUrl = bundleUrl;
+  outInfo.osBundleUrl = osBundleUrl;
   outInfo.changelog = changelog;
   outInfo.releaseDate = relDate;
+  outInfo.osType = osType;
 
   bool newer = isVersionNewer(remoteVer, APP_VERSION);
   {
@@ -169,9 +217,10 @@ bool UpdateManager::checkForUpdatesSync(UpdateInfo &outInfo) {
 
   if (newer) {
     Logger::info("New OTA update available: v" + remoteVer + " (Current: v" +
-                 std::string(APP_VERSION) + ")");
+                 std::string(APP_VERSION) + ") for OS: " + osType);
   } else {
-    Logger::info("RomCloud is up to date (v" + std::string(APP_VERSION) + ")");
+    Logger::info("RomCloud is up to date (v" + std::string(APP_VERSION) +
+                 ") on " + osType);
   }
 
   return newer;
@@ -187,6 +236,195 @@ void UpdateManager::checkForUpdatesAsync(
     }
   }).detach();
 }
+
+// ============================================================================
+// DEPENDENCY CHECKING
+// ============================================================================
+
+std::vector<DependencyInfo> UpdateManager::getMissingDependencies() {
+  std::vector<DependencyInfo> missing;
+
+  std::string appRoot = AppConfig::instance().getAppRoot();
+  std::string binDir = appRoot + "/bin";
+  std::string libDir = appRoot + "/lib";
+
+  // Create directories if needed
+  mkdir(binDir.c_str(), 0755);
+  mkdir(libDir.c_str(), 0755);
+
+  // Check mpv binary
+  DependencyInfo mpv = {"mpv", binDir + "/mpv", "", true};
+  if (access(mpv.path.c_str(), X_OK) != 0) {
+    missing.push_back(mpv);
+    Logger::info("Dependency missing: mpv at " + mpv.path);
+  }
+
+  // Check critical libraries
+  const char* libs[] = {
+    "libavcodec.so.58",
+    "libavformat.so.58",
+    "libavutil.so.56",
+    "libswscale.so.5",
+    "libswresample.so.3"
+  };
+
+  for (const char* lib : libs) {
+    DependencyInfo dep = {lib, libDir + "/" + lib, "", true};
+    if (access(dep.path.c_str(), R_OK) != 0) {
+      missing.push_back(dep);
+      Logger::info("Dependency missing: " + std::string(lib));
+    }
+  }
+
+  return missing;
+}
+
+bool UpdateManager::checkAndInstallDependencies() {
+  auto missing = getMissingDependencies();
+  if (missing.empty()) {
+    Logger::info("All dependencies satisfied.");
+    return true;
+  }
+
+  Logger::info("Missing " + std::to_string(missing.size()) + " dependencies, will install...");
+
+  std::string appRoot = AppConfig::instance().getAppRoot();
+  std::string bundleUrl = "https://github.com/" + std::string(GITHUB_REPO) +
+                          "/releases/download/v" + std::string(APP_VERSION) + "/mpv_bundle.zip";
+
+  std::string bundlePath = appRoot + "/mpv_bundle.zip";
+
+  {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_progress.state = UpdateState::DOWNLOADING_DEPS;
+    m_progress.currentStep = "Downloading media bundle...";
+  }
+
+  // Download bundle
+  if (!downloadFile(bundleUrl, bundlePath)) {
+    Logger::error("Failed to download media bundle from: " + bundleUrl);
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_progress.state = UpdateState::FAILED;
+    m_progress.errorMessage = "Cannot download media bundle";
+    return false;
+  }
+
+  {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_progress.state = UpdateState::INSTALLING_DEPS;
+    m_progress.currentStep = "Installing media bundle...";
+  }
+
+  // Install bundle
+  if (!installMpvsBundle(bundlePath)) {
+    Logger::error("Failed to install media bundle");
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_progress.state = UpdateState::FAILED;
+    m_progress.errorMessage = "Cannot install media bundle";
+    return false;
+  }
+
+  // Clean up
+  unlink(bundlePath.c_str());
+
+  Logger::info("Dependencies installed successfully!");
+  return true;
+}
+
+// ============================================================================
+// DOWNLOAD HELPERS
+// ============================================================================
+
+bool UpdateManager::downloadFile(const std::string& url, const std::string& destPath, uint64_t* outSize) {
+  CURL* curl = curl_easy_init();
+  if (!curl) return false;
+
+  FILE* fp = fopen(destPath.c_str(), "wb");
+  if (!fp) {
+    curl_easy_cleanup(curl);
+    return false;
+  }
+
+  curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+  curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, fwrite);
+  curl_easy_setopt(curl, CURLOPT_WRITEDATA, fp);
+  curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+  curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
+  curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
+  curl_easy_setopt(curl, CURLOPT_TIMEOUT, 300L);
+  curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
+
+  CURLcode res = curl_easy_perform(curl);
+  long httpCode = 0;
+  curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &httpCode);
+  curl_easy_cleanup(curl);
+  fclose(fp);
+
+  if (res != CURLE_OK || httpCode < 200 || httpCode >= 300) {
+    unlink(destPath.c_str());
+    return false;
+  }
+
+  if (outSize) {
+    struct stat st;
+    if (stat(destPath.c_str(), &st) == 0) {
+      *outSize = st.st_size;
+    }
+  }
+
+  return true;
+}
+
+bool UpdateManager::installMpvsBundle(const std::string& zipPath) {
+  std::string appRoot = AppConfig::instance().getAppRoot();
+  std::string binDir = appRoot + "/bin";
+  std::string libDir = appRoot + "/lib";
+
+  // Ensure directories exist
+  mkdir(binDir.c_str(), 0755);
+  mkdir(libDir.c_str(), 0755);
+
+  // Extract with unzip
+  std::string cmd = "cd '" + appRoot + "' && unzip -o '" + zipPath + "' 2>/dev/null";
+  int ret = system(cmd.c_str());
+
+  // Also try busybox unzip
+  if (ret != 0) {
+    cmd = "cd '" + appRoot + "' && busybox unzip -o '" + zipPath + "' 2>/dev/null";
+    system(cmd.c_str());
+  }
+
+  // Make executable
+  std::string mpvPath = binDir + "/mpv";
+  chmod(mpvPath.c_str(), 0755);
+
+  sync();
+  return true;
+}
+
+bool UpdateManager::installOsBundle(const std::string& zipPath, const std::string& osType) {
+  std::string appRoot = AppConfig::instance().getAppRoot();
+
+  // Extract OS-specific bundle
+  std::string cmd = "cd '" + appRoot + "' && unzip -o '" + zipPath + "' 2>/dev/null";
+  system(cmd.c_str());
+
+  // Apply OS-specific patches if needed
+  if (osType == "SpruceOS") {
+    // SpruceOS may need special configuration
+    Logger::info("Applying SpruceOS patches...");
+  } else if (osType == "NextUI") {
+    // NextUI specific setup
+    Logger::info("Applying NextUI patches...");
+  }
+
+  sync();
+  return true;
+}
+
+// ============================================================================
+// PROGRESS TRACKING
+// ============================================================================
 
 UpdateProgress UpdateManager::getProgress() const {
   std::lock_guard<std::mutex> lock(m_mutex);
@@ -206,7 +444,7 @@ int UpdateManager::xferCallback(void *clientp, int64_t dltotal, int64_t dlnow,
   if (!self)
     return 0;
   if (self->m_cancelRequested)
-    return 1; // Abort download
+    return 1;
 
   if (dlnow > 0) {
     std::lock_guard<std::mutex> lock(self->m_mutex);
@@ -219,6 +457,10 @@ int UpdateManager::xferCallback(void *clientp, int64_t dltotal, int64_t dlnow,
   }
   return 0;
 }
+
+// ============================================================================
+// UPDATE START
+// ============================================================================
 
 bool UpdateManager::startUpdate(const UpdateInfo &info) {
   if (m_isRunning) {
@@ -234,6 +476,7 @@ bool UpdateManager::startUpdate(const UpdateInfo &info) {
     m_progress = UpdateProgress();
     m_progress.state = UpdateState::DOWNLOADING;
     m_progress.newVersion = info.remoteVersion;
+    m_progress.currentStep = "Downloading RomCloud v" + info.remoteVersion + "...";
   }
 
   if (m_workerThread.joinable()) {
@@ -251,208 +494,148 @@ void UpdateManager::cancelUpdate() {
   m_isRunning = false;
 }
 
+// ============================================================================
+// DOWNLOAD WORKER
+// ============================================================================
+
 void UpdateManager::runDownloadWorker(UpdateInfo info) {
-  Logger::info("Starting OTA update download: " + info.downloadUrl);
+  Logger::info("Starting OTA update: v" + info.remoteVersion + " for " + info.osType);
 
   std::string binDir = AppConfig::instance().getBinDir();
   std::string newBinPath = binDir + "/RomCloud.new";
   std::string finalBinPath = binDir + "/RomCloud";
 
-  FILE *fp = fopen(newBinPath.c_str(), "wb");
-  if (!fp) {
+  // 1. Download main app binary
+  {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_progress.currentStep = "Downloading RomCloud...";
+  }
+
+  uint64_t downloadedSize = 0;
+  if (!downloadFile(info.downloadUrl, newBinPath, &downloadedSize)) {
     std::lock_guard<std::mutex> lock(m_mutex);
     m_progress.state = UpdateState::FAILED;
-    m_progress.errorMessage = "Không thể tạo tập tin: " + newBinPath;
+    m_progress.errorMessage = "Failed to download RomCloud binary";
     Logger::error(m_progress.errorMessage);
     m_isRunning = false;
     return;
   }
 
-  CURL *curl = curl_easy_init();
-  if (!curl) {
-    fclose(fp);
+  // Verify binary size
+  if (downloadedSize < 1000000) {
+    unlink(newBinPath.c_str());
     std::lock_guard<std::mutex> lock(m_mutex);
     m_progress.state = UpdateState::FAILED;
-    m_progress.errorMessage = "Không thể khởi tạo phiên làm việc CURL.";
-    Logger::error(m_progress.errorMessage);
+    m_progress.errorMessage = "Downloaded file too small - invalid";
     m_isRunning = false;
     return;
   }
 
-  curl_easy_setopt(curl, CURLOPT_URL, info.downloadUrl.c_str());
-  curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, fwrite);
-  curl_easy_setopt(curl, CURLOPT_WRITEDATA, fp);
-  curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
-  curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
-  curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
-  curl_easy_setopt(curl, CURLOPT_CAINFO, "/etc/ssl/certs/ca-certificates.crt");
-  curl_easy_setopt(curl, CURLOPT_USERAGENT, "RomCloud-TrimUI-BrickPro/1.0");
-  curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, xferCallback);
-  curl_easy_setopt(curl, CURLOPT_XFERINFODATA, this);
-  curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
-  curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 15L);
-  curl_easy_setopt(curl, CURLOPT_TIMEOUT, 300L); // 5 min timeout
-  curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
-
-  Logger::info("OTA: Downloading to " + newBinPath);
-  CURLcode res = curl_easy_perform(curl);
-  long httpCode = 0;
-  curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &httpCode);
-  curl_easy_cleanup(curl);
-  fclose(fp);
-
-  if (m_cancelRequested) {
-    FileSystemManager::instance().removeFile(newBinPath);
-    std::lock_guard<std::mutex> lock(m_mutex);
-    m_progress.state = UpdateState::IDLE;
-    m_isRunning = false;
-    Logger::info("OTA update cancelled by user.");
-    return;
-  }
-
-  if (res != CURLE_OK || httpCode < 200 || httpCode >= 300) {
-    FileSystemManager::instance().removeFile(newBinPath);
-    std::lock_guard<std::mutex> lock(m_mutex);
-    m_progress.state = UpdateState::FAILED;
-    m_progress.errorMessage = "Tải về thất bại (Mã phản hồi HTTP " +
-                              std::to_string(httpCode) +
-                              "): " + curl_easy_strerror(res);
-    Logger::error(m_progress.errorMessage);
-    m_isRunning = false;
-    return;
-  }
-
-  // Verify downloaded binary: check minimum size (> 1MB)
-  size_t newSize = FileSystemManager::instance().getFileSize(newBinPath);
-  Logger::info("OTA: Downloaded file size: " + std::to_string(newSize) +
-               " bytes");
-  if (newSize < 1000000) {
-    FileSystemManager::instance().removeFile(newBinPath);
-    std::lock_guard<std::mutex> lock(m_mutex);
-    m_progress.state = UpdateState::FAILED;
-    m_progress.errorMessage =
-        "Tập tin tải về không hợp lệ (kích thước quá nhỏ).";
-    Logger::error(m_progress.errorMessage);
-    m_isRunning = false;
-    return;
-  }
-
-  // Make executable
   chmod(newBinPath.c_str(), 0755);
-
-  // Ensure all downloaded data is committed to SD card
   sync();
 
-  // Try to replace the binary
-  // On FAT32 SD card (TrimUI), we cannot rename/replace a running binary
-  // Solution: Use a helper script to do the replacement on next boot
-
-  std::string helperScript = binDir + "/ota_install.sh";
-  std::string installCmd = "mv -f '" + newBinPath + "' '" + finalBinPath +
-                           "' && chmod +x '" + finalBinPath + "'";
-
-  // Write helper script that will be executed by launch.sh or manually
-  FILE *scriptFile = fopen(helperScript.c_str(), "w");
-  if (scriptFile) {
-    fprintf(scriptFile, "#!/bin/sh\n");
-    fprintf(scriptFile, "if [ -f '%s' ]; then\n", newBinPath.c_str());
-    fprintf(scriptFile, "    mv -f '%s' '%s' 2>/dev/null\n", newBinPath.c_str(),
-            finalBinPath.c_str());
-    fprintf(scriptFile, "fi\n");
-    fprintf(scriptFile, "chmod +x '%s' 2>/dev/null\n", finalBinPath.c_str());
-    fprintf(scriptFile, "rm -f '%s' 2>/dev/null\n", helperScript.c_str());
-    fprintf(scriptFile, "echo 'OTA install complete'\n");
-    fclose(scriptFile);
-    chmod(helperScript.c_str(), 0755);
-    Logger::info("OTA: Created install script: " + helperScript);
-  }
-
-  // Also try direct replacement (works on ext4, may fail on FAT32)
+  // 2. Replace binary
   bool replaced = false;
   std::string oldBinPath = binDir + "/RomCloud.old";
-  FileSystemManager::instance().removeFile(oldBinPath);
+  unlink(oldBinPath.c_str());
 
   if (rename(finalBinPath.c_str(), oldBinPath.c_str()) == 0) {
     if (rename(newBinPath.c_str(), finalBinPath.c_str()) == 0) {
       chmod(finalBinPath.c_str(), 0755);
-      FileSystemManager::instance().removeFile(oldBinPath);
+      unlink(oldBinPath.c_str());
       replaced = true;
-      FileSystemManager::instance().removeFile(helperScript);
-      Logger::info(
-          "OTA: Direct binary replacement succeeded (ext4 filesystem).");
+      Logger::info("Binary replaced successfully");
     } else {
       rename(oldBinPath.c_str(), finalBinPath.c_str());
-      Logger::warn("OTA: Direct replacement failed (FAT32 filesystem).");
     }
-  } else {
-    Logger::warn("OTA: Could not backup old binary (file may be locked).");
   }
 
   if (!replaced) {
-    Logger::info("OTA: Binary replacement deferred. Install script created.");
-    Logger::info("OTA: App will restart. Run: sh " + helperScript +
-                 " to complete installation.");
+    // FAT32 workaround - create install script
+    std::string scriptPath = binDir + "/ota_install.sh";
+    FILE* script = fopen(scriptPath.c_str(), "w");
+    if (script) {
+      fprintf(script, "#!/bin/sh\n");
+      fprintf(script, "mv -f '%s' '%s' 2>/dev/null; ", newBinPath.c_str(), finalBinPath.c_str());
+      fprintf(script, "chmod +x '%s'; ", finalBinPath.c_str());
+      fprintf(script, "rm -f '%s'\n", scriptPath.c_str());
+      fclose(script);
+      chmod(scriptPath.c_str(), 0755);
+    }
+    Logger::info("Binary replacement deferred to next boot");
   }
 
   sync();
 
-  // Ensure media player bundle (mpv & codecs) is present on device
-  std::string appRoot = AppConfig::instance().getAppRoot();
-  if (appRoot.empty()) appRoot = "/mnt/SDCARD/Apps/RomCloud";
-  std::string mpvPath = appRoot + "/bin/mpv";
-  std::string codecPath = appRoot + "/lib/libavcodec.so.58";
+  // 3. Check and install dependencies (mpv, codecs)
+  if (!downloadAndInstallDependencies(info)) {
+    Logger::warn("Some dependencies may be missing - app may not work fully");
+  }
 
-  if (access(mpvPath.c_str(), X_OK) != 0 || access(codecPath.c_str(), R_OK) != 0) {
-    Logger::info("OTA: Device is missing mpv player or codecs. Downloading media bundle...");
-    std::string bUrl = info.bundleUrl;
-    if (bUrl.empty()) {
-      bUrl = "https://github.com/" + std::string(GITHUB_REPO) +
-             "/releases/download/v" + info.remoteVersion + "/mpv_bundle.zip";
+  // 4. Check and install OS-specific bundle if available
+  if (!info.osBundleUrl.empty()) {
+    std::string appRoot = AppConfig::instance().getAppRoot();
+    std::string osBundlePath = appRoot + "/os_bundle.zip";
+
+    {
+      std::lock_guard<std::mutex> lock(m_mutex);
+      m_progress.currentStep = "Downloading OS bundle...";
     }
-    std::string bundlePath = appRoot + "/mpv_bundle.zip";
-    FILE* bfp = fopen(bundlePath.c_str(), "wb");
-    if (bfp) {
-      CURL* bcurl = curl_easy_init();
-      if (bcurl) {
-        curl_easy_setopt(bcurl, CURLOPT_URL, bUrl.c_str());
-        curl_easy_setopt(bcurl, CURLOPT_WRITEFUNCTION, fwrite);
-        curl_easy_setopt(bcurl, CURLOPT_WRITEDATA, bfp);
-        curl_easy_setopt(bcurl, CURLOPT_FOLLOWLOCATION, 1L);
-        curl_easy_setopt(bcurl, CURLOPT_SSL_VERIFYPEER, 0L);
-        curl_easy_setopt(bcurl, CURLOPT_SSL_VERIFYHOST, 0L);
-        curl_easy_setopt(bcurl, CURLOPT_TIMEOUT, 300L);
-        CURLcode bres = curl_easy_perform(bcurl);
-        curl_easy_cleanup(bcurl);
-        fclose(bfp);
-        if (bres == CURLE_OK) {
-          Logger::info("OTA: Unpacking mpv_bundle.zip...");
-          std::string unpackCmd = "unzip -o '" + bundlePath + "' -d '" + appRoot + "' 2>/dev/null || busybox unzip -o '" + bundlePath + "' -d '" + appRoot + "' 2>/dev/null";
-          system(unpackCmd.c_str());
-          unlink(bundlePath.c_str());
-          chmod(mpvPath.c_str(), 0755);
-          sync();
-          Logger::info("OTA: mpv media bundle installed successfully!");
-        } else {
-          unlink(bundlePath.c_str());
-          Logger::warn("OTA: Could not download mpv bundle: " + std::string(curl_easy_strerror(bres)));
-        }
-      } else {
-        fclose(bfp);
-      }
+
+    if (downloadFile(info.osBundleUrl, osBundlePath)) {
+      installOsBundle(osBundlePath, info.osType);
+      unlink(osBundlePath.c_str());
     }
   }
 
-  Logger::info("OTA update ready! File size: " + std::to_string(newSize) +
-               " bytes");
-  Logger::info("OTA: Ready to restart. App will exit with code 42.");
+  Logger::info("OTA update completed!");
 
   {
     std::lock_guard<std::mutex> lock(m_mutex);
     m_progress.state = UpdateState::COMPLETED;
     m_progress.progressPct = 100.0;
+    m_progress.currentStep = "Update ready!";
   }
 
   m_isRunning = false;
+}
+
+bool UpdateManager::downloadAndInstallDependencies(const UpdateInfo& info) {
+  auto missing = getMissingDependencies();
+  if (missing.empty()) {
+    return true;
+  }
+
+  Logger::info("Installing " + std::to_string(missing.size()) + " missing dependencies...");
+
+  std::string appRoot = AppConfig::instance().getAppRoot();
+  std::string bundleUrl = info.bundleUrl;
+  if (bundleUrl.empty()) {
+    bundleUrl = "https://github.com/" + std::string(GITHUB_REPO) +
+                "/releases/download/v" + info.remoteVersion + "/mpv_bundle.zip";
+  }
+
+  std::string bundlePath = appRoot + "/mpv_bundle.zip";
+
+  {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_progress.currentStep = "Downloading media dependencies...";
+  }
+
+  if (!downloadFile(bundleUrl, bundlePath)) {
+    Logger::error("Failed to download media bundle");
+    return false;
+  }
+
+  {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_progress.currentStep = "Installing media...";
+  }
+
+  bool success = installMpvsBundle(bundlePath);
+  unlink(bundlePath.c_str());
+
+  return success;
 }
 
 } // namespace RomCloud

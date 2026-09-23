@@ -1,7 +1,10 @@
 {
-  "version": "2.0.1",
+  "version": "2.0.3",
   "release_date": "2026-09-23",
-  "binary_url": "https://github.com/bun2it/RomCloud/releases/download/v2.0.1/RomCloud",
-  "bundle_url": "https://github.com/bun2it/RomCloud/releases/download/v2.0.1/mpv_bundle.zip",
-  "changelog": "v2.0.1: Tự động tải & cài đặt bộ giải mã MPV/CedarX cho Smart S/Brick Pro qua OTA, sửa lỗi tải lên file/URL m3u IPTV, tích hợp sẵn danh sách kênh truyền hình Việt Nam, đồng bộ audit ROM"
+  "binary_url": "https://github.com/bun2it/RomCloud/releases/download/v2.0.3/RomCloud",
+  "bundle_url": "https://github.com/bun2it/RomCloud/releases/download/v2.0.3/mpv_bundle.zip",
+  "STOCK_PS_bundle_url": "https://github.com/bun2it/RomCloud/releases/download/v2.0.3/bundle-STOCK_PS.zip",
+  "NEXTUI_bundle_url": "https://github.com/bun2it/RomCloud/releases/download/v2.0.3/bundle-NEXTUI.zip",
+  "SPRUCE_OS_bundle_url": "https://github.com/bun2it/RomCloud/releases/download/v2.0.3/bundle-SPRUCE_OS.zip",
+  "changelog": "v2.0.3: Tối ưu UI Launcher (Logo lớn, giao diện tinh gọn), hoàn thiện nhận diện OS Stock/NextUI/SpruceOS, tối ưu đường dẫn động và hardware mpv"
 }

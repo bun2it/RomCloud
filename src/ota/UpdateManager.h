@@ -7,7 +7,7 @@
 
 namespace RomCloud {
 
-constexpr const char* APP_VERSION = "2.0.1";
+constexpr const char* APP_VERSION = "2.0.3";
 constexpr const char* GITHUB_REPO = "bun2it/RomCloud";
 constexpr const char* VERSION_MANIFEST_URL = "https://raw.githubusercontent.com/bun2it/RomCloud/main/version.json";
 
@@ -18,6 +18,8 @@ enum class UpdateState {
     UP_TO_DATE,
     DOWNLOADING,
     VERIFYING,
+    DOWNLOADING_DEPS,
+    INSTALLING_DEPS,
     COMPLETED,
     FAILED
 };
@@ -25,10 +27,12 @@ enum class UpdateState {
 struct UpdateInfo {
     std::string remoteVersion;
     std::string downloadUrl;
-    std::string bundleUrl;
+    std::string bundleUrl;        // mpv/codecs bundle
+    std::string osBundleUrl;      // OS-specific dependencies
     std::string changelog;
     std::string releaseDate;
     uint64_t sizeBytes = 0;
+    std::string osType;           // STOCK_PS, NEXTUI, SPRUCE_OS
 };
 
 struct UpdateProgress {
@@ -38,6 +42,14 @@ struct UpdateProgress {
     double progressPct = 0.0;
     std::string errorMessage;
     std::string newVersion;
+    std::string currentStep;      // "Downloading app...", "Installing mpv..."
+};
+
+struct DependencyInfo {
+    std::string name;
+    std::string path;
+    std::string downloadUrl;
+    bool required;
 };
 
 class UpdateManager {
@@ -54,6 +66,10 @@ public:
     // Start OTA download and installation
     bool startUpdate(const UpdateInfo& info);
     void cancelUpdate();
+
+    // Dependency management
+    bool checkAndInstallDependencies();
+    std::vector<DependencyInfo> getMissingDependencies();
 
     // State & progress
     UpdateProgress getProgress() const;
@@ -75,6 +91,10 @@ private:
     std::thread m_workerThread;
 
     void runDownloadWorker(UpdateInfo info);
+    bool downloadAndInstallDependencies(const UpdateInfo& info);
+    bool downloadFile(const std::string& url, const std::string& destPath, uint64_t* outSize = nullptr);
+    bool installMpvsBundle(const std::string& zipPath);
+    bool installOsBundle(const std::string& zipPath, const std::string& osType);
     static int xferCallback(void* clientp, int64_t dltotal, int64_t dlnow, int64_t ultotal, int64_t ulnow);
     static bool isVersionNewer(const std::string& remote, const std::string& current);
 };

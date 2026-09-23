@@ -713,7 +713,7 @@ void UIManager::update() {
         }
 
         case UIState::SETTINGS: {
-            constexpr int totalSettingsRows = 10;
+            constexpr int totalSettingsRows = 11;
             constexpr int visibleRows = 9;
 
             if (input.isButtonJustPressed(Button::UP)) {
@@ -752,7 +752,20 @@ void UIManager::update() {
                     if (!AuthManager::instance().isLinked()) {
                         setState(UIState::DISCLAIMER);
                     }
-                } else if (m_selectedSettingsRow == 8) {
+                } else if (m_selectedSettingsRow == 2) {
+                    // OS Type selection - cycle through options
+                    OSType current = AppConfig::instance().getOSType();
+                    OSType next;
+                    switch (current) {
+                        case OSType::AUTO:      next = OSType::STOCK_PS; break;
+                        case OSType::STOCK_PS:  next = OSType::NEXTUI; break;
+                        case OSType::NEXTUI:   next = OSType::SPRUCE_OS; break;
+                        case OSType::SPRUCE_OS: next = OSType::AUTO; break;
+                        default:               next = OSType::AUTO; break;
+                    }
+                    AppConfig::instance().setOSType(next);
+                    showToast("OS: " + AppConfig::instance().getOSName(), {168, 85, 247, 255}, 2000);
+                } else if (m_selectedSettingsRow == 9) {
                     // Export backup
                     showToast(UiStrings::BACKUP_EXPORTING, {168, 85, 247, 255}, 2000);
                     auto result = BackupManager::instance().exportToSdCard();
@@ -761,7 +774,7 @@ void UIManager::update() {
                     } else {
                         showToast(UiStrings::BACKUP_FAILED, {239, 68, 68, 255}, 4000);
                     }
-                } else if (m_selectedSettingsRow == 9) {
+                } else if (m_selectedSettingsRow == 10) {
                     // Import backup
                     showToast(UiStrings::BACKUP_IMPORTING, {0, 180, 216, 255}, 2000);
                     auto lastBackup = BackupManager::instance().getMostRecentBackup();
@@ -1411,8 +1424,8 @@ void UIManager::drawGridIcon(const std::string &iconFile, int x, int y, int w, i
     int texW = 0, texH = 0;
     SDL_QueryTexture(texture, nullptr, nullptr, &texW, &texH);
 
-    int maxW = (int)(w * 0.75f);
-    int maxH = (int)(h * 0.75f);
+    int maxW = w;
+    int maxH = h;
     int drawW = maxW;
     int drawH = maxH;
 
@@ -1719,15 +1732,15 @@ void UIManager::renderMenuState() {
     int itemCount = static_cast<int>(m_gridMenuItems.size());
 
     // Single Horizontal Row (1 hàng ngang) Carousel
-    int selW = 210;
-    int selH = 240;
-    int selX = 512 - selW / 2; // 407
-    int selY = 160;
+    int selW = 260;
+    int selH = 320;
+    int selX = 512 - selW / 2; // 382
+    int selY = 180;
 
-    int normW = 175;
-    int normH = 205;
-    int normY = 178;
-    int gap = 20;
+    int normW = 200;
+    int normH = 260;
+    int normY = 210;
+    int gap = 24;
 
     // Render items in a single horizontal row centered around m_selectedMenuIndex
     for (int i = 0; i < itemCount; ++i) {
@@ -1771,54 +1784,45 @@ void UIManager::renderMenuState() {
             drawRoundedBorder(x, y, w, h, 16, {38, 48, 64, 255}, 1);
         }
 
-        // Icon inside card
-        int iconSize = isSel ? 112 : 90;
+        // Icon inside card (enlarged logo size)
+        int iconSize = isSel ? 160 : 120;
         int iconX = x + (w - iconSize) / 2;
-        int iconY = y + (isSel ? 22 : 18);
+        int iconY = y + (isSel ? 30 : 25);
         drawGridIcon(m_gridMenuItems[i].iconFile, iconX, iconY, iconSize, iconSize);
 
-        // Card Title
-        int textY = y + (isSel ? 160 : 135);
+        // Card Title (Logo + Tên chức năng duy nhất)
+        int textY = y + (isSel ? 235 : 195);
         SDL_Color titleColor = isSel ? SDL_Color{255, 255, 255, 255} : SDL_Color{160, 175, 195, 255};
         drawText(m_gridMenuItems[i].title, x + w / 2, textY, titleColor, isSel ? m_fontMedium : m_fontSmall, true);
 
         // OTA badge
         if (hasUpdate && m_gridMenuItems[i].id == "ota") {
-            drawRoundedRect(x + w - 52, y + 8, 44, 22, 6, {239, 68, 68, 255}, true);
-            drawText("NEW", x + w - 30, y + 12, {255, 255, 255, 255}, m_fontSmall, true);
+            drawRoundedRect(x + w - 54, y + 10, 44, 22, 6, {239, 68, 68, 255}, true);
+            drawText("NEW", x + w - 32, y + 13, {255, 255, 255, 255}, m_fontSmall, true);
         }
     }
 
     // Left and Right navigation chevrons
     if (m_selectedMenuIndex > 0) {
-        drawText("◀", 32, 260, {0, 180, 216, 200}, m_fontLarge, true);
+        drawText("◀", 36, 335, {0, 180, 216, 200}, m_fontLarge, true);
     }
     if (m_selectedMenuIndex < itemCount - 1) {
-        drawText("▶", 992, 260, {0, 180, 216, 200}, m_fontLarge, true);
+        drawText("▶", 988, 335, {0, 180, 216, 200}, m_fontLarge, true);
     }
 
-    // Selected item detail text (below row)
-    if (m_selectedMenuIndex >= 0 && m_selectedMenuIndex < itemCount) {
-        const auto& selItem = m_gridMenuItems[m_selectedMenuIndex];
-        drawText(selItem.title, 512, 455, {0, 180, 216, 255}, m_fontLarge, true);
-        drawText(selItem.subtitle, 512, 495, {160, 175, 195, 255}, m_fontMedium, true);
-    }
-
-    // Dot pager (8 dots centered at Y=565)
-    int dotPitch = 22;
-    int totalDotW = (itemCount - 1) * dotPitch + 28;
-    int dotStartX = (1024 - totalDotW) / 2;
-    int currentDotX = dotStartX;
+    // Dot pager centered at Y=560
+    int dotW = 8;
+    int selDotW = 28;
+    int dotGap = 8;
+    int totalDotWidth = selDotW + (itemCount - 1) * (dotW + dotGap);
+    int dotX = (1024 - totalDotWidth) / 2;
+    int dotY = 560;
 
     for (int i = 0; i < itemCount; ++i) {
         bool isSel = (i == m_selectedMenuIndex);
-        if (isSel) {
-            drawRoundedRect(currentDotX, 565, 28, 8, 4, {0, 180, 216, 255}, true);
-            currentDotX += 28 + 8;
-        } else {
-            drawRoundedRect(currentDotX, 565, 8, 8, 4, {45, 56, 75, 255}, true);
-            currentDotX += 8 + 8;
-        }
+        int w = isSel ? selDotW : dotW;
+        drawRoundedRect(dotX, dotY, w, 8, 4, isSel ? SDL_Color{0, 180, 216, 255} : SDL_Color{45, 56, 75, 255}, true);
+        dotX += w + dotGap;
     }
 
     // Footer hint
@@ -2345,28 +2349,32 @@ void UIManager::renderSettingsState() {
     // 1: Thư mục Drive
     items.push_back({UiStrings::SETTING_DRIVE_FOLDER, folderId, SDL_Color{0, 180, 216, 255}, "", SDL_Color{0, 0, 0, 0}, SDL_Color{0, 0, 0, 0}});
 
-    // 2: Thư mục ROM trên thẻ nhớ
+    // 2: Phiên bản hệ điều hành (OS Type)
+    std::string osName = AppConfig::instance().getOSName();
+    items.push_back({"Phiên bản OS", osName, SDL_Color{168, 85, 247, 255}, "[A] Đổi", SDL_Color{88, 28, 135, 255}, SDL_Color{255, 255, 255, 255}});
+
+    // 3: Thư mục ROM trên thẻ nhớ
     items.push_back({UiStrings::SETTING_ROM_SD_FOLDER, AppConfig::instance().getRomsDir(), SDL_Color{255, 255, 255, 255}, "", SDL_Color{0, 0, 0, 0}, SDL_Color{0, 0, 0, 0}});
 
-    // 3: Đồng bộ cuối
+    // 4: Đồng bộ cuối
     items.push_back({UiStrings::SETTING_LAST_SYNC, lastSync, SDL_Color{255, 255, 255, 255}, "", SDL_Color{0, 0, 0, 0}, SDL_Color{0, 0, 0, 0}});
 
-    // 4: Cơ sở dữ liệu SQLite
+    // 5: Cơ sở dữ liệu SQLite
     items.push_back({UiStrings::SETTING_SQLITE_DB, AppConfig::instance().getDatabasePath(), SDL_Color{34, 197, 94, 255}, "", SDL_Color{0, 0, 0, 0}, SDL_Color{0, 0, 0, 0}});
 
-    // 5: Chế độ quét thẻ nhớ
+    // 6: Chế độ quét thẻ nhớ
     items.push_back({UiStrings::SETTING_SCAN_MODE, UiStrings::SETTING_SCAN_AUTO, SDL_Color{34, 197, 94, 255}, "", SDL_Color{0, 0, 0, 0}, SDL_Color{0, 0, 0, 0}});
 
-    // 6: Web Portal
+    // 7: Web Portal
     items.push_back({UiStrings::SETTING_WEB_PORTAL, webUrl, SDL_Color{0, 180, 216, 255}, "", SDL_Color{0, 0, 0, 0}, SDL_Color{0, 0, 0, 0}});
 
-    // 7: Bộ nhớ đệm ảnh bìa
+    // 8: Bộ nhớ đệm ảnh bìa
     items.push_back({UiStrings::SETTING_COVER_CACHE, UiStrings::SETTING_COVER_CACHE_VAL, SDL_Color{34, 197, 94, 255}, "", SDL_Color{0, 0, 0, 0}, SDL_Color{0, 0, 0, 0}});
 
-    // 8: Xuất sao lưu cài đặt
+    // 9: Xuất sao lưu cài đặt
     items.push_back({UiStrings::BACKUP_EXPORT_BTN, UiStrings::BACKUP_EXPORT_DESC, SDL_Color{168, 85, 247, 255}, "[A] Xuất sao lưu", SDL_Color{88, 28, 135, 255}, SDL_Color{255, 255, 255, 255}});
 
-    // 9: Phục hồi cài đặt
+    // 10: Phục hồi cài đặt
     items.push_back({UiStrings::BACKUP_IMPORT_BTN, UiStrings::BACKUP_IMPORT_DESC, SDL_Color{0, 180, 216, 255}, "[A] Phục hồi", SDL_Color{21, 94, 117, 255}, SDL_Color{255, 255, 255, 255}});
 
     int cardX = 24;
@@ -2885,8 +2893,16 @@ void UIManager::renderOTAUpdateState() {
             break;
         }
         case UpdateState::DOWNLOADING:
+        case UpdateState::DOWNLOADING_DEPS:
+        case UpdateState::INSTALLING_DEPS:
         case UpdateState::VERIFYING: {
-            drawText(UiStrings::OTA_DOWNLOADING_TITLE, 512, contentBoxY + 50, {0, 180, 216, 255}, m_fontLarge, true);
+            std::string title = UiStrings::OTA_DOWNLOADING_TITLE;
+            if (prog.state == UpdateState::DOWNLOADING_DEPS) {
+                title = "Đang tải gói hỗ trợ phát video (mpv)...";
+            } else if (prog.state == UpdateState::INSTALLING_DEPS) {
+                title = "Đang cài đặt gói thư viện phụ trợ...";
+            }
+            drawText(title, 512, contentBoxY + 50, {0, 180, 216, 255}, m_fontLarge, true);
 
             int barW = 580;
             int barH = 22;
