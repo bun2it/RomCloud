@@ -31,6 +31,8 @@ install_pending_ota() {
     if [ -f "./icon.png.new" ]; then
         echo "[RomCloud OTA] Found pending icon update..."
         cp -f "./icon.png.new" "./icon.png" 2>/dev/null
+        cp -f "./icon.png.new" "./iconsel.png" 2>/dev/null
+        cp -f "./icon.png.new" "./icontop.png" 2>/dev/null
         cp -f "./icon.png.new" "./assets/apps_icons/APP.png" 2>/dev/null
         cp -f "./icon.png.new" "./assets/icon.png" 2>/dev/null
         rm -f "./icon.png.new"

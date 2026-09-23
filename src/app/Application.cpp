@@ -98,33 +98,53 @@ bool Application::init(int argc, char* argv[]) {
     Logger::info("==========================================");
     Logger::info("App Root: " + AppConfig::instance().getAppRoot());
 
-    // Ensure official app icon is synchronized to launcher icon
+    // Ensure official app icon is synchronized to all launcher icons
     std::string appRoot = AppConfig::instance().getAppRoot();
-    std::string officialIcon = appRoot + "/assets/apps_icons/APP.png";
-    std::string mainIcon = appRoot + "/icon.png";
-    struct stat stOfficial;
-    if (stat(officialIcon.c_str(), &stOfficial) == 0 && stOfficial.st_size > 0) {
+    std::string officialCandidate1 = appRoot + "/icon.png";
+    std::string officialCandidate2 = appRoot + "/assets/apps_icons/APP.png";
+    std::string officialCandidate3 = "/mnt/SDCARD/Apps/RomCloud/icon.png";
+
+    // Find the best valid high-res icon source (> 100KB)
+    std::string bestSource = "";
+    struct stat stBest;
+    stBest.st_size = 0;
+
+    const std::string candidates[] = { officialCandidate1, officialCandidate2, officialCandidate3 };
+    for (const auto& cand : candidates) {
+        struct stat st;
+        if (stat(cand.c_str(), &st) == 0 && st.st_size > 100000) {
+            bestSource = cand;
+            stBest = st;
+            break;
+        }
+    }
+
+    if (!bestSource.empty()) {
         std::vector<std::string> iconDestinations = {
-            mainIcon,
+            appRoot + "/icon.png",
+            appRoot + "/iconsel.png",
+            appRoot + "/icontop.png",
+            appRoot + "/assets/apps_icons/APP.png",
             appRoot + "/assets/icon.png",
             "/mnt/SDCARD/Apps/RomCloud/icon.png",
+            "/mnt/SDCARD/Apps/RomCloud/iconsel.png",
+            "/mnt/SDCARD/Apps/RomCloud/icontop.png",
             "/mnt/SDCARD/App/RomCloud/icon.png"
         };
         for (const auto& dest : iconDestinations) {
             struct stat stDest;
             bool needCopy = false;
-            if (stat(dest.c_str(), &stDest) != 0 || stDest.st_size != stOfficial.st_size) {
-                // If it's the main icon or if the destination file/dir exists
-                if (dest == mainIcon || dest == (appRoot + "/assets/icon.png") || stat(dest.c_str(), &stDest) == 0) {
+            if (stat(dest.c_str(), &stDest) != 0 || stDest.st_size != stBest.st_size) {
+                if (dest.find(appRoot) == 0 || stat(dest.c_str(), &stDest) == 0) {
                     needCopy = true;
                 }
             }
-            if (needCopy) {
-                std::ifstream src(officialIcon, std::ios::binary);
+            if (needCopy && dest != bestSource) {
+                std::ifstream src(bestSource, std::ios::binary);
                 std::ofstream dst(dest, std::ios::binary | std::ios::trunc);
                 if (src && dst) {
                     dst << src.rdbuf();
-                    Logger::info("Synchronized official app icon to: " + dest + " (" + std::to_string(stOfficial.st_size) + " bytes)");
+                    Logger::info("Synchronized official app icon to: " + dest + " (" + std::to_string(stBest.st_size) + " bytes)");
                 }
             }
         }

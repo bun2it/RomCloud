@@ -1,17 +1,17 @@
 {
-  "version": "2.0.6",
+  "version": "2.0.7",
   "release_date": "2026-09-23",
   "target_os": "ALL",
   "icon_url": "https://raw.githubusercontent.com/bun2it/RomCloud/main/icon.png",
-  "binary_url": "https://github.com/bun2it/RomCloud/releases/download/v2.0.6/RomCloud",
-  "bundle_url": "https://github.com/bun2it/RomCloud/releases/download/v2.0.6/mpv_bundle.zip",
-  "STOCK_PS_bundle_url": "https://github.com/bun2it/RomCloud/releases/download/v2.0.6/bundle-STOCK_PS.zip",
-  "NEXTUI_bundle_url": "https://github.com/bun2it/RomCloud/releases/download/v2.0.6/bundle-NEXTUI.zip",
-  "SPRUCE_OS_bundle_url": "https://github.com/bun2it/RomCloud/releases/download/v2.0.6/bundle-SPRUCE_OS.zip",
+  "binary_url": "https://github.com/bun2it/RomCloud/releases/download/v2.0.7/RomCloud",
+  "bundle_url": "https://github.com/bun2it/RomCloud/releases/download/v2.0.7/mpv_bundle.zip",
+  "STOCK_PS_bundle_url": "https://github.com/bun2it/RomCloud/releases/download/v2.0.7/bundle-STOCK_PS.zip",
+  "NEXTUI_bundle_url": "https://github.com/bun2it/RomCloud/releases/download/v2.0.7/bundle-NEXTUI.zip",
+  "SPRUCE_OS_bundle_url": "https://github.com/bun2it/RomCloud/releases/download/v2.0.7/bundle-SPRUCE_OS.zip",
   "os_versions": {
-    "STOCK_PS": "2.0.6",
-    "NEXTUI": "2.0.6",
-    "SPRUCE_OS": "2.0.6"
+    "STOCK_PS": "2.0.7",
+    "NEXTUI": "2.0.7",
+    "SPRUCE_OS": "2.0.7"
   },
-  "changelog": "v2.0.6: Phân phối cập nhật OTA theo từng OS (OS-targeted updates) & Tự động cập nhật / đồng bộ icon chính thức cho TrimUI launcher."
+  "changelog": "v2.0.7: Sửa triệt để lỗi xóa nguồn IPTV (Tên file không hợp lệ); Tự động đồng bộ icon chuẩn 512x512 cho TrimUI launcher; Bổ sung bộ cài đặt gọn nhẹ RomCloud-Lite-Installer."
 }

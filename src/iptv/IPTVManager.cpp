@@ -578,22 +578,32 @@ bool IPTVManager::addSourceFromFile(const std::string& filename, const std::stri
 
 bool IPTVManager::deleteSource(const std::string& filename, std::string& outError) {
     outError.clear();
-    if (filename.empty() || filename.find('/') != std::string::npos ||
-        filename.find('\\') != std::string::npos || filename.find("..") != std::string::npos) {
+    std::string clean = filename;
+    while (!clean.empty() && (clean.front() == ' ' || clean.front() == '\t')) clean.erase(0, 1);
+    while (!clean.empty() && (clean.back() == ' ' || clean.back() == '\t')) clean.pop_back();
+
+    // Strip path if provided (e.g. iptv/foo.m3u or full path)
+    size_t lastSlash = clean.find_last_of("/\\");
+    if (lastSlash != std::string::npos) {
+        clean = clean.substr(lastSlash + 1);
+    }
+
+    if (clean.empty() || clean.find("..") != std::string::npos) {
         outError = "Tên file không hợp lệ";
         return false;
     }
 
-    std::string filePath = m_iptvDir + "/" + filename;
+    std::string filePath = m_iptvDir + "/" + clean;
     if (unlink(filePath.c_str()) != 0) {
         Logger::warn("IPTV: Could not unlink " + filePath + " or file already gone");
     }
 
+    m_sourcesMeta.erase(clean);
     m_sourcesMeta.erase(filename);
     saveSourcesMeta();
     loadPlaylists(m_iptvDir);
 
-    Logger::info("IPTV: Deleted source " + filename + ". Channels remaining: " + std::to_string(m_channels.size()));
+    Logger::info("IPTV: Deleted source " + clean + ". Channels remaining: " + std::to_string(m_channels.size()));
     return true;
 }
 

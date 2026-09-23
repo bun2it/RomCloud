@@ -4361,8 +4361,10 @@ void WebServer::handleClient(int clientFd) {
         std::string url;
         std::string name;
         if (method == "GET") {
-            url = extractQueryParam(path, "url");
-            name = extractQueryParam(path, "name");
+            url = extractQueryParam(queryString, "url");
+            name = extractQueryParam(queryString, "name");
+            if (url.empty()) url = extractQueryParam(fullPath, "url");
+            if (name.empty()) name = extractQueryParam(fullPath, "name");
         } else {
             url = extractPostParam(postBody, "url");
             name = extractPostParam(postBody, "name");
@@ -4401,13 +4403,15 @@ void WebServer::handleClient(int clientFd) {
             std::string res = "HTTP/1.1 400 OK\r\nContent-Type: application/json; charset=UTF-8\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: " + std::to_string(json.length()) + "\r\nConnection: close\r\n\r\n" + json;
             send(clientFd, res.c_str(), res.length(), 0);
         }
-    } else if ((method == "GET" && path.find("/api/iptv/delete") == 0) || (method == "POST" && path == "/api/iptv/delete")) {
+    } else if ((method == "GET" && (path == "/api/iptv/delete" || fullPath.find("/api/iptv/delete") == 0)) || (method == "POST" && path == "/api/iptv/delete")) {
         // Delete IPTV source file
         std::string file;
         if (method == "GET") {
-            file = extractQueryParam(path, "file");
+            file = extractQueryParam(queryString, "file");
+            if (file.empty()) file = extractQueryParam(fullPath, "file");
         } else {
             file = extractPostParam(postBody, "file");
+            if (file.empty()) file = extractPostParam(postBody, "filename");
             if (file.empty()) {
                 size_t fnPos = postBody.find("\"file\":\"");
                 if (fnPos != std::string::npos) {
