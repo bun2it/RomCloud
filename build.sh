@@ -37,6 +37,7 @@ $ZIG c++ \
     src/filesystem/FileSystemManager.cpp \
     src/platform/PlatformInfo.cpp \
     src/logging/Logger.cpp \
+    src/logging/IssueLogger.cpp \
     src/config/AppConfig.cpp \
     src/database/DatabaseManager.cpp \
     src/database/RomIndexer.cpp \

@@ -1804,13 +1804,12 @@ void UIManager::renderConfirmDeleteDialog() {
     int dlgX = (1024 - dlgW) / 2;
     int dlgY = (768 - dlgH) / 2;
 
+    // Borderless dialog - just rounded background
     drawRoundedRect(dlgX, dlgY, dlgW, dlgH, 16, {24, 28, 38, 255}, true);
-    drawRoundedBorder(dlgX, dlgY, dlgW, dlgH, 16, {239, 68, 68, 255}, 2);
 
-    // Title Banner with top rounded corners
-    drawRoundedRect(dlgX + 1, dlgY + 1, dlgW - 2, 54, 15, {185, 28, 28, 255}, true);
-    drawRect(dlgX + 1, dlgY + 35, dlgW - 2, 20, {185, 28, 28, 255}, true);
-    drawText(UiStrings::DIALOG_DELETE_TITLE, dlgX + dlgW / 2, dlgY + 16, {255, 255, 255, 255}, m_fontLarge, true);
+    // Simple title with background color bar (no border)
+    drawRect(dlgX, dlgY, dlgW, 48, {185, 28, 28, 255}, true);
+    drawText(UiStrings::DIALOG_DELETE_TITLE, dlgX + dlgW / 2, dlgY + 14, {255, 255, 255, 255}, m_fontLarge, true);
 
     if (m_selectedGameIndex >= 0 && m_selectedGameIndex < static_cast<int>(m_cachedGames.size())) {
         const auto& game = m_cachedGames[m_selectedGameIndex];
@@ -1823,11 +1822,14 @@ void UIManager::renderConfirmDeleteDialog() {
         drawText(UiStrings::DIALOG_DELETE_SAFE_HINT, dlgX + dlgW / 2, dlgY + 195, {34, 197, 94, 255}, m_fontSmall, true);
     }
 
-    // Action buttons (pill shaped badges)
+    // Action buttons with button icons
     int btnW = 220;
     int btnH = 50;
-    drawBadge(dlgX + 60, dlgY + 250, btnW, btnH, UiStrings::BTN_CONFIRM_DELETE, {185, 28, 28, 255}, {255, 255, 255, 255});
-    drawBadge(dlgX + dlgW - 60 - btnW, dlgY + 250, btnW, btnH, UiStrings::BTN_CANCEL_DELETE, {55, 65, 81, 255}, {255, 255, 255, 255});
+    int btnY = dlgY + 250;
+    // A button (confirm - red background already in drawBadge)
+    drawBadge(dlgX + 60, btnY, btnW, btnH, UiStrings::BTN_CONFIRM_DELETE, {185, 28, 28, 255}, {255, 255, 255, 255});
+    // B button (cancel)
+    drawBadge(dlgX + dlgW - 60 - btnW, btnY, btnW, btnH, UiStrings::BTN_CANCEL_DELETE, {55, 65, 81, 255}, {255, 255, 255, 255});
 }
 
 void UIManager::renderConfirmBatchDeleteDialog() {
@@ -1839,13 +1841,12 @@ void UIManager::renderConfirmBatchDeleteDialog() {
     int dlgX = (1024 - dlgW) / 2;
     int dlgY = (768 - dlgH) / 2;
 
+    // Borderless dialog - just rounded background
     drawRoundedRect(dlgX, dlgY, dlgW, dlgH, 16, {24, 28, 38, 255}, true);
-    drawRoundedBorder(dlgX, dlgY, dlgW, dlgH, 16, {239, 68, 68, 255}, 2);
 
-    // Title Banner
-    drawRoundedRect(dlgX + 1, dlgY + 1, dlgW - 2, 54, 15, {185, 28, 28, 255}, true);
-    drawRect(dlgX + 1, dlgY + 35, dlgW - 2, 20, {185, 28, 28, 255}, true);
-    drawText(UiStrings::MULTI_BATCH_DELETE_TITLE, dlgX + dlgW / 2, dlgY + 16, {255, 255, 255, 255}, m_fontLarge, true);
+    // Simple title bar (no border)
+    drawRect(dlgX, dlgY, dlgW, 48, {185, 28, 28, 255}, true);
+    drawText(UiStrings::MULTI_BATCH_DELETE_TITLE, dlgX + dlgW / 2, dlgY + 14, {255, 255, 255, 255}, m_fontLarge, true);
 
     // Count of selected games
     int selCount = static_cast<int>(m_selectedGameIds.size());
@@ -1893,25 +1894,25 @@ void UIManager::renderConfirmBatchDeleteDialog() {
 }
 
 void UIManager::renderDisclaimerState() {
+    // Borderless disclaimer card - no outer border
     int cardX = 80;
     int cardY = 80;
     int cardW = 864;
     int cardH = 615;
 
-    drawRect(cardX, cardY, cardW, cardH, {22, 27, 36, 255}, true);
-    drawBorder(cardX, cardY, cardW, cardH, {245, 158, 11, 255}, 3);
+    // Main card background only
+    drawRoundedRect(cardX, cardY, cardW, cardH, 16, {22, 27, 36, 255}, true);
 
-    // Amber warning header
-    drawRect(cardX, cardY, cardW, 58, {50, 32, 12, 255}, true);
+    // Amber warning header bar
+    drawRoundedRect(cardX, cardY, cardW, 58, 16, {50, 32, 12, 255}, true);
     drawText(UiStrings::DISCLAIMER_TITLE, 512, cardY + 18, {245, 158, 11, 255}, m_fontLarge, true);
 
-    // Inner panel
+    // Inner panel - subtle inset without border
     int innerX = cardX + 30;
     int innerY = cardY + 76;
     int innerW = cardW - 60;
     int innerH = 435;
-    drawRect(innerX, innerY, innerW, innerH, {16, 20, 28, 255}, true);
-    drawBorder(innerX, innerY, innerW, innerH, {45, 55, 72, 255}, 1);
+    drawRoundedRect(innerX, innerY, innerW, innerH, 8, {16, 20, 28, 255}, true);
 
     int textX = innerX + 28;
     int textY = innerY + 22;
