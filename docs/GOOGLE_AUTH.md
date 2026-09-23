@@ -72,3 +72,15 @@ Because the TrimUI Brick Pro is a gaming handheld without a web browser or virtu
   - Neon bordered User Code box (`XXXX-XXXX`).
   - Animated status spinner: `● Waiting for approval on phone / browser...`.
   - Button `[B] Cancel` to abort polling and return to Settings.
+
+---
+
+## 5. Web Portal: Personal Token via Google OAuth 2.0 Playground
+
+For automated backups without going through Device Flow on the handheld, users can link their personal Drive account directly via the Web Portal (`http://<device_ip>:8080`):
+
+1. **Truy cập OAuth 2.0 Playground:** Mở trình duyệt và truy cập [https://developers.google.com/oauthplayground](https://developers.google.com/oauthplayground).
+2. **Chọn phạm vi quyền (Scope) của Google Drive:** Ở cột bên trái, mở rộng mục **Drive API v3** và tích chọn quyền `https://www.googleapis.com/auth/drive` (hoặc `https://www.googleapis.com/auth/drive.file`).
+3. **Cấp quyền truy cập (Authorize APIs):** Nhấn **Authorize APIs**, đăng nhập tài khoản Google cá nhân. Nếu xuất hiện cảnh báo "Google hasn't verified this app", chọn **Advanced** -> **Go to unknown app (unsafe)** -> **Allow**.
+4. **Trao đổi mã lấy Token:** Tại mục **Step 2**, nhấn **Exchange authorization code for tokens**. Chuyển sang Step 3, copy **Access Token** (`ya29...`) hoặc **Refresh Token** (`1//...`) dán vào Web Portal và nhấn **"Kích hoạt Sao lưu"**.
+

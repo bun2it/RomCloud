@@ -45,7 +45,14 @@ public:
     // Personal token and upload permission check
     bool canUpload() const;
     bool isPublicOnly() const;
-    void setPersonalTokens(const std::string& accessToken, const std::string& refreshToken = "", const std::string& userEmail = "");
+    struct PersonalTokenResult {
+        bool success = false;
+        std::string message;
+        std::string userEmail;
+    };
+    PersonalTokenResult setPersonalTokens(const std::string& token1, const std::string& token2 = "", const std::string& userEmail = "");
+    void clearPersonalTokens();
+    bool validateDriveToken(const std::string& accessToken, std::string& outEmail, std::string& outError);
 
     // Get current device flow prompt data
     DeviceCodeResponse getDeviceCodeInfo() const;

@@ -136,26 +136,149 @@ bool AuthManager::isPublicOnly() const {
     return (token.empty() && refresh.empty() && !folderId.empty());
 }
 
-void AuthManager::setPersonalTokens(const std::string& accessToken, const std::string& refreshToken, const std::string& userEmail) {
+static std::string sanitizeToken(const std::string& str) {
+    size_t first = str.find_first_not_of(" \t\r\n\"'");
+    if (first == std::string::npos) return "";
+    size_t last = str.find_last_not_of(" \t\r\n\"'");
+    return str.substr(first, (last - first + 1));
+}
+
+bool AuthManager::validateDriveToken(const std::string& accessToken, std::string& outEmail, std::string& outError) {
+    std::vector<std::string> headers = {
+        "Authorization: Bearer " + accessToken,
+        "Accept: application/json"
+    };
+
+    // 1. Check directly against Google Drive API v3 (about endpoint)
+    HttpResponse resp = HttpClient::instance().get("https://www.googleapis.com/drive/v3/about?fields=user", headers);
+    if (resp.statusCode == 200) {
+        std::string email = JsonHelper::extractString(resp.body, "emailAddress");
+        std::string name = JsonHelper::extractString(resp.body, "displayName");
+        if (!email.empty()) {
+            outEmail = email;
+        } else if (!name.empty()) {
+            outEmail = name;
+        } else {
+            outEmail = "Google Drive Account";
+        }
+        return true;
+    }
+
+    // 2. If Drive about endpoint did not return 200, try userinfo endpoint
+    HttpResponse uresp = HttpClient::instance().get(USERINFO_ENDPOINT, headers);
+    if (uresp.statusCode == 200) {
+        std::string email = JsonHelper::extractString(uresp.body, "email");
+        if (!email.empty()) {
+            outEmail = email;
+            return true;
+        }
+    }
+
+    std::string err = JsonHelper::extractString(resp.body, "message");
+    if (err.empty()) err = JsonHelper::extractString(resp.body, "error");
+    if (err.empty()) err = (resp.statusCode > 0) ? ("HTTP " + std::to_string(resp.statusCode)) : resp.error;
+    outError = err;
+    return false;
+}
+
+AuthManager::PersonalTokenResult AuthManager::setPersonalTokens(const std::string& token1, const std::string& token2, const std::string& userEmail) {
+    PersonalTokenResult result;
+    result.success = false;
+
+    std::string t1 = sanitizeToken(token1);
+    std::string t2 = sanitizeToken(token2);
+
+    std::string accessTok;
+    std::string refreshTok;
+
+    if (t1.rfind("ya29.", 0) == 0) {
+        accessTok = t1;
+        if (!t2.empty()) refreshTok = t2;
+    } else if (t1.rfind("1/", 0) == 0) {
+        refreshTok = t1;
+        if (t2.rfind("ya29.", 0) == 0) accessTok = t2;
+    } else {
+        if (t2.rfind("ya29.", 0) == 0) {
+            accessTok = t2;
+            refreshTok = t1;
+        } else {
+            accessTok = t1;
+            refreshTok = t2;
+        }
+    }
+
+    // If only refresh token provided, try to exchange it using client credentials
+    if (accessTok.empty() && !refreshTok.empty()) {
+        std::unordered_map<std::string, std::string> params = {
+            {"client_id", m_clientId},
+            {"refresh_token", refreshTok},
+            {"grant_type", "refresh_token"}
+        };
+        if (!m_clientSecret.empty()) {
+            params["client_secret"] = m_clientSecret;
+        }
+        HttpResponse resp = HttpClient::instance().postForm(TOKEN_ENDPOINT, params);
+        if (resp.statusCode == 200) {
+            accessTok = JsonHelper::extractString(resp.body, "access_token");
+        } else {
+            result.message = "Chuỗi bạn vừa dán là Refresh Token tạo bởi Client mặc định của OAuth Playground. RomCloud không thể tự động làm mới từ xa. Vui lòng copy chuỗi 'Access token' (chuỗi bắt đầu bằng ya29...) tại Step 3 trên OAuth Playground dán vào đây để kích hoạt ngay!";
+            return result;
+        }
+    }
+
+    if (accessTok.empty()) {
+        result.message = "Token không được để trống hoặc định dạng không hợp lệ.";
+        return result;
+    }
+
+    // Validate access token directly with Google Drive API
+    std::string detectedEmail;
+    std::string validateError;
+    if (!validateDriveToken(accessTok, detectedEmail, validateError)) {
+        result.message = "Google Drive từ chối xác thực token (" + validateError + "). Vui lòng lấy mã mới từ OAuth Playground.";
+        return result;
+    }
+
     cancelDeviceFlow();
     std::lock_guard<std::recursive_mutex> lock(m_mutex);
     auto& db = DatabaseManager::instance();
-    db.setSetting("auth_access_token", accessToken);
-    if (!refreshToken.empty()) {
-        db.setSetting("auth_refresh_token", refreshToken);
+    db.setSetting("auth_access_token", accessTok);
+    if (!refreshTok.empty()) {
+        db.setSetting("auth_refresh_token", refreshTok);
     }
     uint64_t nowSec = static_cast<uint64_t>(std::time(nullptr));
     db.setSetting("auth_expires_at", std::to_string(nowSec + 3600));
 
-    std::string email = userEmail;
-    if (email.empty()) {
-        email = fetchUserEmail(accessToken);
-    }
+    std::string email = !userEmail.empty() ? userEmail : detectedEmail;
     db.setSetting("auth_user_email", email);
     db.setSetting("auth_is_linked", "1");
     m_userEmail = email;
     m_state = AuthState::LINKED;
+
     Logger::info("Personal Google Drive tokens set successfully for: " + email);
+    result.success = true;
+    result.message = "Đã kích hoạt sao lưu Drive cá nhân thành công cho tài khoản " + email + "!";
+    result.userEmail = email;
+    return result;
+}
+
+void AuthManager::clearPersonalTokens() {
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
+    auto& db = DatabaseManager::instance();
+    db.setSetting("auth_access_token", "");
+    db.setSetting("auth_refresh_token", "");
+    db.setSetting("auth_user_email", "");
+    m_userEmail = "";
+
+    std::string folderId = db.getSetting("drive_folder_id", "");
+    if (folderId.empty()) {
+        db.setSetting("auth_is_linked", "0");
+        m_state = AuthState::UNLINKED;
+    } else {
+        db.setSetting("auth_is_linked", "1");
+        m_state = AuthState::LINKED;
+    }
+    Logger::info("Personal Google Drive backup tokens cleared.");
 }
 
 std::string AuthManager::getUserEmail() const {

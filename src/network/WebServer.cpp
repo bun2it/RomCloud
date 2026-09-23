@@ -997,15 +997,71 @@ std::string WebServer::buildHtmlResponse() {
           </form>
 
           <div style="margin-top: 20px; border-top: 1px solid var(--border); padding-top: 16px;">
-            <label style="font-size: 12px; font-weight: 600; color: var(--purple); display: block; margin-bottom: 4px;">📤 2. Nơi Sao lưu Cá nhân (Upload / Backup lên Google Drive):</label>
-            <p style="font-size: 11px; color: var(--text-muted); margin-bottom: 8px;">Thư mục công cộng chỉ cho phép tải về. Để sao lưu ROM từ thẻ nhớ lên Drive của riêng bạn, hãy dán Google Access Token hoặc Refresh Token vào đây:</p>
-            <div id="backup-perm-status" style="font-size: 12px; margin-bottom: 8px; color: var(--text-muted);">
+            <label style="font-size: 13px; font-weight: 700; color: var(--purple); display: block; margin-bottom: 6px;">📤 2. Nơi Sao lưu Cá nhân (Upload / Backup lên Google Drive):</label>
+            <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 12px; line-height: 1.5;">
+              Thư mục công cộng chỉ cho phép tải ROM về máy. Để sao lưu ROM và file save từ thẻ nhớ máy TrimUI lên tài khoản Google Drive của riêng bạn, bạn cần cấp Access Token hoặc Refresh Token cá nhân:
+            </p>
+
+            <div id="backup-perm-status" style="font-size: 12px; margin-bottom: 14px; padding: 10px 14px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px;">
               Trạng thái quyền sao lưu: <b id="backup-perm-badge" style="color:var(--yellow);">Đang kiểm tra...</b>
             </div>
+
+            <!-- Hướng dẫn chi tiết Google OAuth 2.0 Playground -->
+            <details style="margin-bottom: 16px; background: var(--card-alt); border: 1px solid rgba(168, 85, 247, 0.35); border-radius: 8px; padding: 12px 14px;" open>
+              <summary style="font-size: 13px; font-weight: 700; color: #c084fc; cursor: pointer; user-select: none; outline: none;">
+                📖 Hướng dẫn chi tiết lấy Token qua Google OAuth 2.0 Playground (Bấm để xem/thu gọn)
+              </summary>
+              <div style="margin-top: 12px; font-size: 12px; line-height: 1.6; color: #cbd5e1;">
+                <p style="margin-bottom: 10px;">
+                  Để lấy <b>Refresh Token</b> hoặc <b>Access Token</b> của Google Drive cá nhân (thường dùng cho các ứng dụng hoặc script tự động sao lưu), cách nhanh nhất và phổ biến nhất là sử dụng công cụ <b>Google OAuth 2.0 Playground</b>:
+                </p>
+
+                <div style="background: var(--bg); border-left: 3px solid #38bdf8; padding: 8px 12px; margin-bottom: 10px; border-radius: 0 6px 6px 0;">
+                  <b style="color: #38bdf8;">1. Truy cập OAuth 2.0 Playground:</b><br>
+                  <b>Bước 1:</b> Mở trình duyệt và truy cập vào trang web chính thức: 
+                  <a href="https://developers.google.com/oauthplayground" target="_blank" rel="noopener noreferrer" style="color: #38bdf8; text-decoration: underline; font-weight: 600;">https://developers.google.com/oauthplayground ↗</a><br>
+                  <span style="color: var(--text-dim);">🔍 <i>Cách kiểm tra thành công:</i> Bạn sẽ thấy giao diện gồm các bước cấu hình (Step 1, Step 2, Step 3) ở cột bên trái.</span>
+                </div>
+
+                <div style="background: var(--bg); border-left: 3px solid #38bdf8; padding: 8px 12px; margin-bottom: 10px; border-radius: 0 6px 6px 0;">
+                  <b style="color: #38bdf8;">2. Chọn phạm vi quyền (Scope) của Google Drive:</b><br>
+                  <b>Bước 2:</b> Ở cột bên trái, tìm và mở rộng mục <b>Drive API v3</b>.<br>
+                  Tìm và tích chọn quyền: <code style="background: rgba(255,255,255,0.08); padding: 2px 5px; border-radius: 4px; color: #93c5fd;">https://www.googleapis.com/auth/drive</code> (hoặc <code style="background: rgba(255,255,255,0.08); padding: 2px 5px; border-radius: 4px; color: #93c5fd;">https://www.googleapis.com/auth/drive.file</code> tùy thuộc vào việc bạn muốn cấp quyền truy cập toàn bộ Drive hay chỉ các file do ứng dụng tạo).<br>
+                  <span style="color: var(--text-dim);">🔍 <i>Cách kiểm tra thành công:</i> Ô vuông tương ứng đã được tích chọn và hiển thị trong danh sách scope được chọn.</span>
+                </div>
+
+                <div style="background: var(--bg); border-left: 3px solid #38bdf8; padding: 8px 12px; margin-bottom: 10px; border-radius: 0 6px 6px 0;">
+                  <b style="color: #38bdf8;">3. Cấp quyền truy cập (Authorize APIs):</b><br>
+                  <b>Bước 3:</b> Nhấn vào nút <b>Authorize APIs</b> màu xanh dương ở phía dưới danh sách scope.<br>
+                  - Đăng nhập bằng tài khoản Google của bạn.<br>
+                  - Nếu xuất hiện cảnh báo <i>"Google hasn't verified this app"</i> (Ứng dụng chưa được Google xác minh), bạn bấm vào chữ <b>Advanced</b> (Nâng cao) rồi chọn <b>Go to unknown app</b> (Đi tới ứng dụng - không an toàn).<br>
+                  - Nhấn <b>Allow</b> (Cho phép) để cấp quyền cho ứng dụng.<br>
+                  <span style="color: var(--text-dim);">🔍 <i>Cách kiểm tra thành công:</i> Trình duyệt tự động chuyển hướng ngược lại trang OAuth Playground và giao diện tự động nhảy sang bước tiếp theo (Step 2).</span>
+                </div>
+
+                <div style="background: var(--bg); border-left: 3px solid #38bdf8; padding: 8px 12px; margin-bottom: 10px; border-radius: 0 6px 6px 0;">
+                  <b style="color: #38bdf8;">4. Trao đổi mã để lấy Token:</b><br>
+                  <b>Bước 4:</b> Ở mục <b>Step 2 (Exchange authorization code for tokens)</b>, nhấn vào nút <b>Exchange authorization code for tokens</b>.<br>
+                  <span style="color: var(--text-dim);">🔍 <i>Cách kiểm tra thành công:</i> Chuyển sang Step 3, các ô thông tin sẽ xuất hiện đầy đủ gồm <b>Access Token</b> (chuỗi bắt đầu bằng <code>ya29...</code>) và <b>Refresh Token</b> (chuỗi bắt đầu bằng <code>1//...</code>). Bạn chỉ cần sao chép (copy) chuỗi mã này để dán vào ô bên dưới.</span>
+                </div>
+
+                <div style="background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.35); padding: 10px 14px; border-radius: 6px; margin-top: 10px;">
+                  <b style="color: #fca5a5;">⚠️ Lưu ý bảo mật quan trọng:</b>
+                  <ul style="margin: 4px 0 0 18px; padding: 0; color: #fecaca; font-size: 11px; line-height: 1.5;">
+                    <li>Refresh Token cho phép truy cập liên tục vào Google Drive của bạn mà không cần đăng nhập lại, do đó tuyệt đối không chia sẻ mã này cho người khác hoặc công khai lên mạng.</li>
+                    <li>Nếu ứng dụng của bạn trên Google Cloud đang ở chế độ kiểm thử (Testing), Refresh Token có thể hết hạn sau 7 ngày. Hãy chuyển trạng thái ứng dụng sang <b>In Production</b> (Đang hoạt động) trong Google Cloud Console nếu muốn dùng lâu dài.</li>
+                    <li><b>Gợi ý nhanh:</b> Bạn có thể copy ô <b>Access token</b> (chuỗi bắt đầu bằng <code>ya29...</code>) dán vào ô bên dưới rồi bấm <b>"Kích hoạt Sao lưu"</b> để dùng ngay tức thì!</li>
+                  </ul>
+                </div>
+              </div>
+            </details>
+
             <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-              <input type="text" id="input-personal-token" placeholder="Dán Google OAuth Access Token hoặc Refresh Token vào đây" autocomplete="off" style="flex: 1; min-width: 220px; padding: 8px 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: #fff; font-size: 12px;">
-              <button type="button" class="btn btn-primary" onclick="savePersonalToken()" style="background: var(--purple);">💾 Kích hoạt Sao lưu</button>
+              <input type="text" id="input-personal-token" placeholder="Dán Access Token (ya29...) hoặc Refresh Token (1//...) vào đây" autocomplete="off" onkeydown="if(event.key==='Enter') savePersonalToken()" style="flex: 1; min-width: 240px; padding: 10px 14px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: #fff; font-size: 13px;">
+              <button type="button" class="btn btn-primary" id="btn-save-personal-token" onclick="savePersonalToken()" style="background: var(--purple);">💾 Kích hoạt Sao lưu</button>
+              <button type="button" class="btn btn-secondary" id="btn-clear-personal-token" onclick="clearPersonalToken()" style="display: none;">✕ Hủy sao lưu cá nhân</button>
             </div>
+            <div id="personal-token-status" style="margin-top: 8px; font-size: 12px;"></div>
           </div>
         </div>
       </div>
@@ -1522,11 +1578,14 @@ std::string WebServer::buildHtmlResponse() {
         }
 
         const backupBadge = document.getElementById('backup-perm-badge');
+        const btnClearToken = document.getElementById('btn-clear-personal-token');
         if (backupBadge) {
           if (data.can_upload) {
-            backupBadge.innerHTML = `<span style="color:var(--green);">🟢 Đã kích hoạt</span> (Tự động sao lưu vào thư mục /RomCloud_Backup)`;
+            backupBadge.innerHTML = `<span style="color:var(--green);">🟢 Đã kích hoạt</span> (${escapeHtml(data.user_email || 'Google Drive cá nhân')} - Sao lưu vào thư mục /RomCloud_Backup)`;
+            if (btnClearToken) btnClearToken.style.display = 'inline-block';
           } else {
             backupBadge.innerHTML = `<span style="color:var(--yellow);">⚪ Chưa kích hoạt</span> (Chế độ hiện tại chỉ cho phép tải về)`;
+            if (btnClearToken) btnClearToken.style.display = 'none';
           }
         }
 
@@ -1565,6 +1624,71 @@ std::string WebServer::buildHtmlResponse() {
         triggerSync();
       } catch (err) {
         showToast('Lỗi khi gửi kết nối.');
+      }
+    }
+
+    async function savePersonalToken() {
+      const input = document.getElementById('input-personal-token');
+      const btn = document.getElementById('btn-save-personal-token');
+      const statusBox = document.getElementById('personal-token-status');
+      const val = (input ? input.value : '').trim();
+
+      if (!val) {
+        showToast('⚠️ Vui lòng dán Access Token hoặc Refresh Token vào ô.');
+        if (input) input.focus();
+        return;
+      }
+
+      const origText = btn ? btn.innerHTML : '💾 Kích hoạt Sao lưu';
+      if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '⏳ Đang xác thực với Google...';
+      }
+      if (statusBox) statusBox.innerHTML = '<span style="color:var(--accent);">⏳ Đang kiểm tra token với Google Drive API...</span>';
+
+      try {
+        const body = 'token=' + encodeURIComponent(val);
+        const res = await fetch('/api/set_personal_auth', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: body
+        });
+        const data = await res.json();
+        if (data.success) {
+          showToast(data.message || 'Kích hoạt sao lưu thành công!');
+          if (statusBox) statusBox.innerHTML = `<span style="color:var(--green);">✅ ${escapeHtml(data.message || 'Đã kích hoạt sao lưu thành công!')}</span>`;
+          if (input) input.value = '';
+          await loadStorageInfo();
+        } else {
+          showToast('❌ ' + (data.error || 'Xác thực token thất bại.'));
+          if (statusBox) statusBox.innerHTML = `<span style="color:var(--red);">❌ ${escapeHtml(data.error || 'Xác thực token thất bại.')}</span>`;
+        }
+      } catch (e) {
+        showToast('❌ Lỗi kết nối đến máy chủ RomCloud.');
+        if (statusBox) statusBox.innerHTML = '<span style="color:var(--red);">❌ Lỗi kết nối máy chủ RomCloud.</span>';
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.innerHTML = origText;
+        }
+      }
+    }
+
+    async function clearPersonalToken() {
+      if (!confirm('Bạn có chắc muốn hủy quyền sao lưu cá nhân? (Hệ thống sẽ trở về chế độ chỉ tải game về từ kho công khai)')) return;
+      try {
+        const res = await fetch('/api/set_personal_auth', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: 'action=clear'
+        });
+        const data = await res.json();
+        showToast(data.message || 'Đã hủy quyền sao lưu cá nhân.');
+        const statusBox = document.getElementById('personal-token-status');
+        if (statusBox) statusBox.innerHTML = '';
+        await loadStorageInfo();
+      } catch (e) {
+        showToast('Lỗi khi hủy token.');
       }
     }
 
@@ -2265,11 +2389,24 @@ void WebServer::handleClient(int clientFd) {
                           "Connection: close\r\n\r\n" + body;
         send(clientFd, res.c_str(), res.length(), 0);
     } else if (method == "POST" && path == "/api/set_personal_auth") {
+        std::string action = extractPostParam(postBody, "action");
+        if (action == "clear") {
+            AuthManager::instance().clearPersonalTokens();
+            std::string json = "{\"success\":true,\"message\":\"Đã hủy kích hoạt sao lưu Drive cá nhân thành công.\"}";
+            std::string res = "HTTP/1.1 200 OK\r\n"
+                              "Content-Type: application/json; charset=UTF-8\r\n"
+                              "Access-Control-Allow-Origin: *\r\n"
+                              "Content-Length: " + std::to_string(json.length()) + "\r\n"
+                              "Connection: close\r\n\r\n" + json;
+            send(clientFd, res.c_str(), res.length(), 0);
+            return;
+        }
+
         std::string token = extractPostParam(postBody, "token");
         std::string refreshToken = extractPostParam(postBody, "refresh_token");
         std::string email = extractPostParam(postBody, "email");
         if (token.empty() && refreshToken.empty()) {
-            std::string json = "{\"success\":false,\"error\":\"Token không được để trống.\"}";
+            std::string json = "{\"success\":false,\"error\":\"Vui lòng dán Access Token hoặc Refresh Token vào ô.\"}";
             std::string res = "HTTP/1.1 400 Bad Request\r\n"
                               "Content-Type: application/json; charset=UTF-8\r\n"
                               "Access-Control-Allow-Origin: *\r\n"
@@ -2278,14 +2415,24 @@ void WebServer::handleClient(int clientFd) {
             send(clientFd, res.c_str(), res.length(), 0);
             return;
         }
-        AuthManager::instance().setPersonalTokens(token, refreshToken, email);
-        std::string json = "{\"success\":true,\"message\":\"Đã kích hoạt sao lưu Drive cá nhân thành công!\"}";
-        std::string res = "HTTP/1.1 200 OK\r\n"
-                          "Content-Type: application/json; charset=UTF-8\r\n"
-                          "Access-Control-Allow-Origin: *\r\n"
-                          "Content-Length: " + std::to_string(json.length()) + "\r\n"
-                          "Connection: close\r\n\r\n" + json;
-        send(clientFd, res.c_str(), res.length(), 0);
+        auto result = AuthManager::instance().setPersonalTokens(token, refreshToken, email);
+        if (result.success) {
+            std::string json = "{\"success\":true,\"message\":\"" + escapeJson(result.message) + "\",\"email\":\"" + escapeJson(result.userEmail) + "\"}";
+            std::string res = "HTTP/1.1 200 OK\r\n"
+                              "Content-Type: application/json; charset=UTF-8\r\n"
+                              "Access-Control-Allow-Origin: *\r\n"
+                              "Content-Length: " + std::to_string(json.length()) + "\r\n"
+                              "Connection: close\r\n\r\n" + json;
+            send(clientFd, res.c_str(), res.length(), 0);
+        } else {
+            std::string json = "{\"success\":false,\"error\":\"" + escapeJson(result.message) + "\"}";
+            std::string res = "HTTP/1.1 400 Bad Request\r\n"
+                              "Content-Type: application/json; charset=UTF-8\r\n"
+                              "Access-Control-Allow-Origin: *\r\n"
+                              "Content-Length: " + std::to_string(json.length()) + "\r\n"
+                              "Connection: close\r\n\r\n" + json;
+            send(clientFd, res.c_str(), res.length(), 0);
+        }
     } else if (method == "GET" && path == "/ota_check") {
         UpdateInfo info;
         bool hasUpdate = UpdateManager::instance().checkForUpdatesSync(info);
