@@ -1027,6 +1027,63 @@ void UIManager::drawIcon(const std::string& iconName, int x, int y, int w, int h
     SDL_FreeSurface(surface);
 }
 
+// Draw gamepad button icon (A, B, X, Y, L1, R1, etc.)
+void UIManager::drawButtonIcon(const std::string& button, int x, int y, int size) {
+    SDL_Color bgColor = {60, 60, 60, 255};
+    SDL_Color textColor = {255, 255, 255, 255};
+    std::string label = button;
+
+    // Set colors based on button type (Xbox-style)
+    if (button == "A") {
+        bgColor = {16, 150, 60, 255};    // Green
+        label = "A";
+    } else if (button == "B") {
+        bgColor = {200, 30, 30, 255};   // Red
+        label = "B";
+    } else if (button == "X") {
+        bgColor = {30, 90, 200, 255};  // Blue
+        label = "X";
+    } else if (button == "Y") {
+        bgColor = {200, 180, 20, 255};  // Yellow
+        label = "Y";
+    } else if (button == "L1") {
+        bgColor = {100, 100, 100, 255};
+        label = "L1";
+    } else if (button == "R1") {
+        bgColor = {100, 100, 100, 255};
+        label = "R1";
+    } else if (button == "L2") {
+        bgColor = {80, 80, 80, 255};
+        label = "L2";
+    } else if (button == "R2") {
+        bgColor = {80, 80, 80, 255};
+        label = "R2";
+    } else if (button == "SELECT" || button == "BACK") {
+        bgColor = {80, 80, 80, 255};
+        label = "SEL";
+    } else if (button == "START" || button == "MENU") {
+        bgColor = {80, 80, 80, 255};
+        label = "STA";
+    } else if (button == "HOME") {
+        bgColor = {100, 100, 100, 255};
+        label = "HOME";
+    }
+
+    // Draw rounded rectangle for button
+    int rad = size / 4;
+    drawRoundedRect(x, y, size, size, rad, bgColor, true);
+
+    // Draw button label (letter)
+    int fontSize = size * 3 / 5;
+    TTF_Font* font = m_fontSmall;
+    if (fontSize > 20) font = m_fontMedium;
+
+    int textW = label.length() * fontSize * 2 / 3;
+    int textX = x + (size - textW) / 2;
+    int textY = y + (size - fontSize) / 2;
+    drawText(label, textX, textY, textColor, font);
+}
+
 void UIManager::renderHeader() {
     drawRect(0, 0, 1024, 64, {18, 22, 30, 255}, true);
     drawRect(0, 63, 1024, 1, {40, 48, 62, 255}, true);

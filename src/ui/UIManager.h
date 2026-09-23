@@ -134,6 +134,7 @@ private:
   void drawBadge(int x, int y, int w, int h, const std::string &text,
                  SDL_Color bg, SDL_Color fg);
   void drawIcon(const std::string &iconName, int x, int y, int w, int h);
+  void drawButtonIcon(const std::string &button, int x, int y, int size);
 };
 
 } // namespace RomCloud
