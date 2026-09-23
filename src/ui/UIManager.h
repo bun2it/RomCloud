@@ -1,10 +1,12 @@
 #pragma once
 #include "../database/DatabaseManager.h"
+#include "../iptv/IPTVManager.h"
 #include "CoverManager.h"
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_ttf.h>
 #include <string>
 #include <vector>
+#include <unordered_map>
 
 namespace RomCloud {
 
@@ -21,6 +23,8 @@ enum class UIState {
   DIAGNOSTICS,
   OTA_UPDATE,
   REVERSE_SYNC,
+  IPTV_LIST,
+  IPTV_SEARCH,
   EXIT_REQUESTED
 };
 
@@ -33,6 +37,7 @@ public:
   void shutdown();
   void update();
   void render();
+  void initGridMenu();
 
   UIState getState() const { return m_currentState; }
   void setState(UIState state);
@@ -49,11 +54,29 @@ private:
 
   UIState m_currentState = UIState::MENU;
   int m_selectedMenuIndex = 0;
-  std::vector<std::string> m_menuItems = {
-      "KHO GAME (THƯ VIỆN)", "ĐỒNG BỘ DỮ LIỆU",
-      "UPLOAD LÊN DRIVE",    "CẬP NHẬT PHẦN MỀM (OTA)",
-      "CÀI ĐẶT (SETTINGS)",  "THÔNG TIN HỆ THỐNG",
-      "THOÁT (EXIT)"};
+
+  // Menu items as grid icons
+  struct GridMenuItem {
+      std::string id;
+      std::string title;
+      std::string iconFile;  // PNG filename in assets/apps_icons/
+      std::string subtitle;
+  };
+  std::vector<GridMenuItem> m_gridMenuItems;
+
+  // IPTV State
+  int m_selectedIPTVChannelIndex = 0;
+  int m_iptvScrollOffset = 0;
+  bool m_iptvShowFavoritesOnly = false;
+
+  // IPTV Search & Virtual Keyboard State
+  std::string m_iptvSearchQuery;
+  std::vector<IPTVChannel> m_iptvSearchResults;
+  int m_iptvSearchSelectedIndex = 0;
+  int m_iptvSearchScrollOffset = 0;
+  int m_iptvKbRow = 0;
+  int m_iptvKbCol = 0;
+  bool m_iptvKbInResults = false;
 
   // System Selection State
   int m_selectedSystemIndex = 0;
@@ -117,6 +140,8 @@ private:
   void renderDiagnosticsState();
   void renderOTAUpdateState();
   void renderReverseSyncState();
+  void renderIPTVState();
+  void renderIPTVSearchState();
   void renderUploadOverlay();
   void renderToast();
 
@@ -135,6 +160,20 @@ private:
                  SDL_Color bg, SDL_Color fg);
   void drawIcon(const std::string &iconName, int x, int y, int w, int h);
   void drawButtonIcon(const std::string &button, int x, int y, int size);
+  void drawGridIcon(const std::string &iconFile, int x, int y, int w, int h);
+
+  // Performance caches (60 FPS Smooth UI)
+  std::unordered_map<std::string, SDL_Texture*> m_gridIconCache;
+  std::unordered_map<std::string, SDL_Texture*> m_systemIconCache;
+
+  struct CachedTextTexture {
+      SDL_Texture* texture = nullptr;
+      int w = 0;
+      int h = 0;
+      uint32_t lastUsed = 0;
+  };
+  std::unordered_map<std::string, CachedTextTexture> m_textCache;
+  void clearTextCache();
 };
 
 } // namespace RomCloud

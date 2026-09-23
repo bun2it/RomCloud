@@ -38,6 +38,7 @@ $ZIG c++ \
     src/platform/PlatformInfo.cpp \
     src/logging/Logger.cpp \
     src/logging/IssueLogger.cpp \
+    src/iptv/IPTVManager.cpp \
     src/config/AppConfig.cpp \
     src/database/DatabaseManager.cpp \
     src/database/RomIndexer.cpp \

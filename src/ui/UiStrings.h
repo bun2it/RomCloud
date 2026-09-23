@@ -25,6 +25,7 @@ inline const char *HEADER_OTA = "CẬP NHẬT";
 
 // --- 2. MENU CHÍNH (MAIN MENU) ---
 inline const char *MENU_PLAY = "THƯ VIỆN GAME";
+inline const char *MENU_IPTV = "XEM TV";
 inline const char *MENU_SYNC = "ĐỒNG BỘ";
 inline const char *MENU_REVERSE_SYNC = "TẢI LÊN DRIVE";
 inline const char *MENU_OTA = "CẬP NHẬT";
@@ -32,6 +33,12 @@ inline const char *MENU_OTA_NEW_BADGE = "🆕 OTA v";
 inline const char *MENU_SETTINGS = "CÀI ĐẶT";
 inline const char *MENU_DIAG = "THÔNG TIN";
 inline const char *MENU_EXIT = "THOÁT";
+
+// --- IPTV STRINGS ---
+inline const char *IPTV_TITLE = "XEM TV";
+inline const char *IPTV_NO_CHANNELS = "Không có kênh TV";
+inline const char *IPTV_LOADING = "Đang tải danh sách...";
+inline const char *IPTV_NOW_PLAYING = "Đang phát:";
 
 // --- 3. THANH ĐIỀU KHIỂN & NÚT BẤM ---
 inline const char *FOOTER_ENTER_SYSTEM = "VÀO";

@@ -13,12 +13,14 @@
 #include "../rom/RomDetector.h"
 #include "../app/Application.h"
 #include "../config/AppConfig.h"
+#include "../iptv/IPTVManager.h"
 #include "HttpClient.h"
 
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <netinet/in.h>
 #include <unistd.h>
+#include <dirent.h>
 #include <fcntl.h>
 #include <sstream>
 #include <cstring>
@@ -922,6 +924,7 @@ std::string WebServer::buildHtmlResponse() {
       <button class="tab-btn active" onclick="switchTab('tab-roms')">🎮 Quản lý ROM</button>
       <button class="tab-btn" onclick="switchTab('tab-queue')">📥 Hàng đợi tải <span class="badge" id="nav-queue-badge">0</span></button>
       <button class="tab-btn" onclick="switchTab('tab-storage')">☁️ Đồng bộ &amp; Thẻ nhớ</button>
+      <button class="tab-btn" onclick="switchTab('tab-iptv')">📺 IPTV</button>
       <button class="tab-btn" onclick="switchTab('tab-ota')" id="nav-tab-ota">🚀 Cập nhật OTA <span class="badge" id="ota-nav-badge" style="display: none; background: #ef4444; color: #fff; margin-left: 4px; padding: 2px 6px; border-radius: 8px; font-size: 10px;">NEW</span></button>
     </div>
 
@@ -1216,7 +1219,86 @@ std::string WebServer::buildHtmlResponse() {
       </div>
     </div>
 
-    <!-- TAB 4: OTA UPDATE -->
+    <!-- TAB 4: IPTV -->
+    <div id="tab-iptv" class="tab-content">
+      <div class="card" style="max-width: 700px; margin: 0 auto;">
+        <h3>📺 Quản lý IPTV</h3>
+        <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 16px;">
+          Upload file playlist .m3u để xem TV trực tuyến trên RomCloud.
+        </p>
+
+        <!-- Upload Form -->
+        <div style="background: var(--card-alt); border-radius: 12px; padding: 20px; margin-bottom: 20px; border: 2px dashed var(--border);">
+          <h4 style="margin-bottom: 12px;">📤 Upload Playlist M3U</h4>
+          <input type="file" id="iptv-file" accept=".m3u,.m3u8" style="width: 100%; padding: 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; color: var(--text); margin-bottom: 12px;">
+          <button class="btn btn-primary" onclick="uploadIptvPlaylist()" style="width: 100%;">Upload Playlist</button>
+        </div>
+
+        <!-- Quick Add URL -->
+        <div style="background: var(--card-alt); border-radius: 12px; padding: 20px; margin-bottom: 20px;">
+          <h4 style="margin-bottom: 12px;">🔗 Thêm URL Playlist</h4>
+          <input type="text" id="iptv-url" placeholder="https://example.com/playlist.m3u" style="width: 100%; padding: 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; color: var(--text); margin-bottom: 12px;">
+          <button class="btn btn-primary" onclick="addIptvUrl()" style="width: 100%;">Thêm URL</button>
+        </div>
+
+        <!-- Current Playlists -->
+        <div style="background: var(--card-alt); border-radius: 12px; padding: 20px;">
+          <h4 style="margin-bottom: 12px;">📋 Playlist hiện có</h4>
+          <div id="iptv-playlist-list" style="color: var(--text-muted);">Đang tải...</div>
+        </div>
+      </div>
+
+      <script>
+        function uploadIptvPlaylist() {
+          const fileInput = document.getElementById('iptv-file');
+          if (!fileInput.files[0]) {
+            alert('Vui lòng chọn file playlist');
+            return;
+          }
+          const formData = new FormData();
+          formData.append('file', fileInput.files[0]);
+          fetch('/api/iptv/upload', { method: 'POST', body: formData })
+            .then(r => r.json())
+            .then(d => {
+              if (d.success) {
+                alert('Upload thành công!');
+                loadIptvPlaylists();
+              } else {
+                alert('Lỗi: ' + d.error);
+              }
+            });
+        }
+        function addIptvUrl() {
+          const url = document.getElementById('iptv-url').value;
+          if (!url) return;
+          fetch('/api/iptv/add?url=' + encodeURIComponent(url))
+            .then(r => r.json())
+            .then(d => {
+              if (d.success) {
+                alert('Đã thêm URL!');
+                loadIptvPlaylists();
+              } else {
+                alert('Lỗi: ' + d.error);
+              }
+            });
+        }
+        function loadIptvPlaylists() {
+          fetch('/api/iptv/list')
+            .then(r => r.json())
+            .then(d => {
+              const el = document.getElementById('iptv-playlist-list');
+              if (d.playlists && d.playlists.length > 0) {
+                el.innerHTML = d.playlists.map(p => '<div style="padding: 8px; border-bottom: 1px solid var(--border);">' + p + '</div>').join('');
+              } else {
+                el.innerHTML = '<i>Chưa có playlist nào</i>';
+              }
+            });
+        }
+        loadIptvPlaylists();
+      </script>
+    </div>
+
+    <!-- TAB 5: OTA UPDATE -->
     <div id="tab-ota" class="tab-content">
       <div class="card" style="max-width: 600px; margin: 0 auto;">
         <h3>🚀 Cập nhật ứng dụng RomCloud (OTA)</h3>
@@ -3928,6 +4010,142 @@ void WebServer::handleClient(int clientFd) {
         send(clientFd, res.c_str(), res.length(), 0);
         std::this_thread::sleep_for(std::chrono::milliseconds(500));
         Application::instance().requestRestart();
+    } else if (method == "GET" && path == "/api/iptv/list") {
+        // List IPTV playlists
+        std::vector<std::string> playlists;
+        std::string iptvDir = IPTVManager::instance().getIptvDir();
+        if (iptvDir.empty()) {
+            iptvDir = AppConfig::instance().getAppRoot() + "/iptv";
+        }
+        FileSystemManager::instance().createDirectoryRecursive(iptvDir);
+
+        DIR* dir = opendir(iptvDir.c_str());
+        if (dir) {
+            struct dirent* entry;
+            while ((entry = readdir(dir)) != nullptr) {
+                std::string name = entry->d_name;
+                if (name.length() > 4 && (name.substr(name.length()-4) == ".m3u" || name.substr(name.length()-5) == ".m3u8")) {
+                    playlists.push_back(name);
+                }
+            }
+            closedir(dir);
+        }
+        std::string json = "{";
+        json += "\"playlists\":[";
+        for (size_t i = 0; i < playlists.size(); i++) {
+            if (i > 0) json += ",";
+            json += "\"" + playlists[i] + "\"";
+        }
+        json += "]}";
+        std::string res = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: " + std::to_string(json.length()) + "\r\n\r\n" + json;
+        send(clientFd, res.c_str(), res.length(), 0);
+    } else if (method == "POST" && path == "/api/iptv/upload") {
+        // Upload playlist via POST
+        std::string body;
+        char buf[4096];
+        ssize_t n = recv(clientFd, buf, sizeof(buf)-1, 0);
+        if (n > 0) {
+            buf[n] = 0;
+            body = std::string(buf);
+        }
+        // Parse multipart - simple version
+        std::string filename = "uploaded.m3u";
+        size_t fnPos = body.find("filename=\"");
+        if (fnPos != std::string::npos) {
+            fnPos += 9;
+            size_t fnEnd = body.find("\"", fnPos);
+            if (fnEnd != std::string::npos) {
+                filename = body.substr(fnPos, fnEnd - fnPos);
+                // Remove path if any
+                size_t slash = filename.rfind('/');
+                if (slash != std::string::npos) filename = filename.substr(slash + 1);
+            }
+        }
+        // Find content after double CRLF
+        size_t dataStart = body.find("\r\n\r\n");
+        if (dataStart != std::string::npos) {
+            dataStart += 4;
+            // Find end boundary
+            size_t dataEnd = body.find("\r\n--", dataStart);
+            std::string content = body.substr(dataStart, dataEnd - dataStart);
+
+            std::string iptvDir = IPTVManager::instance().getIptvDir();
+            if (iptvDir.empty()) {
+                iptvDir = AppConfig::instance().getAppRoot() + "/iptv";
+            }
+            FileSystemManager::instance().createDirectoryRecursive(iptvDir);
+
+            std::string path = iptvDir + "/" + filename;
+            std::ofstream out(path);
+            if (out) {
+                out << content;
+                out.close();
+                Logger::info("IPTV playlist uploaded: " + path);
+                IPTVManager::instance().loadPlaylists(iptvDir);
+                std::string json = "{\"success\":true,\"file\":\"" + filename + "\"}";
+                std::string res = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: " + std::to_string(json.length()) + "\r\n\r\n" + json;
+                send(clientFd, res.c_str(), res.length(), 0);
+            } else {
+                std::string json = "{\"success\":false,\"error\":\"Cannot write file\"}";
+                std::string res = "HTTP/1.1 500 OK\r\nContent-Type: application/json\r\nContent-Length: " + std::to_string(json.length()) + "\r\n\r\n" + json;
+                send(clientFd, res.c_str(), res.length(), 0);
+            }
+        } else {
+            std::string json = "{\"success\":false,\"error\":\"No content\"}";
+            std::string res = "HTTP/1.1 400 OK\r\nContent-Type: application/json\r\nContent-Length: " + std::to_string(json.length()) + "\r\n\r\n" + json;
+            send(clientFd, res.c_str(), res.length(), 0);
+        }
+    } else if (method == "GET" && path.find("/api/iptv/add") == 0) {
+        // Download and add playlist from URL
+        std::string url;
+        size_t qPos = path.find("url=");
+        if (qPos != std::string::npos) {
+            url = path.substr(qPos + 4);
+            // URL decode
+            size_t ampPos = url.find("&");
+            if (ampPos != std::string::npos) url = url.substr(0, ampPos);
+            // Decode %XX
+            std::string decoded;
+            for (size_t i = 0; i < url.size(); i++) {
+                if (url[i] == '%' && i + 2 < url.size()) {
+                    int v = std::stoi(url.substr(i+1, 2), nullptr, 16);
+                    decoded += (char)v;
+                    i += 2;
+                } else if (url[i] == '+') {
+                    decoded += ' ';
+                } else {
+                    decoded += url[i];
+                }
+            }
+            url = decoded;
+        }
+
+        if (!url.empty()) {
+            std::string iptvDir = IPTVManager::instance().getIptvDir();
+            if (iptvDir.empty()) {
+                iptvDir = AppConfig::instance().getAppRoot() + "/iptv";
+            }
+            FileSystemManager::instance().createDirectoryRecursive(iptvDir);
+
+            std::string destPath = iptvDir + "/url_playlist.m3u";
+            std::string cmd = "curl -sL \"" + url + "\" -o \"" + destPath + "\" 2>&1";
+            int ret = system(cmd.c_str());
+
+            if (ret == 0) {
+                IPTVManager::instance().loadPlaylists(iptvDir);
+                std::string json = "{\"success\":true,\"file\":\"url_playlist.m3u\"}";
+                std::string res = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: " + std::to_string(json.length()) + "\r\n\r\n" + json;
+                send(clientFd, res.c_str(), res.length(), 0);
+            } else {
+                std::string json = "{\"success\":false,\"error\":\"Download failed\"}";
+                std::string res = "HTTP/1.1 500 OK\r\nContent-Type: application/json\r\nContent-Length: " + std::to_string(json.length()) + "\r\n\r\n" + json;
+                send(clientFd, res.c_str(), res.length(), 0);
+            }
+        } else {
+            std::string json = "{\"success\":false,\"error\":\"No URL provided\"}";
+            std::string res = "HTTP/1.1 400 OK\r\nContent-Type: application/json\r\nContent-Length: " + std::to_string(json.length()) + "\r\n\r\n" + json;
+            send(clientFd, res.c_str(), res.length(), 0);
+        }
     } else {
         std::string notFound = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
         send(clientFd, notFound.c_str(), notFound.length(), 0);

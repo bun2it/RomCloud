@@ -1,0 +1,11 @@
+#EXTM3U
+#EXTINF:-1 tvg-id="CanThoTV.vn@SD" tvg-name="Cần Thơ TV" group-title="Miền Tây",Cần Thơ TV (HD)
+https://live.canthotv.vn/live/tv/chunklist.m3u8
+#EXTINF:-1 tvg-id="CanThoTV2.vn@SD" tvg-name="Cần Thơ TV 2" group-title="Miền Tây",Cần Thơ TV 2 (HD)
+https://live.canthotv.vn/cs2/live.stream/playlist.m3u8
+#EXTINF:-1 tvg-id="DongNaiTV1.vn@SD" tvg-name="Đồng Nai 1" group-title="Đông Nam Bộ",Đồng Nai 1 (HD)
+https://vtvgolive-ott3.vtvdigital.vn/live/dongnai1tv/chunklist_2.m3u8
+#EXTINF:-1 tvg-id="DongNaiTV2.vn@SD" tvg-name="Đồng Nai 2" group-title="Đông Nam Bộ",Đồng Nai 2 (HD)
+https://vtvgolive-ott3.vtvdigital.vn/live/dongnai2tv/chunklist_2.m3u8
+#EXTINF:-1 tvg-id="CaoBangTV.vn@SD" tvg-name="Cao Bằng TV" group-title="Miền Bắc",Cao Bằng TV (HD)
+https://stream.thingnet.vn/live/smil:CRTV.smil/chunklist.m3u8

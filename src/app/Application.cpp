@@ -168,7 +168,10 @@ void Application::run() {
 
         uint32_t frameTime = SDL_GetTicks() - frameStart;
         if (frameTime < FRAME_DELAY) {
-            SDL_Delay(FRAME_DELAY - frameTime);
+            uint32_t remaining = FRAME_DELAY - frameTime;
+            if (remaining > 2) {
+                SDL_Delay(remaining - 1);
+            }
         }
 
         // Log performance stats every 5 seconds

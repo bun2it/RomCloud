@@ -13,6 +13,7 @@
 #include "../app/Application.h"
 #include "../backup/BackupManager.h"
 #include "../sync/UploadManager.h"
+#include "../iptv/IPTVManager.h"
 #include "BoxartScraper.h"
 #include "UiStrings.h"
 #include <SDL2/SDL_image.h>
@@ -27,9 +28,25 @@ UIManager& UIManager::instance() {
     return instance;
 }
 
+void UIManager::initGridMenu() {
+    m_gridMenuItems = {
+        {"games", "THƯ VIỆN GAME", "GAMES.png", "Danh sách ROM"},
+        {"iptv", "XEM TV", "TV.png", "Kênh TV online"},
+        {"sync", "ĐỒNG BỘ", "SYNC.png", "Đồng bộ Google Drive"},
+        {"upload", "TẢI LÊN", "UPLOAD.png", "Upload lên Drive"},
+        {"ota", "CẬP NHẬT", "OTA.png", "Cập nhật OTA"},
+        {"settings", "CÀI ĐẶT", "SETTINGS.png", "Cấu hình"},
+        {"info", "THÔNG TIN", "INFO.png", "Thông tin hệ thống"},
+        {"exit", "THOÁT", "EXIT.png", "Thoát ứng dụng"}
+    };
+}
+
 bool UIManager::init(SDL_Window* window, SDL_Renderer* renderer) {
     m_window = window;
     m_renderer = renderer;
+
+    // Initialize grid menu
+    initGridMenu();
 
     if (TTF_Init() == -1) {
         Logger::error(std::string("TTF_Init failed: ") + TTF_GetError());
@@ -77,6 +94,19 @@ bool UIManager::init(SDL_Window* window, SDL_Renderer* renderer) {
 void UIManager::shutdown() {
     CoverManager::instance().shutdown();
 
+    // Clean up cached textures
+    for (auto& pair : m_gridIconCache) {
+        if (pair.second) SDL_DestroyTexture(pair.second);
+    }
+    m_gridIconCache.clear();
+
+    for (auto& pair : m_systemIconCache) {
+        if (pair.second) SDL_DestroyTexture(pair.second);
+    }
+    m_systemIconCache.clear();
+
+    clearTextCache();
+
     if (m_fontTitle) { TTF_CloseFont(m_fontTitle); m_fontTitle = nullptr; }
     if (m_fontLarge) { TTF_CloseFont(m_fontLarge); m_fontLarge = nullptr; }
     if (m_fontMedium) { TTF_CloseFont(m_fontMedium); m_fontMedium = nullptr; }
@@ -87,6 +117,7 @@ void UIManager::shutdown() {
 
 void UIManager::setState(UIState state) {
     m_currentState = state;
+    InputManager::instance().reset();
     if (state == UIState::SYSTEM_SELECT) {
         refreshSystems();
     }
@@ -179,17 +210,40 @@ void UIManager::update() {
 
     switch (m_currentState) {
         case UIState::MENU: {
-            if (input.isButtonJustPressed(Button::UP)) {
-                m_selectedMenuIndex = (m_selectedMenuIndex - 1 + static_cast<int>(m_menuItems.size())) % static_cast<int>(m_menuItems.size());
-            } else if (input.isButtonJustPressed(Button::DOWN)) {
-                m_selectedMenuIndex = (m_selectedMenuIndex + 1) % static_cast<int>(m_menuItems.size());
+            int itemCount = static_cast<int>(m_gridMenuItems.size());
+
+            if (input.isButtonJustPressed(Button::LEFT) || input.isButtonJustPressed(Button::UP)) {
+                if (m_selectedMenuIndex > 0) {
+                    m_selectedMenuIndex--;
+                } else {
+                    m_selectedMenuIndex = itemCount - 1;
+                }
+            } else if (input.isButtonJustPressed(Button::RIGHT) || input.isButtonJustPressed(Button::DOWN)) {
+                if (m_selectedMenuIndex < itemCount - 1) {
+                    m_selectedMenuIndex++;
+                } else {
+                    m_selectedMenuIndex = 0;
+                }
+            } else if (input.isButtonJustPressed(Button::START)) {
+                setState(UIState::SETTINGS);
+            } else if (input.isButtonJustPressed(Button::SELECT)) {
+                triggerManualSync();
             } else if (input.isButtonJustPressed(Button::A)) {
-                if (m_selectedMenuIndex == 0) {
+                // Handle menu selection based on id
+                std::string selectedId = m_gridMenuItems[m_selectedMenuIndex].id;
+
+                if (selectedId == "games") {
                     setState(UIState::SYSTEM_SELECT);
-                } else if (m_selectedMenuIndex == 1) {
+                } else if (selectedId == "iptv") {
+                    if (IPTVManager::instance().getChannels().empty()) {
+                        IPTVManager::instance().loadPlaylists();
+                    }
+                    m_selectedIPTVChannelIndex = 0;
+                    m_iptvScrollOffset = 0;
+                    setState(UIState::IPTV_LIST);
+                } else if (selectedId == "sync") {
                     triggerManualSync();
-                } else if (m_selectedMenuIndex == 2) {
-                    // Reverse sync / Backup to Drive
+                } else if (selectedId == "upload") {
                     if (!AuthManager::instance().isLinked()) {
                         showToast(UiStrings::TOAST_CONNECT_DRIVE_FIRST, {245, 158, 11, 255});
                     } else if (!AuthManager::instance().canUpload()) {
@@ -198,14 +252,14 @@ void UIManager::update() {
                         UploadManager::instance().startReverseSync();
                         setState(UIState::REVERSE_SYNC);
                     }
-                } else if (m_selectedMenuIndex == 3) {
+                } else if (selectedId == "ota") {
                     setState(UIState::OTA_UPDATE);
                     UpdateManager::instance().checkForUpdatesAsync();
-                } else if (m_selectedMenuIndex == 4) {
+                } else if (selectedId == "settings") {
                     setState(UIState::SETTINGS);
-                } else if (m_selectedMenuIndex == 5) {
+                } else if (selectedId == "info") {
                     setState(UIState::DIAGNOSTICS);
-                } else if (m_selectedMenuIndex == 6) {
+                } else if (selectedId == "exit") {
                     setState(UIState::EXIT_REQUESTED);
                 }
             }
@@ -513,39 +567,24 @@ void UIManager::update() {
         }
 
         case UIState::SEARCH: {
-            // On-screen keyboard layout (rows x cols)
             static const char* kbRows[] = {
-                "ABCDEFGHIJ",
-                "KLMNOPQRST",
-                "UVWXYZ0123",
-                "456789 <OK"
+                "1234567890",
+                "QWERTYUIOP",
+                "ASDFGHJKL-",
+                "ZXCVBNM<_*"  // '<' = DEL, '_' = SPACE, '*' = OK
             };
             static const int kbRowCount = 4;
-
-            auto getKbChar = [&](int row, int col) -> char {
-                if (row < 0 || row >= kbRowCount) return 0;
-                const char* r = kbRows[row];
-                if (col < 0 || col >= (int)strlen(r)) return 0;
-                return r[col];
-            };
-            auto kbRowLen = [&](int row) -> int {
-                if (row < 0 || row >= kbRowCount) return 0;
-                return static_cast<int>(strlen(kbRows[row]));
-            };
+            static const int kbColCount = 10;
 
             if (!m_kbInResults) {
                 // Navigate keyboard
                 if (input.isButtonJustPressed(Button::UP)) {
                     if (m_kbCursorRow > 0) {
                         m_kbCursorRow--;
-                        if (m_kbCursorCol >= kbRowLen(m_kbCursorRow))
-                            m_kbCursorCol = kbRowLen(m_kbCursorRow) - 1;
                     }
                 } else if (input.isButtonJustPressed(Button::DOWN)) {
                     if (m_kbCursorRow < kbRowCount - 1) {
                         m_kbCursorRow++;
-                        if (m_kbCursorCol >= kbRowLen(m_kbCursorRow))
-                            m_kbCursorCol = kbRowLen(m_kbCursorRow) - 1;
                     } else {
                         // Go to results if any
                         if (!m_searchResults.empty()) {
@@ -556,22 +595,23 @@ void UIManager::update() {
                     }
                 } else if (input.isButtonJustPressed(Button::LEFT)) {
                     if (m_kbCursorCol > 0) m_kbCursorCol--;
-                    else m_kbCursorCol = kbRowLen(m_kbCursorRow) - 1;
+                    else m_kbCursorCol = kbColCount - 1;
                 } else if (input.isButtonJustPressed(Button::RIGHT)) {
-                    if (m_kbCursorCol < kbRowLen(m_kbCursorRow) - 1) m_kbCursorCol++;
+                    if (m_kbCursorCol < kbColCount - 1) m_kbCursorCol++;
                     else m_kbCursorCol = 0;
                 } else if (input.isButtonJustPressed(Button::A)) {
-                    char ch = getKbChar(m_kbCursorRow, m_kbCursorCol);
+                    char ch = kbRows[m_kbCursorRow][m_kbCursorCol];
                     if (ch == '<') { // Backspace
                         if (!m_searchQuery.empty()) m_searchQuery.pop_back();
-                    } else if (ch == 'O') { // OK (special - last row last col is "OK")
-                        // OK: check if cursor is at 'K' (which follows 'O')
-                        m_kbInResults = true;
-                        m_searchSelectedIndex = 0;
-                        m_searchScrollOffset = 0;
-                    } else if (ch == ' ') {
+                    } else if (ch == '*') { // OK
+                        if (!m_searchResults.empty()) {
+                            m_kbInResults = true;
+                            m_searchSelectedIndex = 0;
+                            m_searchScrollOffset = 0;
+                        }
+                    } else if (ch == '_') {
                         if (m_searchQuery.size() < 30) m_searchQuery += ' ';
-                    } else if (ch != 0) {
+                    } else {
                         if (m_searchQuery.size() < 30) m_searchQuery += ch;
                     }
                     // Auto-search as user types
@@ -844,32 +884,276 @@ void UIManager::update() {
             break;
         }
 
+        case UIState::IPTV_LIST: {
+            std::vector<IPTVChannel> channels;
+            if (m_iptvShowFavoritesOnly) {
+                channels = IPTVManager::instance().getFavoriteChannels();
+            } else {
+                channels = IPTVManager::instance().getChannels();
+            }
+            int channelCount = static_cast<int>(channels.size());
+            int visibleItems = 10;
+
+            if (input.isButtonJustPressed(Button::UP)) {
+                if (channelCount > 0) {
+                    m_selectedIPTVChannelIndex = std::max(0, m_selectedIPTVChannelIndex - 1);
+                    if (m_selectedIPTVChannelIndex < m_iptvScrollOffset) {
+                        m_iptvScrollOffset = m_selectedIPTVChannelIndex;
+                    }
+                }
+            } else if (input.isButtonJustPressed(Button::DOWN)) {
+                if (channelCount > 0) {
+                    m_selectedIPTVChannelIndex = std::min(channelCount - 1, m_selectedIPTVChannelIndex + 1);
+                    if (m_selectedIPTVChannelIndex >= m_iptvScrollOffset + visibleItems) {
+                        m_iptvScrollOffset = m_selectedIPTVChannelIndex - visibleItems + 1;
+                    }
+                }
+            } else if (input.isButtonJustPressed(Button::A)) {
+                if (channelCount > 0 && m_selectedIPTVChannelIndex >= 0 && m_selectedIPTVChannelIndex < channelCount) {
+                    showToast("Đang kết nối: " + channels[m_selectedIPTVChannelIndex].name + "...", {0, 180, 216, 255}, 5000);
+                    render();
+                    IPTVManager::instance().playChannel(channels[m_selectedIPTVChannelIndex]);
+                }
+            } else if (input.isButtonJustPressed(Button::B)) {
+                if (m_iptvShowFavoritesOnly) {
+                    m_iptvShowFavoritesOnly = false;
+                    m_selectedIPTVChannelIndex = 0;
+                    m_iptvScrollOffset = 0;
+                    showToast("Đang hiển thị tất cả kênh", {0, 180, 216, 255}, 1500);
+                } else {
+                    IPTVManager::instance().stop();
+                    setState(UIState::MENU);
+                }
+            } else if (input.isButtonJustPressed(Button::X)) {
+                // Toggle favorite on selected channel
+                if (channelCount > 0 && m_selectedIPTVChannelIndex >= 0 && m_selectedIPTVChannelIndex < channelCount) {
+                    std::string chanName = channels[m_selectedIPTVChannelIndex].name;
+                    bool wasFav = IPTVManager::instance().isFavorite(chanName);
+                    IPTVManager::instance().toggleFavorite(chanName);
+                    if (!wasFav) {
+                        showToast("★ Đã thêm vào yêu thích: " + chanName, {250, 204, 21, 255}, 2000);
+                    } else {
+                        showToast("☆ Đã xóa khỏi yêu thích: " + chanName, {148, 163, 184, 255}, 2000);
+                        if (m_iptvShowFavoritesOnly) {
+                            channels = IPTVManager::instance().getFavoriteChannels();
+                            channelCount = static_cast<int>(channels.size());
+                            if (m_selectedIPTVChannelIndex >= channelCount) {
+                                m_selectedIPTVChannelIndex = std::max(0, channelCount - 1);
+                            }
+                            if (m_selectedIPTVChannelIndex < m_iptvScrollOffset) {
+                                m_iptvScrollOffset = m_selectedIPTVChannelIndex;
+                            }
+                        }
+                    }
+                }
+            } else if (input.isButtonJustPressed(Button::Y)) {
+                // Toggle Favorites filter mode
+                m_iptvShowFavoritesOnly = !m_iptvShowFavoritesOnly;
+                m_selectedIPTVChannelIndex = 0;
+                m_iptvScrollOffset = 0;
+                showToast(m_iptvShowFavoritesOnly ? "★ Đang lọc: Kênh Yêu Thích" : "Đang lọc: Tất cả kênh", {0, 180, 216, 255}, 2000);
+            } else if (input.isButtonJustPressed(Button::SELECT) || input.isButtonJustPressed(Button::START)) {
+                // Open IPTV QWERTY Search
+                m_iptvSearchQuery.clear();
+                m_iptvSearchResults.clear();
+                m_iptvKbRow = 0;
+                m_iptvKbCol = 0;
+                m_iptvKbInResults = false;
+                m_iptvSearchSelectedIndex = 0;
+                m_iptvSearchScrollOffset = 0;
+                setState(UIState::IPTV_SEARCH);
+            }
+            break;
+        }
+
+        case UIState::IPTV_SEARCH: {
+            static const char* qwertyRows[] = {
+                "1234567890",
+                "QWERTYUIOP",
+                "ASDFGHJKL-",
+                "ZXCVBNM<_*"  // '<' = DEL, '_' = SPACE, '*' = OK
+            };
+            static const int kbRowCount = 4;
+            static const int kbColCount = 10;
+
+            if (!m_iptvKbInResults) {
+                if (input.isButtonJustPressed(Button::UP)) {
+                    if (m_iptvKbRow > 0) {
+                        m_iptvKbRow--;
+                    }
+                } else if (input.isButtonJustPressed(Button::DOWN)) {
+                    if (m_iptvKbRow < kbRowCount - 1) {
+                        m_iptvKbRow++;
+                    } else if (!m_iptvSearchResults.empty()) {
+                        m_iptvKbInResults = true;
+                        m_iptvSearchSelectedIndex = 0;
+                        m_iptvSearchScrollOffset = 0;
+                    }
+                } else if (input.isButtonJustPressed(Button::LEFT)) {
+                    if (m_iptvKbCol > 0) {
+                        m_iptvKbCol--;
+                    } else {
+                        m_iptvKbCol = kbColCount - 1;
+                    }
+                } else if (input.isButtonJustPressed(Button::RIGHT)) {
+                    if (m_iptvKbCol < kbColCount - 1) {
+                        m_iptvKbCol++;
+                    } else {
+                        m_iptvKbCol = 0;
+                    }
+                } else if (input.isButtonJustPressed(Button::A)) {
+                    char ch = qwertyRows[m_iptvKbRow][m_iptvKbCol];
+                    if (ch == '<') {
+                        if (!m_iptvSearchQuery.empty()) {
+                            m_iptvSearchQuery.pop_back();
+                        }
+                    } else if (ch == '_') {
+                        if (m_iptvSearchQuery.length() < 30) {
+                            m_iptvSearchQuery += ' ';
+                        }
+                    } else if (ch == '*') {
+                        if (!m_iptvSearchResults.empty()) {
+                            m_iptvKbInResults = true;
+                            m_iptvSearchSelectedIndex = 0;
+                            m_iptvSearchScrollOffset = 0;
+                        }
+                    } else {
+                        if (m_iptvSearchQuery.length() < 30) {
+                            m_iptvSearchQuery += ch;
+                        }
+                    }
+                    if (!m_iptvSearchQuery.empty()) {
+                        m_iptvSearchResults = IPTVManager::instance().search(m_iptvSearchQuery);
+                    } else {
+                        m_iptvSearchResults.clear();
+                    }
+                    m_iptvSearchSelectedIndex = 0;
+                    m_iptvSearchScrollOffset = 0;
+                } else if (input.isButtonJustPressed(Button::X)) {
+                    m_iptvSearchQuery.clear();
+                    m_iptvSearchResults.clear();
+                    m_iptvSearchSelectedIndex = 0;
+                    m_iptvSearchScrollOffset = 0;
+                } else if (input.isButtonJustPressed(Button::START)) {
+                    if (!m_iptvSearchResults.empty()) {
+                        m_iptvKbInResults = true;
+                        m_iptvSearchSelectedIndex = 0;
+                        m_iptvSearchScrollOffset = 0;
+                    }
+                } else if (input.isButtonJustPressed(Button::B)) {
+                    setState(UIState::IPTV_LIST);
+                }
+            } else {
+                int resultCount = static_cast<int>(m_iptvSearchResults.size());
+                int visibleItems = 10;
+
+                if (input.isButtonJustPressed(Button::UP)) {
+                    if (m_iptvSearchSelectedIndex > 0) {
+                        m_iptvSearchSelectedIndex--;
+                        if (m_iptvSearchSelectedIndex < m_iptvSearchScrollOffset) {
+                            m_iptvSearchScrollOffset = m_iptvSearchSelectedIndex;
+                        }
+                    } else {
+                        m_iptvKbInResults = false;
+                    }
+                } else if (input.isButtonJustPressed(Button::DOWN)) {
+                    if (m_iptvSearchSelectedIndex < resultCount - 1) {
+                        m_iptvSearchSelectedIndex++;
+                        if (m_iptvSearchSelectedIndex >= m_iptvSearchScrollOffset + visibleItems) {
+                            m_iptvSearchScrollOffset = m_iptvSearchSelectedIndex - visibleItems + 1;
+                        }
+                    }
+                } else if (input.isButtonJustPressed(Button::LEFT)) {
+                    m_iptvKbInResults = false;
+                } else if (input.isButtonJustPressed(Button::A)) {
+                    if (resultCount > 0 && m_iptvSearchSelectedIndex >= 0 && m_iptvSearchSelectedIndex < resultCount) {
+                        const auto& selChan = m_iptvSearchResults[m_iptvSearchSelectedIndex];
+                        showToast("Đang kết nối: " + selChan.name + "...", {0, 180, 216, 255}, 5000);
+                        render();
+                        IPTVManager::instance().playChannel(selChan);
+                    }
+                } else if (input.isButtonJustPressed(Button::X)) {
+                    if (resultCount > 0 && m_iptvSearchSelectedIndex >= 0 && m_iptvSearchSelectedIndex < resultCount) {
+                        std::string chanName = m_iptvSearchResults[m_iptvSearchSelectedIndex].name;
+                        bool wasFav = IPTVManager::instance().isFavorite(chanName);
+                        IPTVManager::instance().toggleFavorite(chanName);
+                        m_iptvSearchResults[m_iptvSearchSelectedIndex].isFavorite = !wasFav;
+                        if (!wasFav) {
+                            showToast("★ Đã thêm vào yêu thích: " + chanName, {250, 204, 21, 255}, 2000);
+                        } else {
+                            showToast("☆ Đã xóa khỏi yêu thích: " + chanName, {148, 163, 184, 255}, 2000);
+                        }
+                    }
+                } else if (input.isButtonJustPressed(Button::B)) {
+                    m_iptvKbInResults = false;
+                }
+            }
+            break;
+        }
+
         default: break;
     }
+}
+
+void UIManager::clearTextCache() {
+    for (auto& pair : m_textCache) {
+        if (pair.second.texture) {
+            SDL_DestroyTexture(pair.second.texture);
+        }
+    }
+    m_textCache.clear();
 }
 
 void UIManager::drawText(const std::string& text, int x, int y, SDL_Color color, TTF_Font* font, bool centered) {
     if (!font || text.empty()) return;
 
-    // Scale coordinates based on device
-    int sx = PlatformInfo::instance().scaleX(x);
-    int sy = PlatformInfo::instance().scaleY(y);
+    // Cache key combining font pointer, color (packed 32-bit), and text content
+    char keyBuf[128];
+    uint32_t colorInt = (color.r << 24) | (color.g << 16) | (color.b << 8) | color.a;
+    std::snprintf(keyBuf, sizeof(keyBuf), "%p_%08x_", (void*)font, colorInt);
+    std::string key = std::string(keyBuf) + text;
 
-    SDL_Surface* surface = TTF_RenderUTF8_Blended(font, text.c_str(), color);
-    if (!surface) return;
-    SDL_Texture* texture = SDL_CreateTextureFromSurface(m_renderer, surface);
-    if (!texture) {
+    SDL_Texture* texture = nullptr;
+    int texW = 0, texH = 0;
+
+    auto it = m_textCache.find(key);
+    if (it != m_textCache.end()) {
+        texture = it->second.texture;
+        texW = it->second.w;
+        texH = it->second.h;
+        it->second.lastUsed = SDL_GetTicks();
+    } else {
+        SDL_Surface* surface = TTF_RenderUTF8_Blended(font, text.c_str(), color);
+        if (!surface) return;
+        texture = SDL_CreateTextureFromSurface(m_renderer, surface);
+        texW = surface->w;
+        texH = surface->h;
         SDL_FreeSurface(surface);
-        return;
+        if (!texture) return;
+
+        // Keep cache bounded to max 256 items (~2MB RAM)
+        if (m_textCache.size() >= 256) {
+            auto oldest = m_textCache.begin();
+            for (auto iter = m_textCache.begin(); iter != m_textCache.end(); ++iter) {
+                if (iter->second.lastUsed < oldest->second.lastUsed) {
+                    oldest = iter;
+                }
+            }
+            if (oldest->second.texture) {
+                SDL_DestroyTexture(oldest->second.texture);
+            }
+            m_textCache.erase(oldest);
+        }
+
+        m_textCache[key] = {texture, texW, texH, SDL_GetTicks()};
     }
 
-    int drawX = centered ? (sx - surface->w / 2) : sx;
+    int sx = PlatformInfo::instance().scaleX(x);
+    int sy = PlatformInfo::instance().scaleY(y);
+    int drawX = centered ? (sx - texW / 2) : sx;
     int drawY = sy;
-    SDL_Rect dstRect = {drawX, drawY, surface->w, surface->h};
+    SDL_Rect dstRect = {drawX, drawY, texW, texH};
     SDL_RenderCopy(m_renderer, texture, nullptr, &dstRect);
-
-    SDL_DestroyTexture(texture);
-    SDL_FreeSurface(surface);
 }
 
 void UIManager::drawRect(int x, int y, int w, int h, SDL_Color color, bool filled) {
@@ -1003,28 +1287,46 @@ void UIManager::drawBadge(int x, int y, int w, int h, const std::string& text, S
 }
 
 void UIManager::drawIcon(const std::string& iconName, int x, int y, int w, int h) {
-    std::string iconsDir = AppConfig::instance().getAssetsDir() + "/icons";
-    std::string iconPath = iconsDir + "/" + iconName + ".png";
+    SDL_Texture* texture = nullptr;
+    auto it = m_systemIconCache.find(iconName);
+    if (it != m_systemIconCache.end()) {
+        texture = it->second;
+    } else {
+        std::string iconsDir = AppConfig::instance().getAssetsDir() + "/icons";
+        std::string iconPath = iconsDir + "/" + iconName + ".png";
+        SDL_Surface* surface = IMG_Load(iconPath.c_str());
+        if (surface) {
+            texture = SDL_CreateTextureFromSurface(m_renderer, surface);
+            SDL_FreeSurface(surface);
+            m_systemIconCache[iconName] = texture;
+        }
+    }
 
-    SDL_Surface* surface = IMG_Load(iconPath.c_str());
-    if (!surface) {
+    if (!texture) {
         // Fallback: draw a colored rectangle if icon not found
         drawRect(x, y, w, h, {60, 70, 85, 255}, true);
         return;
     }
 
-    SDL_Texture* texture = SDL_CreateTextureFromSurface(m_renderer, surface);
-    if (!texture) {
-        SDL_FreeSurface(surface);
-        drawRect(x, y, w, h, {60, 70, 85, 255}, true);
-        return;
+    int texW = 0, texH = 0;
+    SDL_QueryTexture(texture, nullptr, nullptr, &texW, &texH);
+    int drawW = w;
+    int drawH = h;
+    if (texW > 0 && texH > 0) {
+        float aspect = static_cast<float>(texW) / static_cast<float>(texH);
+        if (aspect >= 1.0f) {
+            drawW = std::min(w, static_cast<int>(h * aspect));
+            drawH = static_cast<int>(drawW / aspect);
+        } else {
+            drawH = std::min(h, static_cast<int>(w / aspect));
+            drawW = static_cast<int>(drawH * aspect);
+        }
     }
 
-    SDL_Rect dst = {x, y, w, h};
+    int dstX = x + (w - drawW) / 2;
+    int dstY = y + (h - drawH) / 2;
+    SDL_Rect dst = {dstX, dstY, drawW, drawH};
     SDL_RenderCopy(m_renderer, texture, nullptr, &dst);
-
-    SDL_DestroyTexture(texture);
-    SDL_FreeSurface(surface);
 }
 
 // Draw gamepad button icon (A, B, X, Y, L1, R1, etc.)
@@ -1084,7 +1386,63 @@ void UIManager::drawButtonIcon(const std::string& button, int x, int y, int size
     drawText(label, textX, textY, textColor, font);
 }
 
+void UIManager::drawGridIcon(const std::string &iconFile, int x, int y, int w, int h) {
+    SDL_Texture* texture = nullptr;
+    auto it = m_gridIconCache.find(iconFile);
+    if (it != m_gridIconCache.end()) {
+        texture = it->second;
+    } else {
+        std::string iconsDir = AppConfig::instance().getAssetsDir() + "/apps_icons";
+        std::string iconPath = iconsDir + "/" + iconFile;
+        SDL_Surface* surface = IMG_Load(iconPath.c_str());
+        if (surface) {
+            texture = SDL_CreateTextureFromSurface(m_renderer, surface);
+            SDL_FreeSurface(surface);
+            m_gridIconCache[iconFile] = texture;
+        }
+    }
+
+    if (!texture) {
+        drawRoundedRect(x + 10, y + 10, w - 20, h - 20, 8, {60, 70, 85, 255}, true);
+        return;
+    }
+
+    // Preserve exact 1:1 square aspect ratio of icons, centered in the slot
+    int texW = 0, texH = 0;
+    SDL_QueryTexture(texture, nullptr, nullptr, &texW, &texH);
+
+    int maxW = (int)(w * 0.75f);
+    int maxH = (int)(h * 0.75f);
+    int drawW = maxW;
+    int drawH = maxH;
+
+    if (texW > 0 && texH > 0) {
+        float aspect = static_cast<float>(texW) / static_cast<float>(texH);
+        if (aspect >= 1.0f) {
+            drawW = std::min(maxW, static_cast<int>(maxH * aspect));
+            drawH = static_cast<int>(drawW / aspect);
+        } else {
+            drawH = std::min(maxH, static_cast<int>(maxW / aspect));
+            drawW = static_cast<int>(drawH * aspect);
+        }
+    } else {
+        int side = std::min(maxW, maxH);
+        drawW = side;
+        drawH = side;
+    }
+
+    int dstX = x + (w - drawW) / 2;
+    int dstY = y + (h - drawH) / 2;
+
+    SDL_Rect dst = {dstX, dstY, drawW, drawH};
+    SDL_RenderCopy(m_renderer, texture, nullptr, &dst);
+}
+
 void UIManager::renderHeader() {
+    if (m_currentState == UIState::IPTV_LIST || m_currentState == UIState::IPTV_SEARCH) {
+        return;
+    }
+
     drawRect(0, 0, 1024, 64, {18, 22, 30, 255}, true);
     drawRect(0, 63, 1024, 1, {40, 48, 62, 255}, true);
 
@@ -1124,12 +1482,13 @@ void UIManager::renderHeader() {
 
 void UIManager::renderSearchState() {
     static const char* kbRows[] = {
-        "ABCDEFGHIJ",
-        "KLMNOPQRST",
-        "UVWXYZ0123",
-        "456789 <OK"
+        "1234567890",
+        "QWERTYUIOP",
+        "ASDFGHJKL-",
+        "ZXCVBNM<_*"  // '<' = DEL, '_' = SPACE, '*' = OK
     };
     static const int kbRowCount = 4;
+    static const int kbColCount = 10;
 
     // ─── Left panel: keyboard + query bar (Borderless) ───
     int panelW = 430;
@@ -1145,39 +1504,29 @@ void UIManager::renderSearchState() {
 
     // Keyboard with rounded keycaps
     int kbStartY = panelY + 68;
-    int cellW = 38;
-    int cellH = 42;
+    int cellW = 37;
+    int cellH = 46;
+    int gap = 4;
     int kbPadX = 12;
 
     for (int row = 0; row < kbRowCount; row++) {
-        const char* rowStr = kbRows[row];
-        int len = static_cast<int>(strlen(rowStr));
-        for (int col = 0; col < len; col++) {
-            int cx = panelX + kbPadX + col * (cellW + 3);
-            int cy = kbStartY + row * (cellH + 6);
+        for (int col = 0; col < kbColCount; col++) {
+            int cx = panelX + kbPadX + col * (cellW + gap);
+            int cy = kbStartY + row * (cellH + 8);
             bool isSel = (!m_kbInResults && m_kbCursorRow == row && m_kbCursorCol == col);
 
-            char ch = rowStr[col];
+            char ch = kbRows[row][col];
             std::string label;
             if (ch == '<') label = "DEL";
-            else if (ch == 'O' && col < len - 1 && rowStr[col + 1] == 'K') {
-                label = "OK";
-            } else if (ch == 'K' && col > 0 && rowStr[col - 1] == 'O') {
-                continue;
-            } else if (ch == ' ') {
-                label = "SPC";
-            } else {
-                label = std::string(1, ch);
-            }
-
-            int thisW = cellW;
-            if (label == "DEL" || label == "OK" || label == "SPC") thisW = cellW * 2 + 3;
+            else if (ch == '_') label = "SPC";
+            else if (ch == '*') label = "OK";
+            else label = std::string(1, ch);
 
             SDL_Color bg = isSel ? SDL_Color{0, 180, 216, 255} : SDL_Color{28, 38, 55, 255};
             SDL_Color fg = isSel ? SDL_Color{0, 0, 0, 255} : SDL_Color{220, 230, 240, 255};
-            drawRoundedRect(cx, cy, thisW, cellH, 6, bg, true);
-            drawRoundedBorder(cx, cy, thisW, cellH, 6, isSel ? SDL_Color{255, 255, 255, 255} : SDL_Color{40, 55, 75, 255}, 1);
-            drawText(label, cx + thisW / 2, cy + cellH / 2 - 10, fg, m_fontSmall, true);
+            drawRoundedRect(cx, cy, cellW, cellH, 6, bg, true);
+            drawRoundedBorder(cx, cy, cellW, cellH, 6, isSel ? SDL_Color{255, 255, 255, 255} : SDL_Color{45, 60, 80, 255}, 1);
+            drawText(label, cx + cellW / 2, cy + cellH / 2 - 10, fg, m_fontSmall, true);
         }
     }
 
@@ -1248,6 +1597,10 @@ void UIManager::renderSearchState() {
 }
 
 void UIManager::renderFooter() {
+    if (m_currentState == UIState::IPTV_LIST || m_currentState == UIState::IPTV_SEARCH) {
+        return;
+    }
+
     drawRect(0, 715, 1024, 53, {18, 22, 30, 255}, true);
     drawRect(0, 715, 1024, 1, {40, 48, 62, 255}, true);
 
@@ -1349,128 +1702,129 @@ void UIManager::renderToast() {
 }
 
 void UIManager::renderMenuState() {
-    // ─── Left Column: Modern Rounded Menu Cards (Borderless) ───
-    int startX = 36;
-    int cardW = 484;
-    int startY = 100;
-    int itemHeight = 72;
-    int spacing = 10;
+    // Header
+    drawRect(0, 0, 1024, 64, {18, 22, 30, 255}, true);
+    drawRect(0, 63, 1024, 1, {40, 48, 62, 255}, true);
+    drawText("ROMCLOUD", 24, 18, {0, 180, 216, 255}, m_fontLarge);
 
-    std::string otaMenuText = UiStrings::MENU_OTA;
-    if (UpdateManager::instance().isUpdateAvailable()) {
-        otaMenuText = std::string(UiStrings::MENU_OTA_NEW_BADGE) + UpdateManager::instance().getLatestInfo().remoteVersion;
-    }
+    // Right header status
+    auto diag = PlatformInfo::instance().getDiagnostics();
+    std::string statusText = (diag.ipAddress != "N/A" ? "Wi-Fi: ONLINE (" + diag.ipAddress + ")" : "Wi-Fi: OFFLINE");
+    SDL_Color statusColor = (diag.ipAddress != "N/A") ? SDL_Color{34, 197, 94, 255} : SDL_Color{239, 68, 68, 255};
+    drawText(statusText, 994 - (int)statusText.length() * 10, 20, statusColor, m_fontMedium);
 
-    struct MenuItemDef {
-        std::string title;
-        std::string subtitle;
-    };
+    // OTA update info
+    bool hasUpdate = UpdateManager::instance().isUpdateAvailable();
 
-    std::vector<MenuItemDef> menuDefs = {
-        {UiStrings::MENU_PLAY, UiStrings::MENU_SUB_PLAY},
-        {UiStrings::MENU_SYNC, UiStrings::MENU_SUB_SYNC},
-        {UiStrings::MENU_REVERSE_SYNC, UiStrings::MENU_SUB_REVERSE_SYNC},
-        {otaMenuText, UpdateManager::instance().isUpdateAvailable() ? UiStrings::MENU_SUB_OTA_NEW : UiStrings::MENU_SUB_OTA},
-        {UiStrings::MENU_SETTINGS, UiStrings::MENU_SUB_SETTINGS},
-        {UiStrings::MENU_DIAG, UiStrings::MENU_SUB_DIAG},
-        {UiStrings::MENU_EXIT, UiStrings::MENU_SUB_EXIT}
-    };
+    int itemCount = static_cast<int>(m_gridMenuItems.size());
 
-    for (size_t i = 0; i < menuDefs.size(); ++i) {
-        int y = startY + static_cast<int>(i) * (itemHeight + spacing);
-        bool selected = (static_cast<int>(i) == m_selectedMenuIndex);
+    // Single Horizontal Row (1 hàng ngang) Carousel
+    int selW = 210;
+    int selH = 240;
+    int selX = 512 - selW / 2; // 407
+    int selY = 160;
 
-        SDL_Color bg = selected ? SDL_Color{30, 58, 95, 255} : SDL_Color{22, 28, 38, 255};
-        drawRoundedRect(startX, y, cardW, itemHeight, 12, bg, true);
+    int normW = 175;
+    int normH = 205;
+    int normY = 178;
+    int gap = 20;
 
-        if (selected) {
-            drawRoundedBorder(startX, y, cardW, itemHeight, 12, {0, 180, 216, 255}, 2);
-            // Left neon accent capsule
-            drawRoundedRect(startX + 8, y + 12, 6, itemHeight - 24, 3, {0, 180, 216, 255}, true);
+    // Render items in a single horizontal row centered around m_selectedMenuIndex
+    for (int i = 0; i < itemCount; ++i) {
+        int offset = i - m_selectedMenuIndex;
+        int x = 0;
+        int y = 0;
+        int w = 0;
+        int h = 0;
+        bool isSel = (offset == 0);
+
+        if (isSel) {
+            x = selX;
+            y = selY;
+            w = selW;
+            h = selH;
+        } else if (offset > 0) {
+            x = selX + selW + gap + (offset - 1) * (normW + gap);
+            y = normY;
+            w = normW;
+            h = normH;
+        } else { // offset < 0
+            x = selX - gap - normW + (offset + 1) * (normW + gap);
+            y = normY;
+            w = normW;
+            h = normH;
         }
 
-        SDL_Color titleColor = selected ? SDL_Color{255, 255, 255, 255} : SDL_Color{205, 215, 230, 255};
-        drawText(menuDefs[i].title, startX + 32, y + 12, titleColor, m_fontLarge);
+        // Clip items outside visible screen
+        if (x + w < -50 || x > 1024 + 50) {
+            continue;
+        }
 
-        SDL_Color subColor = selected ? SDL_Color{140, 205, 245, 255} : SDL_Color{115, 130, 150, 255};
-        drawText(menuDefs[i].subtitle, startX + 32, y + 42, subColor, m_fontSmall);
+        // Card background
+        SDL_Color bg = isSel ? SDL_Color{26, 52, 88, 255} : SDL_Color{20, 26, 36, 230};
+        drawRoundedRect(x, y, w, h, 16, bg, true);
+
+        if (isSel) {
+            // Glowing cyan border on selected card
+            drawRoundedBorder(x, y, w, h, 16, {0, 180, 216, 255}, 3);
+        } else {
+            drawRoundedBorder(x, y, w, h, 16, {38, 48, 64, 255}, 1);
+        }
+
+        // Icon inside card
+        int iconSize = isSel ? 112 : 90;
+        int iconX = x + (w - iconSize) / 2;
+        int iconY = y + (isSel ? 22 : 18);
+        drawGridIcon(m_gridMenuItems[i].iconFile, iconX, iconY, iconSize, iconSize);
+
+        // Card Title
+        int textY = y + (isSel ? 160 : 135);
+        SDL_Color titleColor = isSel ? SDL_Color{255, 255, 255, 255} : SDL_Color{160, 175, 195, 255};
+        drawText(m_gridMenuItems[i].title, x + w / 2, textY, titleColor, isSel ? m_fontMedium : m_fontSmall, true);
+
+        // OTA badge
+        if (hasUpdate && m_gridMenuItems[i].id == "ota") {
+            drawRoundedRect(x + w - 52, y + 8, 44, 22, 6, {239, 68, 68, 255}, true);
+            drawText("NEW", x + w - 30, y + 12, {255, 255, 255, 255}, m_fontSmall, true);
+        }
     }
 
-    // ─── Right Column: Modern Rounded Dashboard Widget ───
-    int dashX = 544;
-    int dashY = 100;
-    int dashW = 444;
-    int dashH = 574;
-
-    drawRoundedRect(dashX, dashY, dashW, dashH, 14, {20, 26, 36, 255}, true);
-    drawRoundedBorder(dashX, dashY, dashW, dashH, 14, {38, 48, 64, 255}, 1);
-
-    // Widget Header
-    drawText(UiStrings::DASH_TITLE, dashX + 24, dashY + 22, {0, 180, 216, 255}, m_fontMedium);
-    drawRect(dashX + 24, dashY + 54, dashW - 48, 1, {38, 48, 64, 255}, true);
-
-    int rowY = dashY + 74;
-    int stepY = 56;
-
-    // 1. Device Info
-    drawText(UiStrings::DASH_DEVICE_LABEL, dashX + 24, rowY, {130, 145, 165, 255}, m_fontSmall);
-    drawText(UiStrings::DASH_DEVICE_VAL, dashX + 24, rowY + 20, {255, 255, 255, 255}, m_fontMedium);
-
-    rowY += stepY;
-    // 2. Storage & ROM count (cached every 3 seconds to avoid constant SQLite/disk overhead)
-    static uint32_t lastStatsUpdate = 0;
-    static int cachedLocal = 0, cachedCloud = 0;
-    static std::string cachedSdInfo = "";
-    static std::string cachedIp = "";
-    uint32_t now = SDL_GetTicks();
-    if (now - lastStatsUpdate > 3000 || lastStatsUpdate == 0) {
-        lastStatsUpdate = now;
-        DatabaseManager::instance().getTotalGameCounts(cachedLocal, cachedCloud);
-        auto space = FileSystemManager::instance().getDiskSpace(AppConfig::instance().getAppRoot());
-        cachedSdInfo = FileSystemManager::instance().formatBytes(space.availableBytes) +
-                       UiStrings::DASH_STORAGE_FREE +
-                       FileSystemManager::instance().formatBytes(space.totalBytes);
-        cachedIp = PlatformInfo::instance().getIpAddress("wlan0");
+    // Left and Right navigation chevrons
+    if (m_selectedMenuIndex > 0) {
+        drawText("◀", 32, 260, {0, 180, 216, 200}, m_fontLarge, true);
+    }
+    if (m_selectedMenuIndex < itemCount - 1) {
+        drawText("▶", 992, 260, {0, 180, 216, 200}, m_fontLarge, true);
     }
 
-    drawText(UiStrings::DASH_STORAGE_LABEL, dashX + 24, rowY, {130, 145, 165, 255}, m_fontSmall);
-    std::string countStr = std::to_string(cachedLocal) + " ROM thẻ nhớ  •  " + std::to_string(cachedCloud) + " Cloud";
-    drawText(countStr, dashX + 24, rowY + 20, {34, 197, 94, 255}, m_fontMedium);
-
-    // Storage progress gauge bar
-    rowY += 46;
-    int gBarW = dashW - 48;
-    int gBarH = 8;
-    drawRoundedRect(dashX + 24, rowY, gBarW, gBarH, 4, {32, 40, 54, 255}, true);
-    drawRoundedRect(dashX + 24, rowY, (int)(gBarW * 0.45f), gBarH, 4, {34, 197, 94, 255}, true);
-    drawText(std::string(UiStrings::DASH_SD_PREFIX) + cachedSdInfo, dashX + 24, rowY + 14, {120, 135, 155, 255}, m_fontSmall);
-
-    rowY += 48;
-    // 3. Cloud Sync Account
-    drawText(UiStrings::DASH_DRIVE_LABEL, dashX + 24, rowY, {130, 145, 165, 255}, m_fontSmall);
-    if (AuthManager::instance().isLinked()) {
-        std::string email = AuthManager::instance().getUserEmail();
-        if (email.length() > 26) email = email.substr(0, 23) + "...";
-        drawText(email.empty() ? UiStrings::DASH_DRIVE_CONNECTED : email, dashX + 24, rowY + 20, {34, 197, 94, 255}, m_fontMedium);
-    } else {
-        drawText(UiStrings::DASH_DRIVE_DISCONNECTED, dashX + 24, rowY + 20, {239, 68, 68, 255}, m_fontMedium);
+    // Selected item detail text (below row)
+    if (m_selectedMenuIndex >= 0 && m_selectedMenuIndex < itemCount) {
+        const auto& selItem = m_gridMenuItems[m_selectedMenuIndex];
+        drawText(selItem.title, 512, 455, {0, 180, 216, 255}, m_fontLarge, true);
+        drawText(selItem.subtitle, 512, 495, {160, 175, 195, 255}, m_fontMedium, true);
     }
 
-    rowY += stepY;
-    // 4. Web Portal
-    drawText(UiStrings::DASH_PORTAL_LABEL, dashX + 24, rowY, {130, 145, 165, 255}, m_fontSmall);
-    std::string webUrl = "http://" + (cachedIp.empty() || cachedIp == "Disconnected" ? "192.168.1.164" : cachedIp) + ":8080";
-    drawText(webUrl, dashX + 24, rowY + 20, {0, 180, 216, 255}, m_fontMedium);
+    // Dot pager (8 dots centered at Y=565)
+    int dotPitch = 22;
+    int totalDotW = (itemCount - 1) * dotPitch + 28;
+    int dotStartX = (1024 - totalDotW) / 2;
+    int currentDotX = dotStartX;
 
-    rowY += stepY;
-    // 5. Version & Status
-    drawText(UiStrings::DASH_VERSION_LABEL, dashX + 24, rowY, {130, 145, 165, 255}, m_fontSmall);
-    std::string verStr = "RomCloud v" + UpdateManager::instance().getCurrentVersion();
-    drawText(verStr, dashX + 24, rowY + 20, {210, 220, 235, 255}, m_fontMedium);
-
-    if (UpdateManager::instance().isUpdateAvailable()) {
-        drawBadge(dashX + dashW - 140, rowY + 12, 116, 28, UiStrings::DASH_NEW_VERSION_BADGE, {180, 83, 9, 255}, {255, 255, 255, 255});
+    for (int i = 0; i < itemCount; ++i) {
+        bool isSel = (i == m_selectedMenuIndex);
+        if (isSel) {
+            drawRoundedRect(currentDotX, 565, 28, 8, 4, {0, 180, 216, 255}, true);
+            currentDotX += 28 + 8;
+        } else {
+            drawRoundedRect(currentDotX, 565, 8, 8, 4, {45, 56, 75, 255}, true);
+            currentDotX += 8 + 8;
+        }
     }
+
+    // Footer hint
+    drawRect(0, 715, 1024, 53, {18, 22, 30, 255}, true);
+    drawRect(0, 715, 1024, 1, {40, 48, 62, 255}, true);
+    drawText("[A] Chọn    [◄ ►] Chuyển mục    [START] Cài đặt    [SELECT] Đồng bộ", 512, 730, {150, 165, 185, 255}, m_fontSmall, true);
 }
 
 void UIManager::renderSystemSelectState() {
@@ -2577,6 +2931,205 @@ void UIManager::renderOTAUpdateState() {
     drawText(UiStrings::BTN_BACK_MAIN_MENU_HINT, 512, 650, {130, 140, 155, 255}, m_fontSmall, true);
 }
 
+void UIManager::renderIPTVState() {
+    // Header
+    drawRect(0, 0, 1024, 64, {18, 22, 30, 255}, true);
+    drawRect(0, 63, 1024, 1, {40, 48, 62, 255}, true);
+
+    std::string title = m_iptvShowFavoritesOnly ? "XEM TV - KÊNH YÊU THÍCH ★" : UiStrings::IPTV_TITLE;
+    drawText(title, 24, 18, {0, 180, 216, 255}, m_fontLarge);
+
+    std::vector<IPTVChannel> channels;
+    if (m_iptvShowFavoritesOnly) {
+        channels = IPTVManager::instance().getFavoriteChannels();
+    } else {
+        channels = IPTVManager::instance().getChannels();
+    }
+    int channelCount = static_cast<int>(channels.size());
+
+    // Channel count
+    std::string countText = std::to_string(channelCount) + (m_iptvShowFavoritesOnly ? " kênh yêu thích" : " kênh");
+    drawText(countText, 1024 - 24, 18, {130, 145, 165, 255}, m_fontSmall, true);
+
+    // Channel list (full height, 10 items per page)
+    int listY = 74;
+    int itemH = 56;
+    int visibleItems = 10;
+
+    if (channels.empty()) {
+        if (m_iptvShowFavoritesOnly) {
+            drawText("Chưa có kênh yêu thích nào.", 512, 340, {150, 160, 175, 255}, m_fontMedium, true);
+            drawText("Bấm [X] trên danh sách kênh để đánh dấu yêu thích ★", 512, 385, {100, 110, 125, 255}, m_fontSmall, true);
+        } else {
+            drawText(UiStrings::IPTV_NO_CHANNELS, 512, 340, {150, 160, 175, 255}, m_fontMedium, true);
+            drawText("Vui lòng tải playlist (.m3u) qua Web Server (Cổng 8080)", 512, 385, {100, 110, 125, 255}, m_fontSmall, true);
+        }
+    } else {
+        for (int i = m_iptvScrollOffset; i < channelCount && i < m_iptvScrollOffset + visibleItems; i++) {
+            int y = listY + (i - m_iptvScrollOffset) * (itemH + 6);
+            bool isSelected = (i == m_selectedIPTVChannelIndex);
+
+            SDL_Color bg = isSelected ? SDL_Color{30, 58, 95, 255} : SDL_Color{22, 28, 38, 255};
+            drawRoundedRect(16, y, 992, itemH, 8, bg, true);
+
+            if (isSelected) {
+                drawRoundedBorder(16, y, 992, itemH, 8, {0, 180, 216, 255}, 2);
+            }
+
+            // Channel number
+            char numBuf[16];
+            snprintf(numBuf, sizeof(numBuf), "%02d", i + 1);
+            drawText(numBuf, 35, y + 16, {0, 180, 216, 255}, m_fontMedium);
+
+            // Channel name
+            drawText(channels[i].name, 90, y + 15, {255, 255, 255, 255}, m_fontMedium);
+
+            // Favorite star badge
+            if (channels[i].isFavorite) {
+                drawBadge(720, y + 15, 36, 26, "★", {202, 138, 4, 255}, {255, 255, 255, 255});
+            }
+
+            // Playing indicator
+            if (IPTVManager::instance().isPlaying() && IPTVManager::instance().getCurrentChannelName() == channels[i].name) {
+                drawText("● ĐANG PHÁT", 600, y + 18, {34, 197, 94, 255}, m_fontSmall);
+            }
+
+            // Channel group tag on right side
+            if (!channels[i].group.empty()) {
+                drawText(channels[i].group, 840, y + 18, {130, 140, 155, 255}, m_fontSmall);
+            }
+        }
+    }
+
+    // Footer
+    drawRect(0, 715, 1024, 53, {18, 22, 30, 255}, true);
+    drawRect(0, 715, 1024, 1, {40, 48, 62, 255}, true);
+
+    std::string footerText = m_iptvShowFavoritesOnly
+        ? "[A] Phát trực tiếp   [B] Tất cả kênh   [X] Bỏ thích ★   [SELECT] Tìm kiếm"
+        : "[A] Phát trực tiếp   [B] Menu   [X] Thích ★   [Y] Lọc ★   [SELECT] Tìm kiếm";
+    drawText(footerText, 512, 730, {210, 220, 230, 255}, m_fontSmall, true);
+}
+
+void UIManager::renderIPTVSearchState() {
+    static const char* qwertyRows[] = {
+        "1234567890",
+        "QWERTYUIOP",
+        "ASDFGHJKL-",
+        "ZXCVBNM<_*"  // '<' = DEL, '_' = SPACE, '*' = OK
+    };
+    static const int kbRowCount = 4;
+    static const int kbColCount = 10;
+
+    // Header
+    drawRect(0, 0, 1024, 64, {18, 22, 30, 255}, true);
+    drawRect(0, 63, 1024, 1, {40, 48, 62, 255}, true);
+    drawText("TÌM KIẾM KÊNH IPTV", 24, 18, {0, 180, 216, 255}, m_fontLarge);
+
+    int numResults = static_cast<int>(m_iptvSearchResults.size());
+    std::string countText = std::to_string(numResults) + " kết quả";
+    drawText(countText, 1024 - 24, 18, {130, 145, 165, 255}, m_fontSmall, true);
+
+    // Left panel: Search Box + QWERTY Keyboard
+    int panelW = 430;
+    int panelX = 24;
+    int panelY = 74;
+
+    // Search Query Box
+    drawRoundedRect(panelX, panelY, panelW, 52, 10, {22, 32, 46, 255}, true);
+    drawRoundedBorder(panelX, panelY, panelW, 52, 10, {0, 180, 216, 255}, 2);
+    std::string displayQuery = m_iptvSearchQuery.empty() ? "Nhập tên kênh (VTV, HBO...)" : m_iptvSearchQuery + "_";
+    SDL_Color qColor = m_iptvSearchQuery.empty() ? SDL_Color{80, 95, 115, 255} : SDL_Color{255, 255, 255, 255};
+    drawText(displayQuery, panelX + 16, panelY + 14, qColor, m_fontMedium);
+
+    // QWERTY Virtual Keyboard
+    int kbStartY = panelY + 68;
+    int cellW = 37;
+    int cellH = 46;
+    int gap = 4;
+    int kbPadX = 12;
+
+    for (int row = 0; row < kbRowCount; row++) {
+        for (int col = 0; col < kbColCount; col++) {
+            int cx = panelX + kbPadX + col * (cellW + gap);
+            int cy = kbStartY + row * (cellH + 8);
+            bool isSel = (!m_iptvKbInResults && m_iptvKbRow == row && m_iptvKbCol == col);
+
+            char ch = qwertyRows[row][col];
+            std::string label;
+            if (ch == '<') label = "DEL";
+            else if (ch == '_') label = "SPC";
+            else if (ch == '*') label = "OK";
+            else label = std::string(1, ch);
+
+            SDL_Color bg = isSel ? SDL_Color{0, 180, 216, 255} : SDL_Color{28, 38, 55, 255};
+            SDL_Color fg = isSel ? SDL_Color{0, 0, 0, 255} : SDL_Color{220, 230, 240, 255};
+            drawRoundedRect(cx, cy, cellW, cellH, 6, bg, true);
+            drawRoundedBorder(cx, cy, cellW, cellH, 6, isSel ? SDL_Color{255, 255, 255, 255} : SDL_Color{45, 60, 80, 255}, 1);
+            drawText(label, cx + cellW / 2, cy + cellH / 2 - 10, fg, m_fontSmall, true);
+        }
+    }
+
+    // Divider line
+    drawRect(476, 64, 1, 651, {38, 48, 64, 255}, true);
+
+    // Right panel: Results List
+    int rPanelX = 496;
+    int rPanelW = 1024 - rPanelX - 24;
+    int rPanelY = panelY;
+
+    if (m_iptvSearchQuery.empty()) {
+        drawText("Nhập chữ cái trên bàn phím để tìm kênh.", rPanelX + rPanelW / 2, rPanelY + 60, {100, 115, 135, 255}, m_fontSmall, true);
+        drawText("Hỗ trợ tìm theo tên kênh hoặc thể loại.", rPanelX + rPanelW / 2, rPanelY + 100, {80, 95, 115, 255}, m_fontSmall, true);
+    } else if (numResults == 0) {
+        drawText("Không tìm thấy kênh phù hợp.", rPanelX + rPanelW / 2, rPanelY + 60, {239, 68, 68, 255}, m_fontSmall, true);
+    } else {
+        int pageSize = 10;
+        int itemH = 56;
+        int listStartY = rPanelY;
+
+        for (int i = 0; i < pageSize && (m_iptvSearchScrollOffset + i) < numResults; i++) {
+            int idx = m_iptvSearchScrollOffset + i;
+            const auto& chan = m_iptvSearchResults[idx];
+            bool isSel = (m_iptvKbInResults && idx == m_iptvSearchSelectedIndex);
+
+            int itemY = listStartY + i * (itemH + 6);
+            SDL_Color rowBg = isSel ? SDL_Color{30, 58, 95, 255} : SDL_Color{22, 28, 38, 255};
+            drawRoundedRect(rPanelX, itemY, rPanelW, itemH, 8, rowBg, true);
+            if (isSel) {
+                drawRoundedBorder(rPanelX, itemY, rPanelW, itemH, 8, {0, 180, 216, 255}, 2);
+            }
+
+            // Channel number
+            char numBuf[16];
+            snprintf(numBuf, sizeof(numBuf), "%02d", idx + 1);
+            drawText(numBuf, rPanelX + 16, itemY + 16, {0, 180, 216, 255}, m_fontMedium);
+
+            // Channel name
+            drawText(chan.name, rPanelX + 60, itemY + 15, {255, 255, 255, 255}, m_fontMedium);
+
+            // Favorite star badge
+            if (chan.isFavorite) {
+                drawBadge(rPanelX + rPanelW - 140, itemY + 15, 32, 26, "★", {202, 138, 4, 255}, {255, 255, 255, 255});
+            }
+
+            // Group tag
+            if (!chan.group.empty()) {
+                drawText(chan.group, rPanelX + rPanelW - 100, itemY + 18, {130, 140, 155, 255}, m_fontSmall);
+            }
+        }
+    }
+
+    // Footer
+    drawRect(0, 715, 1024, 53, {18, 22, 30, 255}, true);
+    drawRect(0, 715, 1024, 1, {40, 48, 62, 255}, true);
+
+    std::string footerText = (!m_iptvKbInResults)
+        ? "[A] Nhập phím   [B] Trở về   [X] Xóa chữ   [OK / START] Xem kết quả"
+        : "[A] Phát kênh   [B] Bàn phím   [X] Thích ★   [▲ ▼] Chọn kênh";
+    drawText(footerText, 512, 730, {210, 220, 230, 255}, m_fontSmall, true);
+}
+
 void UIManager::render() {
     SDL_SetRenderDrawColor(m_renderer, 13, 17, 23, 255);
     SDL_RenderClear(m_renderer);
@@ -2596,6 +3149,8 @@ void UIManager::render() {
         case UIState::DIAGNOSTICS:      renderDiagnosticsState(); break;
         case UIState::OTA_UPDATE:       renderOTAUpdateState(); break;
         case UIState::REVERSE_SYNC:     renderReverseSyncState(); break;
+        case UIState::IPTV_LIST:        renderIPTVState(); break;
+        case UIState::IPTV_SEARCH:      renderIPTVSearchState(); break;
         default: break;
     }
 
