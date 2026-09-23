@@ -14,6 +14,7 @@
 #include "../app/Application.h"
 #include "../config/AppConfig.h"
 #include "../iptv/IPTVManager.h"
+#include "../database/RomIndexer.h"
 #include "HttpClient.h"
 
 #include <sys/socket.h>
@@ -3628,6 +3629,11 @@ void WebServer::handleClient(int clientFd) {
         send(clientFd, res.c_str(), res.length(), 0);
     } else if (method == "POST" && path == "/api/fix_misplaced_roms") {
         auto list = RomOrganizer::instance().fixMisplacedRoms();
+        // Re-index ROMs so library updates immediately
+        std::string romsDir = AppConfig::instance().getRomsDir();
+        std::thread([romsDir]() {
+            RomIndexer::instance().scanAllSystems(romsDir, nullptr);
+        }).detach();
         std::string json = "{\"success\":true,\"count\":" + std::to_string(list.size()) + ",\"items\":[";
         for (size_t i = 0; i < list.size(); ++i) {
             if (i > 0) json += ",";
@@ -4040,84 +4046,102 @@ void WebServer::handleClient(int clientFd) {
         std::string res = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: " + std::to_string(json.length()) + "\r\n\r\n" + json;
         send(clientFd, res.c_str(), res.length(), 0);
     } else if (method == "POST" && path == "/api/iptv/upload") {
-        // Upload playlist via POST
-        std::string body;
-        char buf[4096];
-        ssize_t n = recv(clientFd, buf, sizeof(buf)-1, 0);
-        if (n > 0) {
-            buf[n] = 0;
-            body = std::string(buf);
+        // Read full POST body according to Content-Length
+        size_t clPos = req.find("Content-Length: ");
+        if (clPos == std::string::npos) clPos = req.find("content-length: ");
+        long totalCl = 0;
+        if (clPos != std::string::npos) {
+            size_t clEnd = req.find("\r\n", clPos);
+            try {
+                totalCl = std::stol(req.substr(clPos + 16, clEnd - (clPos + 16)));
+            } catch (...) {}
         }
-        // Parse multipart - simple version
+
+        std::string fullBody = postBody;
+        if (totalCl > 0 && static_cast<long>(fullBody.size()) < totalCl) {
+            char chunk[16384];
+            while (static_cast<long>(fullBody.size()) < totalCl) {
+                long toRead = std::min<long>(sizeof(chunk), totalCl - static_cast<long>(fullBody.size()));
+                int n = recv(clientFd, chunk, toRead, 0);
+                if (n <= 0) break;
+                fullBody.append(chunk, n);
+            }
+        }
+
+        // Parse multipart filename: filename="..."
         std::string filename = "uploaded.m3u";
-        size_t fnPos = body.find("filename=\"");
+        size_t fnPos = fullBody.find("filename=\"");
         if (fnPos != std::string::npos) {
-            fnPos += 9;
-            size_t fnEnd = body.find("\"", fnPos);
-            if (fnEnd != std::string::npos) {
-                filename = body.substr(fnPos, fnEnd - fnPos);
-                // Remove path if any
-                size_t slash = filename.rfind('/');
+            fnPos += 10; // strlen("filename=\"") == 10
+            size_t fnEnd = fullBody.find("\"", fnPos);
+            if (fnEnd != std::string::npos && fnEnd > fnPos) {
+                filename = fullBody.substr(fnPos, fnEnd - fnPos);
+                size_t slash = filename.find_last_of("/\\");
                 if (slash != std::string::npos) filename = filename.substr(slash + 1);
             }
         }
-        // Find content after double CRLF
-        size_t dataStart = body.find("\r\n\r\n");
-        if (dataStart != std::string::npos) {
-            dataStart += 4;
-            // Find end boundary
-            size_t dataEnd = body.find("\r\n--", dataStart);
-            std::string content = body.substr(dataStart, dataEnd - dataStart);
+        if (filename.empty() || filename == "." || filename == "..") {
+            filename = "playlist_" + std::to_string(std::time(nullptr)) + ".m3u";
+        }
+        if (filename.find(".m3u") == std::string::npos && filename.find(".m3u8") == std::string::npos) {
+            filename += ".m3u";
+        }
 
+        // Extract content after multipart headers (double CRLF)
+        std::string fileContent;
+        size_t dataStart = fullBody.find("\r\n\r\n");
+        if (dataStart != std::string::npos && fullBody.find("Content-Disposition") != std::string::npos) {
+            dataStart += 4;
+            // End boundary
+            size_t dataEnd = fullBody.find("\r\n--", dataStart);
+            if (dataEnd != std::string::npos) {
+                fileContent = fullBody.substr(dataStart, dataEnd - dataStart);
+            } else {
+                fileContent = fullBody.substr(dataStart);
+            }
+        } else {
+            fileContent = fullBody;
+        }
+
+        if (!fileContent.empty()) {
             std::string iptvDir = IPTVManager::instance().getIptvDir();
             if (iptvDir.empty()) {
                 iptvDir = AppConfig::instance().getAppRoot() + "/iptv";
             }
             FileSystemManager::instance().createDirectoryRecursive(iptvDir);
 
-            std::string path = iptvDir + "/" + filename;
-            std::ofstream out(path);
-            if (out) {
-                out << content;
+            std::string outPath = iptvDir + "/" + filename;
+            std::ofstream out(outPath, std::ios::binary);
+            if (out.is_open()) {
+                out.write(fileContent.data(), fileContent.size());
                 out.close();
-                Logger::info("IPTV playlist uploaded: " + path);
+                sync();
+                Logger::info("IPTV: Playlist uploaded successfully to " + outPath + " (" + std::to_string(fileContent.size()) + " bytes)");
                 IPTVManager::instance().loadPlaylists(iptvDir);
-                std::string json = "{\"success\":true,\"file\":\"" + filename + "\"}";
-                std::string res = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: " + std::to_string(json.length()) + "\r\n\r\n" + json;
+                size_t count = IPTVManager::instance().getChannels().size();
+                std::string json = "{\"success\":true,\"file\":\"" + escapeJson(filename) + "\",\"channels\":" + std::to_string(count) + "}";
+                std::string res = "HTTP/1.1 200 OK\r\nContent-Type: application/json; charset=UTF-8\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: " + std::to_string(json.length()) + "\r\nConnection: close\r\n\r\n" + json;
                 send(clientFd, res.c_str(), res.length(), 0);
             } else {
-                std::string json = "{\"success\":false,\"error\":\"Cannot write file\"}";
-                std::string res = "HTTP/1.1 500 OK\r\nContent-Type: application/json\r\nContent-Length: " + std::to_string(json.length()) + "\r\n\r\n" + json;
+                Logger::error("IPTV: Cannot write uploaded file to " + outPath);
+                std::string json = "{\"success\":false,\"error\":\"Cannot write file: " + escapeJson(filename) + "\"}";
+                std::string res = "HTTP/1.1 500 OK\r\nContent-Type: application/json; charset=UTF-8\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: " + std::to_string(json.length()) + "\r\nConnection: close\r\n\r\n" + json;
                 send(clientFd, res.c_str(), res.length(), 0);
             }
         } else {
             std::string json = "{\"success\":false,\"error\":\"No content\"}";
-            std::string res = "HTTP/1.1 400 OK\r\nContent-Type: application/json\r\nContent-Length: " + std::to_string(json.length()) + "\r\n\r\n" + json;
+            std::string res = "HTTP/1.1 400 OK\r\nContent-Type: application/json; charset=UTF-8\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: " + std::to_string(json.length()) + "\r\nConnection: close\r\n\r\n" + json;
             send(clientFd, res.c_str(), res.length(), 0);
         }
     } else if (method == "GET" && path.find("/api/iptv/add") == 0) {
-        // Download and add playlist from URL
+        // Download and add playlist from URL using HttpClient (curl C-API)
         std::string url;
         size_t qPos = path.find("url=");
         if (qPos != std::string::npos) {
             url = path.substr(qPos + 4);
-            // URL decode
-            size_t ampPos = url.find("&");
+            size_t ampPos = url.find('&');
             if (ampPos != std::string::npos) url = url.substr(0, ampPos);
-            // Decode %XX
-            std::string decoded;
-            for (size_t i = 0; i < url.size(); i++) {
-                if (url[i] == '%' && i + 2 < url.size()) {
-                    int v = std::stoi(url.substr(i+1, 2), nullptr, 16);
-                    decoded += (char)v;
-                    i += 2;
-                } else if (url[i] == '+') {
-                    decoded += ' ';
-                } else {
-                    decoded += url[i];
-                }
-            }
-            url = decoded;
+            url = urlDecode(url);
         }
 
         if (!url.empty()) {
@@ -4127,23 +4151,50 @@ void WebServer::handleClient(int clientFd) {
             }
             FileSystemManager::instance().createDirectoryRecursive(iptvDir);
 
-            std::string destPath = iptvDir + "/url_playlist.m3u";
-            std::string cmd = "curl -sL \"" + url + "\" -o \"" + destPath + "\" 2>&1";
-            int ret = system(cmd.c_str());
+            std::string safeName = "playlist_url.m3u";
+            size_t lastSlash = url.find_last_of("/\\");
+            if (lastSlash != std::string::npos && lastSlash + 1 < url.size()) {
+                std::string cand = url.substr(lastSlash + 1);
+                size_t q = cand.find('?');
+                if (q != std::string::npos) cand = cand.substr(0, q);
+                if (cand.size() > 4 && (cand.rfind(".m3u") != std::string::npos || cand.rfind(".m3u8") != std::string::npos)) {
+                    safeName = cand;
+                }
+            }
 
-            if (ret == 0) {
-                IPTVManager::instance().loadPlaylists(iptvDir);
-                std::string json = "{\"success\":true,\"file\":\"url_playlist.m3u\"}";
-                std::string res = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: " + std::to_string(json.length()) + "\r\n\r\n" + json;
-                send(clientFd, res.c_str(), res.length(), 0);
+            std::string destPath = iptvDir + "/" + safeName;
+            Logger::info("IPTV: Fetching playlist from URL: " + url + " -> " + destPath);
+
+            HttpResponse resp = HttpClient::instance().get(url, {
+                "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Accept: */*"
+            }, 30);
+
+            if (resp.success && resp.statusCode >= 200 && resp.statusCode < 400 && !resp.body.empty()) {
+                std::ofstream out(destPath, std::ios::binary);
+                if (out.is_open()) {
+                    out.write(resp.body.data(), resp.body.size());
+                    out.close();
+                    sync();
+                    IPTVManager::instance().loadPlaylists(iptvDir);
+                    size_t count = IPTVManager::instance().getChannels().size();
+                    std::string json = "{\"success\":true,\"file\":\"" + escapeJson(safeName) + "\",\"channels\":" + std::to_string(count) + "}";
+                    std::string res = "HTTP/1.1 200 OK\r\nContent-Type: application/json; charset=UTF-8\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: " + std::to_string(json.length()) + "\r\nConnection: close\r\n\r\n" + json;
+                    send(clientFd, res.c_str(), res.length(), 0);
+                } else {
+                    std::string json = "{\"success\":false,\"error\":\"Cannot write file: " + escapeJson(destPath) + "\"}";
+                    std::string res = "HTTP/1.1 500 OK\r\nContent-Type: application/json; charset=UTF-8\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: " + std::to_string(json.length()) + "\r\nConnection: close\r\n\r\n" + json;
+                    send(clientFd, res.c_str(), res.length(), 0);
+                }
             } else {
-                std::string json = "{\"success\":false,\"error\":\"Download failed\"}";
-                std::string res = "HTTP/1.1 500 OK\r\nContent-Type: application/json\r\nContent-Length: " + std::to_string(json.length()) + "\r\n\r\n" + json;
+                std::string err = resp.error.empty() ? ("HTTP " + std::to_string(resp.statusCode)) : resp.error;
+                std::string json = "{\"success\":false,\"error\":\"Download failed: " + escapeJson(err) + "\"}";
+                std::string res = "HTTP/1.1 500 OK\r\nContent-Type: application/json; charset=UTF-8\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: " + std::to_string(json.length()) + "\r\nConnection: close\r\n\r\n" + json;
                 send(clientFd, res.c_str(), res.length(), 0);
             }
         } else {
             std::string json = "{\"success\":false,\"error\":\"No URL provided\"}";
-            std::string res = "HTTP/1.1 400 OK\r\nContent-Type: application/json\r\nContent-Length: " + std::to_string(json.length()) + "\r\n\r\n" + json;
+            std::string res = "HTTP/1.1 400 OK\r\nContent-Type: application/json; charset=UTF-8\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: " + std::to_string(json.length()) + "\r\nConnection: close\r\n\r\n" + json;
             send(clientFd, res.c_str(), res.length(), 0);
         }
     } else {

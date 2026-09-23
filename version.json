@@ -1,6 +1,7 @@
 {
-  "version": "2.0.0",
+  "version": "2.0.1",
   "release_date": "2026-09-23",
-  "binary_url": "https://github.com/bun2it/RomCloud/releases/download/v2.0.0/RomCloud",
-  "changelog": "v2.0.0: Cập nhật lớn - Xem TV trực tuyến IPTV (Tìm kiếm kênh QWERTY, Kênh yêu thích ★), Launcher 1 hàng ngang (Single-Row Carousel), Kích hoạt Cần Analog Joystick cho TrimUI Brick Pro / Brick Pro S"
+  "binary_url": "https://github.com/bun2it/RomCloud/releases/download/v2.0.1/RomCloud",
+  "bundle_url": "https://github.com/bun2it/RomCloud/releases/download/v2.0.1/mpv_bundle.zip",
+  "changelog": "v2.0.1: Tự động tải & cài đặt bộ giải mã MPV/CedarX cho Smart S/Brick Pro qua OTA, sửa lỗi tải lên file/URL m3u IPTV, tích hợp sẵn danh sách kênh truyền hình Việt Nam, đồng bộ audit ROM"
 }

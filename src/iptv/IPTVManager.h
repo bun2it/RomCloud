@@ -49,6 +49,10 @@ public:
     // Create default playlist
     void createDefaultPlaylist(const std::string& filepath);
 
+    // Media player check & auto installation
+    bool isMediaPlayerInstalled() const;
+    bool ensureMediaPlayerAvailable();
+
     // Play channel with mpv/ffplay
     bool playChannel(const IPTVChannel& channel);
     bool stop();

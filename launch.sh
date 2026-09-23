@@ -27,6 +27,16 @@ install_pending_ota() {
     # Remove any stale helper script
     rm -f "$HELPER_SCRIPT" 2>/dev/null
 
+    # Check for pending mpv & codecs media bundle
+    if [ -f "./mpv_bundle.zip" ]; then
+        echo "[RomCloud OTA] Found mpv_bundle.zip, extracting media bundle..."
+        unzip -o "./mpv_bundle.zip" -d . 2>/dev/null || busybox unzip -o "./mpv_bundle.zip" -d . 2>/dev/null
+        rm -f "./mpv_bundle.zip"
+        chmod +x ./bin/* 2>/dev/null
+        sync
+        echo "[RomCloud OTA] Media player bundle installed successfully."
+    fi
+
     if [ -f "$NEW_BIN" ]; then
         echo "[RomCloud OTA] Found pending update file: $NEW_BIN"
         

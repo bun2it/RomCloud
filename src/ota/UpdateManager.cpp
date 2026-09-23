@@ -90,12 +90,14 @@ bool UpdateManager::checkForUpdatesSync(UpdateInfo &outInfo) {
   std::string changelog = "";
   std::string relDate = "";
   std::string binUrl = "";
+  std::string bundleUrl = "";
 
   if (mResp.success && !mResp.body.empty() && mResp.statusCode == 200) {
     remoteVer = JsonHelper::extractString(mResp.body, "version");
     binUrl = JsonHelper::extractString(mResp.body, "binary_url");
     if (binUrl.empty())
       binUrl = JsonHelper::extractString(mResp.body, "download_url");
+    bundleUrl = JsonHelper::extractString(mResp.body, "bundle_url");
     changelog = JsonHelper::extractString(mResp.body, "changelog");
     relDate = JsonHelper::extractString(mResp.body, "release_date");
   }
@@ -124,7 +126,8 @@ bool UpdateManager::checkForUpdatesSync(UpdateInfo &outInfo) {
           std::string name = JsonHelper::extractString(asset, "name");
           if (name == "RomCloud" || name == "RomCloud.bin") {
             binUrl = JsonHelper::extractString(asset, "browser_download_url");
-            break;
+          } else if (name == "mpv_bundle.zip") {
+            bundleUrl = JsonHelper::extractString(asset, "browser_download_url");
           }
         }
         if (binUrl.empty()) {
@@ -143,9 +146,14 @@ bool UpdateManager::checkForUpdatesSync(UpdateInfo &outInfo) {
     binUrl = "https://raw.githubusercontent.com/" + std::string(GITHUB_REPO) +
              "/main/bin/RomCloud";
   }
+  if (bundleUrl.empty()) {
+    bundleUrl = "https://github.com/" + std::string(GITHUB_REPO) +
+                "/releases/download/v" + remoteVer + "/mpv_bundle.zip";
+  }
 
   outInfo.remoteVersion = remoteVer;
   outInfo.downloadUrl = binUrl;
+  outInfo.bundleUrl = bundleUrl;
   outInfo.changelog = changelog;
   outInfo.releaseDate = relDate;
 
@@ -387,6 +395,52 @@ void UpdateManager::runDownloadWorker(UpdateInfo info) {
   }
 
   sync();
+
+  // Ensure media player bundle (mpv & codecs) is present on device
+  std::string appRoot = AppConfig::instance().getAppRoot();
+  if (appRoot.empty()) appRoot = "/mnt/SDCARD/Apps/RomCloud";
+  std::string mpvPath = appRoot + "/bin/mpv";
+  std::string codecPath = appRoot + "/lib/libavcodec.so.58";
+
+  if (access(mpvPath.c_str(), X_OK) != 0 || access(codecPath.c_str(), R_OK) != 0) {
+    Logger::info("OTA: Device is missing mpv player or codecs. Downloading media bundle...");
+    std::string bUrl = info.bundleUrl;
+    if (bUrl.empty()) {
+      bUrl = "https://github.com/" + std::string(GITHUB_REPO) +
+             "/releases/download/v" + info.remoteVersion + "/mpv_bundle.zip";
+    }
+    std::string bundlePath = appRoot + "/mpv_bundle.zip";
+    FILE* bfp = fopen(bundlePath.c_str(), "wb");
+    if (bfp) {
+      CURL* bcurl = curl_easy_init();
+      if (bcurl) {
+        curl_easy_setopt(bcurl, CURLOPT_URL, bUrl.c_str());
+        curl_easy_setopt(bcurl, CURLOPT_WRITEFUNCTION, fwrite);
+        curl_easy_setopt(bcurl, CURLOPT_WRITEDATA, bfp);
+        curl_easy_setopt(bcurl, CURLOPT_FOLLOWLOCATION, 1L);
+        curl_easy_setopt(bcurl, CURLOPT_SSL_VERIFYPEER, 0L);
+        curl_easy_setopt(bcurl, CURLOPT_SSL_VERIFYHOST, 0L);
+        curl_easy_setopt(bcurl, CURLOPT_TIMEOUT, 300L);
+        CURLcode bres = curl_easy_perform(bcurl);
+        curl_easy_cleanup(bcurl);
+        fclose(bfp);
+        if (bres == CURLE_OK) {
+          Logger::info("OTA: Unpacking mpv_bundle.zip...");
+          std::string unpackCmd = "unzip -o '" + bundlePath + "' -d '" + appRoot + "' 2>/dev/null || busybox unzip -o '" + bundlePath + "' -d '" + appRoot + "' 2>/dev/null";
+          system(unpackCmd.c_str());
+          unlink(bundlePath.c_str());
+          chmod(mpvPath.c_str(), 0755);
+          sync();
+          Logger::info("OTA: mpv media bundle installed successfully!");
+        } else {
+          unlink(bundlePath.c_str());
+          Logger::warn("OTA: Could not download mpv bundle: " + std::string(curl_easy_strerror(bres)));
+        }
+      } else {
+        fclose(bfp);
+      }
+    }
+  }
 
   Logger::info("OTA update ready! File size: " + std::to_string(newSize) +
                " bytes");

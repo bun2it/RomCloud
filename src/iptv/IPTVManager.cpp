@@ -14,6 +14,7 @@
 #include <sstream>
 #include <vector>
 #include <algorithm>
+#include <curl/curl.h>
 
 #include <SDL2/SDL.h>
 
@@ -296,6 +297,72 @@ IPTVChannel* IPTVManager::getChannel(size_t index) {
     return nullptr;
 }
 
+bool IPTVManager::isMediaPlayerInstalled() const {
+    std::string appRoot = AppConfig::instance().getAppRoot();
+    if (appRoot.empty()) appRoot = "/mnt/SDCARD/Apps/RomCloud";
+    std::string mpvPath = appRoot + "/bin/mpv";
+    std::string codecPath = appRoot + "/lib/libavcodec.so.58";
+    return (access(mpvPath.c_str(), X_OK) == 0 && access(codecPath.c_str(), R_OK) == 0);
+}
+
+bool IPTVManager::ensureMediaPlayerAvailable() {
+    if (isMediaPlayerInstalled()) return true;
+
+    std::string appRoot = AppConfig::instance().getAppRoot();
+    if (appRoot.empty()) appRoot = "/mnt/SDCARD/Apps/RomCloud";
+    std::string mpvPath = appRoot + "/bin/mpv";
+
+    Logger::warn("IPTV: Media player (mpv/codecs) missing on device. Starting auto-download...");
+    std::string bundleUrl = "https://github.com/bun2it/RomCloud/releases/download/v2.0.1/mpv_bundle.zip";
+    std::string bundlePath = appRoot + "/mpv_bundle.zip";
+
+    FILE* fp = fopen(bundlePath.c_str(), "wb");
+    if (!fp) {
+        Logger::error("IPTV: Cannot create mpv_bundle.zip for writing");
+        return false;
+    }
+
+    CURL* curl = curl_easy_init();
+    if (!curl) {
+        fclose(fp);
+        return false;
+    }
+
+    curl_easy_setopt(curl, CURLOPT_URL, bundleUrl.c_str());
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, fwrite);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, fp);
+    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 180L);
+    CURLcode res = curl_easy_perform(curl);
+    long httpCode = 0;
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &httpCode);
+    curl_easy_cleanup(curl);
+    fclose(fp);
+
+    if (res != CURLE_OK || httpCode < 200 || httpCode >= 300) {
+        Logger::error("IPTV: Failed to download mpv_bundle.zip (HTTP " + std::to_string(httpCode) + "): " + curl_easy_strerror(res));
+        unlink(bundlePath.c_str());
+        return false;
+    }
+
+    Logger::info("IPTV: Unpacking mpv_bundle.zip to " + appRoot);
+    std::string unpackCmd = "unzip -o '" + bundlePath + "' -d '" + appRoot + "' 2>/dev/null || busybox unzip -o '" + bundlePath + "' -d '" + appRoot + "' 2>/dev/null";
+    system(unpackCmd.c_str());
+    unlink(bundlePath.c_str());
+    chmod(mpvPath.c_str(), 0755);
+    sync();
+
+    if (isMediaPlayerInstalled()) {
+        Logger::info("IPTV: Media player bundle installed successfully!");
+        return true;
+    }
+
+    Logger::error("IPTV: mpv bundle extracted but mpv binary is not accessible");
+    return false;
+}
+
 bool IPTVManager::playChannel(const IPTVChannel& channel) {
     stop();
 
@@ -303,6 +370,8 @@ bool IPTVManager::playChannel(const IPTVChannel& channel) {
         Logger::error("IPTV channel URL is empty");
         return false;
     }
+
+    ensureMediaPlayerAvailable();
 
     Logger::info("Playing IPTV channel: " + channel.name);
     Logger::info("URL: " + channel.url);
@@ -531,13 +600,43 @@ void IPTVManager::createDefaultPlaylist(const std::string& filepath) {
         return;
     }
 
-    file << "#EXTM3U\n";
-    file << "#EXTINF:-1 tvg-id=\"test1\" tvg-name=\"Big Buck Bunny\" group-title=\"Test\",Big Buck Bunny\n";
-    file << "https://test-streams.mux.dev/outcasts/index.m3u8\n";
-    file << "#EXTINF:-1 tvg-id=\"test2\" tvg-name=\"Sintel\" group-title=\"Test\",Sintel Trailer\n";
-    file << "https://bitdash-a.akamaihd.net/content/sintel/hls/playlist.m3u8\n";
-    file << "#EXTINF:-1 tvg-id=\"test3\" tvg-name=\"Tears of Steel\" group-title=\"Test\",Tears of Steel\n";
-    file << "https://bitdash-a.akamaihd.net/content/sintel/hls/playlist.m3u8\n";
+    file << "#EXTM3U\n"
+         << "#EXTINF:-1 tvg-id=\"CanThoTV.vn@SD\" tvg-name=\"Cần Thơ TV\" group-title=\"Miền Tây\",Cần Thơ TV (HD)\n"
+         << "https://live.canthotv.vn/live/tv/chunklist.m3u8\n"
+         << "#EXTINF:-1 tvg-id=\"CanThoTV2.vn@SD\" tvg-name=\"Cần Thơ TV 2\" group-title=\"Miền Tây\",Cần Thơ TV 2 (HD)\n"
+         << "https://live.canthotv.vn/cs2/live.stream/playlist.m3u8\n"
+         << "#EXTINF:-1 tvg-id=\"DongNaiTV1.vn@SD\" tvg-name=\"Đồng Nai 1\" group-title=\"Đông Nam Bộ\",Đồng Nai 1 (HD)\n"
+         << "https://vtvgolive-ott3.vtvdigital.vn/live/dongnai1tv/chunklist_2.m3u8\n"
+         << "#EXTINF:-1 tvg-id=\"DongNaiTV2.vn@SD\" tvg-name=\"Đồng Nai 2\" group-title=\"Đông Nam Bộ\",Đồng Nai 2 (HD)\n"
+         << "https://vtvgolive-ott3.vtvdigital.vn/live/dongnai2tv/chunklist_2.m3u8\n"
+         << "#EXTINF:-1 tvg-id=\"DongNaiTV3.vn@SD\" tvg-name=\"Đồng Nai 3\" group-title=\"Đông Nam Bộ\",Đồng Nai 3 (720p)\n"
+         << "https://dethich.pw/dongnai3/index.m3u8\n"
+         << "#EXTINF:-1 tvg-id=\"AnNinhTV.vn@HD\" tvg-name=\"An Ninh TV\" group-title=\"Thời Sự\",An Ninh TV HD (1080p)\n"
+         << "https://liveh12.vtvprime.vn/hls/ANNINHTV/index.m3u8\n"
+         << "#EXTINF:-1 tvg-id=\"CaoBangTV.vn@SD\" tvg-name=\"Cao Bằng TV\" group-title=\"Miền Bắc\",Cao Bằng TV (HD)\n"
+         << "https://stream.thingnet.vn/live/smil:CRTV.smil/chunklist.m3u8\n"
+         << "#EXTINF:-1 tvg-id=\"DienBienTV.vn@SD\" tvg-name=\"Điện Biên TV\" group-title=\"Miền Bắc\",Điện Biên TV (1080p)\n"
+         << "https://stream.langsontv.vn/live/2855dfeccb7f49a41a2b0441b3bfeda413c/playlist.m3u8\n"
+         << "#EXTINF:-1 tvg-id=\"HaTinhTV.vn@SD\" tvg-name=\"Hà Tĩnh TV\" group-title=\"Miền Trung\",Hà Tĩnh TV (720p)\n"
+         << "https://cohauw9bgpvod.vcdn.cloud/httv1/index.m3u8\n"
+         << "#EXTINF:-1 tvg-id=\"HTV1.vn@SD\" tvg-name=\"HTV1\" group-title=\"HTV TP.HCM\",HTV1 (720p)\n"
+         << "https://dethich.pw/htv1/index.m3u8\n"
+         << "#EXTINF:-1 tvg-id=\"HTV2.vn@SD\" tvg-name=\"HTV2\" group-title=\"HTV TP.HCM\",HTV2 Vie Channel (720p)\n"
+         << "https://dethich.pw/htv2/index.m3u8\n"
+         << "#EXTINF:-1 tvg-id=\"HTV3.vn@SD\" tvg-name=\"HTV3\" group-title=\"HTV TP.HCM\",HTV3 DreamsTV (720p)\n"
+         << "https://dethich.pw/htv3/index.m3u8\n"
+         << "#EXTINF:-1 tvg-id=\"HTV7.vn@SD\" tvg-name=\"HTV7\" group-title=\"HTV TP.HCM\",HTV7 (720p)\n"
+         << "https://dethich.pw/htv7/index.m3u8\n"
+         << "#EXTINF:-1 tvg-id=\"HTV9.vn@SD\" tvg-name=\"HTV9\" group-title=\"HTV TP.HCM\",HTV9 (720p)\n"
+         << "https://dethich.pw/htv9/index.m3u8\n"
+         << "#EXTINF:-1 tvg-id=\"HTVSports.vn@SD\" tvg-name=\"HTV Thể Thao\" group-title=\"Thể Thao\",HTV Thể Thao (HD)\n"
+         << "https://dethich.pw/htvthethao/index.m3u8\n"
+         << "#EXTINF:-1 tvg-id=\"DongThapTV.vn@SD\" tvg-name=\"Đồng Tháp TV\" group-title=\"Miền Tây\",Đồng Tháp TV (720p)\n"
+         << "https://liveh34.vtvprime.vn/hls/DONGTHAPTV/index.m3u8\n"
+         << "#EXTINF:-1 tvg-id=\"BBB\" tvg-name=\"Big Buck Bunny\" group-title=\"Phim & Test\",Big Buck Bunny (1080p 60fps)\n"
+         << "https://test-streams.mux.dev/outcasts/index.m3u8\n"
+         << "#EXTINF:-1 tvg-id=\"TOS\" tvg-name=\"Tears of Steel\" group-title=\"Phim & Test\",Tears of Steel (1080p FHD)\n"
+         << "https://bitdash-a.akamaihd.net/content/sintel/hls/playlist.m3u8\n";
 
     file.close();
     Logger::info("Created default playlist: " + filepath);

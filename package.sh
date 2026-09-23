@@ -50,11 +50,18 @@ chmod +x "$STAGING_DIR/Apps/RomCloud/launch.sh" "$STAGING_DIR/Apps/RomCloud/bin/
 
 # Create zip
 mkdir -p "$DIST_DIR"
-rm -f "$DIST_DIR/$ZIP_NAME"
+rm -f "$DIST_DIR/$ZIP_NAME" "$DIST_DIR/mpv_bundle.zip"
 cd "$STAGING_DIR"
 zip -r "$DIST_DIR/$ZIP_NAME" Apps
+
+# Create mpv_bundle.zip for OTA update delivery
+cd "$STAGING_DIR/Apps/RomCloud"
+zip -r -9 "$DIST_DIR/mpv_bundle.zip" bin/mpv lib
 cd "$SCRIPT_DIR"
 rm -rf "$STAGING_DIR"
 
-echo "=== Release Package Created Successfully: dist/$ZIP_NAME ==="
-ls -lh "$DIST_DIR/$ZIP_NAME"
+cp -f bin/RomCloud "$DIST_DIR/RomCloud"
+cp -f launch.sh "$DIST_DIR/launch.sh"
+
+echo "=== Release Packages Created Successfully ==="
+ls -lh "$DIST_DIR/$ZIP_NAME" "$DIST_DIR/mpv_bundle.zip" "$DIST_DIR/RomCloud"
