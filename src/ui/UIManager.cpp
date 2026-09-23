@@ -13,6 +13,7 @@
 #include "../app/Application.h"
 #include "../backup/BackupManager.h"
 #include "../sync/UploadManager.h"
+#include "BoxartScraper.h"
 #include "UiStrings.h"
 #include <algorithm>
 #include <cmath>
@@ -117,6 +118,7 @@ void UIManager::triggerManualSync() {
     RomIndexer::instance().scanAllSystems(AppConfig::instance().getRomsDir());
     refreshSystems();
     refreshGames();
+    BoxartScraper::instance().startAutoScrapeSdCard(false);
 
     if (AuthManager::instance().isLinked()) {
         DriveSyncEngine::instance().startSync();

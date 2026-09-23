@@ -19,16 +19,55 @@ rm -f /tmp/romcloud_*.tmp 2>/dev/null
 # Ensure port 8080 is freed if previous instance did not exit cleanly
 fuser -k 8080/tcp 2>/dev/null || true
 
-# Check if an OTA update is pending
-if [ -f ./bin/ota_install.sh ]; then
-    echo "Running OTA install script..."
-    sh ./bin/ota_install.sh 2>/dev/null
-    rm -f ./bin/ota_install.sh 2>/dev/null
-fi
-if [ -f ./bin/RomCloud.new ]; then
-    echo "Installing RomCloud.new..."
-    mv -f ./bin/RomCloud.new ./bin/RomCloud 2>/dev/null
-fi
+install_pending_ota() {
+    NEW_BIN="./bin/RomCloud.new"
+    TARGET_BIN="./bin/RomCloud"
+    HELPER_SCRIPT="./bin/ota_install.sh"
+
+    # Remove any stale helper script
+    rm -f "$HELPER_SCRIPT" 2>/dev/null
+
+    if [ -f "$NEW_BIN" ]; then
+        echo "[RomCloud OTA] Found pending update file: $NEW_BIN"
+        
+        # Verify downloaded binary size (must be >= 1MB)
+        NEW_SIZE=$(wc -c < "$NEW_BIN" 2>/dev/null || echo 0)
+        if [ "$NEW_SIZE" -lt 1000000 ]; then
+            echo "[RomCloud OTA] Error: Downloaded file size ($NEW_SIZE bytes) is too small, discarding."
+            rm -f "$NEW_BIN"
+            return 1
+        fi
+
+        # Allow kernel to completely release file handles and flush dirty buffers on FAT32
+        sleep 1
+
+        # FAT32 safe replacement:
+        # Step 1: Remove old target binary (avoid EBUSY on rename/move)
+        rm -f "$TARGET_BIN"
+        sync
+
+        # Step 2: Copy new binary to target path
+        cp -f "$NEW_BIN" "$TARGET_BIN"
+        sync
+
+        # Step 3: Verify target binary size
+        TARGET_SIZE=$(wc -c < "$TARGET_BIN" 2>/dev/null || echo 0)
+        if [ "$TARGET_SIZE" -ge 1000000 ]; then
+            chmod +x "$TARGET_BIN" 2>/dev/null
+            rm -f "$NEW_BIN"
+            sync
+            echo "[RomCloud OTA] Successfully installed new binary ($TARGET_SIZE bytes)!"
+            return 0
+        else
+            echo "[RomCloud OTA] Installation verification failed ($TARGET_SIZE bytes), keeping backup."
+            return 1
+        fi
+    fi
+    return 0
+}
+
+# Check and install any pending OTA update before starting
+install_pending_ota
 
 # Ensure binary is executable
 chmod +x ./bin/RomCloud 2>/dev/null
@@ -38,17 +77,9 @@ while true; do
     ./bin/RomCloud "$PWD"
     EXIT_CODE=$?
     if [ $EXIT_CODE -eq 42 ]; then
-        # OTA update was downloaded, install and restart
-        if [ -f ./bin/ota_install.sh ]; then
-            echo "Installing OTA update via script..."
-            sh ./bin/ota_install.sh 2>/dev/null
-            rm -f ./bin/ota_install.sh 2>/dev/null
-        fi
-        if [ -f ./bin/RomCloud.new ]; then
-            echo "Installing OTA update via RomCloud.new..."
-            mv -f ./bin/RomCloud.new ./bin/RomCloud 2>/dev/null
-        fi
-        chmod +x ./bin/RomCloud 2>/dev/null
+        echo "[RomCloud OTA] Restart requested (exit code 42). Installing update..."
+        sleep 1
+        install_pending_ota
         sleep 1
         continue
     fi

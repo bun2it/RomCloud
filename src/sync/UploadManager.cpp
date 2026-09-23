@@ -119,18 +119,16 @@ std::vector<LocalGameInfo> UploadManager::scanLocalOnlyGames() {
             info.systemId = sys.id;
             info.systemCode = sys.code;
             info.cloudFileId = game.cloudFileId;
-            info.needsUpload = game.cloudFileId.empty();
+            info.needsUpload = true;
 
-            if (info.needsUpload) {
-                // Check if file actually exists locally
-                if (!info.localPath.empty() && FileSystemManager::instance().fileExists(info.localPath)) {
-                    localOnly.push_back(info);
-                }
+            // Check if file actually exists locally on SD card
+            if (!info.localPath.empty() && FileSystemManager::instance().fileExists(info.localPath)) {
+                localOnly.push_back(info);
             }
         }
     }
 
-    Logger::info("UploadManager: Found " + std::to_string(localOnly.size()) + " local games not on cloud");
+    Logger::info("UploadManager: Found " + std::to_string(localOnly.size()) + " local games on SD card ready for backup");
     return localOnly;
 }
 

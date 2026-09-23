@@ -6,6 +6,7 @@
 #include "../sync/DriveSyncEngine.h"
 #include "../ota/UpdateManager.h"
 #include "../download/DownloadManager.h"
+#include "../sync/UploadManager.h"
 #include "../filesystem/FileSystemManager.h"
 #include "../ui/BoxartScraper.h"
 #include "../app/Application.h"
@@ -773,7 +774,99 @@ std::string WebServer::buildHtmlResponse() {
     }
     #toast.show { opacity: 1; transform: translateY(0); }
 
+    /* Storage Architecture Banner */
+    .storage-architecture-banner {
+      display: grid;
+      grid-template-columns: 1fr auto 1fr auto 1.15fr;
+      align-items: stretch;
+      gap: 12px;
+      margin-bottom: 20px;
+      padding: 16px;
+      background: linear-gradient(135deg, rgba(17, 24, 39, 0.95), rgba(15, 23, 42, 0.95));
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+    }
+    .arch-card {
+      background: var(--card-alt);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .arch-public { border-color: rgba(2, 132, 199, 0.45); }
+    .arch-sd { border-color: rgba(16, 185, 129, 0.45); }
+    .arch-private { border-color: rgba(168, 85, 247, 0.45); }
+    .arch-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .arch-header h4 {
+      margin: 0;
+      font-size: 13px;
+      font-weight: 700;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .arch-card p {
+      margin: 0;
+      font-size: 11.5px;
+      color: var(--text-muted);
+      line-height: 1.5;
+    }
+    .arch-status {
+      font-size: 11px;
+      color: var(--text-dim);
+      padding: 6px 8px;
+      background: var(--bg);
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      word-break: break-all;
+    }
+    .arch-arrow {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+      color: var(--text-dim);
+      font-weight: bold;
+    }
+
+    /* Active Upload Floating Bar */
+    #active-upload-floating {
+      position: fixed;
+      bottom: 24px;
+      left: 24px;
+      background: linear-gradient(135deg, #2e1065, #1e1b4b);
+      border: 1px solid #9333ea;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.65);
+      border-radius: 10px;
+      padding: 14px 18px;
+      color: #fff;
+      z-index: 9998;
+      max-width: 440px;
+      width: calc(100% - 48px);
+      display: none;
+    }
+
     /* Mobile Adaptations */
+    @media (max-width: 960px) {
+      .storage-architecture-banner {
+        grid-template-columns: 1fr;
+      }
+      .arch-arrow {
+        transform: rotate(90deg);
+        padding: 4px 0;
+      }
+    }
     @media (max-width: 680px) {
       .game-table th:nth-child(3), .game-table td:nth-child(3) { display: none; }
       .hide-mobile { display: none; }
@@ -831,6 +924,53 @@ std::string WebServer::buildHtmlResponse() {
 
     <!-- TAB 1: ROM MANAGER -->
     <div id="tab-roms" class="tab-content active">
+      <!-- Cloud & Storage Architecture Banner -->
+      <div class="storage-architecture-banner">
+        <div class="arch-card arch-public">
+          <div class="arch-header">
+            <h4>🌐 1. Kho Game Công cộng (Public Drive)</h4>
+            <span class="sys-tag" style="background:#075985;color:#bae6fd;">CHỈ TẢI VỀ</span>
+          </div>
+          <p>Kho ROM chung tải qua link chia sẻ Google Drive (không cần đăng nhập). Bạn có thể tìm kiếm và bấm <b>[📥 Tải về]</b> bất kỳ game nào về máy TrimUI.</p>
+          <div class="arch-status" id="arch-public-status">
+            Nguồn: <b id="arch-public-url" style="color:var(--accent);">Đang tải...</b>
+          </div>
+        </div>
+
+        <div class="arch-arrow">➔</div>
+
+        <div class="arch-card arch-sd">
+          <div class="arch-header">
+            <h4>💾 2. Thẻ nhớ MicroSD (Máy TrimUI)</h4>
+            <span class="sys-tag" style="background:#065f46;color:#a7f3d0;">ĐÃ CÓ TRÊN MÁY</span>
+          </div>
+          <p>Các ROM đã tải về nằm tại <code>/mnt/SDCARD/Roms/</code>. Bạn có thể mở máy lên chơi ngay hoặc bấm <b>[📤 Sao lưu]</b> để đưa lên Drive cá nhân.</p>
+          <div class="arch-status">
+            Trạng thái: <b id="arch-local-status" style="color:var(--green);">-- game trên thẻ</b>
+          </div>
+          <div style="display:flex; gap:6px; margin-top:4px;">
+            <button class="btn btn-secondary" onclick="startAutoScrapeSd()" style="font-size:11.5px;padding:6px 10px;flex:1;border-color:#0284c7;color:#38bdf8;" title="Tự động cào ảnh bìa và thông tin cho toàn bộ ROM trên thẻ nhớ (ScreenScraper / Libretro)">🎨 Tự động cào ảnh thẻ SD</button>
+          </div>
+        </div>
+
+        <div class="arch-arrow">➔</div>
+
+        <div class="arch-card arch-private">
+          <div class="arch-header">
+            <h4>☁️ 3. Google Drive Cá nhân (Sao lưu)</h4>
+            <span class="sys-tag" style="background:#5b21b6;color:#ddd6fe;">BACKUP RIÊNG</span>
+          </div>
+          <p>Lưu trữ dự phòng toàn bộ ROM thẻ nhớ vào thư mục <code>RomCloud_Backup</code> trên Drive cá nhân (qua Access/Refresh Token) để phòng khi hỏng thẻ.</p>
+          <div class="arch-status" id="arch-backup-status-wrap">
+            Quyền: <b id="arch-backup-badge" style="color:var(--yellow);">Đang kiểm tra...</b>
+          </div>
+          <div style="display:flex; gap:6px; margin-top:4px;">
+            <button class="btn btn-primary" id="btn-arch-backup-all" onclick="uploadAllGamesToDrive()" style="background:var(--purple);border-color:#9333ea;font-size:11.5px;padding:6px 10px;flex:1;">📤 Sao lưu toàn bộ thẻ lên Drive</button>
+            <button class="btn btn-secondary" onclick="switchTab('tab-storage')" style="font-size:11.5px;padding:6px 10px;" title="Cài đặt hoặc kiểm tra Token sao lưu">⚙️ Token</button>
+          </div>
+        </div>
+      </div>
+
       <div class="controls-bar">
         <div class="search-row">
           <div class="search-input-wrap">
@@ -842,8 +982,8 @@ std::string WebServer::buildHtmlResponse() {
         <div class="filter-pills-row">
           <div class="state-filter-group">
             <button class="pill-btn active" id="filter-state-all" onclick="setStateFilter(-1)">Tất cả</button>
-            <button class="pill-btn" id="filter-state-local" onclick="setStateFilter(1)">🟢 Đã tải</button>
-            <button class="pill-btn" id="filter-state-cloud" onclick="setStateFilter(0)">☁️ Chưa tải</button>
+            <button class="pill-btn" id="filter-state-local" onclick="setStateFilter(1)">🟢 Trên thẻ SD (Có thể Sao lưu)</button>
+            <button class="pill-btn" id="filter-state-cloud" onclick="setStateFilter(0)">☁️ Kho Public (Chưa tải về)</button>
           </div>
           <div id="system-pills-container" style="display: flex; gap: 6px;">
             <!-- Rendered by JS -->
@@ -869,7 +1009,9 @@ std::string WebServer::buildHtmlResponse() {
               </select>
             </div>
 
-            <button class="btn btn-secondary" onclick="batchScrapeCurrentPage()" id="btn-batch-scrape" style="font-size: 12px; padding: 6px 12px;" title="Cào tự động toàn bộ ảnh bìa và thông tin cốt truyện cho các game ở trang này">🎨 Cào toàn bộ trang</button>
+            <button class="btn btn-secondary" onclick="batchScrapeCurrentPage()" id="btn-batch-scrape" style="font-size: 12px; padding: 6px 12px;" title="Cào tự động toàn bộ ảnh bìa và thông tin cốt truyện cho các game ở trang này">🎨 Cào trang này</button>
+            <button class="btn btn-secondary" onclick="startAutoScrapeSd()" id="btn-auto-scrape-sd" style="font-size: 12px; padding: 6px 12px; border-color: #0284c7; color: #38bdf8;" title="Tự động cào ảnh bìa và thông tin cho tất cả ROM đang có trên thẻ nhớ TrimUI (chạy ngầm)">🎨 Cào toàn bộ thẻ SD</button>
+            <button class="btn btn-secondary" onclick="uploadAllGamesToDrive()" id="btn-batch-backup" style="font-size: 12px; padding: 6px 12px; border-color: #9333ea; color: #c084fc;" title="Sao lưu tất cả ROM hiện có trên thẻ nhớ TrimUI lên Google Drive cá nhân (/RomCloud_Backup)">📤 Sao lưu thẻ lên Drive</button>
 
             <div class="view-toggle-group">
               <button class="view-toggle-btn active" id="btn-view-list" onclick="setViewMode('list')" title="Chế độ Danh sách (List View)">☰ Bảng</button>
@@ -1093,6 +1235,51 @@ std::string WebServer::buildHtmlResponse() {
           <div style="font-size: 12px; color: var(--text-dim);" id="ota-status-txt">Đang tải bản cập nhật...</div>
         </div>
       </div>
+
+      <!-- CARD: SCREENSCRAPER.FR CONFIGURATION -->
+      <div class="card" style="margin-top: 20px; border-color: rgba(2, 132, 199, 0.4);">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+          <h3>🎨 Cấu hình ScreenScraper.fr (Bộ Cào Ảnh Bìa & Thông Tin Game)</h3>
+          <span class="badge" style="background:#0284c7; color:#fff; font-size:11px; padding:3px 8px;">CHUẨN QUỐC TẾ</span>
+        </div>
+        <p style="font-size: 12.5px; color: var(--text-muted); line-height: 1.5; margin-bottom: 12px;">
+          RomCloud kết hợp cơ sở dữ liệu chuyên biệt <b>ScreenScraper.fr</b> (chuẩn quốc tế của Skraper trên PC, Skyscraper, Batocera) và kho ảnh chính thức <b>Libretro Thumbnails</b>. Hệ thống hoàn toàn không dùng Wikipedia để bảo đảm ảnh bìa và cốt truyện chính xác 100%.
+        </p>
+
+        <form id="form-screenscraper-config" onsubmit="saveScreenScraperConfig(event)" style="display: flex; flex-direction: column; gap: 10px;">
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+            <div>
+              <label style="font-size: 11.5px; color: var(--text-dim); display: block; margin-bottom: 4px;">Tên tài khoản ScreenScraper (ssid):</label>
+              <input type="text" id="input-ss-user" placeholder="Ví dụ: myusername" style="width: 100%; padding: 8px 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: #fff; font-size: 12px;">
+            </div>
+            <div>
+              <label style="font-size: 11.5px; color: var(--text-dim); display: block; margin-bottom: 4px;">Mật khẩu ScreenScraper (sspassword):</label>
+              <input type="password" id="input-ss-pass" placeholder="•••••••• (để trống nếu không đổi)" style="width: 100%; padding: 8px 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: #fff; font-size: 12px;">
+            </div>
+          </div>
+
+          <details style="font-size: 11.5px; color: var(--text-dim);">
+            <summary style="cursor: pointer; color: #38bdf8;">⚙️ Tùy chọn Developer ID & Dev Password (nâng cao - không bắt buộc)</summary>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 8px;">
+              <div>
+                <label style="font-size: 11px; display: block; margin-bottom: 3px;">Developer ID (devid):</label>
+                <input type="text" id="input-ss-devid" placeholder="Mặc định: bun2it" style="width: 100%; padding: 6px 8px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: #fff; font-size: 11px;">
+              </div>
+              <div>
+                <label style="font-size: 11px; display: block; margin-bottom: 3px;">Developer Password (devpassword):</label>
+                <input type="password" id="input-ss-devpass" placeholder="Mặc định của RomCloud" style="width: 100%; padding: 6px 8px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: #fff; font-size: 11px;">
+              </div>
+            </div>
+          </details>
+
+          <div style="display: flex; gap: 8px; margin-top: 6px; flex-wrap: wrap;">
+            <button type="submit" class="btn btn-primary" style="font-size: 12px; padding: 7px 14px;">💾 Lưu cấu hình ScreenScraper</button>
+            <button type="button" class="btn btn-secondary" onclick="testScreenScraperConn()" style="font-size: 12px; padding: 7px 14px;">🔌 Kiểm tra kết nối</button>
+            <a href="https://www.screenscraper.fr/" target="_blank" rel="noopener noreferrer" class="btn btn-secondary" style="font-size: 12px; padding: 7px 14px; text-decoration: none;">🌐 Đăng ký tài khoản miễn phí ↗</a>
+          </div>
+          <div id="ss-test-status" style="font-size: 12px; margin-top: 4px; display: none;"></div>
+        </form>
+      </div>
     </div>
   <!-- MODAL: GAME DETAIL & METADATA -->
   <div id="game-detail-modal" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.8); z-index: 1000; align-items: center; justify-content: center; padding: 20px; backdrop-filter: blur(4px);">
@@ -1138,9 +1325,51 @@ std::string WebServer::buildHtmlResponse() {
         </div>
       </div>
       <div style="padding: 12px 20px; border-top: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
-        <button type="button" class="btn btn-primary" id="btn-modal-scrape" onclick="scrapeCurrentModalGame()" style="background: var(--purple);">🎨 Cào lại Bìa &amp; Thông tin</button>
+        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+          <button type="button" class="btn btn-primary" id="btn-modal-scrape" onclick="scrapeCurrentModalGame()" style="background: var(--purple);">🎨 Cào lại Bìa &amp; Thông tin</button>
+          <button type="button" class="btn btn-primary" id="btn-modal-backup" onclick="uploadCurrentModalGame()" style="background: #7c3aed; border-color: #6d28d9; display: none;">📤 Sao lưu lên Drive cá nhân</button>
+        </div>
         <button type="button" class="btn btn-secondary" onclick="closeGameModal()">Đóng</button>
       </div>
+    </div>
+  </div>
+
+  <!-- FLOATING ACTIVE UPLOAD CARD -->
+  <div id="active-upload-floating">
+    <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6px;">
+      <div>
+        <span class="badge" style="background:#9333ea;color:#fff;font-size:10px;padding:2px 6px;">📤 SAO LƯU DRIVE</span>
+        <span style="font-size: 13.5px; font-weight: 700; margin-left: 6px; color:#fff;" id="upload-float-title">Game Title</span>
+      </div>
+      <button class="btn btn-secondary" onclick="cancelActiveUpload()" style="padding: 2px 8px; font-size: 11px;">✕ Hủy</button>
+    </div>
+    <div style="font-size: 11px; color: #cbd5e1; font-family: monospace; margin-bottom: 4px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" id="upload-float-file">filename.bin</div>
+    <div class="progress-track" style="margin: 6px 0; height: 8px; background: rgba(0,0,0,0.4);">
+      <div class="progress-fill" id="upload-float-progress-fill" style="background: var(--purple); width: 0%;"></div>
+    </div>
+    <div style="display: flex; justify-content: space-between; font-size: 11px; color: #e2e8f0;">
+      <span id="upload-float-speed">0 KB/s</span>
+      <span id="upload-float-percent">0%</span>
+      <span id="upload-float-bytes">0 / 0 MB</span>
+    </div>
+  </div>
+
+  <!-- FLOATING ACTIVE AUTO-SCRAPE CARD -->
+  <div id="active-scrape-floating" style="display: none; position: fixed; bottom: 20px; left: 20px; z-index: 9999; background: rgba(15, 23, 42, 0.95); border: 1px solid #0284c7; border-radius: 10px; padding: 12px 16px; width: 340px; box-shadow: 0 10px 25px rgba(0,0,0,0.6); backdrop-filter: blur(8px);">
+    <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6px;">
+      <div>
+        <span class="badge" style="background:#0284c7;color:#fff;font-size:10px;padding:2px 6px;">🎨 ĐANG CÀO DỮ LIỆU</span>
+        <span style="font-size: 13px; font-weight: 700; margin-left: 6px; color:#fff;" id="scrape-float-title">Game Title</span>
+      </div>
+      <button class="btn btn-secondary" onclick="cancelAutoScrape()" style="padding: 2px 8px; font-size: 11px;">✕ Hủy</button>
+    </div>
+    <div style="font-size: 11px; color: #94a3b8; margin-bottom: 4px;" id="scrape-float-sys">Hệ máy: SYS</div>
+    <div class="progress-track" style="margin: 6px 0; height: 8px; background: rgba(0,0,0,0.4);">
+      <div class="progress-fill" id="scrape-float-progress-fill" style="background: #0284c7; width: 0%;"></div>
+    </div>
+    <div style="display: flex; justify-content: space-between; font-size: 11px; color: #e2e8f0;">
+      <span id="scrape-float-count">0 / 0</span>
+      <span id="scrape-float-pct">0%</span>
     </div>
   </div>
 
@@ -1149,6 +1378,7 @@ std::string WebServer::buildHtmlResponse() {
   <script>
     let currentTab = 'tab-roms';
     let isDriveLinked = false;
+    let canUploadGlobal = false;
     let currentViewMode = localStorage.getItem('romcloud_view_mode') || 'grid';
     let currentSystemId = 0;
     let currentStateFilter = -1;
@@ -1158,6 +1388,8 @@ std::string WebServer::buildHtmlResponse() {
     let maxPagesCache = 1;
     let searchDebounceTimer = null;
     let dlPollTimer = null;
+    let uploadPollTimer = null;
+    let scrapePollTimer = null;
     let systemsCache = [];
     let lastLoadedGames = null;
 
@@ -1170,6 +1402,9 @@ std::string WebServer::buildHtmlResponse() {
       loadStorageInfo();
       loadGames();
       startPolling();
+      pollUploadProgress();
+      pollScrapeProgress();
+      loadScreenScraperConfig();
       setTimeout(() => checkOtaUpdate(true), 1200);
       setInterval(() => checkOtaUpdate(true), 180000);
     });
@@ -1223,7 +1458,10 @@ std::string WebServer::buildHtmlResponse() {
       currentTab = tabId;
 
       if (tabId === 'tab-queue') updateDownloadQueueUI();
-      if (tabId === 'tab-storage') loadStorageInfo();
+      if (tabId === 'tab-storage') {
+        loadStorageInfo();
+        loadScreenScraperConfig();
+      }
     }
 
     async function loadSystems() {
@@ -1359,33 +1597,38 @@ std::string WebServer::buildHtmlResponse() {
         let statusPillText = '';
         const detailBtn = `<button class="btn btn-secondary" onclick="openGameModal(${g.id})" title="Xem chi tiết & Cốt truyện game">ℹ️ Chi tiết</button>`;
         const scrapeBtn = `<button class="btn btn-secondary" onclick="scrapeBoxart(${g.id})" title="Cào ảnh bìa & thông tin game">🎨 Scrape</button>`;
+        let tableActions = '';
+        let gridActions = '';
 
         if (g.local_state === 1) {
-          statusBadge = `<span class="status-badge status-local">🟢 Đã tải</span>`;
+          statusBadge = `<span class="status-badge status-local" title="ROM này đã có trên thẻ nhớ TrimUI">🟢 Trên thẻ SD</span>`;
           statusPillClass = 'status-local';
-          statusPillText = '🟢 Đã tải';
+          statusPillText = '🟢 Trên thẻ SD';
+          const backupBtn = `<button class="btn btn-primary" onclick="uploadGameToDrive(${g.id}, '${escapeHtml(g.title)}')" style="background:var(--purple);border-color:#9333ea;" title="Sao lưu ROM này từ thẻ nhớ lên Google Drive cá nhân (/RomCloud_Backup)">📤 Sao lưu</button>`;
           tableActions = `
+            ${backupBtn}
             ${detailBtn}
             ${scrapeBtn}
             <button class="btn btn-danger" onclick="deleteRom(${g.id}, '${escapeHtml(g.title)}')">🗑️ Xóa</button>
           `;
           gridActions = `
+            ${backupBtn}
             ${detailBtn}
             ${scrapeBtn}
             <button class="btn btn-danger" onclick="deleteRom(${g.id}, '${escapeHtml(g.title)}')">🗑️ Xóa</button>
           `;
         } else if (g.in_queue) {
-          statusBadge = `<span class="status-badge status-queue">⏳ Hàng đợi</span>`;
+          statusBadge = `<span class="status-badge status-queue" title="Đang chờ tải về máy TrimUI">⏳ Đang tải về</span>`;
           statusPillClass = 'status-queue';
-          statusPillText = '⏳ Hàng đợi';
+          statusPillText = '⏳ Đang tải';
           tableActions = `${detailBtn} ${scrapeBtn} <button class="btn btn-secondary" onclick="removeFromQueue(${g.id})">✕ Bỏ</button>`;
           gridActions = `${detailBtn} ${scrapeBtn} <button class="btn btn-secondary" onclick="removeFromQueue(${g.id})">✕ Bỏ</button>`;
         } else {
-          statusBadge = `<span class="status-badge status-cloud">☁️ Cloud</span>`;
+          statusBadge = `<span class="status-badge status-cloud" title="ROM trên kho Google Drive công khai, chưa tải về thẻ nhớ">☁️ Kho Public</span>`;
           statusPillClass = 'status-cloud';
-          statusPillText = '☁️ Cloud';
-          tableActions = `${detailBtn} ${scrapeBtn} <button class="btn btn-primary" onclick="downloadGame(${g.id})">📥 Tải về</button>`;
-          gridActions = `${detailBtn} ${scrapeBtn} <button class="btn btn-primary" onclick="downloadGame(${g.id})">📥 Tải về</button>`;
+          statusPillText = '☁️ Kho Public';
+          tableActions = `${detailBtn} ${scrapeBtn} <button class="btn btn-primary" onclick="downloadGame(${g.id})" title="Tải ROM này từ kho Public về thẻ nhớ TrimUI">📥 Tải về máy</button>`;
+          gridActions = `${detailBtn} ${scrapeBtn} <button class="btn btn-primary" onclick="downloadGame(${g.id})" title="Tải ROM này từ kho Public về thẻ nhớ TrimUI">📥 Tải về máy</button>`;
         }
 
         let metaBadges = '';
@@ -1502,6 +1745,11 @@ std::string WebServer::buildHtmlResponse() {
           img.style.display = 'none';
           placeholder.style.display = 'block';
         }
+
+        const backupModalBtn = document.getElementById('btn-modal-backup');
+        if (backupModalBtn) {
+          backupModalBtn.style.display = (g.local_state === 1) ? 'inline-block' : 'none';
+        }
       } catch (e) {
         showToast('Lỗi khi tải chi tiết game.');
       }
@@ -1517,7 +1765,7 @@ std::string WebServer::buildHtmlResponse() {
       const btn = document.getElementById('btn-modal-scrape');
       const origText = btn ? btn.innerHTML : '🎨 Cào lại Bìa & Thông tin';
       if (btn) { btn.disabled = true; btn.innerHTML = '⏳ Đang cào dữ liệu...'; }
-      showToast('⏳ Đang tìm kiếm ảnh bìa và thông tin cốt truyện trên Libretro & Wikipedia...');
+      showToast('⏳ Đang tìm kiếm ảnh bìa và thông tin trên ScreenScraper & Libretro...');
 
       try {
         const res = await fetch('/api/scrape_cover', {
@@ -1534,6 +1782,12 @@ std::string WebServer::buildHtmlResponse() {
       } finally {
         if (btn) { btn.disabled = false; btn.innerHTML = origText; }
       }
+    }
+
+    async function uploadCurrentModalGame() {
+      if (!currentModalGameId) return;
+      const title = document.getElementById('modal-game-title').textContent || 'ROM';
+      await uploadGameToDrive(currentModalGameId, title);
     }
 
     // Actions
@@ -1574,7 +1828,7 @@ std::string WebServer::buildHtmlResponse() {
     }
 
     async function scrapeBoxart(gameId) {
-      showToast('⏳ Đang tìm kiếm ảnh bìa và thông tin game trên Libretro & Wikipedia...');
+      showToast('⏳ Đang tìm kiếm ảnh bìa và thông tin trên ScreenScraper & Libretro...');
       try {
         const res = await fetch('/api/scrape_cover', {
           method: 'POST',
@@ -1632,6 +1886,155 @@ std::string WebServer::buildHtmlResponse() {
       loadGames();
     }
 
+    // Auto-scrape all SD Card ROMs in background
+    async function startAutoScrapeSd(force = false) {
+      if (!confirm('Tự động cào ảnh bìa và thông tin cốt truyện cho các ROM trên thẻ nhớ (chạy ngầm)?\n\nNguồn dữ liệu: ScreenScraper.fr & Libretro Thumbnails chính thức (Không dùng Wikipedia).')) {
+        return;
+      }
+      try {
+        const res = await fetch('/api/auto_scrape_sd', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: `force=${force ? '1' : '0'}`
+        });
+        const data = await res.json();
+        showToast(data.message || 'Đã khởi chạy tiến trình cào tự động!');
+        startScrapePolling();
+      } catch (e) {
+        showToast('❌ Lỗi khi khởi chạy cào tự động.');
+      }
+    }
+
+    function startScrapePolling() {
+      if (scrapePollTimer) return;
+      pollScrapeProgress();
+      scrapePollTimer = setInterval(pollScrapeProgress, 1200);
+    }
+
+    async function pollScrapeProgress() {
+      try {
+        const res = await fetch('/api/auto_scrape_status');
+        const data = await res.json();
+        const card = document.getElementById('active-scrape-floating');
+        if (!data.is_scraping) {
+          if (card) card.style.display = 'none';
+          if (scrapePollTimer) {
+            clearInterval(scrapePollTimer);
+            scrapePollTimer = null;
+          }
+          return;
+        }
+
+        if (card) card.style.display = 'block';
+        const titleEl = document.getElementById('scrape-float-title');
+        const sysEl = document.getElementById('scrape-float-sys');
+        const fillEl = document.getElementById('scrape-float-progress-fill');
+        const countEl = document.getElementById('scrape-float-count');
+        const pctEl = document.getElementById('scrape-float-pct');
+
+        if (titleEl) titleEl.textContent = data.current_game || 'ROM Game';
+        if (sysEl) sysEl.textContent = `Hệ máy: ${data.current_sys || 'SYS'} (${data.scraped}/${data.total} game)`;
+        if (fillEl) fillEl.style.width = (data.progress_pct || 0) + '%';
+        if (countEl) countEl.textContent = `Đã cào: ${data.scraped} / ${data.total} (${data.success} thành công)`;
+        if (pctEl) pctEl.textContent = `${data.progress_pct || 0}%`;
+      } catch (e) {}
+    }
+
+    async function cancelAutoScrape() {
+      if (!confirm('Bạn có chắc chắn muốn hủy quá trình cào tự động ROM trên thẻ?')) return;
+      try {
+        await fetch('/api/cancel_auto_scrape', { method: 'POST' });
+        showToast('Đã gửi yêu cầu hủy cào tự động.');
+        const card = document.getElementById('active-scrape-floating');
+        if (card) card.style.display = 'none';
+        if (scrapePollTimer) {
+          clearInterval(scrapePollTimer);
+          scrapePollTimer = null;
+        }
+      } catch (e) {}
+    }
+
+    async function loadScreenScraperConfig() {
+      try {
+        const res = await fetch('/api/screenscraper_config');
+        const data = await res.json();
+        const userInput = document.getElementById('input-ss-user');
+        const devInput = document.getElementById('input-ss-devid');
+        const passInput = document.getElementById('input-ss-pass');
+        if (userInput && data.user) userInput.value = data.user;
+        if (devInput && data.dev_id) devInput.value = data.dev_id;
+        if (passInput && data.has_pass) passInput.placeholder = '•••••••• (Đã lưu mật khẩu)';
+      } catch (e) {}
+    }
+
+    async function saveScreenScraperConfig(e) {
+      e.preventDefault();
+      const user = (document.getElementById('input-ss-user')?.value || '').trim();
+      const pass = (document.getElementById('input-ss-pass')?.value || '').trim();
+      const devId = (document.getElementById('input-ss-devid')?.value || '').trim();
+      const devPass = (document.getElementById('input-ss-devpass')?.value || '').trim();
+
+      const params = new URLSearchParams();
+      params.append('user', user);
+      if (pass) params.append('pass', pass);
+      if (devId) params.append('dev_id', devId);
+      if (devPass) params.append('dev_pass', devPass);
+
+      try {
+        const res = await fetch('/api/save_screenscraper_config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: params.toString()
+        });
+        const data = await res.json();
+        showToast(data.message || 'Đã lưu cấu hình ScreenScraper.fr');
+        const st = document.getElementById('ss-test-status');
+        if (st) {
+          st.style.display = 'block';
+          st.innerHTML = '<span style="color:var(--green);">✅ Đã lưu cấu hình. Hãy bấm "Kiểm tra kết nối" để xác thực tài khoản.</span>';
+        }
+      } catch (e) {
+        showToast('❌ Lỗi lưu cấu hình.');
+      }
+    }
+
+    async function testScreenScraperConn() {
+      const user = (document.getElementById('input-ss-user')?.value || '').trim();
+      const pass = (document.getElementById('input-ss-pass')?.value || '').trim();
+      const devId = (document.getElementById('input-ss-devid')?.value || '').trim();
+      const devPass = (document.getElementById('input-ss-devpass')?.value || '').trim();
+
+      const st = document.getElementById('ss-test-status');
+      if (st) {
+        st.style.display = 'block';
+        st.innerHTML = '<span style="color:var(--accent);">⏳ Đang kết nối đến API ScreenScraper.fr...</span>';
+      }
+
+      const params = new URLSearchParams();
+      params.append('user', user);
+      if (pass) params.append('pass', pass);
+      if (devId) params.append('dev_id', devId);
+      if (devPass) params.append('dev_pass', devPass);
+
+      try {
+        const res = await fetch('/api/test_screenscraper', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: params.toString()
+        });
+        const data = await res.json();
+        if (st) {
+          if (data.success) {
+            st.innerHTML = `<span style="color:var(--green);">🟢 ${escapeHtml(data.message)}</span>`;
+          } else {
+            st.innerHTML = `<span style="color:var(--red);">🔴 ${escapeHtml(data.message)}</span>`;
+          }
+        }
+      } catch (e) {
+        if (st) st.innerHTML = '<span style="color:var(--red);">🔴 Lỗi kết nối kiểm tra.</span>';
+      }
+    }
+
     async function cancelActiveDownload() {
       if (!confirm('Bạn có chắc chắn muốn hủy lượt tải game hiện tại?')) return;
       try {
@@ -1663,6 +2066,114 @@ std::string WebServer::buildHtmlResponse() {
         showToast('Đã xóa sạch hàng đợi.');
         updateDownloadQueueUI();
         loadGames();
+      } catch (e) {}
+    }
+
+    // Google Drive Personal Backup Actions
+    async function uploadGameToDrive(gameId, title) {
+      if (!canUploadGlobal) {
+        if (confirm('⚠️ Bạn chưa cấp Token Google Drive cá nhân để sao lưu!\n\nBạn có muốn chuyển sang Tab "Cài đặt Cloud" để nhập Refresh Token hoặc Access Token theo hướng dẫn không?')) {
+          switchTab('tab-storage');
+        }
+        return;
+      }
+
+      if (!confirm(`Sao lưu ROM "${title}" từ thẻ nhớ TrimUI lên thư mục /RomCloud_Backup trên Google Drive cá nhân của bạn?`)) {
+        return;
+      }
+
+      try {
+        const res = await fetch('/api/upload_game', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: `game_id=${gameId}`
+        });
+        const data = await res.json();
+        if (data.success) {
+          showToast(data.message || 'Đã bắt đầu sao lưu ROM lên Google Drive!');
+          startUploadPolling();
+        } else {
+          showToast('⚠️ ' + (data.message || 'Không thể bắt đầu sao lưu.'));
+        }
+      } catch (e) {
+        showToast('❌ Lỗi khi gửi yêu cầu sao lưu.');
+      }
+    }
+
+    async function uploadAllGamesToDrive() {
+      if (!canUploadGlobal) {
+        if (confirm('⚠️ Bạn chưa cài đặt Token Google Drive cá nhân để cấp quyền sao lưu!\n\nBạn có muốn chuyển sang Tab "Cài đặt Cloud" để nhập Refresh Token hoặc Access Token theo hướng dẫn không?')) {
+          switchTab('tab-storage');
+        }
+        return;
+      }
+
+      if (!confirm('Bạn có muốn sao lưu TOÀN BỘ game hiện có trên thẻ nhớ TrimUI lên thư mục /RomCloud_Backup trên Google Drive cá nhân của bạn?\n\nQuá trình sao lưu sẽ chạy ngầm lần lượt từng game.')) {
+        return;
+      }
+
+      try {
+        const res = await fetch('/api/upload_all', { method: 'POST' });
+        const data = await res.json();
+        if (data.success) {
+          showToast(data.message || 'Đã bắt đầu sao lưu toàn bộ thẻ nhớ lên Google Drive!');
+          startUploadPolling();
+        } else {
+          showToast('⚠️ ' + (data.message || 'Không thể bắt đầu sao lưu.'));
+        }
+      } catch (e) {
+        showToast('❌ Lỗi khi gửi yêu cầu sao lưu toàn bộ.');
+      }
+    }
+
+    function startUploadPolling() {
+      if (uploadPollTimer) return;
+      pollUploadProgress();
+      uploadPollTimer = setInterval(pollUploadProgress, 1200);
+    }
+
+    async function pollUploadProgress() {
+      try {
+        const res = await fetch('/api/upload_status');
+        const data = await res.json();
+        const floatCard = document.getElementById('active-upload-floating');
+        if (!data.in_progress) {
+          if (floatCard) floatCard.style.display = 'none';
+          if (uploadPollTimer) {
+            clearInterval(uploadPollTimer);
+            uploadPollTimer = null;
+          }
+          return;
+        }
+
+        if (floatCard) floatCard.style.display = 'block';
+        const titleEl = document.getElementById('upload-float-title');
+        const fileEl = document.getElementById('upload-float-file');
+        const fillEl = document.getElementById('upload-float-progress-fill');
+        const speedEl = document.getElementById('upload-float-speed');
+        const pctEl = document.getElementById('upload-float-percent');
+        const bytesEl = document.getElementById('upload-float-bytes');
+
+        if (titleEl) titleEl.textContent = data.current_game || 'Game ROM';
+        if (fileEl) fileEl.textContent = `${data.current_file || ''} (${data.uploaded_count}/${data.total_games} game)`;
+        if (fillEl) fillEl.style.width = (data.progress_pct || 0) + '%';
+        if (speedEl) speedEl.textContent = `${data.speed_kbps || 0} KB/s`;
+        if (pctEl) pctEl.textContent = `${data.progress_pct || 0}%`;
+        if (bytesEl) bytesEl.textContent = `${data.uploaded_mb || '0'} / ${data.total_mb || '0'} MB`;
+      } catch (e) {}
+    }
+
+    async function cancelActiveUpload() {
+      if (!confirm('Bạn có chắc chắn muốn hủy quá trình sao lưu hiện tại?')) return;
+      try {
+        await fetch('/api/cancel_upload', { method: 'POST' });
+        showToast('Đã gửi yêu cầu hủy sao lưu.');
+        const floatCard = document.getElementById('active-upload-floating');
+        if (floatCard) floatCard.style.display = 'none';
+        if (uploadPollTimer) {
+          clearInterval(uploadPollTimer);
+          uploadPollTimer = null;
+        }
       } catch (e) {}
     }
 
@@ -1769,6 +2280,26 @@ std::string WebServer::buildHtmlResponse() {
           } else {
             backupBadge.innerHTML = `<span style="color:var(--yellow);">⚪ Chưa kích hoạt</span> (Chế độ hiện tại chỉ cho phép tải về)`;
             if (btnClearToken) btnClearToken.style.display = 'none';
+          }
+        }
+
+        canUploadGlobal = !!data.can_upload;
+
+        // Update Architecture Banner cards in Tab 1
+        const archPublicUrl = document.getElementById('arch-public-url');
+        if (archPublicUrl) {
+          archPublicUrl.textContent = data.is_linked ? (data.drive_url || 'Đã liên kết kho ROM') : 'Chưa kết nối kho ROM';
+        }
+        const archLocalStatus = document.getElementById('arch-local-status');
+        if (archLocalStatus) {
+          archLocalStatus.innerHTML = `${data.total_local || 0} ROMs trên thẻ • <span style="color:var(--text-dim);">${data.avail_str || '--'} trống</span>`;
+        }
+        const archBackupBadge = document.getElementById('arch-backup-badge');
+        if (archBackupBadge) {
+          if (data.can_upload) {
+            archBackupBadge.innerHTML = `<span style="color:var(--green);">🟢 Sẵn sàng sao lưu</span> (${escapeHtml(data.user_email || 'Drive cá nhân')})`;
+          } else {
+            archBackupBadge.innerHTML = `<span style="color:var(--yellow);">⚪ Chưa cấp Token sao lưu</span>`;
           }
         }
 
@@ -2505,7 +3036,7 @@ void WebServer::handleClient(int clientFd) {
                     if (ok) {
                         msg = "Đã cập nhật ảnh bìa & thông tin cho \"" + (title.empty() ? g.title : title) + "\"!";
                     } else {
-                        msg = "Không tìm thấy dữ liệu trên Libretro / Wikipedia.";
+                        msg = "Không tìm thấy dữ liệu trên ScreenScraper.fr / Libretro.";
                     }
                 }
             }
@@ -2520,6 +3051,105 @@ void WebServer::handleClient(int clientFd) {
         json += "\"description\":\"" + escapeJson(desc) + "\",";
         json += "\"message\":\"" + escapeJson(msg) + "\"";
         json += "}";
+        std::string res = "HTTP/1.1 200 OK\r\n"
+                          "Content-Type: application/json; charset=UTF-8\r\n"
+                          "Access-Control-Allow-Origin: *\r\n"
+                          "Content-Length: " + std::to_string(json.length()) + "\r\n"
+                          "Connection: close\r\n\r\n" + json;
+        send(clientFd, res.c_str(), res.length(), 0);
+    } else if (method == "POST" && path == "/api/auto_scrape_sd") {
+        bool force = (extractPostParam(postBody, "force") == "1");
+        bool started = BoxartScraper::instance().startAutoScrapeSdCard(force);
+        std::string msg = started ? "Đã bắt đầu tự động cào ảnh bìa và thông tin cho ROM trên thẻ SD." :
+                                    "Không có ROM nào trên thẻ cần cào hoặc tiến trình đang chạy.";
+        std::string json = "{\"success\":" + std::string(started ? "true" : "false") + ",\"message\":\"" + escapeJson(msg) + "\"}";
+        std::string res = "HTTP/1.1 200 OK\r\n"
+                          "Content-Type: application/json; charset=UTF-8\r\n"
+                          "Access-Control-Allow-Origin: *\r\n"
+                          "Content-Length: " + std::to_string(json.length()) + "\r\n"
+                          "Connection: close\r\n\r\n" + json;
+        send(clientFd, res.c_str(), res.length(), 0);
+    } else if (method == "GET" && path == "/api/auto_scrape_status") {
+        auto st = BoxartScraper::instance().getAutoScrapeStatus();
+        std::string json = "{";
+        json += "\"is_scraping\":" + std::string(st.isScraping ? "true" : "false") + ",";
+        json += "\"total\":" + std::to_string(st.totalGames) + ",";
+        json += "\"scraped\":" + std::to_string(st.scrapedCount) + ",";
+        json += "\"success\":" + std::to_string(st.successCount) + ",";
+        json += "\"progress_pct\":" + std::to_string(st.progressPct) + ",";
+        json += "\"current_game\":\"" + escapeJson(st.currentGame) + "\",";
+        json += "\"current_sys\":\"" + escapeJson(st.currentSystem) + "\",";
+        json += "\"message\":\"" + escapeJson(st.lastMessage) + "\"";
+        json += "}";
+        std::string res = "HTTP/1.1 200 OK\r\n"
+                          "Content-Type: application/json; charset=UTF-8\r\n"
+                          "Access-Control-Allow-Origin: *\r\n"
+                          "Content-Length: " + std::to_string(json.length()) + "\r\n"
+                          "Connection: close\r\n\r\n" + json;
+        send(clientFd, res.c_str(), res.length(), 0);
+    } else if (method == "POST" && path == "/api/cancel_auto_scrape") {
+        BoxartScraper::instance().cancelAutoScrape();
+        std::string json = "{\"success\":true,\"message\":\"Đã gửi yêu cầu hủy cào tự động.\"}";
+        std::string res = "HTTP/1.1 200 OK\r\n"
+                          "Content-Type: application/json; charset=UTF-8\r\n"
+                          "Access-Control-Allow-Origin: *\r\n"
+                          "Content-Length: " + std::to_string(json.length()) + "\r\n"
+                          "Connection: close\r\n\r\n" + json;
+        send(clientFd, res.c_str(), res.length(), 0);
+    } else if (method == "GET" && path == "/api/screenscraper_config") {
+        std::string user = DatabaseManager::instance().getSetting("screenscraper_user", "");
+        std::string devId = DatabaseManager::instance().getSetting("screenscraper_devid", "");
+        bool hasPass = !DatabaseManager::instance().getSetting("screenscraper_pass", "").empty();
+        std::string json = "{";
+        json += "\"user\":\"" + escapeJson(user) + "\",";
+        json += "\"dev_id\":\"" + escapeJson(devId) + "\",";
+        json += "\"has_pass\":" + std::string(hasPass ? "true" : "false");
+        json += "}";
+        std::string res = "HTTP/1.1 200 OK\r\n"
+                          "Content-Type: application/json; charset=UTF-8\r\n"
+                          "Access-Control-Allow-Origin: *\r\n"
+                          "Content-Length: " + std::to_string(json.length()) + "\r\n"
+                          "Connection: close\r\n\r\n" + json;
+        send(clientFd, res.c_str(), res.length(), 0);
+    } else if (method == "POST" && path == "/api/save_screenscraper_config") {
+        std::string user = extractPostParam(postBody, "user");
+        std::string pass = extractPostParam(postBody, "pass");
+        std::string devId = extractPostParam(postBody, "dev_id");
+        std::string devPass = extractPostParam(postBody, "dev_pass");
+
+        DatabaseManager::instance().setSetting("screenscraper_user", user);
+        if (!pass.empty()) {
+            DatabaseManager::instance().setSetting("screenscraper_pass", pass);
+        }
+        if (!devId.empty()) {
+            DatabaseManager::instance().setSetting("screenscraper_devid", devId);
+        }
+        if (!devPass.empty()) {
+            DatabaseManager::instance().setSetting("screenscraper_devpass", devPass);
+        }
+
+        std::string json = "{\"success\":true,\"message\":\"Đã lưu cấu hình ScreenScraper.fr thành công!\"}";
+        std::string res = "HTTP/1.1 200 OK\r\n"
+                          "Content-Type: application/json; charset=UTF-8\r\n"
+                          "Access-Control-Allow-Origin: *\r\n"
+                          "Content-Length: " + std::to_string(json.length()) + "\r\n"
+                          "Connection: close\r\n\r\n" + json;
+        send(clientFd, res.c_str(), res.length(), 0);
+    } else if (method == "POST" && path == "/api/test_screenscraper") {
+        std::string user = extractPostParam(postBody, "user");
+        std::string pass = extractPostParam(postBody, "pass");
+        std::string devId = extractPostParam(postBody, "dev_id");
+        std::string devPass = extractPostParam(postBody, "dev_pass");
+
+        if (pass.empty()) {
+            pass = DatabaseManager::instance().getSetting("screenscraper_pass", "");
+        }
+
+        std::string errMsg;
+        bool ok = BoxartScraper::instance().testScreenScraperAuth(user, pass, devId, devPass, errMsg);
+        std::string msg = ok ? "Kết nối ScreenScraper.fr thành công!" : errMsg;
+
+        std::string json = "{\"success\":" + std::string(ok ? "true" : "false") + ",\"message\":\"" + escapeJson(msg) + "\"}";
         std::string res = "HTTP/1.1 200 OK\r\n"
                           "Content-Type: application/json; charset=UTF-8\r\n"
                           "Access-Control-Allow-Origin: *\r\n"
@@ -2684,6 +3314,71 @@ void WebServer::handleClient(int clientFd) {
                               "Connection: close\r\n\r\n" + json;
             send(clientFd, res.c_str(), res.length(), 0);
         }
+    } else if (method == "POST" && path == "/api/upload_game") {
+        if (!AuthManager::instance().canUpload()) {
+            std::string json = "{\"success\":false,\"error\":\"Chưa kích hoạt quyền sao lưu! Vui lòng vào tab 'Đồng bộ & Thẻ nhớ' để nạp Google Token cá nhân trước.\"}";
+            std::string res = "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json; charset=UTF-8\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: " + std::to_string(json.length()) + "\r\nConnection: close\r\n\r\n" + json;
+            send(clientFd, res.c_str(), res.length(), 0);
+        } else {
+            std::string gameIdStr = extractPostParam(postBody, "game_id");
+            int64_t gameId = 0;
+            try { gameId = std::stoll(gameIdStr); } catch (...) {}
+            if (gameId > 0) {
+                UploadManager::instance().startUploadGames({gameId});
+                std::string json = "{\"success\":true,\"message\":\"Đang bắt đầu sao lưu game lên Google Drive cá nhân...\"}";
+                std::string res = "HTTP/1.1 200 OK\r\nContent-Type: application/json; charset=UTF-8\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: " + std::to_string(json.length()) + "\r\nConnection: close\r\n\r\n" + json;
+                send(clientFd, res.c_str(), res.length(), 0);
+            } else {
+                std::string json = "{\"success\":false,\"error\":\"ID game không hợp lệ.\"}";
+                std::string res = "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json; charset=UTF-8\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: " + std::to_string(json.length()) + "\r\nConnection: close\r\n\r\n" + json;
+                send(clientFd, res.c_str(), res.length(), 0);
+            }
+        }
+    } else if (method == "POST" && path == "/api/upload_all") {
+        if (!AuthManager::instance().canUpload()) {
+            std::string json = "{\"success\":false,\"error\":\"Chưa kích hoạt quyền sao lưu! Vui lòng vào tab 'Đồng bộ & Thẻ nhớ' để nạp Google Token cá nhân trước.\"}";
+            std::string res = "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json; charset=UTF-8\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: " + std::to_string(json.length()) + "\r\nConnection: close\r\n\r\n" + json;
+            send(clientFd, res.c_str(), res.length(), 0);
+        } else {
+            UploadManager::instance().startReverseSync();
+            std::string json = "{\"success\":true,\"message\":\"Đang bắt đầu sao lưu toàn bộ game trên thẻ nhớ lên Google Drive cá nhân...\"}";
+            std::string res = "HTTP/1.1 200 OK\r\nContent-Type: application/json; charset=UTF-8\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: " + std::to_string(json.length()) + "\r\nConnection: close\r\n\r\n" + json;
+            send(clientFd, res.c_str(), res.length(), 0);
+        }
+    } else if (method == "GET" && path == "/api/upload_status") {
+        auto prog = UploadManager::instance().getProgress();
+        bool isUp = UploadManager::instance().isUploading();
+        std::string stateStr = "IDLE";
+        if (prog.state == UploadState::PREPARING) stateStr = "PREPARING";
+        else if (prog.state == UploadState::UPLOADING) stateStr = "UPLOADING";
+        else if (prog.state == UploadState::COMPLETED) stateStr = "COMPLETED";
+        else if (prog.state == UploadState::FAILED) stateStr = "FAILED";
+        else if (prog.state == UploadState::CANCELLED) stateStr = "CANCELLED";
+
+        std::string json = "{";
+        json += "\"is_uploading\":" + std::string(isUp ? "true" : "false") + ",";
+        json += "\"state\":\"" + stateStr + "\",";
+        json += "\"game_title\":\"" + escapeJson(prog.gameTitle) + "\",";
+        json += "\"filename\":\"" + escapeJson(prog.filename) + "\",";
+        json += "\"system\":\"" + escapeJson(prog.systemCode) + "\",";
+        json += "\"progress_pct\":" + std::to_string(prog.progressPct) + ",";
+        json += "\"bytes_uploaded\":" + std::to_string(prog.bytesUploaded) + ",";
+        json += "\"total_bytes\":" + std::to_string(prog.totalBytes) + ",";
+        json += "\"speed_kbps\":" + std::to_string(prog.speedKBps) + ",";
+        json += "\"total_games\":" + std::to_string(prog.totalGames) + ",";
+        json += "\"current_index\":" + std::to_string(prog.currentIndex) + ",";
+        json += "\"games_uploaded\":" + std::to_string(prog.gamesUploaded) + ",";
+        json += "\"games_failed\":" + std::to_string(prog.gamesFailed) + ",";
+        json += "\"error\":\"" + escapeJson(prog.errorMessage) + "\"";
+        json += "}";
+
+        std::string res = "HTTP/1.1 200 OK\r\nContent-Type: application/json; charset=UTF-8\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: " + std::to_string(json.length()) + "\r\nConnection: close\r\n\r\n" + json;
+        send(clientFd, res.c_str(), res.length(), 0);
+    } else if (method == "POST" && path == "/api/cancel_upload") {
+        UploadManager::instance().cancel();
+        std::string json = "{\"success\":true,\"message\":\"Đã yêu cầu hủy sao lưu.\"}";
+        std::string res = "HTTP/1.1 200 OK\r\nContent-Type: application/json; charset=UTF-8\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: " + std::to_string(json.length()) + "\r\nConnection: close\r\n\r\n" + json;
+        send(clientFd, res.c_str(), res.length(), 0);
     } else if (method == "GET" && path == "/ota_check") {
         UpdateInfo info;
         bool hasUpdate = UpdateManager::instance().checkForUpdatesSync(info);
