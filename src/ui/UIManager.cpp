@@ -936,6 +936,21 @@ void UIManager::update() {
                         m_iptvScrollOffset = m_selectedIPTVChannelIndex - visibleItems + 1;
                     }
                 }
+            } else if (input.isButtonJustPressed(Button::L1)) {
+                if (channelCount > 0) {
+                    m_selectedIPTVChannelIndex = std::max(0, m_selectedIPTVChannelIndex - visibleItems);
+                    m_iptvScrollOffset = std::max(0, m_iptvScrollOffset - visibleItems);
+                    if (m_selectedIPTVChannelIndex < m_iptvScrollOffset) {
+                        m_iptvScrollOffset = m_selectedIPTVChannelIndex;
+                    }
+                }
+            } else if (input.isButtonJustPressed(Button::R1)) {
+                if (channelCount > 0) {
+                    m_selectedIPTVChannelIndex = std::min(channelCount - 1, m_selectedIPTVChannelIndex + visibleItems);
+                    if (m_selectedIPTVChannelIndex >= m_iptvScrollOffset + visibleItems) {
+                        m_iptvScrollOffset = std::min(std::max(0, channelCount - visibleItems), m_iptvScrollOffset + visibleItems);
+                    }
+                }
             } else if (input.isButtonJustPressed(Button::A)) {
                 if (channelCount > 0 && m_selectedIPTVChannelIndex >= 0 && m_selectedIPTVChannelIndex < channelCount) {
                     showToast("Đang kết nối: " + channels[m_selectedIPTVChannelIndex].name + "...", {0, 180, 216, 255}, 3000);
@@ -1091,6 +1106,21 @@ void UIManager::update() {
                         m_iptvSearchSelectedIndex++;
                         if (m_iptvSearchSelectedIndex >= m_iptvSearchScrollOffset + visibleItems) {
                             m_iptvSearchScrollOffset = m_iptvSearchSelectedIndex - visibleItems + 1;
+                        }
+                    }
+                } else if (input.isButtonJustPressed(Button::L1)) {
+                    if (resultCount > 0) {
+                        m_iptvSearchSelectedIndex = std::max(0, m_iptvSearchSelectedIndex - visibleItems);
+                        m_iptvSearchScrollOffset = std::max(0, m_iptvSearchScrollOffset - visibleItems);
+                        if (m_iptvSearchSelectedIndex < m_iptvSearchScrollOffset) {
+                            m_iptvSearchScrollOffset = m_iptvSearchSelectedIndex;
+                        }
+                    }
+                } else if (input.isButtonJustPressed(Button::R1)) {
+                    if (resultCount > 0) {
+                        m_iptvSearchSelectedIndex = std::min(resultCount - 1, m_iptvSearchSelectedIndex + visibleItems);
+                        if (m_iptvSearchSelectedIndex >= m_iptvSearchScrollOffset + visibleItems) {
+                            m_iptvSearchScrollOffset = std::min(std::max(0, resultCount - visibleItems), m_iptvSearchScrollOffset + visibleItems);
                         }
                     }
                 } else if (input.isButtonJustPressed(Button::LEFT)) {
@@ -3017,22 +3047,34 @@ void UIManager::renderIPTVState() {
             drawText(numBuf, 35, y + 16, {0, 180, 216, 255}, m_fontMedium);
 
             // Channel name
-            drawText(channels[i].name, 90, y + 15, {255, 255, 255, 255}, m_fontMedium);
-
-            // Favorite star badge
-            if (channels[i].isFavorite) {
-                drawBadge(720, y + 15, 36, 26, "★", {202, 138, 4, 255}, {255, 255, 255, 255});
+            std::string chanName = channels[i].name;
+            if (chanName.length() > 28) {
+                chanName = chanName.substr(0, 26) + "..";
             }
+            drawText(chanName, 85, y + 15, {255, 255, 255, 255}, m_fontMedium);
 
             // Playing indicator
             if (IPTVManager::instance().isPlaying() && IPTVManager::instance().getCurrentChannelName() == channels[i].name) {
-                drawText("● ĐANG PHÁT", 600, y + 18, {34, 197, 94, 255}, m_fontSmall);
+                drawText("● ĐANG PHÁT", 475, y + 18, {34, 197, 94, 255}, m_fontSmall);
             }
 
-            // Channel group tag on right side
-            if (!channels[i].group.empty()) {
-                drawText(channels[i].group, 840, y + 18, {130, 140, 155, 255}, m_fontSmall);
+            // Favorite star badge
+            if (channels[i].isFavorite) {
+                drawBadge(605, y + 15, 34, 26, "★", {202, 138, 4, 255}, {255, 255, 255, 255});
             }
+
+            // Channel group tag
+            if (!channels[i].group.empty()) {
+                std::string grp = channels[i].group;
+                if (grp.length() > 14) grp = grp.substr(0, 12) + "..";
+                drawText(grp, 650, y + 18, {130, 140, 155, 255}, m_fontSmall);
+            }
+
+            // Source name column on the far right
+            std::string srcText = channels[i].source.empty() ? "Mặc định" : channels[i].source;
+            if (srcText.length() > 18) srcText = srcText.substr(0, 16) + "..";
+            drawBadge(815, y + 14, 180, 28, srcText, {28, 42, 62, 255}, {147, 197, 253, 255});
+            drawRoundedBorder(815, y + 14, 180, 28, 6, {59, 130, 246, 120}, 1);
         }
     }
 
@@ -3041,8 +3083,8 @@ void UIManager::renderIPTVState() {
     drawRect(0, 715, 1024, 1, {40, 48, 62, 255}, true);
 
     std::string footerText = m_iptvShowFavoritesOnly
-        ? "[A] Phát trực tiếp   [B] Tất cả kênh   [X] Bỏ thích ★   [SELECT] Tìm kiếm"
-        : "[A] Phát trực tiếp   [B] Menu   [X] Thích ★   [Y] Lọc ★   [SELECT] Tìm kiếm";
+        ? "[A] Phát trực tiếp   [B] Tất cả kênh   [X] Bỏ thích ★   [L1/R1] Sang trang   [SELECT] Tìm kiếm"
+        : "[A] Phát trực tiếp   [B] Menu   [X] Thích ★   [Y] Lọc ★   [L1/R1] Sang trang   [SELECT] Tìm kiếm";
     drawText(footerText, 512, 730, {210, 220, 230, 255}, m_fontSmall, true);
 }
 
@@ -3141,17 +3183,29 @@ void UIManager::renderIPTVSearchState() {
             drawText(numBuf, rPanelX + 16, itemY + 16, {0, 180, 216, 255}, m_fontMedium);
 
             // Channel name
-            drawText(chan.name, rPanelX + 60, itemY + 15, {255, 255, 255, 255}, m_fontMedium);
+            std::string chanName = chan.name;
+            if (chanName.length() > 16) {
+                chanName = chanName.substr(0, 14) + "..";
+            }
+            drawText(chanName, rPanelX + 55, itemY + 15, {255, 255, 255, 255}, m_fontMedium);
 
             // Favorite star badge
             if (chan.isFavorite) {
-                drawBadge(rPanelX + rPanelW - 140, itemY + 15, 32, 26, "★", {202, 138, 4, 255}, {255, 255, 255, 255});
+                drawBadge(rPanelX + rPanelW - 225, itemY + 15, 28, 26, "★", {202, 138, 4, 255}, {255, 255, 255, 255});
             }
 
             // Group tag
             if (!chan.group.empty()) {
-                drawText(chan.group, rPanelX + rPanelW - 100, itemY + 18, {130, 140, 155, 255}, m_fontSmall);
+                std::string grp = chan.group;
+                if (grp.length() > 10) grp = grp.substr(0, 8) + "..";
+                drawText(grp, rPanelX + rPanelW - 190, itemY + 18, {130, 140, 155, 255}, m_fontSmall);
             }
+
+            // Source tag column
+            std::string src = chan.source.empty() ? "Nguồn" : chan.source;
+            if (src.length() > 9) src = src.substr(0, 8) + "..";
+            drawBadge(rPanelX + rPanelW - 95, itemY + 14, 90, 28, src, {28, 42, 62, 255}, {147, 197, 253, 255});
+            drawRoundedBorder(rPanelX + rPanelW - 95, itemY + 14, 90, 28, 6, {59, 130, 246, 120}, 1);
         }
     }
 
@@ -3161,7 +3215,7 @@ void UIManager::renderIPTVSearchState() {
 
     std::string footerText = (!m_iptvKbInResults)
         ? "[A] Nhập phím   [B] Trở về   [X] Xóa chữ   [OK / START] Xem kết quả"
-        : "[A] Phát kênh   [B] Bàn phím   [X] Thích ★   [▲ ▼] Chọn kênh";
+        : "[A] Phát kênh   [B] Bàn phím   [X] Thích ★   [L1/R1] Sang trang   [▲ ▼] Chọn kênh";
     drawText(footerText, 512, 730, {210, 220, 230, 255}, m_fontSmall, true);
 }
 

@@ -1222,80 +1222,287 @@ std::string WebServer::buildHtmlResponse() {
 
     <!-- TAB 4: IPTV -->
     <div id="tab-iptv" class="tab-content">
-      <div class="card" style="max-width: 700px; margin: 0 auto;">
-        <h3>📺 Quản lý IPTV</h3>
-        <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 16px;">
-          Upload file playlist .m3u để xem TV trực tuyến trên RomCloud.
-        </p>
+      <div style="max-width: 900px; margin: 0 auto;">
+        <div class="card" style="margin-bottom: 20px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <h3 style="margin: 0;">📺 Quản lý Nguồn Kênh IPTV</h3>
+            <span id="iptv-total-summary" style="font-size: 13px; font-weight: 600; color: var(--accent); background: rgba(0, 180, 216, 0.1); padding: 4px 10px; border-radius: 6px;">Đang tải...</span>
+          </div>
+          <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 16px;">
+            Thêm, quản lý hoặc xóa các nguồn danh sách kênh (.m3u, .m3u8 hoặc URL). Tên nguồn sẽ hiển thị trực tiếp ở <b>cột ngoài cùng bên phải</b> trên màn hình danh sách kênh máy TrimUI.
+          </p>
 
-        <!-- Upload Form -->
-        <div style="background: var(--card-alt); border-radius: 12px; padding: 20px; margin-bottom: 20px; border: 2px dashed var(--border);">
-          <h4 style="margin-bottom: 12px;">📤 Upload Playlist M3U</h4>
-          <input type="file" id="iptv-file" accept=".m3u,.m3u8" style="width: 100%; padding: 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; color: var(--text); margin-bottom: 12px;">
-          <button class="btn btn-primary" onclick="uploadIptvPlaylist()" style="width: 100%;">Upload Playlist</button>
+          <!-- Current Sources Table -->
+          <div style="margin-top: 15px;">
+            <h4 style="margin-bottom: 10px; display: flex; align-items: center; gap: 8px;">
+              📋 Danh sách nguồn kênh đã cài đặt
+              <button class="btn btn-secondary" onclick="loadIptvSources()" style="padding: 3px 8px; font-size: 11px;">🔄 Làm mới</button>
+            </h4>
+            <div id="iptv-sources-container" style="background: var(--card-alt); border-radius: 10px; border: 1px solid var(--border); overflow: hidden;">
+              <div style="padding: 20px; text-align: center; color: var(--text-muted);">Đang tải danh sách nguồn...</div>
+            </div>
+          </div>
         </div>
 
-        <!-- Quick Add URL -->
-        <div style="background: var(--card-alt); border-radius: 12px; padding: 20px; margin-bottom: 20px;">
-          <h4 style="margin-bottom: 12px;">🔗 Thêm URL Playlist</h4>
-          <input type="text" id="iptv-url" placeholder="https://example.com/playlist.m3u" style="width: 100%; padding: 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; color: var(--text); margin-bottom: 12px;">
-          <button class="btn btn-primary" onclick="addIptvUrl()" style="width: 100%;">Thêm URL</button>
-        </div>
+        <!-- Add Source Grid -->
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 20px;">
+          <!-- Quick Add URL -->
+          <div class="card">
+            <h4 style="margin-bottom: 8px;">🔗 Thêm nguồn từ URL</h4>
+            <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 14px;">
+              Dán link playlist M3U/M3U8 trực tiếp từ nhà mạng hoặc dịch vụ IPTV.
+            </p>
+            <div style="margin-bottom: 10px;">
+              <label style="font-size: 12px; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 4px;">Tên nguồn hiển thị (tùy chọn):</label>
+              <input type="text" id="iptv-url-name" placeholder="Ví dụ: Kênh Việt Nam, Thể Thao..." class="search-input" style="width: 100%; box-sizing: border-box; padding: 9px 12px;">
+            </div>
+            <div style="margin-bottom: 14px;">
+              <label style="font-size: 12px; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 4px;">Đường dẫn URL Playlist:</label>
+              <input type="text" id="iptv-url" placeholder="https://example.com/playlist.m3u" class="search-input" style="width: 100%; box-sizing: border-box; padding: 9px 12px;">
+            </div>
+            <button class="btn btn-primary" id="btn-add-iptv-url" onclick="addIptvUrl()" style="width: 100%; padding: 10px; font-weight: 600;">➕ Tải & Thêm Nguồn URL</button>
+            <div id="iptv-url-status" style="margin-top: 10px; font-size: 12.5px; display: none;"></div>
+          </div>
 
-        <!-- Current Playlists -->
-        <div style="background: var(--card-alt); border-radius: 12px; padding: 20px;">
-          <h4 style="margin-bottom: 12px;">📋 Playlist hiện có</h4>
-          <div id="iptv-playlist-list" style="color: var(--text-muted);">Đang tải...</div>
+          <!-- Upload Form -->
+          <div class="card">
+            <h4 style="margin-bottom: 8px;">📤 Tải lên file Playlist (.m3u, .m3u8)</h4>
+            <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 14px;">
+              Tải file playlist có sẵn trên máy tính/điện thoại của bạn lên máy TrimUI.
+            </p>
+            <div style="margin-bottom: 10px;">
+              <label style="font-size: 12px; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 4px;">Tên nguồn hiển thị (tùy chọn):</label>
+              <input type="text" id="iptv-file-name" placeholder="Để trống sẽ tự động lấy tên file" class="search-input" style="width: 100%; box-sizing: border-box; padding: 9px 12px;">
+            </div>
+            <div style="margin-bottom: 14px;">
+              <label style="font-size: 12px; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 4px;">Chọn file M3U/M3U8:</label>
+              <input type="file" id="iptv-file" accept=".m3u,.m3u8" style="width: 100%; box-sizing: border-box; padding: 8px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; color: var(--text);">
+            </div>
+            <button class="btn btn-primary" id="btn-upload-iptv" onclick="uploadIptvPlaylist()" style="width: 100%; padding: 10px; font-weight: 600;">📤 Upload Playlist</button>
+            <div id="iptv-file-status" style="margin-top: 10px; font-size: 12.5px; display: none;"></div>
+          </div>
         </div>
       </div>
 
       <script>
-        function uploadIptvPlaylist() {
-          const fileInput = document.getElementById('iptv-file');
-          if (!fileInput.files[0]) {
-            alert('Vui lòng chọn file playlist');
+        function formatBytes(bytes) {
+          if (!bytes || bytes === 0) return '0 B';
+          const k = 1024;
+          const sizes = ['B', 'KB', 'MB', 'GB'];
+          const i = Math.floor(Math.log(bytes) / Math.log(k));
+          return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+        }
+
+        function loadIptvSources() {
+          const container = document.getElementById('iptv-sources-container');
+          const summaryEl = document.getElementById('iptv-total-summary');
+          if (!container) return;
+          fetch('/api/iptv/sources')
+            .then(r => r.json())
+            .then(d => {
+              if (!d.success || !d.sources || d.sources.length === 0) {
+                container.innerHTML = '<div style="padding: 24px; text-align: center; color: var(--text-muted);">'
+                  + '<div style="font-size: 24px; margin-bottom: 6px;">📺</div>'
+                  + '<b>Chưa có nguồn kênh nào</b><br>'
+                  + '<span style="font-size: 12px;">Hãy thêm nguồn bằng đường link URL hoặc upload file playlist bên dưới.</span></div>';
+                if (summaryEl) summaryEl.textContent = '0 nguồn • 0 kênh';
+                return;
+              }
+
+              if (summaryEl) {
+                summaryEl.textContent = d.sources.length + ' nguồn • ' + (d.total_channels || 0) + ' kênh';
+              }
+
+              let html = '<table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 13px;">'
+                + '<thead style="background: rgba(255,255,255,0.03); border-bottom: 1px solid var(--border); color: var(--text-muted); font-size: 12px;">'
+                + '<tr>'
+                + '<th style="padding: 10px 14px;">TÊN NGUỒN</th>'
+                + '<th style="padding: 10px 14px;">LOẠI</th>'
+                + '<th style="padding: 10px 14px; text-align: center;">SỐ KÊNH</th>'
+                + '<th style="padding: 10px 14px; text-align: right;">DUNG LƯỢNG</th>'
+                + '<th style="padding: 10px 14px; text-align: center;">THAO TÁC</th>'
+                + '</tr>'
+                + '</thead><tbody>';
+
+              d.sources.forEach((s) => {
+                const isUrl = s.type === 'url';
+                const typeBadge = isUrl
+                  ? '<span style="background: #1e3a5f; color: #38bdf8; padding: 2px 7px; border-radius: 4px; font-size: 11px; font-weight: 600;">URL Link</span>'
+                  : '<span style="background: #1e293b; color: #94a3b8; padding: 2px 7px; border-radius: 4px; font-size: 11px; font-weight: 600;">File Upload</span>';
+                
+                const subText = isUrl ? (s.url || s.filename) : s.filename;
+
+                html += '<tr style="border-bottom: 1px solid var(--border);">'
+                  + '<td style="padding: 12px 14px;">'
+                  + '<div style="font-weight: 600; color: var(--text); font-size: 14px;">' + escapeHtml(s.name) + '</div>'
+                  + '<div style="font-size: 11.5px; color: var(--text-muted); word-break: break-all; max-width: 320px;" title="' + escapeHtml(subText) + '">' + escapeHtml(subText) + '</div>'
+                  + '</td>'
+                  + '<td style="padding: 12px 14px;">' + typeBadge + '</td>'
+                  + '<td style="padding: 12px 14px; text-align: center; font-weight: 600; color: var(--accent);">' + s.channels + '</td>'
+                  + '<td style="padding: 12px 14px; text-align: right; color: var(--text-muted);">' + formatBytes(s.size) + '</td>'
+                  + '<td style="padding: 12px 14px; text-align: center;">'
+                  + '<div style="display: flex; gap: 6px; justify-content: center;">';
+                
+                if (isUrl && s.url) {
+                  html += '<button class="btn btn-secondary" onclick="reloadIptvUrl(\'' + escapeHtml(s.url) + '\', \'' + escapeHtml(s.name) + '\')" style="padding: 4px 8px; font-size: 11.5px;" title="Tải lại kênh từ link">🔄</button>';
+                }
+                
+                html += '<button class="btn btn-danger" onclick="deleteIptvSource(\'' + escapeHtml(s.filename) + '\', \'' + escapeHtml(s.name) + '\')" style="padding: 4px 10px; font-size: 11.5px;">🗑️ Xóa</button>'
+                  + '</div>'
+                  + '</td>'
+                  + '</tr>';
+              });
+
+              html += '</tbody></table>';
+              container.innerHTML = html;
+            })
+            .catch(err => {
+              if (container) container.innerHTML = '<div style="padding: 16px; color: var(--red); text-align: center;">Lỗi tải danh sách: ' + err + '</div>';
+            });
+        }
+
+        function deleteIptvSource(filename, name) {
+          if (!confirm('Bạn có chắc muốn xóa nguồn kênh "' + name + '" (' + filename + ') không?')) {
             return;
           }
+          fetch('/api/iptv/delete?file=' + encodeURIComponent(filename))
+            .then(r => r.json())
+            .then(d => {
+              if (d.success) {
+                loadIptvSources();
+              } else {
+                alert('Lỗi xóa nguồn: ' + (d.error || 'Thất bại'));
+              }
+            })
+            .catch(e => alert('Lỗi kết nối: ' + e));
+        }
+
+        function reloadIptvUrl(url, name) {
+          if (!confirm('Tải lại danh sách kênh mới nhất từ "' + name + '"?')) return;
+          const statusEl = document.getElementById('iptv-url-status');
+          if (statusEl) {
+            statusEl.style.display = 'block';
+            statusEl.style.color = 'var(--accent)';
+            statusEl.textContent = '⏳ Đang làm mới nguồn kênh...';
+          }
+          fetch('/api/iptv/add?url=' + encodeURIComponent(url) + '&name=' + encodeURIComponent(name))
+            .then(r => r.json())
+            .then(d => {
+              if (d.success) {
+                if (statusEl) {
+                  statusEl.style.color = 'var(--green)';
+                  statusEl.textContent = '✅ Đã cập nhật: ' + d.channels + ' kênh!';
+                }
+                loadIptvSources();
+              } else {
+                if (statusEl) {
+                  statusEl.style.color = 'var(--red)';
+                  statusEl.textContent = '❌ Lỗi: ' + (d.error || 'Cập nhật thất bại');
+                }
+              }
+            })
+            .catch(e => {
+              if (statusEl) {
+                statusEl.style.color = 'var(--red)';
+                statusEl.textContent = '❌ Lỗi: ' + e;
+              }
+            });
+        }
+
+        function addIptvUrl() {
+          const urlInput = document.getElementById('iptv-url');
+          const nameInput = document.getElementById('iptv-url-name');
+          const btn = document.getElementById('btn-add-iptv-url');
+          const statusEl = document.getElementById('iptv-url-status');
+
+          const url = (urlInput.value || '').trim();
+          const name = (nameInput.value || '').trim();
+
+          if (!url) {
+            alert('Vui lòng nhập đường dẫn URL playlist');
+            urlInput.focus();
+            return;
+          }
+
+          btn.disabled = true;
+          btn.textContent = '⏳ Đang tải & phân tích kênh...';
+          statusEl.style.display = 'block';
+          statusEl.style.color = 'var(--accent)';
+          statusEl.textContent = 'Đang kết nối tới máy chủ IPTV và nạp danh sách kênh...';
+
+          fetch('/api/iptv/add?url=' + encodeURIComponent(url) + '&name=' + encodeURIComponent(name))
+            .then(r => r.json())
+            .then(d => {
+              btn.disabled = false;
+              btn.textContent = '➕ Tải & Thêm Nguồn URL';
+              if (d.success) {
+                statusEl.style.color = 'var(--green)';
+                statusEl.textContent = '✅ Đã thêm thành công! Tìm thấy ' + d.channels + ' kênh TV.';
+                urlInput.value = '';
+                nameInput.value = '';
+                loadIptvSources();
+              } else {
+                statusEl.style.color = 'var(--red)';
+                statusEl.textContent = '❌ Thất bại: ' + (d.error || 'Không thể tải danh sách');
+              }
+            })
+            .catch(err => {
+              btn.disabled = false;
+              btn.textContent = '➕ Tải & Thêm Nguồn URL';
+              statusEl.style.color = 'var(--red)';
+              statusEl.textContent = '❌ Lỗi kết nối: ' + err;
+            });
+        }
+
+        function uploadIptvPlaylist() {
+          const fileInput = document.getElementById('iptv-file');
+          const nameInput = document.getElementById('iptv-file-name');
+          const btn = document.getElementById('btn-upload-iptv');
+          const statusEl = document.getElementById('iptv-file-status');
+
+          if (!fileInput.files[0]) {
+            alert('Vui lòng chọn file playlist (.m3u, .m3u8)');
+            return;
+          }
+
+          const file = fileInput.files[0];
+          const name = (nameInput.value || '').trim();
+
+          btn.disabled = true;
+          btn.textContent = '⏳ Đang upload...';
+          statusEl.style.display = 'block';
+          statusEl.style.color = 'var(--accent)';
+          statusEl.textContent = 'Đang tải file lên máy TrimUI...';
+
           const formData = new FormData();
-          formData.append('file', fileInput.files[0]);
+          formData.append('file', file);
+          if (name) formData.append('name', name);
+
           fetch('/api/iptv/upload', { method: 'POST', body: formData })
             .then(r => r.json())
             .then(d => {
+              btn.disabled = false;
+              btn.textContent = '📤 Upload Playlist';
               if (d.success) {
-                alert('Upload thành công!');
-                loadIptvPlaylists();
+                statusEl.style.color = 'var(--green)';
+                statusEl.textContent = '✅ Upload thành công: ' + d.channels + ' kênh TV!';
+                fileInput.value = '';
+                nameInput.value = '';
+                loadIptvSources();
               } else {
-                alert('Lỗi: ' + d.error);
+                statusEl.style.color = 'var(--red)';
+                statusEl.textContent = '❌ Lỗi: ' + (d.error || 'Upload thất bại');
               }
+            })
+            .catch(err => {
+              btn.disabled = false;
+              btn.textContent = '📤 Upload Playlist';
+              statusEl.style.color = 'var(--red)';
+              statusEl.textContent = '❌ Lỗi kết nối: ' + err;
             });
         }
-        function addIptvUrl() {
-          const url = document.getElementById('iptv-url').value;
-          if (!url) return;
-          fetch('/api/iptv/add?url=' + encodeURIComponent(url))
-            .then(r => r.json())
-            .then(d => {
-              if (d.success) {
-                alert('Đã thêm URL!');
-                loadIptvPlaylists();
-              } else {
-                alert('Lỗi: ' + d.error);
-              }
-            });
-        }
-        function loadIptvPlaylists() {
-          fetch('/api/iptv/list')
-            .then(r => r.json())
-            .then(d => {
-              const el = document.getElementById('iptv-playlist-list');
-              if (d.playlists && d.playlists.length > 0) {
-                el.innerHTML = d.playlists.map(p => '<div style="padding: 8px; border-bottom: 1px solid var(--border);">' + p + '</div>').join('');
-              } else {
-                el.innerHTML = '<i>Chưa có playlist nào</i>';
-              }
-            });
-        }
-        loadIptvPlaylists();
+
+        loadIptvSources();
       </script>
     </div>
 
@@ -1607,6 +1814,9 @@ std::string WebServer::buildHtmlResponse() {
       if (tabId === 'tab-storage') {
         loadStorageInfo();
         loadScreenScraperConfig();
+      }
+      if (tabId === 'tab-iptv' && typeof loadIptvSources === 'function') {
+        loadIptvSources();
       }
     }
 
@@ -4016,34 +4226,33 @@ void WebServer::handleClient(int clientFd) {
         send(clientFd, res.c_str(), res.length(), 0);
         std::this_thread::sleep_for(std::chrono::milliseconds(500));
         Application::instance().requestRestart();
-    } else if (method == "GET" && path == "/api/iptv/list") {
-        // List IPTV playlists
-        std::vector<std::string> playlists;
-        std::string iptvDir = IPTVManager::instance().getIptvDir();
-        if (iptvDir.empty()) {
-            iptvDir = AppConfig::instance().getAppRoot() + "/iptv";
-        }
-        FileSystemManager::instance().createDirectoryRecursive(iptvDir);
-
-        DIR* dir = opendir(iptvDir.c_str());
-        if (dir) {
-            struct dirent* entry;
-            while ((entry = readdir(dir)) != nullptr) {
-                std::string name = entry->d_name;
-                if (name.length() > 4 && (name.substr(name.length()-4) == ".m3u" || name.substr(name.length()-5) == ".m3u8")) {
-                    playlists.push_back(name);
-                }
-            }
-            closedir(dir);
-        }
-        std::string json = "{";
-        json += "\"playlists\":[";
-        for (size_t i = 0; i < playlists.size(); i++) {
+    } else if (method == "GET" && path == "/api/iptv/sources") {
+        // Return structured IPTV sources with channel counts & metadata
+        auto sources = IPTVManager::instance().getSources();
+        size_t totalChannels = IPTVManager::instance().getChannels().size();
+        std::string json = "{\"success\":true,\"total_channels\":" + std::to_string(totalChannels) + ",\"sources\":[";
+        for (size_t i = 0; i < sources.size(); i++) {
             if (i > 0) json += ",";
-            json += "\"" + playlists[i] + "\"";
+            json += "{\"name\":\"" + escapeJson(sources[i].name) + "\","
+                 + "\"filename\":\"" + escapeJson(sources[i].filename) + "\","
+                 + "\"type\":\"" + escapeJson(sources[i].type) + "\","
+                 + "\"url\":\"" + escapeJson(sources[i].url) + "\","
+                 + "\"channels\":" + std::to_string(sources[i].channelCount) + ","
+                 + "\"size\":" + std::to_string(sources[i].fileSize) + "}";
         }
         json += "]}";
-        std::string res = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: " + std::to_string(json.length()) + "\r\n\r\n" + json;
+        std::string res = "HTTP/1.1 200 OK\r\nContent-Type: application/json; charset=UTF-8\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: " + std::to_string(json.length()) + "\r\nConnection: close\r\n\r\n" + json;
+        send(clientFd, res.c_str(), res.length(), 0);
+    } else if (method == "GET" && path == "/api/iptv/list") {
+        // List IPTV playlists (compatibility endpoint)
+        auto sources = IPTVManager::instance().getSources();
+        std::string json = "{\"playlists\":[";
+        for (size_t i = 0; i < sources.size(); i++) {
+            if (i > 0) json += ",";
+            json += "\"" + escapeJson(sources[i].filename) + "\"";
+        }
+        json += "]}";
+        std::string res = "HTTP/1.1 200 OK\r\nContent-Type: application/json; charset=UTF-8\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: " + std::to_string(json.length()) + "\r\nConnection: close\r\n\r\n" + json;
         send(clientFd, res.c_str(), res.length(), 0);
     } else if (method == "POST" && path == "/api/iptv/upload") {
         // Read full POST body according to Content-Length
@@ -4072,7 +4281,7 @@ void WebServer::handleClient(int clientFd) {
         std::string filename = "uploaded.m3u";
         size_t fnPos = fullBody.find("filename=\"");
         if (fnPos != std::string::npos) {
-            fnPos += 10; // strlen("filename=\"") == 10
+            fnPos += 10;
             size_t fnEnd = fullBody.find("\"", fnPos);
             if (fnEnd != std::string::npos && fnEnd > fnPos) {
                 filename = fullBody.substr(fnPos, fnEnd - fnPos);
@@ -4087,12 +4296,25 @@ void WebServer::handleClient(int clientFd) {
             filename += ".m3u";
         }
 
+        // Parse optional custom source name
+        std::string customName;
+        size_t nmPos = fullBody.find("name=\"name\"");
+        if (nmPos != std::string::npos) {
+            size_t dbl = fullBody.find("\r\n\r\n", nmPos);
+            if (dbl != std::string::npos) {
+                dbl += 4;
+                size_t endNm = fullBody.find("\r\n--", dbl);
+                if (endNm != std::string::npos) {
+                    customName = fullBody.substr(dbl, endNm - dbl);
+                }
+            }
+        }
+
         // Extract content after multipart headers (double CRLF)
         std::string fileContent;
         size_t dataStart = fullBody.find("\r\n\r\n");
         if (dataStart != std::string::npos && fullBody.find("Content-Disposition") != std::string::npos) {
             dataStart += 4;
-            // End boundary
             size_t dataEnd = fullBody.find("\r\n--", dataStart);
             if (dataEnd != std::string::npos) {
                 fileContent = fullBody.substr(dataStart, dataEnd - dataStart);
@@ -4117,7 +4339,8 @@ void WebServer::handleClient(int clientFd) {
                 out.close();
                 sync();
                 Logger::info("IPTV: Playlist uploaded successfully to " + outPath + " (" + std::to_string(fileContent.size()) + " bytes)");
-                IPTVManager::instance().loadPlaylists(iptvDir);
+                
+                IPTVManager::instance().addSourceFromFile(filename, customName);
                 size_t count = IPTVManager::instance().getChannels().size();
                 std::string json = "{\"success\":true,\"file\":\"" + escapeJson(filename) + "\",\"channels\":" + std::to_string(count) + "}";
                 std::string res = "HTTP/1.1 200 OK\r\nContent-Type: application/json; charset=UTF-8\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: " + std::to_string(json.length()) + "\r\nConnection: close\r\n\r\n" + json;
@@ -4133,67 +4356,76 @@ void WebServer::handleClient(int clientFd) {
             std::string res = "HTTP/1.1 400 OK\r\nContent-Type: application/json; charset=UTF-8\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: " + std::to_string(json.length()) + "\r\nConnection: close\r\n\r\n" + json;
             send(clientFd, res.c_str(), res.length(), 0);
         }
-    } else if (method == "GET" && path.find("/api/iptv/add") == 0) {
-        // Download and add playlist from URL using HttpClient (curl C-API)
+    } else if ((method == "GET" && path.find("/api/iptv/add") == 0) || (method == "POST" && path == "/api/iptv/add")) {
+        // Download and add playlist from URL
         std::string url;
-        size_t qPos = path.find("url=");
-        if (qPos != std::string::npos) {
-            url = path.substr(qPos + 4);
-            size_t ampPos = url.find('&');
-            if (ampPos != std::string::npos) url = url.substr(0, ampPos);
-            url = urlDecode(url);
+        std::string name;
+        if (method == "GET") {
+            url = extractQueryParam(path, "url");
+            name = extractQueryParam(path, "name");
+        } else {
+            url = extractPostParam(postBody, "url");
+            name = extractPostParam(postBody, "name");
+            if (url.empty()) {
+                size_t uPos = postBody.find("\"url\":\"");
+                if (uPos != std::string::npos) {
+                    uPos += 7;
+                    size_t uEnd = postBody.find("\"", uPos);
+                    if (uEnd != std::string::npos) url = postBody.substr(uPos, uEnd - uPos);
+                }
+                size_t nPos = postBody.find("\"name\":\"");
+                if (nPos != std::string::npos) {
+                    nPos += 8;
+                    size_t nEnd = postBody.find("\"", nPos);
+                    if (nEnd != std::string::npos) name = postBody.substr(nPos, nEnd - nPos);
+                }
+            }
         }
 
         if (!url.empty()) {
-            std::string iptvDir = IPTVManager::instance().getIptvDir();
-            if (iptvDir.empty()) {
-                iptvDir = AppConfig::instance().getAppRoot() + "/iptv";
-            }
-            FileSystemManager::instance().createDirectoryRecursive(iptvDir);
-
-            std::string safeName = "playlist_url.m3u";
-            size_t lastSlash = url.find_last_of("/\\");
-            if (lastSlash != std::string::npos && lastSlash + 1 < url.size()) {
-                std::string cand = url.substr(lastSlash + 1);
-                size_t q = cand.find('?');
-                if (q != std::string::npos) cand = cand.substr(0, q);
-                if (cand.size() > 4 && (cand.rfind(".m3u") != std::string::npos || cand.rfind(".m3u8") != std::string::npos)) {
-                    safeName = cand;
-                }
-            }
-
-            std::string destPath = iptvDir + "/" + safeName;
-            Logger::info("IPTV: Fetching playlist from URL: " + url + " -> " + destPath);
-
-            HttpResponse resp = HttpClient::instance().get(url, {
-                "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                "Accept: */*"
-            }, 30);
-
-            if (resp.success && resp.statusCode >= 200 && resp.statusCode < 400 && !resp.body.empty()) {
-                std::ofstream out(destPath, std::ios::binary);
-                if (out.is_open()) {
-                    out.write(resp.body.data(), resp.body.size());
-                    out.close();
-                    sync();
-                    IPTVManager::instance().loadPlaylists(iptvDir);
-                    size_t count = IPTVManager::instance().getChannels().size();
-                    std::string json = "{\"success\":true,\"file\":\"" + escapeJson(safeName) + "\",\"channels\":" + std::to_string(count) + "}";
-                    std::string res = "HTTP/1.1 200 OK\r\nContent-Type: application/json; charset=UTF-8\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: " + std::to_string(json.length()) + "\r\nConnection: close\r\n\r\n" + json;
-                    send(clientFd, res.c_str(), res.length(), 0);
-                } else {
-                    std::string json = "{\"success\":false,\"error\":\"Cannot write file: " + escapeJson(destPath) + "\"}";
-                    std::string res = "HTTP/1.1 500 OK\r\nContent-Type: application/json; charset=UTF-8\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: " + std::to_string(json.length()) + "\r\nConnection: close\r\n\r\n" + json;
-                    send(clientFd, res.c_str(), res.length(), 0);
-                }
+            std::string error;
+            std::string filename;
+            size_t chanCount = 0;
+            if (IPTVManager::instance().addSourceFromUrl(url, name, error, filename, chanCount)) {
+                size_t total = IPTVManager::instance().getChannels().size();
+                std::string json = "{\"success\":true,\"file\":\"" + escapeJson(filename) + "\",\"channels\":" + std::to_string(chanCount) + ",\"total_channels\":" + std::to_string(total) + "}";
+                std::string res = "HTTP/1.1 200 OK\r\nContent-Type: application/json; charset=UTF-8\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: " + std::to_string(json.length()) + "\r\nConnection: close\r\n\r\n" + json;
+                send(clientFd, res.c_str(), res.length(), 0);
             } else {
-                std::string err = resp.error.empty() ? ("HTTP " + std::to_string(resp.statusCode)) : resp.error;
-                std::string json = "{\"success\":false,\"error\":\"Download failed: " + escapeJson(err) + "\"}";
-                std::string res = "HTTP/1.1 500 OK\r\nContent-Type: application/json; charset=UTF-8\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: " + std::to_string(json.length()) + "\r\nConnection: close\r\n\r\n" + json;
+                std::string json = "{\"success\":false,\"error\":\"" + escapeJson(error) + "\"}";
+                std::string res = "HTTP/1.1 400 OK\r\nContent-Type: application/json; charset=UTF-8\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: " + std::to_string(json.length()) + "\r\nConnection: close\r\n\r\n" + json;
                 send(clientFd, res.c_str(), res.length(), 0);
             }
         } else {
-            std::string json = "{\"success\":false,\"error\":\"No URL provided\"}";
+            std::string json = "{\"success\":false,\"error\":\"Chưa cung cấp đường dẫn URL\"}";
+            std::string res = "HTTP/1.1 400 OK\r\nContent-Type: application/json; charset=UTF-8\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: " + std::to_string(json.length()) + "\r\nConnection: close\r\n\r\n" + json;
+            send(clientFd, res.c_str(), res.length(), 0);
+        }
+    } else if ((method == "GET" && path.find("/api/iptv/delete") == 0) || (method == "POST" && path == "/api/iptv/delete")) {
+        // Delete IPTV source file
+        std::string file;
+        if (method == "GET") {
+            file = extractQueryParam(path, "file");
+        } else {
+            file = extractPostParam(postBody, "file");
+            if (file.empty()) {
+                size_t fnPos = postBody.find("\"file\":\"");
+                if (fnPos != std::string::npos) {
+                    fnPos += 8;
+                    size_t fnEnd = postBody.find("\"", fnPos);
+                    if (fnEnd != std::string::npos) file = postBody.substr(fnPos, fnEnd - fnPos);
+                }
+            }
+        }
+
+        std::string error;
+        if (IPTVManager::instance().deleteSource(file, error)) {
+            size_t count = IPTVManager::instance().getChannels().size();
+            std::string json = "{\"success\":true,\"deleted\":\"" + escapeJson(file) + "\",\"channels\":" + std::to_string(count) + "}";
+            std::string res = "HTTP/1.1 200 OK\r\nContent-Type: application/json; charset=UTF-8\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: " + std::to_string(json.length()) + "\r\nConnection: close\r\n\r\n" + json;
+            send(clientFd, res.c_str(), res.length(), 0);
+        } else {
+            std::string json = "{\"success\":false,\"error\":\"" + escapeJson(error.empty() ? "Không thể xóa nguồn" : error) + "\"}";
             std::string res = "HTTP/1.1 400 OK\r\nContent-Type: application/json; charset=UTF-8\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: " + std::to_string(json.length()) + "\r\nConnection: close\r\n\r\n" + json;
             send(clientFd, res.c_str(), res.length(), 0);
         }

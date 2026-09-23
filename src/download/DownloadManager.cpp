@@ -12,6 +12,7 @@
 #include <chrono>
 #include <algorithm>
 #include <sys/stat.h>
+#include <unistd.h>
 #include <deque>
 
 namespace RomCloud {
@@ -298,7 +299,9 @@ void DownloadManager::runDownloadWorker() {
     curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, xferCallback);
     curl_easy_setopt(curl, CURLOPT_XFERINFODATA, this);
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
-    curl_easy_setopt(curl, CURLOPT_CAINFO, "/etc/ssl/certs/ca-certificates.crt");
+    if (access("/etc/ssl/certs/ca-certificates.crt", F_OK) == 0) {
+        curl_easy_setopt(curl, CURLOPT_CAINFO, "/etc/ssl/certs/ca-certificates.crt");
+    }
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
     curl_easy_setopt(curl, CURLOPT_USERAGENT, "RomCloud-TrimUI-BrickPro/1.0");

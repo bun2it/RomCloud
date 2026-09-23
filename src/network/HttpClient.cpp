@@ -2,6 +2,7 @@
 #include "../logging/Logger.h"
 #include <curl/curl.h>
 #include <sstream>
+#include <unistd.h>
 
 namespace RomCloud {
 
@@ -95,7 +96,9 @@ HttpResponse HttpClient::get(const std::string& url, const std::vector<std::stri
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, timeoutSec);
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 10);
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
-    curl_easy_setopt(curl, CURLOPT_CAINFO, "/etc/ssl/certs/ca-certificates.crt");
+    if (access("/etc/ssl/certs/ca-certificates.crt", F_OK) == 0) {
+        curl_easy_setopt(curl, CURLOPT_CAINFO, "/etc/ssl/certs/ca-certificates.crt");
+    }
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
     curl_easy_setopt(curl, CURLOPT_USERAGENT, "RomCloud-TrimUI-BrickPro/1.0");
@@ -145,7 +148,9 @@ HttpResponse HttpClient::post(const std::string& url, const std::string& postDat
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, timeoutSec);
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 10);
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
-    curl_easy_setopt(curl, CURLOPT_CAINFO, "/etc/ssl/certs/ca-certificates.crt");
+    if (access("/etc/ssl/certs/ca-certificates.crt", F_OK) == 0) {
+        curl_easy_setopt(curl, CURLOPT_CAINFO, "/etc/ssl/certs/ca-certificates.crt");
+    }
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
     curl_easy_setopt(curl, CURLOPT_USERAGENT, "RomCloud-TrimUI-BrickPro/1.0");

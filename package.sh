@@ -43,7 +43,8 @@ cp config/settings.json "$STAGING_DIR/Apps/RomCloud/config/"
 if [ -f config/input.conf ]; then
     cp config/input.conf "$STAGING_DIR/Apps/RomCloud/config/"
 fi
-cp -f iptv/*.m3u "$STAGING_DIR/Apps/RomCloud/iptv/" 2>/dev/null || true
+cp -f iptv/*.m3u iptv/*.m3u8 "$STAGING_DIR/Apps/RomCloud/iptv/" 2>/dev/null || true
+cp -f iptv/sources.txt "$STAGING_DIR/Apps/RomCloud/iptv/" 2>/dev/null || true
 
 # Ensure execution permissions
 chmod +x "$STAGING_DIR/Apps/RomCloud/launch.sh" "$STAGING_DIR/Apps/RomCloud/bin/RomCloud"

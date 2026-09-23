@@ -1,10 +1,10 @@
 {
-  "version": "2.0.4",
+  "version": "2.0.5",
   "release_date": "2026-09-23",
-  "binary_url": "https://github.com/bun2it/RomCloud/releases/download/v2.0.4/RomCloud",
-  "bundle_url": "https://github.com/bun2it/RomCloud/releases/download/v2.0.4/mpv_bundle.zip",
-  "STOCK_PS_bundle_url": "https://github.com/bun2it/RomCloud/releases/download/v2.0.4/bundle-STOCK_PS.zip",
-  "NEXTUI_bundle_url": "https://github.com/bun2it/RomCloud/releases/download/v2.0.4/bundle-NEXTUI.zip",
-  "SPRUCE_OS_bundle_url": "https://github.com/bun2it/RomCloud/releases/download/v2.0.4/bundle-SPRUCE_OS.zip",
-  "changelog": "v2.0.4: Sửa lỗi SpruceOS (treo khi bấm đồng bộ, hỗ trợ Emu/MEDIA player, App/RomCloud path), cập nhật logo chính thức APP.png"
+  "binary_url": "https://github.com/bun2it/RomCloud/releases/download/v2.0.5/RomCloud",
+  "bundle_url": "https://github.com/bun2it/RomCloud/releases/download/v2.0.5/mpv_bundle.zip",
+  "STOCK_PS_bundle_url": "https://github.com/bun2it/RomCloud/releases/download/v2.0.5/bundle-STOCK_PS.zip",
+  "NEXTUI_bundle_url": "https://github.com/bun2it/RomCloud/releases/download/v2.0.5/bundle-NEXTUI.zip",
+  "SPRUCE_OS_bundle_url": "https://github.com/bun2it/RomCloud/releases/download/v2.0.5/bundle-SPRUCE_OS.zip",
+  "changelog": "v2.0.5: Quản lý nguồn IPTV (thêm/xóa URL & file M3U, tải trực tiếp trên Web Portal), hiển thị cột tên nguồn ngoài cùng bên phải, phím L1/R1 sang trang nhanh 10 kênh"
 }

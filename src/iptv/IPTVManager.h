@@ -11,7 +11,18 @@ struct IPTVChannel {
     std::string url;
     std::string group;
     std::string logo;
+    std::string source;      // Tên nguồn hiển thị (vd: "Việt Nam", "Mặc định", "Thể Thao")
+    std::string sourceFile;  // Tên file (vd: "vietnam.m3u")
     bool isFavorite = false;
+};
+
+struct IPTVSource {
+    std::string name;
+    std::string filename;
+    std::string type; // "file" or "url"
+    std::string url;
+    size_t channelCount = 0;
+    size_t fileSize = 0;
 };
 
 class IPTVManager {
@@ -26,6 +37,12 @@ public:
 
     // Get all channels
     const std::vector<IPTVChannel>& getChannels() const { return m_channels; }
+
+    // Sources management
+    std::vector<IPTVSource> getSources() const { return m_sources; }
+    bool addSourceFromUrl(const std::string& url, const std::string& customName, std::string& outError, std::string& outFilename, size_t& outChannelCount);
+    bool addSourceFromFile(const std::string& filename, const std::string& customName);
+    bool deleteSource(const std::string& filename, std::string& outError);
 
     // Favorites support
     bool isFavorite(const std::string& channelName) const;
@@ -67,13 +84,17 @@ private:
     IPTVManager(const IPTVManager&) = delete;
     IPTVManager& operator=(const IPTVManager&) = delete;
 
-    bool parseM3UFile(const std::string& filepath);
+    bool parseM3UFile(const std::string& filepath, const std::string& sourceName, const std::string& filename, size_t* outChannelCount = nullptr);
+    void loadSourcesMeta();
+    void saveSourcesMeta();
     std::string extractGroup(const std::string& line);
     std::string extractName(const std::string& line);
     std::string extractLogo(const std::string& line);
 
     std::string m_iptvDir;
     std::vector<IPTVChannel> m_channels;
+    std::vector<IPTVSource> m_sources;
+    std::unordered_map<std::string, IPTVSource> m_sourcesMeta;
     std::unordered_set<std::string> m_favorites;
     std::unordered_map<std::string, std::vector<size_t>> m_groups; // group -> channel indices
     bool m_isPlaying = false;

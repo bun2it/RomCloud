@@ -50,13 +50,24 @@ IPTVManager::~IPTVManager() {
     stop();
 }
 
+static size_t curlWriteBufferCallback(void* contents, size_t size, size_t nmemb, void* userp) {
+    size_t total = size * nmemb;
+    auto* s = static_cast<std::string*>(userp);
+    if (s) {
+        s->append(static_cast<char*>(contents), total);
+    }
+    return total;
+}
+
 bool IPTVManager::loadPlaylists(const std::string& directory) {
     std::string dirPath = directory.empty() ? m_iptvDir : directory;
     Logger::info("Loading IPTV playlists from: " + dirPath);
 
     m_channels.clear();
     m_groups.clear();
+    m_sources.clear();
     loadFavorites();
+    loadSourcesMeta();
 
     if (!FileSystemManager::instance().directoryExists(dirPath)) {
         Logger::warn("IPTV directory not found: " + dirPath);
@@ -70,6 +81,7 @@ bool IPTVManager::loadPlaylists(const std::string& directory) {
 
     int loaded = 0;
     struct dirent* entry;
+    std::vector<std::string> playlistFiles;
     while ((entry = readdir(dir)) != nullptr) {
         std::string filename = entry->d_name;
         if (filename.length() >= 4) {
@@ -80,14 +92,52 @@ bool IPTVManager::loadPlaylists(const std::string& directory) {
                 std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
             }
             if (ext == ".m3u" || ext == ".m3u8") {
-                std::string path = dirPath + "/" + filename;
-                if (parseM3UFile(path)) {
-                    loaded++;
-                }
+                playlistFiles.push_back(filename);
             }
         }
     }
     closedir(dir);
+
+    std::sort(playlistFiles.begin(), playlistFiles.end());
+
+    for (const auto& filename : playlistFiles) {
+        std::string path = dirPath + "/" + filename;
+        std::string sourceName = "";
+        auto it = m_sourcesMeta.find(filename);
+        if (it != m_sourcesMeta.end() && !it->second.name.empty()) {
+            sourceName = it->second.name;
+        } else {
+            if (filename == "default.m3u") sourceName = "Mặc định";
+            else if (filename == "vietnam.m3u") sourceName = "Việt Nam";
+            else {
+                sourceName = filename;
+                size_t dot = sourceName.rfind('.');
+                if (dot != std::string::npos) sourceName = sourceName.substr(0, dot);
+                std::replace(sourceName.begin(), sourceName.end(), '_', ' ');
+            }
+            IPTVSource newSrc;
+            newSrc.name = sourceName;
+            newSrc.filename = filename;
+            newSrc.type = "file";
+            m_sourcesMeta[filename] = newSrc;
+        }
+
+        size_t count = 0;
+        if (parseM3UFile(path, sourceName, filename, &count)) {
+            IPTVSource src = m_sourcesMeta[filename];
+            src.name = sourceName;
+            src.filename = filename;
+            src.channelCount = count;
+            struct stat st;
+            if (stat(path.c_str(), &st) == 0) {
+                src.fileSize = st.st_size;
+            }
+            m_sources.push_back(src);
+            loaded++;
+        }
+    }
+
+    saveSourcesMeta();
 
     Logger::info("Loaded " + std::to_string(m_channels.size()) + " IPTV channels from " +
                  std::to_string(loaded) + " playlist(s)");
@@ -95,7 +145,7 @@ bool IPTVManager::loadPlaylists(const std::string& directory) {
     return m_channels.size() > 0;
 }
 
-bool IPTVManager::parseM3UFile(const std::string& filepath) {
+bool IPTVManager::parseM3UFile(const std::string& filepath, const std::string& sourceName, const std::string& filename, size_t* outChannelCount) {
     std::ifstream file(filepath);
     if (!file.is_open()) {
         Logger::error("Cannot open M3U file: " + filepath);
@@ -103,9 +153,10 @@ bool IPTVManager::parseM3UFile(const std::string& filepath) {
     }
 
     std::string line;
-    std::string currentGroup = "Việt Nam";
+    std::string currentGroup = "Chung";
     std::string currentName;
     std::string currentLogo;
+    size_t count = 0;
 
     while (std::getline(file, line)) {
         if (!line.empty() && line.back() == '\r') {
@@ -133,22 +184,29 @@ bool IPTVManager::parseM3UFile(const std::string& filepath) {
         }
 
         std::string url = line;
+        while (!url.empty() && (url.front() == ' ' || url.front() == '\t')) url.erase(0, 1);
+        while (!url.empty() && (url.back() == ' ' || url.back() == '\t')) url.pop_back();
+
         if (!url.empty() && url.find("://") != std::string::npos) {
             IPTVChannel channel;
             channel.name = currentName;
             channel.url = url;
             channel.group = currentGroup;
             channel.logo = currentLogo;
+            channel.source = sourceName;
+            channel.sourceFile = filename;
             channel.isFavorite = isFavorite(currentName);
 
             m_channels.push_back(channel);
 
             size_t idx = m_channels.size() - 1;
             m_groups[currentGroup].push_back(idx);
+            count++;
         }
     }
 
     file.close();
+    if (outChannelCount) *outChannelCount = count;
     return true;
 }
 
@@ -283,11 +341,260 @@ std::vector<IPTVChannel> IPTVManager::search(const std::string& query) const {
         std::string lowerGroup = channel.group;
         std::transform(lowerGroup.begin(), lowerGroup.end(), lowerGroup.begin(), ::tolower);
 
-        if (lowerName.find(lowerQuery) != std::string::npos || lowerGroup.find(lowerQuery) != std::string::npos) {
+        std::string lowerSource = channel.source;
+        std::transform(lowerSource.begin(), lowerSource.end(), lowerSource.begin(), ::tolower);
+
+        if (lowerName.find(lowerQuery) != std::string::npos ||
+            lowerGroup.find(lowerQuery) != std::string::npos ||
+            lowerSource.find(lowerQuery) != std::string::npos) {
             result.push_back(channel);
         }
     }
     return result;
+}
+
+void IPTVManager::loadSourcesMeta() {
+    m_sourcesMeta.clear();
+    std::string metaPath = m_iptvDir + "/sources.txt";
+    std::ifstream file(metaPath);
+    if (!file.is_open()) return;
+
+    std::string line;
+    while (std::getline(file, line)) {
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        if (line.empty() || line[0] == '#') continue;
+
+        // format: filename|name|type|url
+        std::stringstream ss(line);
+        std::string fn, name, type, url;
+        if (std::getline(ss, fn, '|') && std::getline(ss, name, '|')) {
+            std::getline(ss, type, '|');
+            std::getline(ss, url, '|');
+            IPTVSource src;
+            src.filename = fn;
+            src.name = name;
+            src.type = type.empty() ? "file" : type;
+            src.url = url;
+            m_sourcesMeta[fn] = src;
+        }
+    }
+    file.close();
+}
+
+void IPTVManager::saveSourcesMeta() {
+    std::string metaPath = m_iptvDir + "/sources.txt";
+    std::ofstream file(metaPath);
+    if (!file.is_open()) return;
+
+    file << "# RomCloud IPTV Sources Metadata\n";
+    file << "# filename|name|type|url\n";
+    for (const auto& pair : m_sourcesMeta) {
+        file << pair.second.filename << "|"
+             << pair.second.name << "|"
+             << pair.second.type << "|"
+             << pair.second.url << "\n";
+    }
+    file.close();
+}
+
+bool IPTVManager::addSourceFromUrl(const std::string& url, const std::string& customName, std::string& outError, std::string& outFilename, size_t& outChannelCount) {
+    outChannelCount = 0;
+    outFilename.clear();
+    outError.clear();
+
+    std::string cleanUrl = url;
+    while (!cleanUrl.empty() && (cleanUrl.front() == ' ' || cleanUrl.front() == '\t')) cleanUrl.erase(0, 1);
+    while (!cleanUrl.empty() && (cleanUrl.back() == ' ' || cleanUrl.back() == '\t')) cleanUrl.pop_back();
+
+    if (cleanUrl.empty() || (cleanUrl.find("http://") != 0 && cleanUrl.find("https://") != 0)) {
+        outError = "URL không hợp lệ. Phải bắt đầu bằng http:// hoặc https://";
+        return false;
+    }
+
+    std::string displayName = customName;
+    while (!displayName.empty() && (displayName.front() == ' ' || displayName.front() == '\t')) displayName.erase(0, 1);
+    while (!displayName.empty() && (displayName.back() == ' ' || displayName.back() == '\t')) displayName.pop_back();
+
+    if (displayName.empty()) {
+        size_t lastSlash = cleanUrl.find_last_of("/\\");
+        if (lastSlash != std::string::npos && lastSlash + 1 < cleanUrl.size()) {
+            std::string cand = cleanUrl.substr(lastSlash + 1);
+            size_t q = cand.find('?');
+            if (q != std::string::npos) cand = cand.substr(0, q);
+            if (cand.size() > 4) {
+                size_t dot = cand.rfind('.');
+                if (dot != std::string::npos) cand = cand.substr(0, dot);
+                displayName = cand;
+            }
+        }
+        if (displayName.empty()) {
+            displayName = "Nguồn URL " + std::to_string(std::time(nullptr));
+        }
+    }
+
+    std::string baseSlug;
+    for (char ch : displayName) {
+        if ((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9')) {
+            baseSlug += static_cast<char>(std::tolower(ch));
+        } else if (ch == ' ' || ch == '-' || ch == '_') {
+            if (!baseSlug.empty() && baseSlug.back() != '_') {
+                baseSlug += '_';
+            }
+        }
+    }
+    if (baseSlug.empty()) baseSlug = "playlist";
+    while (!baseSlug.empty() && baseSlug.back() == '_') baseSlug.pop_back();
+
+    std::string targetFilename = baseSlug + ".m3u";
+    int counter = 1;
+    while (true) {
+        std::string fullPath = m_iptvDir + "/" + targetFilename;
+        auto it = m_sourcesMeta.find(targetFilename);
+        if (it != m_sourcesMeta.end()) {
+            if (it->second.url == cleanUrl) {
+                break;
+            }
+        } else if (!FileSystemManager::instance().fileExists(fullPath)) {
+            break;
+        }
+        targetFilename = baseSlug + "_" + std::to_string(counter++) + ".m3u";
+    }
+
+    Logger::info("IPTV: Fetching URL: " + cleanUrl + " -> " + targetFilename);
+
+    CURL* curl = curl_easy_init();
+    if (!curl) {
+        outError = "Không thể khởi tạo CURL handle";
+        return false;
+    }
+
+    std::string responseBody;
+    struct curl_slist* headers = nullptr;
+    headers = curl_slist_append(headers, "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36");
+    headers = curl_slist_append(headers, "Accept: */*");
+    headers = curl_slist_append(headers, "Accept-Language: vi,en;q=0.9");
+
+    curl_easy_setopt(curl, CURLOPT_URL, cleanUrl.c_str());
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curlWriteBufferCallback);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &responseBody);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
+    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 15L);
+    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 5L);
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
+    curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
+
+    if (access("/etc/ssl/certs/ca-certificates.crt", F_OK) == 0) {
+        curl_easy_setopt(curl, CURLOPT_CAINFO, "/etc/ssl/certs/ca-certificates.crt");
+    }
+
+    CURLcode res = curl_easy_perform(curl);
+    long httpCode = 0;
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &httpCode);
+    curl_slist_free_all(headers);
+    curl_easy_cleanup(curl);
+
+    if (res != CURLE_OK) {
+        outError = "Lỗi kết nối tải URL: " + std::string(curl_easy_strerror(res));
+        Logger::error("IPTV addSourceFromUrl error: " + outError);
+        return false;
+    }
+
+    if (httpCode < 200 || httpCode >= 400) {
+        outError = "Máy chủ URL trả về HTTP " + std::to_string(httpCode);
+        Logger::error("IPTV addSourceFromUrl error: " + outError);
+        return false;
+    }
+
+    if (responseBody.empty()) {
+        outError = "Nội dung tải về rỗng";
+        return false;
+    }
+
+    if (responseBody.find("<!DOCTYPE html") != std::string::npos ||
+        responseBody.find("<html") != std::string::npos) {
+        if (responseBody.find("#EXTM3U") == std::string::npos && responseBody.find("#EXTINF") == std::string::npos) {
+            outError = "URL trả về trang web HTML, không phải file playlist M3U/M3U8 hợp lệ";
+            return false;
+        }
+    }
+
+    std::string outPath = m_iptvDir + "/" + targetFilename;
+    std::ofstream out(outPath, std::ios::binary);
+    if (!out.is_open()) {
+        outError = "Không thể ghi file vào " + outPath;
+        return false;
+    }
+    out.write(responseBody.data(), responseBody.size());
+    out.close();
+    sync();
+
+    IPTVSource meta;
+    meta.name = displayName;
+    meta.filename = targetFilename;
+    meta.type = "url";
+    meta.url = cleanUrl;
+    meta.fileSize = responseBody.size();
+    m_sourcesMeta[targetFilename] = meta;
+    saveSourcesMeta();
+
+    loadPlaylists(m_iptvDir);
+
+    outFilename = targetFilename;
+    for (const auto& s : m_sources) {
+        if (s.filename == targetFilename) {
+            outChannelCount = s.channelCount;
+            break;
+        }
+    }
+
+    Logger::info("IPTV: Successfully added source '" + displayName + "' (" + targetFilename + ") with " +
+                 std::to_string(outChannelCount) + " channels");
+    return true;
+}
+
+bool IPTVManager::addSourceFromFile(const std::string& filename, const std::string& customName) {
+    if (filename.empty()) return false;
+    std::string name = customName;
+    if (name.empty()) {
+        name = filename;
+        size_t dot = name.rfind('.');
+        if (dot != std::string::npos) name = name.substr(0, dot);
+        std::replace(name.begin(), name.end(), '_', ' ');
+    }
+
+    IPTVSource meta;
+    meta.name = name;
+    meta.filename = filename;
+    meta.type = "file";
+    meta.url = "";
+    m_sourcesMeta[filename] = meta;
+    saveSourcesMeta();
+    loadPlaylists(m_iptvDir);
+    return true;
+}
+
+bool IPTVManager::deleteSource(const std::string& filename, std::string& outError) {
+    outError.clear();
+    if (filename.empty() || filename.find('/') != std::string::npos ||
+        filename.find('\\') != std::string::npos || filename.find("..") != std::string::npos) {
+        outError = "Tên file không hợp lệ";
+        return false;
+    }
+
+    std::string filePath = m_iptvDir + "/" + filename;
+    if (unlink(filePath.c_str()) != 0) {
+        Logger::warn("IPTV: Could not unlink " + filePath + " or file already gone");
+    }
+
+    m_sourcesMeta.erase(filename);
+    saveSourcesMeta();
+    loadPlaylists(m_iptvDir);
+
+    Logger::info("IPTV: Deleted source " + filename + ". Channels remaining: " + std::to_string(m_channels.size()));
+    return true;
 }
 
 IPTVChannel* IPTVManager::getChannel(size_t index) {
