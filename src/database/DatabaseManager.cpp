@@ -888,6 +888,35 @@ bool DatabaseManager::updateGameMetadata(int64_t gameId, const std::string& desc
     return false;
 }
 
+bool DatabaseManager::moveGameToSystem(int64_t gameId, int newSystemId, const std::string& newLocalPath, const std::string& newCoverPath) {
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
+    if (!m_db) return false;
+
+    std::string now = getCurrentTimestamp();
+    std::string sql;
+    if (!newCoverPath.empty()) {
+        sql = "UPDATE games SET system_id = ?, local_path = ?, cover_path = ?, updated_at = ? WHERE id = ?;";
+    } else {
+        sql = "UPDATE games SET system_id = ?, local_path = ?, updated_at = ? WHERE id = ?;";
+    }
+
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2(m_db, sql.c_str(), -1, &stmt, nullptr) == SQLITE_OK) {
+        int idx = 1;
+        sqlite3_bind_int(stmt, idx++, newSystemId);
+        sqlite3_bind_text(stmt, idx++, newLocalPath.c_str(), -1, SQLITE_TRANSIENT);
+        if (!newCoverPath.empty()) {
+            sqlite3_bind_text(stmt, idx++, newCoverPath.c_str(), -1, SQLITE_TRANSIENT);
+        }
+        sqlite3_bind_text(stmt, idx++, now.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int64(stmt, idx++, gameId);
+        sqlite3_step(stmt);
+        sqlite3_finalize(stmt);
+        return true;
+    }
+    return false;
+}
+
 bool DatabaseManager::markGameDeletedLocally(int64_t gameId) {
     std::lock_guard<std::recursive_mutex> lock(m_mutex);
     if (!m_db) return false;

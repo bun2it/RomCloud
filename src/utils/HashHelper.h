@@ -38,6 +38,33 @@ public:
         return ss.str();
     }
 
+    // Computes CRC32 checksum of a file on disk (8-character hex string, e.g. "9b24443a")
+    static std::string computeFileCrc32(const std::string& filePath) {
+        std::ifstream file(filePath, std::ios::binary);
+        if (!file.is_open()) return "";
+
+        uint32_t crc = 0xFFFFFFFF;
+        std::vector<char> buffer(65536);
+        while (file.good()) {
+            file.read(buffer.data(), buffer.size());
+            std::streamsize bytesRead = file.gcount();
+            if (bytesRead > 0) {
+                for (std::streamsize i = 0; i < bytesRead; ++i) {
+                    uint8_t byte = static_cast<uint8_t>(buffer[i]);
+                    crc ^= byte;
+                    for (int j = 0; j < 8; ++j) {
+                        crc = (crc >> 1) ^ (0xEDB88320 & (-(crc & 1)));
+                    }
+                }
+            }
+        }
+        crc ^= 0xFFFFFFFF;
+
+        std::stringstream ss;
+        ss << std::hex << std::setw(8) << std::setfill('0') << crc;
+        return ss.str();
+    }
+
 private:
     struct MD5Context {
         uint32_t state[4];

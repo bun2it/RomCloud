@@ -9,11 +9,14 @@
 #include "../sync/UploadManager.h"
 #include "../filesystem/FileSystemManager.h"
 #include "../ui/BoxartScraper.h"
+#include "../rom/RomOrganizer.h"
+#include "../rom/RomDetector.h"
 #include "../app/Application.h"
 #include "../config/AppConfig.h"
 #include "HttpClient.h"
 
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <netinet/in.h>
 #include <unistd.h>
 #include <fcntl.h>
@@ -950,6 +953,7 @@ std::string WebServer::buildHtmlResponse() {
           </div>
           <div style="display:flex; gap:6px; margin-top:4px;">
             <button class="btn btn-secondary" onclick="startAutoScrapeSd()" style="font-size:11.5px;padding:6px 10px;flex:1;border-color:#0284c7;color:#38bdf8;" title="Tự động cào ảnh bìa và thông tin cho toàn bộ ROM trên thẻ nhớ (ScreenScraper / Libretro)">🎨 Tự động cào ảnh thẻ SD</button>
+            <button class="btn btn-secondary" onclick="openDoctorModal()" style="font-size:11.5px;padding:6px 10px;flex:1;border-color:#10b981;color:#34d399;font-weight:600;" title="Bác sĩ ROM: Tự động phát hiện ROM đặt sai thư mục Emulator và chuyển về đúng hệ máy">🩺 Sửa ROM lạc chỗ</button>
           </div>
         </div>
 
@@ -1012,6 +1016,7 @@ std::string WebServer::buildHtmlResponse() {
             <button class="btn btn-secondary" onclick="batchScrapeCurrentPage()" id="btn-batch-scrape" style="font-size: 12px; padding: 6px 12px;" title="Cào tự động toàn bộ ảnh bìa và thông tin cốt truyện cho các game ở trang này">🎨 Cào trang này</button>
             <button class="btn btn-secondary" onclick="startAutoScrapeSd()" id="btn-auto-scrape-sd" style="font-size: 12px; padding: 6px 12px; border-color: #0284c7; color: #38bdf8;" title="Tự động cào ảnh bìa và thông tin cho tất cả ROM đang có trên thẻ nhớ TrimUI (chạy ngầm)">🎨 Cào toàn bộ thẻ SD</button>
             <button class="btn btn-secondary" onclick="uploadAllGamesToDrive()" id="btn-batch-backup" style="font-size: 12px; padding: 6px 12px; border-color: #9333ea; color: #c084fc;" title="Sao lưu tất cả ROM hiện có trên thẻ nhớ TrimUI lên Google Drive cá nhân (/RomCloud_Backup)">📤 Sao lưu thẻ lên Drive</button>
+            <button class="btn btn-secondary" onclick="openDoctorModal()" id="btn-toolbar-doctor" style="font-size: 12px; padding: 6px 12px; border-color: #10b981; color: #34d399; font-weight: 600;" title="Bác sĩ ROM: Tự động phát hiện ROM đặt sai thư mục Emulator và chuyển về đúng hệ máy để chơi được ngay">🩺 Bác sĩ ROM</button>
 
             <div class="view-toggle-group">
               <button class="view-toggle-btn active" id="btn-view-list" onclick="setViewMode('list')" title="Chế độ Danh sách (List View)">☰ Bảng</button>
@@ -1319,8 +1324,18 @@ std::string WebServer::buildHtmlResponse() {
             </div>
           </div>
           <div style="margin-bottom: 6px; font-size: 12px; font-weight: 600; color: var(--text-muted);">📖 Tóm tắt &amp; Cốt truyện game:</div>
-          <div id="modal-description" style="font-size: 12px; color: #cbd5e1; line-height: 1.6; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px; max-height: 150px; overflow-y: auto;">
+          <div id="modal-description" style="font-size: 12px; color: #cbd5e1; line-height: 1.6; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px; max-height: 140px; overflow-y: auto;">
             Chưa có dữ liệu mô tả cho game này. Bấm "Cào lại Bìa &amp; Thông tin" bên dưới để tìm nạp tự động.
+          </div>
+
+          <!-- MANUAL SCRAPER REFINEMENT SEARCH (LIKE SCRAPE-EDIT) -->
+          <div style="margin-top: 14px; border-top: 1px solid var(--border); padding-top: 10px;">
+            <div style="font-size: 11.5px; font-weight: 600; color: #38bdf8; margin-bottom: 6px;">🔍 Tìm kiếm &amp; Chọn bìa thủ công (ScreenScraper / Libretro):</div>
+            <div style="display: flex; gap: 6px;">
+              <input type="text" id="modal-search-query" placeholder="Nhập tên game để tìm..." style="flex: 1; padding: 6px 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: #fff; font-size: 12px;">
+              <button type="button" class="btn btn-secondary" onclick="searchModalScraperCandidates()" style="font-size: 11px; padding: 6px 12px; border-color: #0284c7; color: #38bdf8;">🔎 Tìm kiếm</button>
+            </div>
+            <div id="modal-candidates-list" style="margin-top: 8px; max-height: 180px; overflow-y: auto; display: none; flex-direction: column; gap: 6px;"></div>
           </div>
         </div>
       </div>
@@ -1330,6 +1345,54 @@ std::string WebServer::buildHtmlResponse() {
           <button type="button" class="btn btn-primary" id="btn-modal-backup" onclick="uploadCurrentModalGame()" style="background: #7c3aed; border-color: #6d28d9; display: none;">📤 Sao lưu lên Drive cá nhân</button>
         </div>
         <button type="button" class="btn btn-secondary" onclick="closeGameModal()">Đóng</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: BÁC SĨ ROM (AUTO-FIX MISPLACED ROMS) -->
+  <div id="doctor-modal" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.85); z-index: 1050; align-items: center; justify-content: center; padding: 20px; backdrop-filter: blur(5px);">
+    <div style="background: var(--card-bg); border: 1px solid #10b981; border-radius: 12px; width: 100%; max-width: 680px; max-height: 85vh; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 20px 40px rgba(0,0,0,0.6);">
+      <div style="padding: 14px 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; background: rgba(16,185,129,0.1);">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span style="font-size: 22px;">🩺</span>
+          <div>
+            <h3 style="margin: 0; font-size: 16px; color: #fff; font-weight: 700;">Bác Sĩ ROM - Tự Động Sửa ROM Đặt Sai Emulator</h3>
+            <span style="font-size: 11.5px; color: var(--text-dim);">Tự động phát hiện ROM bỏ nhầm thư mục và dời về đúng hệ máy</span>
+          </div>
+        </div>
+        <button type="button" class="btn btn-secondary" onclick="closeDoctorModal()" style="padding: 4px 10px; font-size: 14px;">✕</button>
+      </div>
+
+      <div style="padding: 16px 20px; overflow-y: auto; flex: 1;">
+        <!-- Status / Audit Card -->
+        <div id="doctor-loading" style="display: none; text-align: center; padding: 30px;">
+          <div style="font-size: 28px; animation: spin 1.5s linear infinite; display: inline-block;">⏳</div>
+          <div style="margin-top: 10px; color: #e2e8f0; font-size: 14px;">Đang khám và quét toàn bộ thư mục ROM trên thẻ nhớ TrimUI...</div>
+        </div>
+
+        <div id="doctor-results" style="display: block;">
+          <div id="doctor-summary-box" style="padding: 12px 14px; border-radius: 8px; margin-bottom: 14px; font-size: 13px; line-height: 1.5;"></div>
+
+          <!-- List of detected misplaced ROMs -->
+          <div id="doctor-items-wrap" style="max-height: 280px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px;"></div>
+        </div>
+
+        <!-- Drag & Drop Upload Zone -->
+        <div style="margin-top: 16px; padding: 14px; border: 2px dashed rgba(16,185,129,0.4); border-radius: 8px; background: rgba(16,185,129,0.04); text-align: center;">
+          <div style="font-size: 13px; font-weight: 600; color: #34d399; margin-bottom: 4px;">📥 Nạp ROM Mới Tự Động (Chọn file từ Máy tính / Điện thoại)</div>
+          <div style="font-size: 11.5px; color: var(--text-dim); margin-bottom: 10px;">Thả file ROM bất kỳ vào đây, hệ thống sẽ tự nhận diện và cất vào đúng thư mục Emulator trên máy!</div>
+          <input type="file" id="doctor-file-input" style="display: none;" onchange="uploadAutoRomFile(this.files[0])">
+          <button type="button" class="btn btn-secondary" onclick="document.getElementById('doctor-file-input').click()" style="font-size: 12px; padding: 6px 14px; border-color: #10b981; color: #34d399;">📁 Chọn File ROM</button>
+          <div id="doctor-upload-status" style="margin-top: 8px; font-size: 12px; display: none;"></div>
+        </div>
+      </div>
+
+      <div style="padding: 12px 20px; border-top: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; background: rgba(0,0,0,0.2);">
+        <button type="button" class="btn btn-secondary" onclick="runDoctorAudit()">🔄 Khám lại</button>
+        <div style="display: flex; gap: 8px;">
+          <button type="button" class="btn btn-primary" id="btn-doctor-fix" onclick="executeDoctorFix()" style="background: #10b981; border-color: #059669; font-weight: 600;">🩺 Tự Động Chuyển Về Đúng Emulator</button>
+          <button type="button" class="btn btn-secondary" onclick="closeDoctorModal()">Đóng</button>
+        </div>
       </div>
     </div>
   </div>
@@ -1750,6 +1813,11 @@ std::string WebServer::buildHtmlResponse() {
         if (backupModalBtn) {
           backupModalBtn.style.display = (g.local_state === 1) ? 'inline-block' : 'none';
         }
+
+        const sQuery = document.getElementById('modal-search-query');
+        if (sQuery) sQuery.value = g.title || g.filename || '';
+        const cList = document.getElementById('modal-candidates-list');
+        if (cList) { cList.innerHTML = ''; cList.style.display = 'none'; }
       } catch (e) {
         showToast('Lỗi khi tải chi tiết game.');
       }
@@ -1758,6 +1826,83 @@ std::string WebServer::buildHtmlResponse() {
     function closeGameModal() {
       const modal = document.getElementById('game-detail-modal');
       if (modal) modal.style.display = 'none';
+    }
+
+    let modalCandidatesCache = [];
+    async function searchModalScraperCandidates() {
+      const qInput = document.getElementById('modal-search-query');
+      const query = (qInput ? qInput.value : '').trim();
+      const sysTag = document.getElementById('modal-sys-tag')?.textContent || '';
+      if (!query) { showToast('Vui lòng nhập tên game để tìm kiếm.'); return; }
+
+      const cList = document.getElementById('modal-candidates-list');
+      if (cList) {
+        cList.style.display = 'flex';
+        cList.innerHTML = '<div style="color:var(--text-dim); padding:10px; text-align:center;">⏳ Đang tìm kiếm trên ScreenScraper &amp; Libretro...</div>';
+      }
+
+      try {
+        const res = await fetch('/api/search_scraper', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: `query=${encodeURIComponent(query)}&system_code=${encodeURIComponent(sysTag)}`
+        });
+        const data = await res.json();
+        modalCandidatesCache = data.candidates || [];
+
+        if (!modalCandidatesCache.length) {
+          if (cList) cList.innerHTML = '<div style="color:var(--text-dim); padding:10px; text-align:center;">Không tìm thấy kết quả phù hợp. Hãy thử tên ngắn gọn hơn.</div>';
+          return;
+        }
+
+        let html = '';
+        modalCandidatesCache.forEach((c, idx) => {
+          html += `
+            <div style="display:flex; gap:10px; align-items:center; background:var(--bg); border:1px solid var(--border); border-radius:6px; padding:8px 10px;">
+              <div style="width:40px; height:50px; flex-shrink:0; background:#000; border-radius:4px; overflow:hidden; display:flex; align-items:center; justify-content:center;">
+                ${c.cover_url ? `<img src="${c.cover_url}" style="width:100%; height:100%; object-fit:cover;" onerror="this.style.display='none';">` : '🎮'}
+              </div>
+              <div style="flex:1; min-width:0;">
+                <div style="font-size:12px; font-weight:600; color:#fff; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(c.title)}</div>
+                <div style="font-size:11px; color:var(--text-dim);">${escapeHtml(c.source || '')} ${c.release_year ? '• ' + c.release_year : ''}</div>
+              </div>
+              <button type="button" class="btn btn-primary" onclick="applySelectedCandidate(${idx})" style="font-size:11px; padding:4px 10px; white-space:nowrap;">Áp dụng bìa này</button>
+            </div>
+          `;
+        });
+        if (cList) cList.innerHTML = html;
+      } catch (e) {
+        if (cList) cList.innerHTML = '<div style="color:var(--red); padding:10px; text-align:center;">Lỗi tìm kiếm.</div>';
+      }
+    }
+
+    async function applySelectedCandidate(idx) {
+      const c = modalCandidatesCache[idx];
+      if (!c || !currentModalGameId) return;
+
+      showToast('⏳ Đang tải và áp dụng ảnh bìa...');
+      try {
+        const params = new URLSearchParams();
+        params.append('game_id', currentModalGameId);
+        params.append('cover_url', c.cover_url || '');
+        params.append('title', c.title || '');
+        params.append('year', c.release_year || '');
+        params.append('genre', c.genre || '');
+        params.append('developer', c.developer || '');
+        params.append('description', c.description || '');
+
+        const res = await fetch('/api/apply_candidate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: params.toString()
+        });
+        const data = await res.json();
+        showToast(data.message || 'Đã áp dụng thông tin & ảnh bìa game!');
+        await openGameModal(currentModalGameId);
+        loadGames();
+      } catch (e) {
+        showToast('❌ Lỗi khi áp dụng bìa game.');
+      }
     }
 
     async function scrapeCurrentModalGame() {
@@ -1804,6 +1949,174 @@ std::string WebServer::buildHtmlResponse() {
         updateDownloadQueueUI();
       } catch (e) {
         showToast('Lỗi khi thêm vào hàng tải.');
+      }
+    }
+
+    // DOCTOR ROM FUNCTIONS
+    function openDoctorModal() {
+      const modal = document.getElementById('doctor-modal');
+      if (modal) modal.style.display = 'flex';
+      runDoctorAudit();
+    }
+
+    function closeDoctorModal() {
+      const modal = document.getElementById('doctor-modal');
+      if (modal) modal.style.display = 'none';
+    }
+
+    let doctorAuditItems = [];
+    async function runDoctorAudit() {
+      const loading = document.getElementById('doctor-loading');
+      const results = document.getElementById('doctor-results');
+      const summaryBox = document.getElementById('doctor-summary-box');
+      const itemsWrap = document.getElementById('doctor-items-wrap');
+      const fixBtn = document.getElementById('btn-doctor-fix');
+
+      if (loading) loading.style.display = 'block';
+      if (results) results.style.display = 'none';
+      if (itemsWrap) itemsWrap.innerHTML = '';
+
+      try {
+        const res = await fetch('/api/audit_roms', { method: 'POST' });
+        const data = await res.json();
+        doctorAuditItems = data.items || [];
+
+        if (loading) loading.style.display = 'none';
+        if (results) results.style.display = 'block';
+
+        if (doctorAuditItems.length === 0) {
+          if (summaryBox) {
+            summaryBox.style.background = 'rgba(16,185,129,0.15)';
+            summaryBox.style.border = '1px solid #10b981';
+            summaryBox.style.color = '#34d399';
+            summaryBox.innerHTML = '<b>✅ Tuyệt vời!</b> Toàn bộ ROM trên thẻ nhớ của bạn đều đang nằm đúng thư mục Emulator chuẩn của TrimUI. Không phát hiện ROM nào bị lạc chỗ.';
+          }
+          if (fixBtn) fixBtn.style.display = 'none';
+        } else {
+          if (summaryBox) {
+            summaryBox.style.background = 'rgba(245,158,11,0.15)';
+            summaryBox.style.border = '1px solid #f59e0b';
+            summaryBox.style.color = '#fbbf24';
+            summaryBox.innerHTML = `<b>⚠️ Phát hiện ${doctorAuditItems.length} ROM đang đặt sai thư mục!</b><br>Các game này có thể không chạy được hoặc bị lỗi nếu không dời về đúng Emulator. Bấm nút màu xanh bên dưới để RomCloud tự động sắp xếp lại.`;
+          }
+          if (fixBtn) {
+            fixBtn.style.display = 'inline-block';
+            fixBtn.disabled = false;
+            fixBtn.innerHTML = `🩺 Tự Động Chuyển ${doctorAuditItems.length} ROM Về Đúng Emulator`;
+          }
+
+          if (itemsWrap) {
+            itemsWrap.innerHTML = doctorAuditItems.map(item => `
+              <div style="background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; display: flex; justify-content: space-between; align-items: center; gap: 10px;">
+                <div style="min-width: 0; flex: 1;">
+                  <div style="font-weight: 600; color: #fff; font-size: 13px; text-overflow: ellipsis; overflow: hidden; white-space: nowrap;">${escapeHtml(item.filename)}</div>
+                  <div style="font-size: 11.5px; color: var(--text-dim); margin-top: 3px;">
+                    Hiện tại: <span style="color: #f87171; background: rgba(239,68,68,0.15); padding: 1px 6px; border-radius: 4px; font-weight: 600;">/Roms/${escapeHtml(item.current_system)}</span>
+                    ➔ Cần dời về: <span style="color: #34d399; background: rgba(16,185,129,0.15); padding: 1px 6px; border-radius: 4px; font-weight: 600;">/Roms/${escapeHtml(item.detected_system)} (${escapeHtml(item.detected_name)})</span>
+                  </div>
+                  <div style="font-size: 11px; color: #94a3b8; margin-top: 2px;">💡 Lý do: ${escapeHtml(item.reason)}</div>
+                </div>
+              </div>
+            `).join('');
+          }
+        }
+      } catch (e) {
+        if (loading) loading.style.display = 'none';
+        if (results) results.style.display = 'block';
+        if (summaryBox) {
+          summaryBox.style.background = 'rgba(239,68,68,0.15)';
+          summaryBox.style.border = '1px solid #ef4444';
+          summaryBox.style.color = '#f87171';
+          summaryBox.innerHTML = '❌ Lỗi khi kiểm tra thư mục ROM trên thẻ nhớ.';
+        }
+      }
+    }
+
+    async function executeDoctorFix() {
+      const fixBtn = document.getElementById('btn-doctor-fix');
+      if (fixBtn) {
+        fixBtn.disabled = true;
+        fixBtn.innerHTML = '⏳ Đang tự động chuyển file & Boxart...';
+      }
+      showToast('⏳ Bác sĩ ROM đang điều chuyển các game về đúng Emulator...');
+
+      try {
+        const res = await fetch('/api/fix_misplaced_roms', { method: 'POST' });
+        const data = await res.json();
+        const fixedItems = data.items || [];
+        const successCount = fixedItems.filter(i => i.fixed).length;
+
+        const summaryBox = document.getElementById('doctor-summary-box');
+        if (summaryBox) {
+          summaryBox.style.background = 'rgba(16,185,129,0.2)';
+          summaryBox.style.border = '1px solid #10b981';
+          summaryBox.style.color = '#34d399';
+          summaryBox.innerHTML = `<b>🎉 THÀNH CÔNG!</b> Đã tự động dời ${successCount} ROM về đúng thư mục Emulator trên thẻ nhớ. Toàn bộ game và Boxart đã sẵn sàng để bạn chơi ngay trên TrimUI!`;
+        }
+
+        const itemsWrap = document.getElementById('doctor-items-wrap');
+        if (itemsWrap) {
+          itemsWrap.innerHTML = fixedItems.map(item => `
+            <div style="background: rgba(16,185,129,0.06); border: 1px solid rgba(16,185,129,0.3); border-radius: 8px; padding: 8px 12px; font-size: 12px; color: #e2e8f0; display: flex; align-items: center; justify-content: space-between;">
+              <div>
+                <b>${escapeHtml(item.filename)}</b>
+                <div style="font-size: 11px; color: #34d399;">${escapeHtml(item.status)}</div>
+              </div>
+              <span style="font-size: 16px;">✅</span>
+            </div>
+          `).join('');
+        }
+
+        if (fixBtn) fixBtn.style.display = 'none';
+        showToast(`🎉 Đã sửa xong ${successCount} ROM đặt nhầm!`);
+        loadGames();
+        loadStorageInfo();
+      } catch (e) {
+        showToast('❌ Lỗi khi thực hiện dời ROM.');
+        if (fixBtn) {
+          fixBtn.disabled = false;
+          fixBtn.innerHTML = 'Thử lại';
+        }
+      }
+    }
+
+    async function uploadAutoRomFile(file) {
+      if (!file) return;
+      const statusDiv = document.getElementById('doctor-upload-status');
+      if (statusDiv) {
+        statusDiv.style.display = 'block';
+        statusDiv.style.color = '#38bdf8';
+        statusDiv.innerHTML = `⏳ Đang tải lên và phân tích hệ máy cho <b>${escapeHtml(file.name)}</b> (${(file.size / 1024 / 1024).toFixed(2)} MB)...`;
+      }
+
+      try {
+        const res = await fetch(`/api/upload_rom_auto?filename=${encodeURIComponent(file.name)}`, {
+          method: 'POST',
+          body: file
+        });
+        const data = await res.json();
+        if (data.success) {
+          if (statusDiv) {
+            statusDiv.style.color = '#34d399';
+            statusDiv.innerHTML = `✅ ${escapeHtml(data.message || 'Đã phân loại thành công!')}`;
+          }
+          showToast(`🎉 Nhận diện thành công: ${data.system_name || 'ROM'}! Đã đưa vào Emulator.`);
+          setTimeout(() => {
+            runDoctorAudit();
+            loadGames();
+            loadStorageInfo();
+          }, 1000);
+        } else {
+          if (statusDiv) {
+            statusDiv.style.color = '#f87171';
+            statusDiv.innerHTML = `❌ ${escapeHtml(data.error || 'Lỗi xử lý file')}`;
+          }
+        }
+      } catch (e) {
+        if (statusDiv) {
+          statusDiv.style.color = '#f87171';
+          statusDiv.innerHTML = '❌ Lỗi đường truyền khi tải file lên máy TrimUI.';
+        }
       }
     }
 
@@ -3156,6 +3469,191 @@ void WebServer::handleClient(int clientFd) {
                           "Content-Length: " + std::to_string(json.length()) + "\r\n"
                           "Connection: close\r\n\r\n" + json;
         send(clientFd, res.c_str(), res.length(), 0);
+    } else if (method == "POST" && path == "/api/search_scraper") {
+        std::string query = extractPostParam(postBody, "query");
+        std::string sysCode = extractPostParam(postBody, "system_code");
+        auto cands = BoxartScraper::instance().searchCandidates(query, sysCode);
+
+        std::string json = "{\"success\":true,\"candidates\":[";
+        for (size_t i = 0; i < cands.size(); ++i) {
+            if (i > 0) json += ",";
+            json += "{";
+            json += "\"title\":\"" + escapeJson(cands[i].title) + "\",";
+            json += "\"release_year\":\"" + escapeJson(cands[i].releaseYear) + "\",";
+            json += "\"developer\":\"" + escapeJson(cands[i].developer) + "\",";
+            json += "\"genre\":\"" + escapeJson(cands[i].genre) + "\",";
+            json += "\"description\":\"" + escapeJson(cands[i].description) + "\",";
+            json += "\"cover_url\":\"" + escapeJson(cands[i].coverUrl) + "\",";
+            json += "\"source\":\"" + escapeJson(cands[i].source) + "\"";
+            json += "}";
+        }
+        json += "]}";
+
+        std::string res = "HTTP/1.1 200 OK\r\n"
+                          "Content-Type: application/json; charset=UTF-8\r\n"
+                          "Access-Control-Allow-Origin: *\r\n"
+                          "Content-Length: " + std::to_string(json.length()) + "\r\n"
+                          "Connection: close\r\n\r\n" + json;
+        send(clientFd, res.c_str(), res.length(), 0);
+    } else if (method == "POST" && path == "/api/apply_candidate") {
+        std::string gameIdStr = extractPostParam(postBody, "game_id");
+        int64_t gameId = 0;
+        try { gameId = std::stoll(gameIdStr); } catch(...) {}
+
+        ScrapeCandidate cand;
+        cand.title = extractPostParam(postBody, "title");
+        cand.releaseYear = extractPostParam(postBody, "year");
+        cand.genre = extractPostParam(postBody, "genre");
+        cand.developer = extractPostParam(postBody, "developer");
+        cand.description = extractPostParam(postBody, "description");
+        cand.coverUrl = extractPostParam(postBody, "cover_url");
+
+        bool ok = false;
+        if (gameId > 0) {
+            ok = BoxartScraper::instance().applyCandidate(gameId, cand);
+        }
+
+        std::string json = "{\"success\":" + std::string(ok ? "true" : "false") +
+                           ",\"message\":\"" + (ok ? "Đã áp dụng ảnh bìa và thông tin game thành công!" : "Lỗi khi áp dụng thông tin game.") + "\"}";
+        std::string res = "HTTP/1.1 200 OK\r\n"
+                          "Content-Type: application/json; charset=UTF-8\r\n"
+                          "Access-Control-Allow-Origin: *\r\n"
+                          "Content-Length: " + std::to_string(json.length()) + "\r\n"
+                          "Connection: close\r\n\r\n" + json;
+        send(clientFd, res.c_str(), res.length(), 0);
+    } else if (method == "POST" && path == "/api/audit_roms") {
+        auto list = RomOrganizer::instance().auditMisplacedRoms();
+        std::string json = "{\"success\":true,\"count\":" + std::to_string(list.size()) + ",\"items\":[";
+        for (size_t i = 0; i < list.size(); ++i) {
+            if (i > 0) json += ",";
+            json += "{";
+            json += "\"filename\":\"" + escapeJson(list[i].filename) + "\",";
+            json += "\"original_path\":\"" + escapeJson(list[i].originalPath) + "\",";
+            json += "\"current_system\":\"" + escapeJson(list[i].currentSystemCode) + "\",";
+            json += "\"detected_system\":\"" + escapeJson(list[i].detectedSystemCode) + "\",";
+            json += "\"detected_name\":\"" + escapeJson(list[i].detectedSystemName) + "\",";
+            json += "\"target_path\":\"" + escapeJson(list[i].targetPath) + "\",";
+            json += "\"confidence\":\"" + escapeJson(list[i].confidence) + "\",";
+            json += "\"reason\":\"" + escapeJson(list[i].reason) + "\"";
+            json += "}";
+        }
+        json += "]}";
+        std::string res = "HTTP/1.1 200 OK\r\n"
+                          "Content-Type: application/json; charset=UTF-8\r\n"
+                          "Access-Control-Allow-Origin: *\r\n"
+                          "Content-Length: " + std::to_string(json.length()) + "\r\n"
+                          "Connection: close\r\n\r\n" + json;
+        send(clientFd, res.c_str(), res.length(), 0);
+    } else if (method == "POST" && path == "/api/fix_misplaced_roms") {
+        auto list = RomOrganizer::instance().fixMisplacedRoms();
+        std::string json = "{\"success\":true,\"count\":" + std::to_string(list.size()) + ",\"items\":[";
+        for (size_t i = 0; i < list.size(); ++i) {
+            if (i > 0) json += ",";
+            json += "{";
+            json += "\"filename\":\"" + escapeJson(list[i].filename) + "\",";
+            json += "\"current_system\":\"" + escapeJson(list[i].currentSystemCode) + "\",";
+            json += "\"detected_system\":\"" + escapeJson(list[i].detectedSystemCode) + "\",";
+            json += "\"detected_name\":\"" + escapeJson(list[i].detectedSystemName) + "\",";
+            json += "\"fixed\":" + std::string(list[i].fixed ? "true" : "false") + ",";
+            json += "\"status\":\"" + escapeJson(list[i].statusMessage) + "\"";
+            json += "}";
+        }
+        json += "]}";
+        std::string res = "HTTP/1.1 200 OK\r\n"
+                          "Content-Type: application/json; charset=UTF-8\r\n"
+                          "Access-Control-Allow-Origin: *\r\n"
+                          "Content-Length: " + std::to_string(json.length()) + "\r\n"
+                          "Connection: close\r\n\r\n" + json;
+        send(clientFd, res.c_str(), res.length(), 0);
+    } else if (method == "POST" && path == "/api/organize_inbox") {
+        auto list = RomOrganizer::instance().organizeDirectory(RomOrganizer::instance().getInboxDir());
+        std::string json = "{\"success\":true,\"count\":" + std::to_string(list.size()) + "}";
+        std::string res = "HTTP/1.1 200 OK\r\n"
+                          "Content-Type: application/json; charset=UTF-8\r\n"
+                          "Access-Control-Allow-Origin: *\r\n"
+                          "Content-Length: " + std::to_string(json.length()) + "\r\n"
+                          "Connection: close\r\n\r\n" + json;
+        send(clientFd, res.c_str(), res.length(), 0);
+    } else if (method == "POST" && path == "/api/upload_rom_auto") {
+        std::string fname = extractQueryParam(queryString, "filename");
+        if (fname.empty()) fname = "uploaded_rom.bin";
+
+        std::string inboxPath = RomOrganizer::instance().getInboxDir() + "/" + fname;
+        std::ofstream outFile(inboxPath, std::ios::binary);
+        if (outFile.is_open()) {
+            if (!postBody.empty()) {
+                outFile.write(postBody.data(), postBody.size());
+            }
+
+            size_t clPos = req.find("Content-Length: ");
+            if (clPos != std::string::npos) {
+                size_t clEnd = req.find("\r\n", clPos);
+                long totalCl = 0;
+                try {
+                    totalCl = std::stol(req.substr(clPos + 16, clEnd - (clPos + 16)));
+                } catch (...) {}
+
+                long bytesReadSoFar = static_cast<long>(postBody.size());
+                char chunk[32768];
+                while (bytesReadSoFar < totalCl) {
+                    long toRead = std::min<long>(sizeof(chunk), totalCl - bytesReadSoFar);
+                    int n = recv(clientFd, chunk, toRead, 0);
+                    if (n <= 0) break;
+                    outFile.write(chunk, n);
+                    bytesReadSoFar += n;
+                }
+            }
+            outFile.close();
+            sync();
+
+            RomDetectionResult det = RomDetector::instance().detectSystem(inboxPath);
+            std::string sysCode = det.detected ? det.systemCode : "GBA";
+            std::string sysName = det.detected ? det.systemName : "Game";
+
+            SystemRecord targetSys;
+            std::string finalDst;
+            std::string message;
+            if (DatabaseManager::instance().getSystemByCode(sysCode, targetSys)) {
+                std::string targetDir = AppConfig::instance().getRomsDir() + "/" + targetSys.romDir;
+                FileSystemManager::instance().createDirectoryRecursive(targetDir);
+                std::string targetFile = targetDir + "/" + fname;
+                RomOrganizer::instance().safeMoveFile(inboxPath, targetFile, finalDst);
+
+                GameRecord g;
+                g.systemId = targetSys.id;
+                g.filename = fname;
+                size_t dot = fname.rfind('.');
+                g.title = (dot != std::string::npos) ? fname.substr(0, dot) : fname;
+                g.localPath = finalDst;
+                g.localState = GameState::LOCAL;
+                struct stat st;
+                if (::stat(finalDst.c_str(), &st) == 0) g.sizeBytes = st.st_size;
+                DatabaseManager::instance().upsertGame(g);
+
+                message = "Đã nhận diện: " + sysName + " (" + sysCode + ")! Game đã được lưu vào /Roms/" + targetSys.romDir + "/";
+            } else {
+                message = "Đã lưu ROM vào Hộp tiếp nhận _INBOX.";
+            }
+
+            std::string json = "{\"success\":true,\"filename\":\"" + escapeJson(fname) +
+                               "\",\"system_code\":\"" + escapeJson(sysCode) +
+                               "\",\"system_name\":\"" + escapeJson(sysName) +
+                               "\",\"message\":\"" + escapeJson(message) + "\"}";
+            std::string res = "HTTP/1.1 200 OK\r\n"
+                              "Content-Type: application/json; charset=UTF-8\r\n"
+                              "Access-Control-Allow-Origin: *\r\n"
+                              "Content-Length: " + std::to_string(json.length()) + "\r\n"
+                              "Connection: close\r\n\r\n" + json;
+            send(clientFd, res.c_str(), res.length(), 0);
+        } else {
+            std::string json = "{\"success\":false,\"error\":\"Không thể ghi file vào thẻ nhớ.\"}";
+            std::string res = "HTTP/1.1 500 Internal Server Error\r\n"
+                              "Content-Type: application/json; charset=UTF-8\r\n"
+                              "Access-Control-Allow-Origin: *\r\n"
+                              "Content-Length: " + std::to_string(json.length()) + "\r\n"
+                              "Connection: close\r\n\r\n" + json;
+            send(clientFd, res.c_str(), res.length(), 0);
+        }
     } else if (method == "GET" && path == "/api/storage_info") {
         auto disk = FileSystemManager::instance().getDiskSpace(AppConfig::instance().getRomsDir());
         bool isLinked = AuthManager::instance().isLinked();

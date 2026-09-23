@@ -42,6 +42,8 @@ $ZIG c++ \
     src/database/RomIndexer.cpp \
     src/sync/UploadManager.cpp \
     src/backup/BackupManager.cpp \
+    src/rom/RomDetector.cpp \
+    src/rom/RomOrganizer.cpp \
     -Lsysroot/lib \
     -lSDL2 \
     -lSDL2_image \

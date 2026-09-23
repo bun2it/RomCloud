@@ -1,6 +1,6 @@
 {
-  "version": "1.2.8",
+  "version": "1.2.9",
   "release_date": "2026-09-23",
-  "binary_url": "https://github.com/bun2it/RomCloud/releases/download/v1.2.8/RomCloud",
-  "changelog": "v1.2.8: Khắc phục triệt để lỗi ghi đè OTA trên FAT32; Làm rõ kiến trúc 3 tầng ROM (Kho Public vs Thẻ SD vs Drive cá nhân) & nút Sao lưu; Tích hợp ScreenScraper.fr & Libretro (loại bỏ Wikipedia); Tự động cào ảnh bìa cho toàn bộ ROM trên thẻ SD."
+  "binary_url": "https://github.com/bun2it/RomCloud/releases/download/v1.2.9/RomCloud",
+  "changelog": "v1.2.9: Thêm tính năng 'Bác sĩ ROM' - Tự động phát hiện và chuyển các game đặt nhầm thư mục về đúng Emulator để mở lên chơi được ngay; Nâng cấp cào ảnh bìa (Boxart) cực nhanh và chuẩn xác từ ScreenScraper & Libretro; Hỗ trợ nạp ROM trực tiếp từ trình duyệt web."
 }
