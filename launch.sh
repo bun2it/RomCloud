@@ -27,6 +27,17 @@ install_pending_ota() {
     # Remove any stale helper script
     rm -f "$HELPER_SCRIPT" 2>/dev/null
 
+    # Check for pending official icon update
+    if [ -f "./icon.png.new" ]; then
+        echo "[RomCloud OTA] Found pending icon update..."
+        cp -f "./icon.png.new" "./icon.png" 2>/dev/null
+        cp -f "./icon.png.new" "./assets/apps_icons/APP.png" 2>/dev/null
+        cp -f "./icon.png.new" "./assets/icon.png" 2>/dev/null
+        rm -f "./icon.png.new"
+        sync
+        echo "[RomCloud OTA] App icon updated successfully."
+    fi
+
     # Check for pending mpv & codecs media bundle
     if [ -f "./mpv_bundle.zip" ]; then
         echo "[RomCloud OTA] Found mpv_bundle.zip, extracting media bundle..."

@@ -7,7 +7,7 @@
 
 namespace RomCloud {
 
-constexpr const char* APP_VERSION = "2.0.5";
+constexpr const char* APP_VERSION = "2.0.6";
 constexpr const char* GITHUB_REPO = "bun2it/RomCloud";
 constexpr const char* VERSION_MANIFEST_URL = "https://raw.githubusercontent.com/bun2it/RomCloud/main/version.json";
 
@@ -27,12 +27,14 @@ enum class UpdateState {
 struct UpdateInfo {
     std::string remoteVersion;
     std::string downloadUrl;
+    std::string iconUrl;          // Official app icon URL
     std::string bundleUrl;        // mpv/codecs bundle
     std::string osBundleUrl;      // OS-specific dependencies
     std::string changelog;
     std::string releaseDate;
     uint64_t sizeBytes = 0;
-    std::string osType;           // STOCK_PS, NEXTUI, SPRUCE_OS
+    std::string osType;           // Current device OS
+    std::string targetOs;         // ALL, or specific OS (STOCK_PS, NEXTUI, SPRUCE_OS)
 };
 
 struct UpdateProgress {

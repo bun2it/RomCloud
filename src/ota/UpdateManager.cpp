@@ -85,14 +85,21 @@ bool UpdateManager::isVersionNewer(const std::string &remote,
 bool UpdateManager::checkForUpdatesSync(UpdateInfo &outInfo) {
   Logger::info("Checking for OTA updates...");
 
-  // Get OS type for OS-specific bundles
-  std::string osType = OSTypeToString(AppConfig::instance().getOSType());
-  if (osType == "Auto") {
-    // Force detect if auto
-    AppConfig::instance().setOSType(OSType::AUTO);
-    OSType detected = AppConfig::instance().detectOSType();
-    AppConfig::instance().setOSType(detected);
-    osType = OSTypeToString(detected);
+  // Get OS type for OS-specific bundles and targeting
+  OSType currentOSType = AppConfig::instance().getOSType();
+  if (currentOSType == OSType::AUTO) {
+    currentOSType = AppConfig::instance().detectOSType();
+    AppConfig::instance().setOSType(currentOSType);
+  }
+  std::string osType = OSTypeToString(currentOSType);
+
+  // Standard canonical OS key: STOCK_PS, NEXTUI, SPRUCE_OS
+  std::string osKey = "STOCK_PS";
+  switch (currentOSType) {
+    case OSType::STOCK_PS:  osKey = "STOCK_PS"; break;
+    case OSType::NEXTUI:    osKey = "NEXTUI"; break;
+    case OSType::SPRUCE_OS: osKey = "SPRUCE_OS"; break;
+    default:                osKey = "STOCK_PS"; break;
   }
 
   std::vector<std::string> headers = {
@@ -108,6 +115,8 @@ bool UpdateManager::checkForUpdatesSync(UpdateInfo &outInfo) {
   HttpResponse mResp = HttpClient::instance().get(manifestUrl, manifestHeaders);
 
   std::string remoteVer = "";
+  std::string targetOs = "ALL";
+  std::string iconUrl = "";
   std::string changelog = "";
   std::string relDate = "";
   std::string binUrl = "";
@@ -115,19 +124,75 @@ bool UpdateManager::checkForUpdatesSync(UpdateInfo &outInfo) {
   std::string osBundleUrl = "";
 
   if (mResp.success && !mResp.body.empty() && mResp.statusCode == 200) {
-    remoteVer = JsonHelper::extractString(mResp.body, "version");
+    // 1. Check target_os
+    targetOs = JsonHelper::extractString(mResp.body, "target_os");
+    if (targetOs.empty()) {
+      targetOs = "ALL";
+    }
+
+    // Verify whether this update is intended for current OS
+    bool osMatches = false;
+    if (targetOs == "ALL" || targetOs == "all" || targetOs == "*") {
+      osMatches = true;
+    } else {
+      if (targetOs.find(osKey) != std::string::npos ||
+          targetOs.find(osType) != std::string::npos) {
+        osMatches = true;
+      } else {
+        std::string lowerTarget = targetOs;
+        std::transform(lowerTarget.begin(), lowerTarget.end(), lowerTarget.begin(), ::tolower);
+        std::string lowerKey = osKey;
+        std::transform(lowerKey.begin(), lowerKey.end(), lowerKey.begin(), ::tolower);
+        std::string lowerType = osType;
+        std::transform(lowerType.begin(), lowerType.end(), lowerType.begin(), ::tolower);
+        if (lowerTarget.find(lowerKey) != std::string::npos || lowerTarget.find(lowerType) != std::string::npos) {
+          osMatches = true;
+        }
+      }
+    }
+
+    if (!osMatches) {
+      Logger::info("OTA update is targeted for [" + targetOs + "] but device is [" + osType + "/" + osKey + "]. Skipping OTA notification.");
+      std::lock_guard<std::mutex> lock(m_mutex);
+      m_hasUpdate = false;
+      m_progress.state = UpdateState::UP_TO_DATE;
+      return false;
+    }
+
+    // 2. Version determination: check OS-specific override first, then general version
+    std::string osVer = JsonHelper::extractString(mResp.body, osKey + "_version");
+    if (osVer.empty()) {
+      osVer = JsonHelper::extractString(mResp.body, osKey);
+    }
+    if (!osVer.empty()) {
+      remoteVer = osVer;
+    } else {
+      remoteVer = JsonHelper::extractString(mResp.body, "version");
+    }
+
+    iconUrl = JsonHelper::extractString(mResp.body, "icon_url");
+
     binUrl = JsonHelper::extractString(mResp.body, "binary_url");
     if (binUrl.empty())
       binUrl = JsonHelper::extractString(mResp.body, "download_url");
     bundleUrl = JsonHelper::extractString(mResp.body, "bundle_url");
     osBundleUrl = JsonHelper::extractString(mResp.body, "os_bundle_url");
 
-    // Check for OS-specific bundle
+    // Check for OS-specific bundle (check osKey first e.g. SPRUCE_OS_bundle_url, then osType)
+    if (osBundleUrl.empty()) {
+      osBundleUrl = JsonHelper::extractString(mResp.body, osKey + "_bundle_url");
+    }
     if (osBundleUrl.empty()) {
       osBundleUrl = JsonHelper::extractString(mResp.body, osType + "_bundle_url");
     }
 
-    changelog = JsonHelper::extractString(mResp.body, "changelog");
+    // Changelog: OS-specific changelog first, then general changelog
+    std::string osChangelog = JsonHelper::extractString(mResp.body, osKey + "_changelog");
+    if (!osChangelog.empty()) {
+      changelog = osChangelog;
+    } else {
+      changelog = JsonHelper::extractString(mResp.body, "changelog");
+    }
     relDate = JsonHelper::extractString(mResp.body, "release_date");
   }
 
@@ -157,13 +222,17 @@ bool UpdateManager::checkForUpdatesSync(UpdateInfo &outInfo) {
 
           if (name == "RomCloud" || name == "RomCloud.bin") {
             binUrl = url;
+          } else if (name == "icon.png" || name == "APP.png") {
+            iconUrl = url;
           } else if (name == "mpv_bundle.zip" || name == "mpv_bundle-" + osType + ".zip") {
             bundleUrl = url;
           } else if (name.find("_bundle.zip") != std::string::npos) {
             // Check OS-specific bundle
+            std::string lowerOsKey = osKey;
+            std::transform(lowerOsKey.begin(), lowerOsKey.end(), lowerOsKey.begin(), ::tolower);
             std::string lowerOsType = osType;
             std::transform(lowerOsType.begin(), lowerOsType.end(), lowerOsType.begin(), ::tolower);
-            if (name.find(lowerOsType) != std::string::npos) {
+            if (name.find(lowerOsKey) != std::string::npos || name.find(lowerOsType) != std::string::npos) {
               osBundleUrl = url;
             }
           }
@@ -190,20 +259,25 @@ bool UpdateManager::checkForUpdatesSync(UpdateInfo &outInfo) {
     bundleUrl = "https://github.com/" + std::string(GITHUB_REPO) +
                 "/releases/download/v" + remoteVer + "/mpv_bundle.zip";
   }
+  if (iconUrl.empty()) {
+    iconUrl = "https://raw.githubusercontent.com/" + std::string(GITHUB_REPO) + "/main/icon.png";
+  }
 
   // OS-specific bundle URL
   if (osBundleUrl.empty()) {
     osBundleUrl = "https://github.com/" + std::string(GITHUB_REPO) +
-                  "/releases/download/v" + remoteVer + "/bundle-" + osType + ".zip";
+                  "/releases/download/v" + remoteVer + "/bundle-" + osKey + ".zip";
   }
 
   outInfo.remoteVersion = remoteVer;
   outInfo.downloadUrl = binUrl;
+  outInfo.iconUrl = iconUrl;
   outInfo.bundleUrl = bundleUrl;
   outInfo.osBundleUrl = osBundleUrl;
   outInfo.changelog = changelog;
   outInfo.releaseDate = relDate;
   outInfo.osType = osType;
+  outInfo.targetOs = targetOs;
 
   bool newer = isVersionNewer(remoteVer, APP_VERSION);
   {
@@ -567,7 +641,45 @@ void UpdateManager::runDownloadWorker(UpdateInfo info) {
 
   sync();
 
-  // 3. Check and install dependencies (mpv, codecs)
+  // 3. Download and update official app icon
+  if (!info.iconUrl.empty()) {
+    std::string appRoot = AppConfig::instance().getAppRoot();
+    std::string newIconPath = appRoot + "/icon.png.new";
+    std::string finalIconPath = appRoot + "/icon.png";
+    std::string appIconPath = appRoot + "/assets/apps_icons/APP.png";
+    std::string assetsIconPath = appRoot + "/assets/icon.png";
+
+    {
+      std::lock_guard<std::mutex> lock(m_mutex);
+      m_progress.currentStep = "Updating app icon...";
+    }
+
+    uint64_t iconSize = 0;
+    if (downloadFile(info.iconUrl, newIconPath, &iconSize) && iconSize > 1000) {
+      chmod(newIconPath.c_str(), 0644);
+      unlink(finalIconPath.c_str());
+      if (rename(newIconPath.c_str(), finalIconPath.c_str()) == 0) {
+        std::ifstream src(finalIconPath, std::ios::binary);
+        if (src) {
+          std::ofstream dst1(appIconPath, std::ios::binary | std::ios::trunc);
+          if (dst1) dst1 << src.rdbuf();
+          src.clear();
+          src.seekg(0, std::ios::beg);
+          std::ofstream dst2(assetsIconPath, std::ios::binary | std::ios::trunc);
+          if (dst2) dst2 << src.rdbuf();
+        }
+        Logger::info("App icon updated successfully via OTA (" + std::to_string(iconSize) + " bytes)");
+      } else {
+        // FAT32 deferred: keep newIconPath so launch.sh can copy it
+        Logger::info("Icon rename deferred to launch.sh");
+      }
+    } else {
+      unlink(newIconPath.c_str());
+      Logger::warn("Failed to download or verify app icon");
+    }
+  }
+
+  // 4. Check and install dependencies (mpv, codecs)
   if (!downloadAndInstallDependencies(info)) {
     Logger::warn("Some dependencies may be missing - app may not work fully");
   }

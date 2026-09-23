@@ -63,6 +63,7 @@ rm -rf "$STAGING_DIR"
 
 cp -f bin/RomCloud "$DIST_DIR/RomCloud"
 cp -f launch.sh "$DIST_DIR/launch.sh"
+cp -f icon.png "$DIST_DIR/icon.png"
 
 echo "=== Release Packages Created Successfully ==="
-ls -lh "$DIST_DIR/$ZIP_NAME" "$DIST_DIR/mpv_bundle.zip" "$DIST_DIR/RomCloud"
+ls -lh "$DIST_DIR/$ZIP_NAME" "$DIST_DIR/mpv_bundle.zip" "$DIST_DIR/RomCloud" "$DIST_DIR/icon.png"

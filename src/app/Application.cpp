@@ -16,6 +16,8 @@
 
 #include <csignal>
 #include <unistd.h>
+#include <fstream>
+#include <sys/stat.h>
 
 namespace RomCloud {
 
@@ -95,6 +97,39 @@ bool Application::init(int argc, char* argv[]) {
     Logger::info("=== RomCloud Phase 6 (On-Demand DL) ======");
     Logger::info("==========================================");
     Logger::info("App Root: " + AppConfig::instance().getAppRoot());
+
+    // Ensure official app icon is synchronized to launcher icon
+    std::string appRoot = AppConfig::instance().getAppRoot();
+    std::string officialIcon = appRoot + "/assets/apps_icons/APP.png";
+    std::string mainIcon = appRoot + "/icon.png";
+    struct stat stOfficial;
+    if (stat(officialIcon.c_str(), &stOfficial) == 0 && stOfficial.st_size > 0) {
+        std::vector<std::string> iconDestinations = {
+            mainIcon,
+            appRoot + "/assets/icon.png",
+            "/mnt/SDCARD/Apps/RomCloud/icon.png",
+            "/mnt/SDCARD/App/RomCloud/icon.png"
+        };
+        for (const auto& dest : iconDestinations) {
+            struct stat stDest;
+            bool needCopy = false;
+            if (stat(dest.c_str(), &stDest) != 0 || stDest.st_size != stOfficial.st_size) {
+                // If it's the main icon or if the destination file/dir exists
+                if (dest == mainIcon || dest == (appRoot + "/assets/icon.png") || stat(dest.c_str(), &stDest) == 0) {
+                    needCopy = true;
+                }
+            }
+            if (needCopy) {
+                std::ifstream src(officialIcon, std::ios::binary);
+                std::ofstream dst(dest, std::ios::binary | std::ios::trunc);
+                if (src && dst) {
+                    dst << src.rdbuf();
+                    Logger::info("Synchronized official app icon to: " + dest + " (" + std::to_string(stOfficial.st_size) + " bytes)");
+                }
+            }
+        }
+        sync();
+    }
 
     // Initialize Network, OAuth, Sync & Download
     HttpClient::instance().init();
