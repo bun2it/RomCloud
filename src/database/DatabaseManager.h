@@ -41,6 +41,11 @@ struct GameRecord {
     std::string localPath;
     GameState localState = GameState::CLOUD;
     std::string coverPath;
+    std::string description;
+    std::string developer;
+    std::string publisher;
+    std::string genre;
+    std::string releaseYear;
     std::string createdAt;
     std::string updatedAt;
 };
@@ -71,6 +76,7 @@ public:
     bool upsertGame(const GameRecord& game, int64_t* outInsertedId = nullptr);
     bool updateGameLocalState(int64_t gameId, GameState state, const std::string& localPath = "");
     bool updateGameCover(int64_t gameId, const std::string& coverPath);
+    bool updateGameMetadata(int64_t gameId, const std::string& description, const std::string& releaseYear, const std::string& developer, const std::string& genre, const std::string& coverPath = "");
     bool markGameDeletedLocally(int64_t gameId);
     bool clearCloudGames();
 

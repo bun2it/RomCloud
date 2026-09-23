@@ -499,11 +499,12 @@ void DownloadManager::runDownloadWorker() {
     DatabaseManager::instance().updateGameLocalState(m_activeGame.id, GameState::LOCAL, m_finalFilePath);
     Logger::info("ROM installed locally at: " + m_finalFilePath + ". State transitioned to LOCAL.");
 
-    // Auto-scrape boxart cover art if not present
-    std::string scrapedCover;
-    if (BoxartScraper::instance().scrapeCover(m_activeGame, m_activeSystem, scrapedCover)) {
-        DatabaseManager::instance().updateGameCover(m_activeGame.id, scrapedCover);
-        Logger::info("Auto-scraped boxart for game: " + m_activeGame.title + " -> " + scrapedCover);
+    // Auto-scrape boxart cover art and metadata if not present
+    auto scrapeRes = BoxartScraper::instance().scrapeGameInfo(m_activeGame, m_activeSystem);
+    if (scrapeRes.success) {
+        Logger::info("Auto-scraped boxart and info for game: " + m_activeGame.title +
+                     (!scrapeRes.releaseYear.empty() ? (" (" + scrapeRes.releaseYear + ")") : "") +
+                     (!scrapeRes.coverPath.empty() ? (" -> " + scrapeRes.coverPath) : ""));
     }
 
     {

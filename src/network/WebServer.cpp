@@ -869,6 +869,8 @@ std::string WebServer::buildHtmlResponse() {
               </select>
             </div>
 
+            <button class="btn btn-secondary" onclick="batchScrapeCurrentPage()" id="btn-batch-scrape" style="font-size: 12px; padding: 6px 12px;" title="Cào tự động toàn bộ ảnh bìa và thông tin cốt truyện cho các game ở trang này">🎨 Cào toàn bộ trang</button>
+
             <div class="view-toggle-group">
               <button class="view-toggle-btn active" id="btn-view-list" onclick="setViewMode('list')" title="Chế độ Danh sách (List View)">☰ Bảng</button>
               <button class="view-toggle-btn" id="btn-view-grid" onclick="setViewMode('grid')" title="Chế độ Lưới bìa game (Grid View)">☷ Lưới thẻ</button>
@@ -1092,6 +1094,54 @@ std::string WebServer::buildHtmlResponse() {
         </div>
       </div>
     </div>
+  <!-- MODAL: GAME DETAIL & METADATA -->
+  <div id="game-detail-modal" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.8); z-index: 1000; align-items: center; justify-content: center; padding: 20px; backdrop-filter: blur(4px);">
+    <div style="background: var(--card-bg); border: 1px solid var(--border); border-radius: 12px; max-width: 680px; width: 100%; max-height: 90vh; overflow-y: auto; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5);">
+      <div style="padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center;">
+        <h3 id="modal-game-title" style="margin: 0; font-size: 17px; color: #fff; font-weight: 700;">Chi tiết ROM Game</h3>
+        <button type="button" class="btn btn-secondary" onclick="closeGameModal()" style="padding: 4px 10px; font-size: 14px;">✕</button>
+      </div>
+      <div style="padding: 20px; display: flex; gap: 20px; flex-wrap: wrap;">
+        <!-- Left: Cover Art -->
+        <div style="flex: 0 0 160px; text-align: center;">
+          <div id="modal-cover-wrap" style="width: 160px; height: 210px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; display: flex; align-items: center; justify-content: center;">
+            <img id="modal-cover-img" src="" alt="Cover" style="width: 100%; height: 100%; object-fit: contain; display: none;">
+            <div id="modal-cover-placeholder" style="font-size: 40px; color: var(--text-dim);">🎮</div>
+          </div>
+          <span id="modal-sys-tag" class="sys-tag sys-default" style="margin-top: 10px; display: inline-block;">GBA</span>
+        </div>
+        <!-- Right: Metadata & Info -->
+        <div style="flex: 1; min-width: 260px;">
+          <div style="font-size: 12px; color: var(--text-dim); font-family: monospace; margin-bottom: 10px;" id="modal-game-filename">filename.gba</div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 14px; font-size: 12px;">
+            <div style="background: var(--card-alt); padding: 8px 10px; border-radius: 6px;">
+              <span style="color: var(--text-dim); display: block; font-size: 11px;">📅 Năm phát hành</span>
+              <b id="modal-release-year" style="color: #fff;">--</b>
+            </div>
+            <div style="background: var(--card-alt); padding: 8px 10px; border-radius: 6px;">
+              <span style="color: var(--text-dim); display: block; font-size: 11px;">🏷️ Thể loại</span>
+              <b id="modal-genre" style="color: #38bdf8;">--</b>
+            </div>
+            <div style="background: var(--card-alt); padding: 8px 10px; border-radius: 6px;">
+              <span style="color: var(--text-dim); display: block; font-size: 11px;">🏢 Nhà phát triển</span>
+              <b id="modal-developer" style="color: #cbd5e1;">--</b>
+            </div>
+            <div style="background: var(--card-alt); padding: 8px 10px; border-radius: 6px;">
+              <span style="color: var(--text-dim); display: block; font-size: 11px;">💾 Dung lượng / Trạng thái</span>
+              <b id="modal-status" style="color: #fff;">--</b>
+            </div>
+          </div>
+          <div style="margin-bottom: 6px; font-size: 12px; font-weight: 600; color: var(--text-muted);">📖 Tóm tắt &amp; Cốt truyện game:</div>
+          <div id="modal-description" style="font-size: 12px; color: #cbd5e1; line-height: 1.6; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px; max-height: 150px; overflow-y: auto;">
+            Chưa có dữ liệu mô tả cho game này. Bấm "Cào lại Bìa &amp; Thông tin" bên dưới để tìm nạp tự động.
+          </div>
+        </div>
+      </div>
+      <div style="padding: 12px 20px; border-top: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+        <button type="button" class="btn btn-primary" id="btn-modal-scrape" onclick="scrapeCurrentModalGame()" style="background: var(--purple);">🎨 Cào lại Bìa &amp; Thông tin</button>
+        <button type="button" class="btn btn-secondary" onclick="closeGameModal()">Đóng</button>
+      </div>
+    </div>
   </div>
 
   <div id="toast">Thông báo</div>
@@ -1307,34 +1357,40 @@ std::string WebServer::buildHtmlResponse() {
         let statusBadge = '';
         let statusPillClass = '';
         let statusPillText = '';
-        let tableActions = '';
-        let gridActions = '';
+        const detailBtn = `<button class="btn btn-secondary" onclick="openGameModal(${g.id})" title="Xem chi tiết & Cốt truyện game">ℹ️ Chi tiết</button>`;
+        const scrapeBtn = `<button class="btn btn-secondary" onclick="scrapeBoxart(${g.id})" title="Cào ảnh bìa & thông tin game">🎨 Scrape</button>`;
 
         if (g.local_state === 1) {
           statusBadge = `<span class="status-badge status-local">🟢 Đã tải</span>`;
           statusPillClass = 'status-local';
           statusPillText = '🟢 Đã tải';
           tableActions = `
-            <button class="btn btn-secondary" onclick="scrapeBoxart(${g.id})" title="Tải ảnh bìa">🖼️ Bìa</button>
+            ${detailBtn}
+            ${scrapeBtn}
             <button class="btn btn-danger" onclick="deleteRom(${g.id}, '${escapeHtml(g.title)}')">🗑️ Xóa</button>
           `;
           gridActions = `
-            <button class="btn btn-secondary" onclick="scrapeBoxart(${g.id})" title="Tải ảnh bìa">🖼️ Bìa</button>
+            ${detailBtn}
+            ${scrapeBtn}
             <button class="btn btn-danger" onclick="deleteRom(${g.id}, '${escapeHtml(g.title)}')">🗑️ Xóa</button>
           `;
         } else if (g.in_queue) {
           statusBadge = `<span class="status-badge status-queue">⏳ Hàng đợi</span>`;
           statusPillClass = 'status-queue';
           statusPillText = '⏳ Hàng đợi';
-          tableActions = `<button class="btn btn-secondary" onclick="removeFromQueue(${g.id})">✕ Bỏ</button>`;
-          gridActions = `<button class="btn btn-secondary" onclick="removeFromQueue(${g.id})">✕ Bỏ</button>`;
+          tableActions = `${detailBtn} ${scrapeBtn} <button class="btn btn-secondary" onclick="removeFromQueue(${g.id})">✕ Bỏ</button>`;
+          gridActions = `${detailBtn} ${scrapeBtn} <button class="btn btn-secondary" onclick="removeFromQueue(${g.id})">✕ Bỏ</button>`;
         } else {
           statusBadge = `<span class="status-badge status-cloud">☁️ Cloud</span>`;
           statusPillClass = 'status-cloud';
           statusPillText = '☁️ Cloud';
-          tableActions = `<button class="btn btn-primary" onclick="downloadGame(${g.id})">📥 Tải về</button>`;
-          gridActions = `<button class="btn btn-primary" onclick="downloadGame(${g.id})">📥 Tải về</button>`;
+          tableActions = `${detailBtn} ${scrapeBtn} <button class="btn btn-primary" onclick="downloadGame(${g.id})">📥 Tải về</button>`;
+          gridActions = `${detailBtn} ${scrapeBtn} <button class="btn btn-primary" onclick="downloadGame(${g.id})">📥 Tải về</button>`;
         }
+
+        let metaBadges = '';
+        if (g.release_year) metaBadges += `<span class="badge" style="background:#334155;color:#94a3b8;font-size:10px;padding:2px 6px;margin-right:4px;">📅 ${escapeHtml(g.release_year)}</span>`;
+        if (g.genre) metaBadges += `<span class="badge" style="background:#1e293b;border:1px solid #475569;color:#38bdf8;font-size:10px;padding:2px 6px;">🏷️ ${escapeHtml(g.genre)}</span>`;
 
         let coverHtml = '';
         if (g.has_cover) {
@@ -1352,8 +1408,9 @@ std::string WebServer::buildHtmlResponse() {
           <tr>
             <td><span class="sys-tag ${sysClass}">${escapeHtml(g.sys_code || 'GAME')}</span></td>
             <td>
-              <span class="game-title">${escapeHtml(g.title)}</span>
+              <span class="game-title" style="cursor: pointer;" onclick="openGameModal(${g.id})">${escapeHtml(g.title)}</span>
               <span class="game-file">${escapeHtml(g.filename)}</span>
+              ${metaBadges ? `<div style="margin-top: 4px;">${metaBadges}</div>` : ''}
             </td>
             <td>${g.size_str || '0 B'}</td>
             <td>${statusBadge}</td>
@@ -1363,18 +1420,20 @@ std::string WebServer::buildHtmlResponse() {
 
         gridHtml += `
           <div class="game-card">
-            <div class="card-cover-wrap">
+            <div class="card-cover-wrap" style="cursor: pointer;" onclick="openGameModal(${g.id})">
               <span class="sys-tag ${sysClass} card-sys-tag">${escapeHtml(g.sys_code || 'GAME')}</span>
               <span class="card-status-pill ${statusPillClass}">${statusPillText}</span>
               ${coverHtml}
             </div>
             <div class="card-body">
               <div>
-                <div class="card-title" title="${escapeHtml(g.title)}">${escapeHtml(g.title)}</div>
+                <div class="card-title" title="${escapeHtml(g.title)}" style="cursor: pointer;" onclick="openGameModal(${g.id})">${escapeHtml(g.title)}</div>
                 <div class="card-file" title="${escapeHtml(g.filename)}">${escapeHtml(g.filename)}</div>
                 <div class="card-meta">
                   <span>💾 ${g.size_str || '0 B'}</span>
+                  ${g.release_year ? `<span style="margin-left: 6px; color: #94a3b8;">📅 ${escapeHtml(g.release_year)}</span>` : ''}
                 </div>
+                ${g.genre ? `<div style="font-size: 11px; color: #38bdf8; margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">🏷️ ${escapeHtml(g.genre)}</div>` : ''}
               </div>
               <div class="card-actions">
                 ${gridActions}
@@ -1395,6 +1454,86 @@ std::string WebServer::buildHtmlResponse() {
     function escapeHtml(s) {
       if (!s) return '';
       return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    // Modal Actions
+    let currentModalGameId = 0;
+    async function openGameModal(gameId) {
+      currentModalGameId = gameId;
+      const modal = document.getElementById('game-detail-modal');
+      if (!modal) return;
+      modal.style.display = 'flex';
+
+      document.getElementById('modal-game-title').textContent = 'Đang tải thông tin...';
+      document.getElementById('modal-game-filename').textContent = '';
+      document.getElementById('modal-release-year').textContent = 'Đang tải...';
+      document.getElementById('modal-genre').textContent = 'Đang tải...';
+      document.getElementById('modal-developer').textContent = 'Đang tải...';
+      document.getElementById('modal-status').textContent = 'Đang tải...';
+      document.getElementById('modal-description').textContent = 'Đang tải thông tin tóm tắt và cốt truyện...';
+      document.getElementById('modal-cover-img').style.display = 'none';
+      document.getElementById('modal-cover-placeholder').style.display = 'block';
+
+      try {
+        const res = await fetch(`/api/game_detail?game_id=${gameId}`);
+        const g = await res.json();
+        if (g.error) {
+          showToast('Không tìm thấy thông tin game.');
+          closeGameModal();
+          return;
+        }
+
+        document.getElementById('modal-game-title').textContent = g.title || 'Game ROM';
+        document.getElementById('modal-game-filename').textContent = g.filename || '';
+        document.getElementById('modal-sys-tag').textContent = g.sys_code || 'GAME';
+        document.getElementById('modal-release-year').textContent = g.release_year || 'Chưa có thông tin';
+        document.getElementById('modal-genre').textContent = g.genre || 'Chưa phân loại';
+        document.getElementById('modal-developer').textContent = g.developer || 'Chưa rõ';
+        document.getElementById('modal-status').innerHTML = `${g.size_str || '0 B'} • ${g.local_state === 1 ? '<span style="color:var(--green);">🟢 Đã tải về máy</span>' : '<span style="color:var(--accent);">☁️ Trên Google Drive</span>'}`;
+        document.getElementById('modal-description').textContent = g.description || 'Chưa có dữ liệu mô tả cho game này. Bấm nút "Cào lại Bìa & Thông tin" bên dưới để tìm nạp tự động từ Libretro và Wikipedia.';
+
+        const img = document.getElementById('modal-cover-img');
+        const placeholder = document.getElementById('modal-cover-placeholder');
+        if (g.has_cover) {
+          img.src = `/api/cover?game_id=${g.id}&t=${Date.now()}`;
+          img.style.display = 'block';
+          placeholder.style.display = 'none';
+        } else {
+          img.style.display = 'none';
+          placeholder.style.display = 'block';
+        }
+      } catch (e) {
+        showToast('Lỗi khi tải chi tiết game.');
+      }
+    }
+
+    function closeGameModal() {
+      const modal = document.getElementById('game-detail-modal');
+      if (modal) modal.style.display = 'none';
+    }
+
+    async function scrapeCurrentModalGame() {
+      if (!currentModalGameId) return;
+      const btn = document.getElementById('btn-modal-scrape');
+      const origText = btn ? btn.innerHTML : '🎨 Cào lại Bìa & Thông tin';
+      if (btn) { btn.disabled = true; btn.innerHTML = '⏳ Đang cào dữ liệu...'; }
+      showToast('⏳ Đang tìm kiếm ảnh bìa và thông tin cốt truyện trên Libretro & Wikipedia...');
+
+      try {
+        const res = await fetch('/api/scrape_cover', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: `game_id=${currentModalGameId}`
+        });
+        const data = await res.json();
+        showToast(data.message || 'Cào dữ liệu hoàn tất!');
+        await openGameModal(currentModalGameId);
+        loadGames();
+      } catch (e) {
+        showToast('Lỗi khi cào dữ liệu game.');
+      } finally {
+        if (btn) { btn.disabled = false; btn.innerHTML = origText; }
+      }
     }
 
     // Actions
@@ -1435,7 +1574,7 @@ std::string WebServer::buildHtmlResponse() {
     }
 
     async function scrapeBoxart(gameId) {
-      showToast('Đang tìm kiếm ảnh bìa trên Libretro CDN...');
+      showToast('⏳ Đang tìm kiếm ảnh bìa và thông tin game trên Libretro & Wikipedia...');
       try {
         const res = await fetch('/api/scrape_cover', {
           method: 'POST',
@@ -1443,10 +1582,54 @@ std::string WebServer::buildHtmlResponse() {
           body: `game_id=${gameId}`
         });
         const data = await res.json();
-        showToast(data.message || 'Cập nhật ảnh bìa hoàn tất.');
+        if (data.success) {
+          showToast(data.message || 'Cập nhật ảnh bìa & thông tin hoàn tất!');
+          loadGames();
+        } else {
+          showToast('⚠️ ' + (data.message || 'Không tìm thấy dữ liệu.'));
+        }
       } catch (e) {
-        showToast('Lỗi cào ảnh bìa.');
+        showToast('❌ Lỗi cào thông tin game.');
       }
+    }
+
+    let isBatchScraping = false;
+    async function batchScrapeCurrentPage() {
+      if (isBatchScraping) {
+        showToast('⚠️ Đang trong quá trình cào thông tin, vui lòng đợi...');
+        return;
+      }
+      if (!lastLoadedGames || !lastLoadedGames.games || lastLoadedGames.games.length === 0) {
+        showToast('Không có game nào ở trang hiện tại để cào.');
+        return;
+      }
+      const gamesToScrape = lastLoadedGames.games;
+      if (!confirm(`Bạn có muốn tự động cào ảnh bìa và thông tin cho tất cả ${gamesToScrape.length} game trong trang này?`)) return;
+
+      isBatchScraping = true;
+      const btn = document.getElementById('btn-batch-scrape');
+      const origText = btn ? btn.innerHTML : '🎨 Cào toàn bộ trang';
+      if (btn) { btn.disabled = true; btn.innerHTML = '⏳ Đang cào...'; }
+
+      let successCount = 0;
+      for (let i = 0; i < gamesToScrape.length; i++) {
+        const g = gamesToScrape[i];
+        showToast(`⏳ Đang cào (${i + 1}/${gamesToScrape.length}): ${g.title.substring(0, 20)}...`);
+        try {
+          const res = await fetch('/api/scrape_cover', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: `game_id=${g.id}`
+          });
+          const data = await res.json();
+          if (data.success) successCount++;
+        } catch (e) {}
+      }
+
+      showToast(`✅ Đã hoàn tất cào thông tin cho ${successCount}/${gamesToScrape.length} game!`);
+      if (btn) { btn.disabled = false; btn.innerHTML = origText; }
+      isBatchScraping = false;
+      loadGames();
     }
 
     async function cancelActiveDownload() {
@@ -2034,7 +2217,11 @@ void WebServer::handleClient(int clientFd) {
             json += "\"size_str\":\"" + FileSystemManager::instance().formatBytes(g.sizeBytes) + "\",";
             json += "\"local_state\":" + std::to_string(static_cast<int>(g.localState)) + ",";
             json += "\"in_queue\":" + std::string(inQueue ? "true" : "false") + ",";
-            json += "\"has_cover\":" + std::string(g.coverPath.empty() ? "false" : "true") + "}";
+            json += "\"has_cover\":" + std::string(g.coverPath.empty() ? "false" : "true") + ",";
+            json += "\"release_year\":\"" + escapeJson(g.releaseYear) + "\",";
+            json += "\"genre\":\"" + escapeJson(g.genre) + "\",";
+            json += "\"developer\":\"" + escapeJson(g.developer) + "\",";
+            json += "\"description\":\"" + escapeJson(g.description) + "\"}";
         }
         json += "]}";
 
@@ -2045,6 +2232,49 @@ void WebServer::handleClient(int clientFd) {
                           "Content-Length: " + std::to_string(json.length()) + "\r\n"
                           "Connection: close\r\n\r\n" + json;
         send(clientFd, res.c_str(), res.length(), 0);
+    } else if (method == "GET" && path == "/api/game_detail") {
+        std::string gameIdStr = extractQueryParam(queryString, "game_id");
+        int64_t gameId = 0;
+        try { gameId = std::stoll(gameIdStr); } catch(...) {}
+        GameRecord g;
+        if (gameId > 0 && DatabaseManager::instance().getGameById(gameId, g)) {
+            SystemRecord sys;
+            DatabaseManager::instance().getSystemById(g.systemId, sys);
+            bool inQueue = DownloadManager::instance().isInQueue(g.id);
+            std::string json = "{";
+            json += "\"id\":" + std::to_string(g.id) + ",";
+            json += "\"title\":\"" + escapeJson(g.title) + "\",";
+            json += "\"filename\":\"" + escapeJson(g.filename) + "\",";
+            json += "\"system_id\":" + std::to_string(g.systemId) + ",";
+            json += "\"sys_code\":\"" + escapeJson(sys.code.empty() ? g.systemCode : sys.code) + "\",";
+            json += "\"sys_name\":\"" + escapeJson(sys.name) + "\",";
+            json += "\"size_str\":\"" + FileSystemManager::instance().formatBytes(g.sizeBytes) + "\",";
+            json += "\"local_state\":" + std::to_string(static_cast<int>(g.localState)) + ",";
+            json += "\"in_queue\":" + std::string(inQueue ? "true" : "false") + ",";
+            json += "\"has_cover\":" + std::string(g.coverPath.empty() ? "false" : "true") + ",";
+            json += "\"release_year\":\"" + escapeJson(g.releaseYear) + "\",";
+            json += "\"genre\":\"" + escapeJson(g.genre) + "\",";
+            json += "\"developer\":\"" + escapeJson(g.developer) + "\",";
+            json += "\"description\":\"" + escapeJson(g.description) + "\"";
+            json += "}";
+            std::string res = "HTTP/1.1 200 OK\r\n"
+                              "Content-Type: application/json; charset=UTF-8\r\n"
+                              "Cache-Control: no-cache, no-store, must-revalidate\r\n"
+                              "Access-Control-Allow-Origin: *\r\n"
+                              "Content-Length: " + std::to_string(json.length()) + "\r\n"
+                              "Connection: close\r\n\r\n" + json;
+            send(clientFd, res.c_str(), res.length(), 0);
+            return;
+        } else {
+            std::string json = "{\"error\":\"Game not found\"}";
+            std::string res = "HTTP/1.1 404 Not Found\r\n"
+                              "Content-Type: application/json; charset=UTF-8\r\n"
+                              "Access-Control-Allow-Origin: *\r\n"
+                              "Content-Length: " + std::to_string(json.length()) + "\r\n"
+                              "Connection: close\r\n\r\n" + json;
+            send(clientFd, res.c_str(), res.length(), 0);
+            return;
+        }
     } else if (method == "GET" && path == "/api/search") {
         if (!AuthManager::instance().isLinked()) {
             std::string res = "HTTP/1.1 200 OK\r\n"
@@ -2245,30 +2475,51 @@ void WebServer::handleClient(int clientFd) {
                           "Content-Length: " + std::to_string(json.length()) + "\r\n"
                           "Connection: close\r\n\r\n" + json;
         send(clientFd, res.c_str(), res.length(), 0);
-    } else if (method == "POST" && path == "/api/scrape_cover") {
+    } else if (method == "POST" && (path == "/api/scrape_cover" || path == "/api/scrape_game")) {
         std::string gameIdStr = extractPostParam(postBody, "game_id");
         int64_t gameId = 0;
         try { gameId = std::stoll(gameIdStr); } catch(...) {}
 
         bool ok = false;
         std::string coverPath;
-        std::string msg = "Không thể cào boxart";
+        std::string releaseYear;
+        std::string genre;
+        std::string developer;
+        std::string desc;
+        std::string title;
+        std::string msg = "Không thể cào thông tin game";
+
         if (gameId > 0) {
             GameRecord g;
             if (DatabaseManager::instance().getGameById(gameId, g)) {
                 SystemRecord sys;
                 if (DatabaseManager::instance().getSystemById(g.systemId, sys)) {
-                    ok = BoxartScraper::instance().scrapeCover(g, sys, coverPath);
+                    auto scrapeRes = BoxartScraper::instance().scrapeGameInfo(g, sys);
+                    ok = scrapeRes.success;
+                    coverPath = scrapeRes.coverPath;
+                    releaseYear = scrapeRes.releaseYear;
+                    genre = scrapeRes.genre;
+                    developer = scrapeRes.developer;
+                    desc = scrapeRes.description;
+                    title = scrapeRes.title;
                     if (ok) {
-                        DatabaseManager::instance().updateGameCover(gameId, coverPath);
-                        msg = "Đã lưu ảnh bìa cho \"" + g.title + "\"!";
+                        msg = "Đã cập nhật ảnh bìa & thông tin cho \"" + (title.empty() ? g.title : title) + "\"!";
                     } else {
-                        msg = "Không tìm thấy ảnh bìa trên Libretro CDN.";
+                        msg = "Không tìm thấy dữ liệu trên Libretro / Wikipedia.";
                     }
                 }
             }
         }
-        std::string json = "{\"success\":" + std::string(ok ? "true" : "false") + ",\"cover_path\":\"" + escapeJson(coverPath) + "\",\"message\":\"" + escapeJson(msg) + "\"}";
+        std::string json = "{";
+        json += "\"success\":" + std::string(ok ? "true" : "false") + ",";
+        json += "\"cover_path\":\"" + escapeJson(coverPath) + "\",";
+        json += "\"title\":\"" + escapeJson(title) + "\",";
+        json += "\"release_year\":\"" + escapeJson(releaseYear) + "\",";
+        json += "\"genre\":\"" + escapeJson(genre) + "\",";
+        json += "\"developer\":\"" + escapeJson(developer) + "\",";
+        json += "\"description\":\"" + escapeJson(desc) + "\",";
+        json += "\"message\":\"" + escapeJson(msg) + "\"";
+        json += "}";
         std::string res = "HTTP/1.1 200 OK\r\n"
                           "Content-Type: application/json; charset=UTF-8\r\n"
                           "Access-Control-Allow-Origin: *\r\n"

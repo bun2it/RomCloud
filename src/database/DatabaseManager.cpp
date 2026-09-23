@@ -101,6 +101,13 @@ bool DatabaseManager::init(const std::string& dbPath) {
 
     seedDefaultSystems();
 
+    // Ensure metadata columns exist (safe idempotent migration for existing databases)
+    executeSimpleQuery("ALTER TABLE games ADD COLUMN description TEXT;");
+    executeSimpleQuery("ALTER TABLE games ADD COLUMN developer TEXT;");
+    executeSimpleQuery("ALTER TABLE games ADD COLUMN publisher TEXT;");
+    executeSimpleQuery("ALTER TABLE games ADD COLUMN genre TEXT;");
+    executeSimpleQuery("ALTER TABLE games ADD COLUMN release_year TEXT;");
+
     std::string settingsPath = AppConfig::instance().getSettingsPath();
     if (FileSystemManager::instance().fileExists(settingsPath)) {
         std::ifstream f(settingsPath);
@@ -437,7 +444,7 @@ std::vector<GameRecord> DatabaseManager::getGamesFiltered(int systemId, int stat
     }
 
     // 2. Fetch page items
-    std::string sql = "SELECT g.id, g.cloud_file_id, g.system_id, g.filename, g.title, g.size_bytes, g.mime_type, g.drive_modified_time, g.checksum_sha256, g.local_path, g.local_state, g.cover_path, g.created_at, g.updated_at, COALESCE(s.code,'') FROM games g LEFT JOIN systems s ON g.system_id = s.id" + whereClause + " ORDER BY g.title ASC LIMIT ? OFFSET ?;";
+    std::string sql = "SELECT g.id, g.cloud_file_id, g.system_id, g.filename, g.title, g.size_bytes, g.mime_type, g.drive_modified_time, g.checksum_sha256, g.local_path, g.local_state, g.cover_path, g.created_at, g.updated_at, COALESCE(s.code,''), COALESCE(g.description,''), COALESCE(g.developer,''), COALESCE(g.genre,''), COALESCE(g.release_year,'') FROM games g LEFT JOIN systems s ON g.system_id = s.id" + whereClause + " ORDER BY g.title ASC LIMIT ? OFFSET ?;";
 
     sqlite3_stmt* stmt = nullptr;
     if (sqlite3_prepare_v2(m_db, sql.c_str(), -1, &stmt, nullptr) == SQLITE_OK) {
@@ -478,6 +485,14 @@ std::vector<GameRecord> DatabaseManager::getGamesFiltered(int systemId, int stat
             if (uat) g.updatedAt = uat;
             const char* scode = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 14));
             if (scode) g.systemCode = scode;
+            const char* desc = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 15));
+            if (desc) g.description = desc;
+            const char* dev = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 16));
+            if (dev) g.developer = dev;
+            const char* gen = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 17));
+            if (gen) g.genre = gen;
+            const char* yr = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 18));
+            if (yr) g.releaseYear = yr;
             list.push_back(g);
         }
         sqlite3_finalize(stmt);
@@ -489,7 +504,7 @@ bool DatabaseManager::getGameById(int64_t gameId, GameRecord& outGame) {
     std::lock_guard<std::recursive_mutex> lock(m_mutex);
     if (!m_db) return false;
 
-    const char* sql = "SELECT id, cloud_file_id, system_id, filename, title, size_bytes, mime_type, drive_modified_time, checksum_sha256, local_path, local_state, cover_path, created_at, updated_at FROM games WHERE id = ? LIMIT 1;";
+    const char* sql = "SELECT id, cloud_file_id, system_id, filename, title, size_bytes, mime_type, drive_modified_time, checksum_sha256, local_path, local_state, cover_path, created_at, updated_at, COALESCE(description,''), COALESCE(developer,''), COALESCE(genre,''), COALESCE(release_year,'') FROM games WHERE id = ? LIMIT 1;";
     sqlite3_stmt* stmt = nullptr;
     bool found = false;
 
@@ -516,6 +531,14 @@ bool DatabaseManager::getGameById(int64_t gameId, GameRecord& outGame) {
             if (cov) outGame.coverPath = cov;
             outGame.createdAt = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 12));
             outGame.updatedAt = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 13));
+            const char* desc = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 14));
+            if (desc) outGame.description = desc;
+            const char* dev = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 15));
+            if (dev) outGame.developer = dev;
+            const char* gen = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 16));
+            if (gen) outGame.genre = gen;
+            const char* yr = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 17));
+            if (yr) outGame.releaseYear = yr;
             found = true;
         }
         sqlite3_finalize(stmt);
@@ -772,6 +795,36 @@ bool DatabaseManager::updateGameCover(int64_t gameId, const std::string& coverPa
         sqlite3_bind_text(stmt, 1, coverPath.c_str(), -1, SQLITE_STATIC);
         sqlite3_bind_text(stmt, 2, now.c_str(), -1, SQLITE_STATIC);
         sqlite3_bind_int64(stmt, 3, gameId);
+        sqlite3_step(stmt);
+        sqlite3_finalize(stmt);
+        return true;
+    }
+    return false;
+}
+
+bool DatabaseManager::updateGameMetadata(int64_t gameId, const std::string& description, const std::string& releaseYear, const std::string& developer, const std::string& genre, const std::string& coverPath) {
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
+    if (!m_db) return false;
+
+    std::string now = getCurrentTimestamp();
+    std::string sql = "UPDATE games SET description = ?, release_year = ?, developer = ?, genre = ?, updated_at = ?";
+    if (!coverPath.empty()) {
+        sql += ", cover_path = ?";
+    }
+    sql += " WHERE id = ?;";
+
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2(m_db, sql.c_str(), -1, &stmt, nullptr) == SQLITE_OK) {
+        int idx = 1;
+        sqlite3_bind_text(stmt, idx++, description.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(stmt, idx++, releaseYear.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(stmt, idx++, developer.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(stmt, idx++, genre.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(stmt, idx++, now.c_str(), -1, SQLITE_TRANSIENT);
+        if (!coverPath.empty()) {
+            sqlite3_bind_text(stmt, idx++, coverPath.c_str(), -1, SQLITE_TRANSIENT);
+        }
+        sqlite3_bind_int64(stmt, idx++, gameId);
         sqlite3_step(stmt);
         sqlite3_finalize(stmt);
         return true;

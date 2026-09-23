@@ -34,6 +34,11 @@ CREATE TABLE IF NOT EXISTS games (
     local_path TEXT,
     local_state INTEGER NOT NULL DEFAULT 0, -- 0=CLOUD, 1=LOCAL, 2=DOWNLOADING, 3=ERROR
     cover_path TEXT,
+    description TEXT,
+    developer TEXT,
+    publisher TEXT,
+    genre TEXT,
+    release_year TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
