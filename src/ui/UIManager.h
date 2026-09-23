@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 #include <unordered_map>
+#include <atomic>
 
 namespace RomCloud {
 
@@ -174,6 +175,9 @@ private:
   };
   std::unordered_map<std::string, CachedTextTexture> m_textCache;
   void clearTextCache();
+
+  std::atomic<bool> m_isIndexing{false};
+  std::atomic<bool> m_needLibraryRefresh{false};
 };
 
 } // namespace RomCloud

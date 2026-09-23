@@ -142,21 +142,23 @@ void UIManager::refreshGames() {
 }
 
 void UIManager::triggerManualSync() {
-    if (DriveSyncEngine::instance().isSyncing()) {
+    if (DriveSyncEngine::instance().isSyncing() || m_isIndexing) {
         showToast(UiStrings::TOAST_SYNCING_DRIVE, {245, 158, 11, 255});
         return;
     }
-    showToast(UiStrings::TOAST_SCANNING_SD, {0, 180, 216, 255}, 1500);
-    RomIndexer::instance().scanAllSystems(AppConfig::instance().getRomsDir());
-    refreshSystems();
-    refreshGames();
-    BoxartScraper::instance().startAutoScrapeSdCard(false);
+    showToast(UiStrings::TOAST_SCANNING_SD, {0, 180, 216, 255}, 2000);
 
-    if (AuthManager::instance().isLinked()) {
-        DriveSyncEngine::instance().startSync();
-    } else {
-        showToast(UiStrings::TOAST_SD_SCANNED_NO_DRIVE, {34, 197, 94, 255}, 3000);
-    }
+    m_isIndexing = true;
+    std::thread([this]() {
+        RomIndexer::instance().scanAllSystems(AppConfig::instance().getRomsDir());
+        BoxartScraper::instance().startAutoScrapeSdCard(false);
+        m_needLibraryRefresh = true;
+        m_isIndexing = false;
+
+        if (AuthManager::instance().isLinked()) {
+            DriveSyncEngine::instance().startSync();
+        }
+    }).detach();
 }
 
 void UIManager::update() {
@@ -191,13 +193,26 @@ void UIManager::update() {
         return;
     }
 
-    // Check if sync completed
+    // Check if local library indexing completed
+    if (m_needLibraryRefresh.exchange(false)) {
+        refreshSystems();
+        refreshGames();
+        if (!AuthManager::instance().isLinked()) {
+            showToast(UiStrings::TOAST_SD_SCANNED_NO_DRIVE, {34, 197, 94, 255}, 3000);
+        }
+    }
+
+    // Check if sync completed or errored
     auto syncProg = DriveSyncEngine::instance().getProgress();
     if (syncProg.status == SyncStatus::COMPLETED) {
         DriveSyncEngine::instance().init();
         refreshSystems();
         refreshGames();
         showToast("Đồng bộ hoàn tất: Đã lưu " + std::to_string(syncProg.cloudGamesFound) + " game vào thư viện!", {34, 197, 94, 255});
+    } else if (syncProg.status == SyncStatus::ERROR_OCCURRED) {
+        std::string err = syncProg.errorMessage.empty() ? "Lỗi đồng bộ Google Drive" : syncProg.errorMessage;
+        DriveSyncEngine::instance().init();
+        showToast(err, {239, 68, 68, 255}, 4000);
     }
 
     static AuthState lastAuthState = AuthManager::instance().getState();
@@ -923,9 +938,11 @@ void UIManager::update() {
                 }
             } else if (input.isButtonJustPressed(Button::A)) {
                 if (channelCount > 0 && m_selectedIPTVChannelIndex >= 0 && m_selectedIPTVChannelIndex < channelCount) {
-                    showToast("Đang kết nối: " + channels[m_selectedIPTVChannelIndex].name + "...", {0, 180, 216, 255}, 5000);
+                    showToast("Đang kết nối: " + channels[m_selectedIPTVChannelIndex].name + "...", {0, 180, 216, 255}, 3000);
                     render();
-                    IPTVManager::instance().playChannel(channels[m_selectedIPTVChannelIndex]);
+                    if (!IPTVManager::instance().playChannel(channels[m_selectedIPTVChannelIndex])) {
+                        showToast("Không thể phát video (Lỗi kết nối hoặc player)", {239, 68, 68, 255}, 4000);
+                    }
                 }
             } else if (input.isButtonJustPressed(Button::B)) {
                 if (m_iptvShowFavoritesOnly) {
@@ -1081,9 +1098,11 @@ void UIManager::update() {
                 } else if (input.isButtonJustPressed(Button::A)) {
                     if (resultCount > 0 && m_iptvSearchSelectedIndex >= 0 && m_iptvSearchSelectedIndex < resultCount) {
                         const auto& selChan = m_iptvSearchResults[m_iptvSearchSelectedIndex];
-                        showToast("Đang kết nối: " + selChan.name + "...", {0, 180, 216, 255}, 5000);
+                        showToast("Đang kết nối: " + selChan.name + "...", {0, 180, 216, 255}, 3000);
                         render();
-                        IPTVManager::instance().playChannel(selChan);
+                        if (!IPTVManager::instance().playChannel(selChan)) {
+                            showToast("Không thể phát video (Lỗi kết nối hoặc player)", {239, 68, 68, 255}, 4000);
+                        }
                     }
                 } else if (input.isButtonJustPressed(Button::X)) {
                     if (resultCount > 0 && m_iptvSearchSelectedIndex >= 0 && m_iptvSearchSelectedIndex < resultCount) {

@@ -301,8 +301,26 @@ bool IPTVManager::isMediaPlayerInstalled() const {
     std::string appRoot = AppConfig::instance().getAppRoot();
     if (appRoot.empty()) appRoot = "/mnt/SDCARD/Apps/RomCloud";
     std::string mpvPath = appRoot + "/bin/mpv";
-    std::string codecPath = appRoot + "/lib/libavcodec.so.58";
-    return (access(mpvPath.c_str(), X_OK) == 0 && access(codecPath.c_str(), R_OK) == 0);
+    if (access(mpvPath.c_str(), X_OK) == 0) return true;
+
+    // Check system player paths (Stock OS, SpruceOS, NextUI)
+    std::string sdRoot = AppConfig::instance().getSdRoot();
+    const std::string players[] = {
+        sdRoot + "/System/bin/mpv",
+        sdRoot + "/Emus/VIDEOS/mpv.sh",
+        sdRoot + "/Emu/VIDEOS/mpv.sh",
+        sdRoot + "/Emu/MEDIA/bin64/ffplay",
+        sdRoot + "/Emu/MEDIA/bin32/ffplay",
+        "/usr/trimui/bin/mpv",
+        "/usr/bin/mpv",
+        appRoot + "/bin/ffplay",
+        sdRoot + "/System/bin/ffplay",
+        "/usr/bin/ffplay"
+    };
+    for (const auto& p : players) {
+        if (access(p.c_str(), X_OK) == 0) return true;
+    }
+    return false;
 }
 
 bool IPTVManager::ensureMediaPlayerAvailable() {
@@ -313,7 +331,7 @@ bool IPTVManager::ensureMediaPlayerAvailable() {
     std::string mpvPath = appRoot + "/bin/mpv";
 
     Logger::warn("IPTV: Media player (mpv/codecs) missing on device. Starting auto-download...");
-    std::string bundleUrl = "https://github.com/bun2it/RomCloud/releases/download/v2.0.1/mpv_bundle.zip";
+    std::string bundleUrl = "https://github.com/bun2it/RomCloud/releases/download/v2.0.3/mpv_bundle.zip";
     std::string bundlePath = appRoot + "/mpv_bundle.zip";
 
     FILE* fp = fopen(bundlePath.c_str(), "wb");
@@ -334,7 +352,7 @@ bool IPTVManager::ensureMediaPlayerAvailable() {
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
-    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 180L);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
     CURLcode res = curl_easy_perform(curl);
     long httpCode = 0;
     curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &httpCode);
@@ -378,29 +396,26 @@ bool IPTVManager::playChannel(const IPTVChannel& channel) {
 
     std::string appRoot = AppConfig::instance().getAppRoot();
     if (appRoot.empty()) appRoot = "/mnt/SDCARD/Apps/RomCloud";
+    std::string sdRoot = AppConfig::instance().getSdRoot();
 
     std::vector<std::string> playerCandidates = {
         appRoot + "/bin/mpv",
-        "/mnt/SDCARD/System/bin/mpv",
-        "/mnt/SDCARD/Emus/VIDEOS/mpv.sh",
+        sdRoot + "/System/bin/mpv",
+        sdRoot + "/Emus/VIDEOS/mpv.sh",
+        sdRoot + "/Emu/VIDEOS/mpv.sh",
+        sdRoot + "/Emu/MEDIA/bin64/ffplay",
+        sdRoot + "/Emu/MEDIA/bin32/ffplay",
         "/usr/trimui/bin/mpv",
         "/usr/bin/mpv",
         appRoot + "/bin/ffplay",
-        "/mnt/SDCARD/System/bin/ffplay",
-        "/usr/bin/ffplay",
-        "mpv",
-        "ffplay"
+        sdRoot + "/System/bin/ffplay",
+        "/usr/bin/ffplay"
     };
 
     std::string playerPath;
     for (const auto& candidate : playerCandidates) {
-        if (candidate.front() == '/') {
-            struct stat st;
-            if (stat(candidate.c_str(), &st) == 0 && st.st_size > 1000 && access(candidate.c_str(), X_OK) == 0) {
-                playerPath = candidate;
-                break;
-            }
-        } else {
+        struct stat st;
+        if (stat(candidate.c_str(), &st) == 0 && st.st_size > 1000 && access(candidate.c_str(), X_OK) == 0) {
             playerPath = candidate;
             break;
         }
@@ -434,8 +449,8 @@ bool IPTVManager::playChannel(const IPTVChannel& channel) {
             close(logFd);
         }
 
-        // Export library paths so mpv can find codec libraries and ALSA/DRM
-        std::string libPath = appRoot + "/lib:/mnt/SDCARD/System/lib:/usr/lib:/lib";
+        // Export library paths so player can find codec libraries (RomCloud lib, SpruceOS Emu/MEDIA lib, system libs)
+        std::string libPath = appRoot + "/lib:" + sdRoot + "/Emu/MEDIA/lib64:" + sdRoot + "/Emu/MEDIA/lib32:" + sdRoot + "/System/lib:/usr/lib:/lib";
         setenv("LD_LIBRARY_PATH", libPath.c_str(), 1);
         setenv("HOME", appRoot.c_str(), 1);
 
@@ -484,6 +499,7 @@ bool IPTVManager::playChannel(const IPTVChannel& channel) {
         m_mpvPid = pid;
         m_isPlaying = true;
         m_currentChannel = channel.name;
+        uint32_t playStartTime = SDL_GetTicks();
         Logger::info("IPTV player started with PID: " + std::to_string(pid) + " using " + playerPath);
 
         // Responsive loop: wait for player to exit OR user to press B/Menu/Select
@@ -526,10 +542,16 @@ bool IPTVManager::playChannel(const IPTVChannel& channel) {
         // Clean up stay_awake
         unlink("/tmp/stay_awake");
 
+        uint32_t playDuration = SDL_GetTicks() - playStartTime;
+        bool playSuccess = true;
+
         if (WIFEXITED(status)) {
             int exitCode = WEXITSTATUS(status);
-            Logger::info("IPTV player exited with code: " + std::to_string(exitCode));
+            Logger::info("IPTV player exited with code: " + std::to_string(exitCode) + " after " + std::to_string(playDuration) + "ms");
             if (exitCode != 0) {
+                if (playDuration < 3000) {
+                    playSuccess = false;
+                }
                 // Read last lines of iptv_mpv.log for diagnostics
                 std::ifstream logFile(appRoot + "/iptv_mpv.log");
                 if (logFile.is_open()) {
@@ -556,7 +578,7 @@ bool IPTVManager::playChannel(const IPTVChannel& channel) {
         SDL_FlushEvents(SDL_FIRSTEVENT, SDL_LASTEVENT);
         InputManager::instance().reset();
 
-        return true;
+        return playSuccess;
     }
 
     unlink("/tmp/stay_awake");

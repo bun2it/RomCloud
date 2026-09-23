@@ -40,6 +40,11 @@ AppConfig::AppConfig() {
             m_sdRoot = std::string(cwd);
             m_appRoot = m_sdRoot;
         }
+    } else {
+        // Detect if RomCloud is in App (SpruceOS style) instead of Apps
+        if (stat("/mnt/SDCARD/Apps/RomCloud", &st) != 0 && stat("/mnt/SDCARD/App/RomCloud", &st) == 0) {
+            m_appRoot = "/mnt/SDCARD/App/RomCloud";
+        }
     }
 
     // Load saved OS type from settings
@@ -207,9 +212,12 @@ std::string AppConfig::getMediaPlayerPath() const {
         m_sdRoot + "/System/bin/mpv",
         m_sdRoot + "/Emus/VIDEOS/mpv.sh",
         m_sdRoot + "/Emu/VIDEOS/mpv.sh",
+        m_sdRoot + "/Emu/MEDIA/bin64/ffplay",
+        m_sdRoot + "/Emu/MEDIA/bin32/ffplay",
         "/usr/trimui/bin/mpv",
         "/usr/bin/mpv",
         getBinDir() + "/ffplay",
+        m_sdRoot + "/System/bin/ffplay",
         "/usr/bin/ffplay"
     };
 

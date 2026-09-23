@@ -18,6 +18,7 @@ public:
     // App root
     void setAppRoot(const std::string& root);
     const std::string& getAppRoot() const { return m_appRoot; }
+    const std::string& getSdRoot() const { return m_sdRoot; }
 
     // OS Type configuration
     void setOSType(OSType type);

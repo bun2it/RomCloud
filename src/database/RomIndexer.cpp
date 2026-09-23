@@ -120,16 +120,6 @@ ScanProgress RomIndexer::scanSystem(const SystemRecord& system, const std::strin
 ScanProgress RomIndexer::scanAllSystems(const std::string& romsBaseDir, ScanProgressCallback progressCb) {
     ScanProgress totalProgress;
 
-    // Automatically audit & cure misplaced ROMs (or files in _INBOX) before indexing
-    try {
-        auto fixed = RomOrganizer::instance().fixMisplacedRoms(romsBaseDir);
-        if (!fixed.empty()) {
-            Logger::info("RomOrganizer: Auto-cured and relocated " + std::to_string(fixed.size()) + " misplaced ROMs to correct emulators.");
-        }
-    } catch (const std::exception& e) {
-        Logger::error("RomOrganizer auto-fix error: " + std::string(e.what()));
-    }
-
     auto systems = DatabaseManager::instance().getSystems(false);
 
     Logger::info("Starting local ROM library indexing across " + std::to_string(systems.size()) + " systems...");
