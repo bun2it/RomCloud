@@ -6,6 +6,7 @@
 #include "../network/JsonHelper.h"
 
 #include <curl/curl.h>
+#include <SDL2/SDL.h>
 #include <sstream>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -375,7 +376,7 @@ bool UpdateManager::checkAndInstallDependencies() {
   }
 
   // Download bundle
-  if (!downloadFile(bundleUrl, bundlePath)) {
+  if (!downloadFile(bundleUrl, bundlePath, nullptr, true)) {
     Logger::error("Failed to download media bundle from: " + bundleUrl);
     std::lock_guard<std::mutex> lock(m_mutex);
     m_progress.state = UpdateState::FAILED;
@@ -409,7 +410,7 @@ bool UpdateManager::checkAndInstallDependencies() {
 // DOWNLOAD HELPERS
 // ============================================================================
 
-bool UpdateManager::downloadFile(const std::string& url, const std::string& destPath, uint64_t* outSize) {
+bool UpdateManager::downloadFile(const std::string& url, const std::string& destPath, uint64_t* outSize, bool trackProgress) {
   CURL* curl = curl_easy_init();
   if (!curl) return false;
 
@@ -419,20 +420,41 @@ bool UpdateManager::downloadFile(const std::string& url, const std::string& dest
     return false;
   }
 
+  if (trackProgress) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_lastXferTime = 0;
+    m_lastXferBytes = 0;
+    m_progress.speedKBps = 0.0;
+  }
+
   curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
   curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, fwrite);
   curl_easy_setopt(curl, CURLOPT_WRITEDATA, fp);
   curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
   curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
   curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
-  curl_easy_setopt(curl, CURLOPT_TIMEOUT, 300L);
+  curl_easy_setopt(curl, CURLOPT_TIMEOUT, 600L);
   curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
+  curl_easy_setopt(curl, CURLOPT_USERAGENT, "RomCloud-OTA/2.0");
+
+  if (trackProgress) {
+    curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
+    curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, xferCallback);
+    curl_easy_setopt(curl, CURLOPT_XFERINFODATA, this);
+  } else {
+    curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 1L);
+  }
 
   CURLcode res = curl_easy_perform(curl);
   long httpCode = 0;
   curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &httpCode);
   curl_easy_cleanup(curl);
   fclose(fp);
+
+  if (m_cancelRequested) {
+    unlink(destPath.c_str());
+    return false;
+  }
 
   if (res != CURLE_OK || httpCode < 200 || httpCode >= 300) {
     unlink(destPath.c_str());
@@ -520,13 +542,27 @@ int UpdateManager::xferCallback(void *clientp, int64_t dltotal, int64_t dlnow,
   if (self->m_cancelRequested)
     return 1;
 
-  if (dlnow > 0) {
+  if (dlnow >= 0) {
+    uint32_t now = SDL_GetTicks();
     std::lock_guard<std::mutex> lock(self->m_mutex);
     self->m_progress.bytesDownloaded = static_cast<uint64_t>(dlnow);
     if (dltotal > 0) {
       self->m_progress.totalBytes = static_cast<uint64_t>(dltotal);
       self->m_progress.progressPct =
           (static_cast<double>(dlnow) / static_cast<double>(dltotal)) * 100.0;
+    }
+
+    if (self->m_lastXferTime == 0) {
+      self->m_lastXferTime = now;
+      self->m_lastXferBytes = dlnow;
+    } else if (now > self->m_lastXferTime + 300) {
+      uint32_t elapsedMs = now - self->m_lastXferTime;
+      int64_t bytesDiff = dlnow - self->m_lastXferBytes;
+      if (bytesDiff >= 0 && elapsedMs > 0) {
+        self->m_progress.speedKBps = (static_cast<double>(bytesDiff) / 1024.0) / (static_cast<double>(elapsedMs) / 1000.0);
+      }
+      self->m_lastXferTime = now;
+      self->m_lastXferBytes = dlnow;
     }
   }
   return 0;
@@ -582,14 +618,25 @@ void UpdateManager::runDownloadWorker(UpdateInfo info) {
   // 1. Download main app binary
   {
     std::lock_guard<std::mutex> lock(m_mutex);
-    m_progress.currentStep = "Downloading RomCloud...";
+    m_progress.state = UpdateState::DOWNLOADING;
+    m_progress.currentStep = "Đang tải bản cập nhật RomCloud...";
+    m_progress.bytesDownloaded = 0;
+    m_progress.totalBytes = info.sizeBytes;
+    m_progress.progressPct = 0.0;
+    m_progress.speedKBps = 0.0;
   }
 
   uint64_t downloadedSize = 0;
-  if (!downloadFile(info.downloadUrl, newBinPath, &downloadedSize)) {
+  if (!downloadFile(info.downloadUrl, newBinPath, &downloadedSize, true)) {
+    if (m_cancelRequested) {
+      std::lock_guard<std::mutex> lock(m_mutex);
+      m_progress.state = UpdateState::IDLE;
+      m_isRunning = false;
+      return;
+    }
     std::lock_guard<std::mutex> lock(m_mutex);
     m_progress.state = UpdateState::FAILED;
-    m_progress.errorMessage = "Failed to download RomCloud binary";
+    m_progress.errorMessage = "Tải tập tin RomCloud thất bại. Kiểm tra kết nối mạng!";
     Logger::error(m_progress.errorMessage);
     m_isRunning = false;
     return;
@@ -600,7 +647,7 @@ void UpdateManager::runDownloadWorker(UpdateInfo info) {
     unlink(newBinPath.c_str());
     std::lock_guard<std::mutex> lock(m_mutex);
     m_progress.state = UpdateState::FAILED;
-    m_progress.errorMessage = "Downloaded file too small - invalid";
+    m_progress.errorMessage = "Tập tin tải về quá nhỏ hoặc không hợp lệ.";
     m_isRunning = false;
     return;
   }
@@ -609,6 +656,14 @@ void UpdateManager::runDownloadWorker(UpdateInfo info) {
   sync();
 
   // 2. Replace binary
+  {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_progress.state = UpdateState::INSTALLING;
+    m_progress.currentStep = "Đang cài đặt và thay thế file thực thi RomCloud...";
+    m_progress.progressPct = 100.0;
+    m_progress.speedKBps = 0.0;
+  }
+
   bool replaced = false;
   std::string oldBinPath = binDir + "/RomCloud.old";
   unlink(oldBinPath.c_str());
@@ -651,11 +706,12 @@ void UpdateManager::runDownloadWorker(UpdateInfo info) {
 
     {
       std::lock_guard<std::mutex> lock(m_mutex);
-      m_progress.currentStep = "Updating app icon...";
+      m_progress.state = UpdateState::INSTALLING;
+      m_progress.currentStep = "Đang cập nhật biểu tượng ứng dụng...";
     }
 
     uint64_t iconSize = 0;
-    if (downloadFile(info.iconUrl, newIconPath, &iconSize) && iconSize > 1000) {
+    if (downloadFile(info.iconUrl, newIconPath, &iconSize, false) && iconSize > 1000) {
       chmod(newIconPath.c_str(), 0644);
       unlink(finalIconPath.c_str());
       if (rename(newIconPath.c_str(), finalIconPath.c_str()) == 0) {
@@ -684,17 +740,29 @@ void UpdateManager::runDownloadWorker(UpdateInfo info) {
     Logger::warn("Some dependencies may be missing - app may not work fully");
   }
 
-  // 4. Check and install OS-specific bundle if available
+  // 5. Check and install OS-specific bundle if available
   if (!info.osBundleUrl.empty()) {
     std::string appRoot = AppConfig::instance().getAppRoot();
     std::string osBundlePath = appRoot + "/os_bundle.zip";
 
     {
       std::lock_guard<std::mutex> lock(m_mutex);
-      m_progress.currentStep = "Downloading OS bundle...";
+      m_progress.state = UpdateState::DOWNLOADING_DEPS;
+      m_progress.currentStep = "Đang tải gói cấu hình " + info.osType + "...";
+      m_progress.bytesDownloaded = 0;
+      m_progress.totalBytes = 0;
+      m_progress.progressPct = 0.0;
+      m_progress.speedKBps = 0.0;
     }
 
-    if (downloadFile(info.osBundleUrl, osBundlePath)) {
+    if (downloadFile(info.osBundleUrl, osBundlePath, nullptr, true)) {
+      {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_progress.state = UpdateState::INSTALLING_DEPS;
+        m_progress.currentStep = "Đang cài đặt gói tối ưu " + info.osType + "...";
+        m_progress.progressPct = 100.0;
+        m_progress.speedKBps = 0.0;
+      }
       installOsBundle(osBundlePath, info.osType);
       unlink(osBundlePath.c_str());
     }
@@ -706,7 +774,7 @@ void UpdateManager::runDownloadWorker(UpdateInfo info) {
     std::lock_guard<std::mutex> lock(m_mutex);
     m_progress.state = UpdateState::COMPLETED;
     m_progress.progressPct = 100.0;
-    m_progress.currentStep = "Update ready!";
+    m_progress.currentStep = "Cập nhật thành công! Vui lòng khởi động lại.";
   }
 
   m_isRunning = false;
@@ -731,17 +799,25 @@ bool UpdateManager::downloadAndInstallDependencies(const UpdateInfo& info) {
 
   {
     std::lock_guard<std::mutex> lock(m_mutex);
-    m_progress.currentStep = "Downloading media dependencies...";
+    m_progress.state = UpdateState::DOWNLOADING_DEPS;
+    m_progress.currentStep = "Đang tải gói hỗ trợ phát video (mpv, codecs)...";
+    m_progress.bytesDownloaded = 0;
+    m_progress.totalBytes = 0;
+    m_progress.progressPct = 0.0;
+    m_progress.speedKBps = 0.0;
   }
 
-  if (!downloadFile(bundleUrl, bundlePath)) {
+  if (!downloadFile(bundleUrl, bundlePath, nullptr, true)) {
     Logger::error("Failed to download media bundle");
     return false;
   }
 
   {
     std::lock_guard<std::mutex> lock(m_mutex);
-    m_progress.currentStep = "Installing media...";
+    m_progress.state = UpdateState::INSTALLING_DEPS;
+    m_progress.currentStep = "Đang giải nén và thiết lập trình phát video...";
+    m_progress.progressPct = 100.0;
+    m_progress.speedKBps = 0.0;
   }
 
   bool success = installMpvsBundle(bundlePath);

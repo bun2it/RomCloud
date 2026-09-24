@@ -895,11 +895,13 @@ void UIManager::update() {
                 } else if (input.isButtonJustPressed(Button::B)) {
                     setState(UIState::MENU);
                 }
-            } else if (prog.state == UpdateState::DOWNLOADING || prog.state == UpdateState::VERIFYING) {
+            } else if (prog.state == UpdateState::DOWNLOADING || prog.state == UpdateState::DOWNLOADING_DEPS || prog.state == UpdateState::VERIFYING) {
                 if (input.isButtonJustPressed(Button::B)) {
                     UpdateManager::instance().cancelUpdate();
                     showToast(UiStrings::TOAST_OTA_CANCELLED, {245, 158, 11, 255});
                 }
+            } else if (prog.state == UpdateState::INSTALLING || prog.state == UpdateState::INSTALLING_DEPS) {
+                // Prevent cancelling while extracting or installing to avoid corruption
             } else if (prog.state == UpdateState::COMPLETED) {
                 if (input.isButtonJustPressed(Button::A)) {
                     Application::instance().requestRestart();
@@ -2954,15 +2956,20 @@ void UIManager::renderOTAUpdateState() {
         }
         case UpdateState::DOWNLOADING:
         case UpdateState::DOWNLOADING_DEPS:
+        case UpdateState::INSTALLING:
         case UpdateState::INSTALLING_DEPS:
         case UpdateState::VERIFYING: {
             std::string title = UiStrings::OTA_DOWNLOADING_TITLE;
             if (prog.state == UpdateState::DOWNLOADING_DEPS) {
                 title = "Đang tải gói hỗ trợ phát video (mpv)...";
-            } else if (prog.state == UpdateState::INSTALLING_DEPS) {
-                title = "Đang cài đặt gói thư viện phụ trợ...";
+            } else if (prog.state == UpdateState::INSTALLING || prog.state == UpdateState::INSTALLING_DEPS) {
+                title = "Đang cài đặt bản cập nhật...";
             }
-            drawText(title, 512, contentBoxY + 50, {0, 180, 216, 255}, m_fontLarge, true);
+            drawText(title, 512, contentBoxY + 40, {0, 180, 216, 255}, m_fontLarge, true);
+
+            // Detailed current step description
+            std::string stepMsg = prog.currentStep.empty() ? title : prog.currentStep;
+            drawText(stepMsg, 512, contentBoxY + 80, {210, 225, 240, 255}, m_fontSmall, true);
 
             int barW = 580;
             int barH = 22;
@@ -2974,15 +2981,31 @@ void UIManager::renderOTAUpdateState() {
 
             char pctBuf[32];
             std::snprintf(pctBuf, sizeof(pctBuf), "%.1f%%", pct);
-            std::string dlStr = FileSystemManager::instance().formatBytes(prog.bytesDownloaded);
-            std::string totStr = FileSystemManager::instance().formatBytes(prog.totalBytes);
+            std::string dlStr = (prog.bytesDownloaded > 0) ? FileSystemManager::instance().formatBytes(prog.bytesDownloaded) : "0 B";
+            std::string totStr = (prog.totalBytes > 0) ? FileSystemManager::instance().formatBytes(prog.totalBytes) : "...";
             std::string progressInfo = dlStr + " / " + totStr + " (" + pctBuf + ")";
+
+            // Format download speed
+            if (prog.speedKBps >= 1024.0) {
+                char sBuf[32];
+                std::snprintf(sBuf, sizeof(sBuf), "  •  %.1f MB/s", prog.speedKBps / 1024.0);
+                progressInfo += sBuf;
+            } else if (prog.speedKBps > 0.0) {
+                char sBuf[32];
+                std::snprintf(sBuf, sizeof(sBuf), "  •  %.0f KB/s", prog.speedKBps);
+                progressInfo += sBuf;
+            }
+
             drawText(progressInfo, 512, barY + 34, {255, 255, 255, 255}, m_fontSmall, true);
 
             if (prog.state == UpdateState::VERIFYING) {
                 drawText(UiStrings::OTA_VERIFYING_FILE, 512, contentBoxY + 190, {245, 158, 11, 255}, m_fontSmall, true);
             }
-            drawBadge(422, contentBoxY + 265, 180, 44, UiStrings::OTA_BTN_CANCEL_DOWNLOAD, {55, 65, 81, 255}, {255, 255, 255, 255});
+            if (prog.state == UpdateState::DOWNLOADING || prog.state == UpdateState::DOWNLOADING_DEPS) {
+                drawBadge(422, contentBoxY + 265, 180, 44, UiStrings::OTA_BTN_CANCEL_DOWNLOAD, {55, 65, 81, 255}, {255, 255, 255, 255});
+            } else {
+                drawBadge(372, contentBoxY + 265, 280, 44, "Đang xử lý, vui lòng chờ...", {40, 50, 65, 255}, {200, 215, 230, 255});
+            }
             break;
         }
         case UpdateState::COMPLETED: {

@@ -1,17 +1,17 @@
 {
-  "version": "2.0.8",
+  "version": "2.0.9",
   "release_date": "2026-09-24",
   "target_os": "ALL",
   "icon_url": "https://raw.githubusercontent.com/bun2it/RomCloud/main/icon.png",
-  "binary_url": "https://github.com/bun2it/RomCloud/releases/download/v2.0.8/RomCloud",
-  "bundle_url": "https://github.com/bun2it/RomCloud/releases/download/v2.0.8/mpv_bundle.zip",
-  "STOCK_PS_bundle_url": "https://github.com/bun2it/RomCloud/releases/download/v2.0.8/bundle-STOCK_PS.zip",
-  "NEXTUI_bundle_url": "https://github.com/bun2it/RomCloud/releases/download/v2.0.8/bundle-NEXTUI.zip",
-  "SPRUCE_OS_bundle_url": "https://github.com/bun2it/RomCloud/releases/download/v2.0.8/bundle-SPRUCE_OS.zip",
+  "binary_url": "https://github.com/bun2it/RomCloud/releases/download/v2.0.9/RomCloud",
+  "bundle_url": "https://github.com/bun2it/RomCloud/releases/download/v2.0.9/mpv_bundle.zip",
+  "STOCK_PS_bundle_url": "https://github.com/bun2it/RomCloud/releases/download/v2.0.9/bundle-STOCK_PS.zip",
+  "NEXTUI_bundle_url": "https://github.com/bun2it/RomCloud/releases/download/v2.0.9/bundle-NEXTUI.zip",
+  "SPRUCE_OS_bundle_url": "https://github.com/bun2it/RomCloud/releases/download/v2.0.9/bundle-SPRUCE_OS.zip",
   "os_versions": {
-    "STOCK_PS": "2.0.8",
-    "NEXTUI": "2.0.8",
-    "SPRUCE_OS": "2.0.8"
+    "STOCK_PS": "2.0.9",
+    "NEXTUI": "2.0.9",
+    "SPRUCE_OS": "2.0.9"
   },
-  "changelog": "v2.0.8: Sửa triệt để lỗi scale icon và căn chỉnh UI trên màn hình 16:9 (TrimUI Smart Pro S / Brick Pro S); Khắc phục hiện tượng icon bị lệch và đè lẫn nhau."
+  "changelog": "v2.0.9: Khôi phục đầy đủ thanh tiến trình OTA (tốc độ tải MB/s, % hoàn thành, dung lượng tệp và các bước cài đặt chi tiết)."
 }

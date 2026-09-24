@@ -7,7 +7,7 @@
 
 namespace RomCloud {
 
-constexpr const char* APP_VERSION = "2.0.8";
+constexpr const char* APP_VERSION = "2.0.9";
 constexpr const char* GITHUB_REPO = "bun2it/RomCloud";
 constexpr const char* VERSION_MANIFEST_URL = "https://raw.githubusercontent.com/bun2it/RomCloud/main/version.json";
 
@@ -18,6 +18,7 @@ enum class UpdateState {
     UP_TO_DATE,
     DOWNLOADING,
     VERIFYING,
+    INSTALLING,
     DOWNLOADING_DEPS,
     INSTALLING_DEPS,
     COMPLETED,
@@ -42,6 +43,7 @@ struct UpdateProgress {
     uint64_t bytesDownloaded = 0;
     uint64_t totalBytes = 0;
     double progressPct = 0.0;
+    double speedKBps = 0.0;
     std::string errorMessage;
     std::string newVersion;
     std::string currentStep;      // "Downloading app...", "Installing mpv..."
@@ -94,11 +96,14 @@ private:
 
     void runDownloadWorker(UpdateInfo info);
     bool downloadAndInstallDependencies(const UpdateInfo& info);
-    bool downloadFile(const std::string& url, const std::string& destPath, uint64_t* outSize = nullptr);
+    bool downloadFile(const std::string& url, const std::string& destPath, uint64_t* outSize = nullptr, bool trackProgress = false);
     bool installMpvsBundle(const std::string& zipPath);
     bool installOsBundle(const std::string& zipPath, const std::string& osType);
     static int xferCallback(void* clientp, int64_t dltotal, int64_t dlnow, int64_t ultotal, int64_t ulnow);
     static bool isVersionNewer(const std::string& remote, const std::string& current);
+
+    uint32_t m_lastXferTime = 0;
+    int64_t m_lastXferBytes = 0;
 };
 
 } // namespace RomCloud

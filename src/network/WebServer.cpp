@@ -4207,6 +4207,9 @@ void WebServer::handleClient(int clientFd) {
         else if (prog.state == UpdateState::UP_TO_DATE) stateStr = "UP_TO_DATE";
         else if (prog.state == UpdateState::DOWNLOADING) stateStr = "DOWNLOADING";
         else if (prog.state == UpdateState::VERIFYING) stateStr = "VERIFYING";
+        else if (prog.state == UpdateState::INSTALLING) stateStr = "INSTALLING";
+        else if (prog.state == UpdateState::DOWNLOADING_DEPS) stateStr = "DOWNLOADING_DEPS";
+        else if (prog.state == UpdateState::INSTALLING_DEPS) stateStr = "INSTALLING_DEPS";
         else if (prog.state == UpdateState::COMPLETED) stateStr = "COMPLETED";
         else if (prog.state == UpdateState::FAILED) stateStr = "FAILED";
 
@@ -4214,6 +4217,8 @@ void WebServer::handleClient(int clientFd) {
                            "\"progress_pct\":" + std::to_string(prog.progressPct) + ","
                            "\"bytes_downloaded\":" + std::to_string(prog.bytesDownloaded) + ","
                            "\"total_bytes\":" + std::to_string(prog.totalBytes) + ","
+                           "\"speed_kbps\":" + std::to_string(prog.speedKBps) + ","
+                           "\"current_step\":\"" + escapeJson(prog.currentStep) + "\","
                            "\"error\":\"" + escapeJson(prog.errorMessage) + "\"}";
         std::string res = "HTTP/1.1 200 OK\r\n"
                           "Content-Type: application/json; charset=UTF-8\r\n"
