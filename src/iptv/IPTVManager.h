@@ -72,6 +72,12 @@ public:
 
     // Play channel with mpv/ffplay
     bool playChannel(const IPTVChannel& channel);
+    bool playYouTubeVideo(const std::string& videoId, const std::string& initialUrl, const std::string& quality = "360");
+    bool playYouTubeUrl(const std::string& url);
+    bool switchYouTubeQuality(const std::string& videoId, const std::string& targetQuality);
+    void showOverlayIcon(const std::string& iconName, uint32_t durationMs = 1400);
+    bool sendMpvIpcCommand(const std::string& cmd, std::string* response = nullptr);
+    bool isYouTubePlaying() const { return m_isPlaying && m_currentChannel == "YouTube"; }
     bool stop();
 
     // Status
@@ -100,6 +106,7 @@ private:
     bool m_isPlaying = false;
     std::string m_currentChannel;
     int m_mpvPid = -1;
+    uint32_t m_overlayExpireTime = 0;
 };
 
 } // namespace RomCloud

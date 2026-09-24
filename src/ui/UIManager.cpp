@@ -16,10 +16,19 @@
 #include "../iptv/IPTVManager.h"
 #include "BoxartScraper.h"
 #include "UiStrings.h"
+#include "TelexHelper.h"
+#include "../network/JsonHelper.h"
+#include "../network/HttpClient.h"
 #include <SDL2/SDL_image.h>
+#include <mutex>
+#include <unordered_set>
 #include <algorithm>
+#include <sstream>
+#include <cstdio>
 #include <cmath>
 #include <cstring>
+#include <unistd.h>
+#include <sys/stat.h>
 
 namespace RomCloud {
 
@@ -32,6 +41,7 @@ void UIManager::initGridMenu() {
     m_gridMenuItems = {
         {"games", "THƯ VIỆN GAME", "GAMES.png", "Danh sách ROM"},
         {"iptv", "XEM TV", "TV.png", "Kênh TV online"},
+        {"youtube", "YOUTUBE", "YOUTUBE.png", "YouTube"},
         {"sync", "ĐỒNG BỘ", "SYNC.png", "Đồng bộ Google Drive"},
         {"upload", "TẢI LÊN", "UPLOAD.png", "Upload lên Drive"},
         {"ota", "CẬP NHẬT", "OTA.png", "Cập nhật OTA"},
@@ -106,6 +116,7 @@ void UIManager::shutdown() {
     m_systemIconCache.clear();
 
     clearTextCache();
+    clearThumbnailCache();
 
     if (m_fontTitle) { TTF_CloseFont(m_fontTitle); m_fontTitle = nullptr; }
     if (m_fontLarge) { TTF_CloseFont(m_fontLarge); m_fontLarge = nullptr; }
@@ -116,6 +127,12 @@ void UIManager::shutdown() {
 }
 
 void UIManager::setState(UIState state) {
+    if ((m_currentState == UIState::YOUTUBE_RESULTS || m_currentState == UIState::YOUTUBE_SEARCH) &&
+        (state != UIState::YOUTUBE_RESULTS && state != UIState::YOUTUBE_SEARCH)) {
+        clearThumbnailCache();
+        system("rm -rf /tmp/yt_thumbs/* 2>/dev/null &");
+    }
+
     m_currentState = state;
     InputManager::instance().reset();
     if (state == UIState::SYSTEM_SELECT) {
@@ -215,6 +232,48 @@ void UIManager::update() {
         showToast(err, {239, 68, 68, 255}, 4000);
     }
 
+    // Check if YouTube search finished
+    if (m_ytSearchFinished.exchange(false)) {
+        m_ytIsSearching = false;
+        if (!m_ytSearchResults.empty()) {
+            if (m_currentState == UIState::YOUTUBE_SEARCH) {
+                setState(UIState::YOUTUBE_RESULTS);
+                m_ytSearchSelectedIndex = 0;
+                m_ytSearchScrollOffset = 0;
+
+                // Collect video IDs and start background thumbnail downloads
+                std::vector<std::string> vids;
+                for (const auto& item : m_ytSearchResults) {
+                    size_t p = item.find('|');
+                    if (p != std::string::npos) {
+                        vids.push_back(item.substr(0, p));
+                    }
+                }
+                startThumbnailDownloads(vids);
+            }
+        } else {
+            if (m_currentState == UIState::YOUTUBE_SEARCH) {
+                std::string msg = m_ytErrorMessage.empty() ? "Không tìm thấy video nào" : m_ytErrorMessage;
+                showToast(msg, {245, 158, 11, 255}, 3500);
+            }
+        }
+    }
+
+    // Check if YouTube video stream resolution finished
+    if (m_ytVideoReady.exchange(false)) {
+        m_ytIsLoadingVideo = false;
+        if (!m_ytPendingStreamUrl.empty()) {
+            std::string url = m_ytPendingStreamUrl;
+            std::string vid = m_ytPendingVideoId;
+            m_ytPendingStreamUrl.clear();
+            m_ytPendingVideoId.clear();
+            IPTVManager::instance().playYouTubeVideo(vid, url, "360");
+            setState(UIState::YOUTUBE_RESULTS);
+        } else {
+            showToast("Không thể lấy link phát video", {239, 68, 68, 255}, 3000);
+        }
+    }
+
     static AuthState lastAuthState = AuthManager::instance().getState();
     AuthState curAuthState = AuthManager::instance().getState();
     if (curAuthState == AuthState::LINKED && lastAuthState != AuthState::LINKED) {
@@ -256,6 +315,21 @@ void UIManager::update() {
                     m_selectedIPTVChannelIndex = 0;
                     m_iptvScrollOffset = 0;
                     setState(UIState::IPTV_LIST);
+                } else if (selectedId == "youtube") {
+                    m_ytSearchQuery.clear();
+                    m_ytSearchResults.clear();
+                    m_ytSearchSelectedIndex = 0;
+                    m_ytSearchScrollOffset = 0;
+                    m_ytKbRow = 0;
+                    m_ytKbCol = 0;
+                    m_ytKbInResults = false;
+                    m_ytErrorMessage.clear();
+                    m_ytIsSearching = false;
+                    m_ytSearchFinished = false;
+                    m_ytIsLoadingVideo = false;
+                    m_ytVideoReady = false;
+                    m_ytPendingStreamUrl.clear();
+                    setState(UIState::YOUTUBE_SEARCH);
                 } else if (selectedId == "sync") {
                     triggerManualSync();
                 } else if (selectedId == "upload") {
@@ -1155,6 +1229,240 @@ void UIManager::update() {
             break;
         }
 
+        case UIState::YOUTUBE_SEARCH: {
+            if (m_ytIsSearching) {
+                break; // Ignore input while searching
+            }
+
+            static const char* lowerRows[] = {
+                "1234567890",
+                "qwertyuiop",
+                "asdfghjkl-",
+                "zxcvbnm()/"
+            };
+            static const char* upperRows[] = {
+                "1234567890",
+                "QWERTYUIOP",
+                "ASDFGHJKL-",
+                "ZXCVBNM()/"
+            };
+
+            if (input.isButtonJustPressed(Button::UP)) {
+                if (m_ytKbRow > 0) m_ytKbRow--;
+            } else if (input.isButtonJustPressed(Button::DOWN)) {
+                if (m_ytKbRow < 4) m_ytKbRow++;
+            } else if (input.isButtonJustPressed(Button::LEFT)) {
+                if (m_ytKbRow == 4) {
+                    int actionIdx = m_ytKbCol / 2;
+                    if (actionIdx > 0) actionIdx--;
+                    else actionIdx = 4;
+                    m_ytKbCol = actionIdx * 2;
+                } else {
+                    if (m_ytKbCol > 0) m_ytKbCol--;
+                    else m_ytKbCol = 9;
+                }
+            } else if (input.isButtonJustPressed(Button::RIGHT)) {
+                if (m_ytKbRow == 4) {
+                    int actionIdx = m_ytKbCol / 2;
+                    if (actionIdx < 4) actionIdx++;
+                    else actionIdx = 0;
+                    m_ytKbCol = actionIdx * 2;
+                } else {
+                    if (m_ytKbCol < 9) m_ytKbCol++;
+                    else m_ytKbCol = 0;
+                }
+            } else if (input.isButtonJustPressed(Button::A)) {
+                if (m_ytKbRow < 4) {
+                    char ch = m_ytKbShift ? upperRows[m_ytKbRow][m_ytKbCol] : lowerRows[m_ytKbRow][m_ytKbCol];
+                    if (m_ytSearchQuery.length() < 60) {
+                        if (m_ytTelexMode) {
+                            m_ytSearchQuery = TelexHelper::processTelex(m_ytSearchQuery, ch);
+                        } else {
+                            m_ytSearchQuery += ch;
+                        }
+                    }
+                } else {
+                    int actionIdx = m_ytKbCol / 2;
+                    if (actionIdx == 0) {
+                        m_ytKbShift = !m_ytKbShift;
+                    } else if (actionIdx == 1) {
+                        m_ytTelexMode = !m_ytTelexMode;
+                        showToast(m_ytTelexMode ? "Chế độ: TELEX" : "Chế độ: TIẾNG ANH (US)", {0, 200, 83, 255}, 1200);
+                    } else if (actionIdx == 2) {
+                        if (m_ytSearchQuery.length() < 60) m_ytSearchQuery += ' ';
+                    } else if (actionIdx == 3) {
+                        TelexHelper::popUtf8(m_ytSearchQuery);
+                    } else if (actionIdx == 4) {
+                        if (!m_ytSearchQuery.empty()) {
+                            triggerYouTubeSearch();
+                        } else if (!m_ytSearchResults.empty()) {
+                            setState(UIState::YOUTUBE_RESULTS);
+                        }
+                    }
+                }
+            } else if (input.isButtonJustPressed(Button::L1)) {
+                m_ytKbShift = !m_ytKbShift;
+            } else if (input.isButtonJustPressed(Button::R1)) {
+                m_ytTelexMode = !m_ytTelexMode;
+                showToast(m_ytTelexMode ? "Chế độ: TELEX" : "Chế độ: TIẾNG ANH (US)", {0, 200, 83, 255}, 1200);
+            } else if (input.isButtonJustPressed(Button::X)) {
+                if (m_ytSearchQuery.length() < 60) m_ytSearchQuery += ' ';
+            } else if (input.isButtonJustPressed(Button::Y)) {
+                TelexHelper::popUtf8(m_ytSearchQuery);
+            } else if (input.isButtonJustPressed(Button::START)) {
+                if (!m_ytSearchQuery.empty()) {
+                    triggerYouTubeSearch();
+                } else if (!m_ytSearchResults.empty()) {
+                    setState(UIState::YOUTUBE_RESULTS);
+                }
+            } else if (input.isButtonJustPressed(Button::B)) {
+                if (!m_ytSearchQuery.empty()) {
+                    TelexHelper::popUtf8(m_ytSearchQuery);
+                } else if (!m_ytSearchResults.empty()) {
+                    setState(UIState::YOUTUBE_RESULTS);
+                } else {
+                    setState(UIState::MENU);
+                }
+            } else if (input.isButtonJustPressed(Button::SELECT)) {
+                setState(UIState::MENU);
+            }
+            break;
+        }
+
+        case UIState::YOUTUBE_RESULTS: {
+            if (m_ytIsLoadingVideo) {
+                break; // Ignore input while resolving video stream
+            }
+
+            int resultCount = static_cast<int>(m_ytSearchResults.size());
+            if (resultCount == 0) {
+                setState(UIState::YOUTUBE_SEARCH);
+                break;
+            }
+
+            const int gridCols = 3;
+            const int pageSize = 6;
+
+            if (input.isButtonJustPressed(Button::LEFT)) {
+                if (m_ytSearchSelectedIndex % gridCols > 0) {
+                    m_ytSearchSelectedIndex--;
+                }
+            } else if (input.isButtonJustPressed(Button::RIGHT)) {
+                if (m_ytSearchSelectedIndex % gridCols < gridCols - 1 &&
+                    m_ytSearchSelectedIndex + 1 < resultCount) {
+                    m_ytSearchSelectedIndex++;
+                }
+            } else if (input.isButtonJustPressed(Button::UP)) {
+                if (m_ytSearchSelectedIndex >= gridCols) {
+                    m_ytSearchSelectedIndex -= gridCols;
+                }
+            } else if (input.isButtonJustPressed(Button::DOWN)) {
+                if (m_ytSearchSelectedIndex + gridCols < resultCount) {
+                    m_ytSearchSelectedIndex += gridCols;
+                } else if (m_ytSearchSelectedIndex + 1 < resultCount && (m_ytSearchSelectedIndex % gridCols == 0)) {
+                    m_ytSearchSelectedIndex = resultCount - 1;
+                }
+            } else if (input.isButtonJustPressed(Button::X)) {
+                setState(UIState::YOUTUBE_SEARCH);
+            } else if (input.isButtonJustPressed(Button::L1)) {
+                if (m_ytCurrentPage > 1) {
+                    m_ytCurrentPage--;
+                    int startIdx = (m_ytCurrentPage - 1) * 6;
+                    int endIdx = std::min<int>(startIdx + 6, static_cast<int>(m_ytAllCachedResults.size()));
+                    if (startIdx < endIdx) {
+                        m_ytSearchResults.assign(m_ytAllCachedResults.begin() + startIdx, m_ytAllCachedResults.begin() + endIdx);
+                        m_ytSearchSelectedIndex = 0;
+                        m_ytSearchScrollOffset = 0;
+                        std::vector<std::string> vids;
+                        for (const auto& item : m_ytSearchResults) {
+                            size_t p = item.find('|');
+                            if (p != std::string::npos) vids.push_back(item.substr(0, p));
+                        }
+                        startThumbnailDownloads(vids);
+                    }
+                }
+            } else if (input.isButtonJustPressed(Button::R1)) {
+                int targetPage = m_ytCurrentPage + 1;
+                int startIdx = (targetPage - 1) * 6;
+                if (startIdx < static_cast<int>(m_ytAllCachedResults.size())) {
+                    // Turn page instantly from in-memory cache
+                    m_ytCurrentPage = targetPage;
+                    int endIdx = std::min<int>(startIdx + 6, static_cast<int>(m_ytAllCachedResults.size()));
+                    m_ytSearchResults.assign(m_ytAllCachedResults.begin() + startIdx, m_ytAllCachedResults.begin() + endIdx);
+                    m_ytSearchSelectedIndex = 0;
+                    m_ytSearchScrollOffset = 0;
+                    std::vector<std::string> vids;
+                    for (const auto& item : m_ytSearchResults) {
+                        size_t p = item.find('|');
+                        if (p != std::string::npos) vids.push_back(item.substr(0, p));
+                    }
+                    startThumbnailDownloads(vids);
+                } else if (!m_ytIsSearching) {
+                    // Fetch next page dynamically via script
+                    m_ytIsSearching = true;
+                    showToast("Đang tải trang tiếp theo...", {0, 180, 216, 255}, 1500);
+                    std::string query = m_ytLastSearchQuery;
+                    std::thread([this, query, targetPage, startIdx]() {
+                        std::string appRoot = AppConfig::instance().getAppRoot();
+                        if (appRoot.empty()) appRoot = "/mnt/SDCARD/Apps/RomCloud";
+                        std::string scriptPath = appRoot + "/scripts/youtube_search.sh";
+                        std::string escapedQuery;
+                        for (char c : query) {
+                            if (c == '"' || c == '\\') escapedQuery += '\\';
+                            escapedQuery += c;
+                        }
+                        std::string cmd = "\"" + scriptPath + "\" search \"" + escapedQuery + "\" " + std::to_string(targetPage) + " 6 2>/dev/null";
+                        FILE* pipe = popen(cmd.c_str(), "r");
+                        std::vector<std::string> moreResults;
+                        if (pipe) {
+                            char buffer[2048];
+                            while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
+                                std::string line(buffer);
+                                while (!line.empty() && (line.back() == '\n' || line.back() == '\r')) line.pop_back();
+                                if (line.find("ERROR:") == 0 || line.find("WARNING:") == 0) continue;
+                                if (std::count(line.begin(), line.end(), '|') >= 4) {
+                                    moreResults.push_back(line);
+                                }
+                            }
+                            pclose(pipe);
+                        }
+                        if (!moreResults.empty()) {
+                            m_ytAllCachedResults.insert(m_ytAllCachedResults.end(), moreResults.begin(), moreResults.end());
+                            m_ytCurrentPage = targetPage;
+                            int endIdx = std::min<int>(startIdx + 6, static_cast<int>(m_ytAllCachedResults.size()));
+                            m_ytSearchResults.assign(m_ytAllCachedResults.begin() + startIdx, m_ytAllCachedResults.begin() + endIdx);
+                            m_ytSearchSelectedIndex = 0;
+                            m_ytSearchScrollOffset = 0;
+                            std::vector<std::string> vids;
+                            for (const auto& item : m_ytSearchResults) {
+                                size_t p = item.find('|');
+                                if (p != std::string::npos) vids.push_back(item.substr(0, p));
+                            }
+                            startThumbnailDownloads(vids);
+                        } else {
+                            showToast("Đã đến trang cuối", {245, 158, 11, 255}, 2000);
+                        }
+                        m_ytIsSearching = false;
+                    }).detach();
+                }
+            } else if (input.isButtonJustPressed(Button::A)) {
+                if (m_ytSearchSelectedIndex >= 0 && m_ytSearchSelectedIndex < resultCount) {
+                    std::string selected = m_ytSearchResults[m_ytSearchSelectedIndex];
+                    std::string videoId = selected.substr(0, selected.find('|'));
+                    playYouTubeVideo(videoId);
+                }
+            } else if (input.isButtonJustPressed(Button::B) || input.isButtonJustPressed(Button::START)) {
+                m_ytIsSearching = false;
+                setState(UIState::YOUTUBE_SEARCH);
+            } else if (input.isButtonJustPressed(Button::SELECT)) {
+                m_ytIsSearching = false;
+                setState(UIState::MENU);
+            }
+
+            m_ytSearchScrollOffset = (m_ytSearchSelectedIndex / pageSize) * pageSize;
+            break;
+        }
+
         default: break;
     }
 }
@@ -1514,45 +1822,7 @@ void UIManager::drawGridIcon(const std::string &iconFile, int x, int y, int w, i
 }
 
 void UIManager::renderHeader() {
-    if (m_currentState == UIState::IPTV_LIST || m_currentState == UIState::IPTV_SEARCH) {
-        return;
-    }
-
-    drawRect(0, 0, 1024, 64, {18, 22, 30, 255}, true);
-    drawRect(0, 63, 1024, 1, {40, 48, 62, 255}, true);
-
-    drawText(UiStrings::APP_TITLE, 30, 14, {0, 180, 216, 255}, m_fontTitle ? m_fontTitle : m_fontLarge);
-    drawText(UiStrings::APP_SUBTITLE, 240, 22, {130, 145, 165, 255}, m_fontMedium);
-
-    if (m_currentState == UIState::GAME_LIST) {
-        std::string sysTitle = m_activeSystem.code + " - " + m_activeSystem.name;
-        drawText(sysTitle, 512, 18, {255, 255, 255, 255}, m_fontLarge, true);
-
-        std::string filterLabel = UiStrings::FILTER_TAG_ALL;
-        SDL_Color filterBg = {107, 33, 168, 255};
-        if (m_filterMode == GameFilterMode::LOCAL_ONLY) {
-            filterLabel = UiStrings::FILTER_TAG_LOCAL;
-            filterBg = {22, 101, 52, 255};
-        } else if (m_filterMode == GameFilterMode::CLOUD_ONLY) {
-            filterLabel = UiStrings::FILTER_TAG_CLOUD;
-            filterBg = {30, 58, 138, 255};
-        }
-        drawBadge(790, 14, 205, 38, filterLabel, filterBg, {255, 255, 255, 255});
-    } else {
-        auto diag = PlatformInfo::instance().getDiagnostics();
-        std::string statusText = "Wi-Fi: " + (diag.ipAddress != "N/A" ? "ONLINE (" + diag.ipAddress + ")" : "OFFLINE");
-        SDL_Color statusColor = (diag.ipAddress != "N/A") ? SDL_Color{34, 197, 94, 255} : SDL_Color{239, 68, 68, 255};
-        drawText(statusText, 994 - (int)statusText.length() * 10, 20, statusColor, m_fontMedium);
-    }
-
-    if (DownloadManager::instance().isDownloading()) {
-        auto dlp = DownloadManager::instance().getProgress();
-        char buf[16];
-        std::snprintf(buf, sizeof(buf), "%.0f%%", dlp.progressPct);
-        std::string dlBadge = "⬇ " + std::string(buf);
-        int bx = (m_currentState == UIState::GAME_LIST || m_currentState == UIState::SEARCH) ? 700 : 540;
-        drawBadge(bx, 14, 80, 38, dlBadge, {2, 132, 199, 255}, {255, 255, 255, 255});
-    }
+    // Header removed to maximize full-screen view for all screens
 }
 
 void UIManager::renderSearchState() {
@@ -1672,7 +1942,8 @@ void UIManager::renderSearchState() {
 }
 
 void UIManager::renderFooter() {
-    if (m_currentState == UIState::IPTV_LIST || m_currentState == UIState::IPTV_SEARCH) {
+    if (m_currentState == UIState::IPTV_LIST || m_currentState == UIState::IPTV_SEARCH ||
+        m_currentState == UIState::YOUTUBE_SEARCH || m_currentState == UIState::YOUTUBE_RESULTS) {
         return;
     }
 
@@ -1777,31 +2048,20 @@ void UIManager::renderToast() {
 }
 
 void UIManager::renderMenuState() {
-    // Header
-    drawRect(0, 0, 1024, 64, {18, 22, 30, 255}, true);
-    drawRect(0, 63, 1024, 1, {40, 48, 62, 255}, true);
-    drawText("ROMCLOUD", 24, 18, {0, 180, 216, 255}, m_fontLarge);
-
-    // Right header status
-    auto diag = PlatformInfo::instance().getDiagnostics();
-    std::string statusText = (diag.ipAddress != "N/A" ? "Wi-Fi: ONLINE (" + diag.ipAddress + ")" : "Wi-Fi: OFFLINE");
-    SDL_Color statusColor = (diag.ipAddress != "N/A") ? SDL_Color{34, 197, 94, 255} : SDL_Color{239, 68, 68, 255};
-    drawText(statusText, 994 - (int)statusText.length() * 10, 20, statusColor, m_fontMedium);
-
     // OTA update info
     bool hasUpdate = UpdateManager::instance().isUpdateAvailable();
 
     int itemCount = static_cast<int>(m_gridMenuItems.size());
 
-    // Single Horizontal Row (1 hàng ngang) Carousel
+    // Single Horizontal Row (1 hàng ngang) Carousel - Centered vertically without header
     int selW = 260;
     int selH = 320;
     int selX = 512 - selW / 2; // 382
-    int selY = 180;
+    int selY = 155;
 
     int normW = 200;
     int normH = 260;
-    int normY = 210;
+    int normY = 185;
     int gap = 24;
 
     // Render items in a single horizontal row centered around m_selectedMenuIndex
@@ -1866,10 +2126,10 @@ void UIManager::renderMenuState() {
 
     // Left and Right navigation chevrons
     if (m_selectedMenuIndex > 0) {
-        drawText("◀", 36, 335, {0, 180, 216, 200}, m_fontLarge, true);
+        drawText("<", 36, 335, {0, 180, 216, 200}, m_fontLarge, true);
     }
     if (m_selectedMenuIndex < itemCount - 1) {
-        drawText("▶", 988, 335, {0, 180, 216, 200}, m_fontLarge, true);
+        drawText(">", 988, 335, {0, 180, 216, 200}, m_fontLarge, true);
     }
 
     // Dot pager centered at Y=560
@@ -1890,7 +2150,7 @@ void UIManager::renderMenuState() {
     // Footer hint
     drawRect(0, 715, 1024, 53, {18, 22, 30, 255}, true);
     drawRect(0, 715, 1024, 1, {40, 48, 62, 255}, true);
-    drawText("[A] Chọn    [◄ ►] Chuyển mục    [START] Cài đặt    [SELECT] Đồng bộ", 512, 730, {150, 165, 185, 255}, m_fontSmall, true);
+    drawText("[A] Chọn    [D-Pad] Chuyển mục    [START] Cài đặt    [SELECT] Đồng bộ", 512, 730, {150, 165, 185, 255}, m_fontSmall, true);
 }
 
 void UIManager::renderSystemSelectState() {
@@ -3274,6 +3534,8 @@ void UIManager::render() {
         case UIState::REVERSE_SYNC:     renderReverseSyncState(); break;
         case UIState::IPTV_LIST:        renderIPTVState(); break;
         case UIState::IPTV_SEARCH:      renderIPTVSearchState(); break;
+        case UIState::YOUTUBE_SEARCH:   renderYouTubeSearchState(); break;
+        case UIState::YOUTUBE_RESULTS:  renderYouTubeResultsState(); break;
         default: break;
     }
 
@@ -3284,4 +3546,899 @@ void UIManager::render() {
     SDL_RenderPresent(m_renderer);
 }
 
+static std::vector<std::string> split(const std::string& s, char delim) {
+    std::vector<std::string> parts;
+    std::stringstream ss(s);
+    std::string token;
+    while (std::getline(ss, token, delim)) parts.push_back(token);
+    return parts;
+}
+
+static std::string formatDuration(const std::string& raw) {
+    if (raw.empty() || raw == "NA" || raw == "None") return "";
+    try {
+        long sec = std::stol(raw);
+        if (sec <= 0) return "";
+        long h = sec / 3600;
+        long m = (sec % 3600) / 60;
+        long s = sec % 60;
+        char buf[32];
+        if (h > 0) {
+            snprintf(buf, sizeof(buf), "%ld:%02ld:%02ld", h, m, s);
+        } else {
+            snprintf(buf, sizeof(buf), "%ld:%02ld", m, s);
+        }
+        return buf;
+    } catch (...) {
+        return raw;
+    }
+}
+
+static std::string formatViews(const std::string& raw) {
+    if (raw.empty() || raw == "NA" || raw == "None") return "";
+    try {
+        long long views = std::stoll(raw);
+        if (views <= 0) return "";
+        if (views >= 1000000) {
+            char buf[32];
+            snprintf(buf, sizeof(buf), "%.1fM lượt xem", views / 1000000.0);
+            return buf;
+        } else if (views >= 1000) {
+            char buf[32];
+            snprintf(buf, sizeof(buf), "%.1fK lượt xem", views / 1000.0);
+            return buf;
+        }
+        return std::to_string(views) + " lượt xem";
+    } catch (...) {
+        return raw;
+    }
+}
+
+static std::mutex s_ytStreamMutex;
+
+static std::string decodeJsonText(const std::string& raw) {
+    std::string out;
+    out.reserve(raw.size());
+    for (size_t i = 0; i < raw.size(); ++i) {
+        if (raw[i] == '\\' && i + 1 < raw.size()) {
+            char next = raw[i + 1];
+            if (next == '\"') { out += '\"'; i++; }
+            else if (next == '\\') { out += '\\'; i++; }
+            else if (next == '/') { out += '/'; i++; }
+            else if (next == 'n' || next == 'r' || next == 't') { out += ' '; i++; }
+            else if (next == 'u' && i + 5 < raw.size()) {
+                std::string hex = raw.substr(i + 2, 4);
+                try {
+                    unsigned long code = std::stoul(hex, nullptr, 16);
+                    if (code == 0x0026) out += '&';
+                    else if (code == 0x0027) out += '\'';
+                    else if (code == 0x0022) out += '\"';
+                    else if (code < 128) out += static_cast<char>(code);
+                    else {
+                        if (code < 0x800) {
+                            out += static_cast<char>(0xC0 | (code >> 6));
+                            out += static_cast<char>(0x80 | (code & 0x3F));
+                        } else {
+                            out += static_cast<char>(0xE0 | (code >> 12));
+                            out += static_cast<char>(0x80 | ((code >> 6) & 0x3F));
+                            out += static_cast<char>(0x80 | (code & 0x3F));
+                        }
+                    }
+                    i += 5;
+                } catch (...) {
+                    out += raw[i];
+                }
+            } else {
+                out += next;
+                i++;
+            }
+        } else if (raw[i] == '|') {
+            out += '-';
+        } else {
+            out += raw[i];
+        }
+    }
+    return out;
+}
+
+static std::string extractField(const std::string& block, const std::string& startKey, const std::string& valKey) {
+    size_t sPos = block.find(startKey);
+    if (sPos == std::string::npos) return "";
+    size_t vPos = block.find(valKey, sPos);
+    if (vPos == std::string::npos || vPos > sPos + 400) return "";
+    size_t quoteStart = block.find('\"', vPos + valKey.length());
+    if (quoteStart == std::string::npos) return "";
+    size_t quoteEnd = quoteStart + 1;
+    while (quoteEnd < block.length()) {
+        if (block[quoteEnd] == '\"' && block[quoteEnd - 1] != '\\') break;
+        quoteEnd++;
+    }
+    if (quoteEnd >= block.length()) return "";
+    return block.substr(quoteStart + 1, quoteEnd - quoteStart - 1);
+}
+
+static std::vector<std::string> parseInnertubeSearchResponse(const std::string& json) {
+    std::vector<std::string> results;
+    size_t searchPos = 0;
+
+    while (true) {
+        size_t p1 = json.find("\"videoWithContextRenderer\":", searchPos);
+        size_t p2 = json.find("\"videoRenderer\":", searchPos);
+        size_t matchPos = std::string::npos;
+
+        if (p1 != std::string::npos && (p2 == std::string::npos || p1 < p2)) {
+            matchPos = p1;
+        } else if (p2 != std::string::npos) {
+            matchPos = p2;
+        } else {
+            break;
+        }
+
+        size_t bracePos = json.find('{', matchPos);
+        if (bracePos == std::string::npos) break;
+        searchPos = bracePos + 1;
+
+        // Find end of this item block (next renderer or max 35000 chars)
+        size_t nextP1 = json.find("\"videoWithContextRenderer\":", searchPos);
+        size_t nextP2 = json.find("\"videoRenderer\":", searchPos);
+        size_t nextItem = std::min(nextP1, nextP2);
+        size_t blockEnd = (nextItem != std::string::npos) ? nextItem : std::min(json.length(), searchPos + 35000);
+        std::string block = json.substr(searchPos, blockEnd - searchPos);
+
+        std::string vid;
+        // Extract video ID: either from thumbnail URL or "videoId"
+        size_t imgPos = block.find("i.ytimg.com/vi/");
+        if (imgPos != std::string::npos) {
+            size_t slashPos = block.find('/', imgPos + 15);
+            if (slashPos != std::string::npos && slashPos - (imgPos + 15) == 11) {
+                vid = block.substr(imgPos + 15, 11);
+            }
+        }
+        if (vid.empty()) {
+            vid = extractField(block, "\"videoId\"", ":");
+        }
+        if (vid.empty() || vid.length() != 11) continue;
+
+        // Title: headline or title
+        std::string title = decodeJsonText(extractField(block, "\"headline\"", "\"text\""));
+        if (title.empty()) title = decodeJsonText(extractField(block, "\"headline\"", "\"content\""));
+        if (title.empty()) title = decodeJsonText(extractField(block, "\"title\"", "\"text\""));
+        if (title.empty()) title = decodeJsonText(extractField(block, "\"title\"", "\"content\""));
+        if (title.empty()) continue;
+
+        // Channel / Uploader
+        std::string channel = decodeJsonText(extractField(block, "\"shortBylineText\"", "\"text\""));
+        if (channel.empty()) channel = decodeJsonText(extractField(block, "\"longBylineText\"", "\"text\""));
+        if (channel.empty()) channel = decodeJsonText(extractField(block, "\"ownerText\"", "\"text\""));
+        if (channel.empty()) channel = "YouTube";
+
+        // Duration: lengthText or thumbnailOverlayTimeStatusRenderer
+        std::string duration = extractField(block, "\"lengthText\"", "\"simpleText\"");
+        if (duration.empty()) duration = extractField(block, "\"lengthText\"", "\"text\"");
+        if (duration.empty()) duration = extractField(block, "\"thumbnailOverlayTimeStatusRenderer\"", "\"text\"");
+        if (duration.empty()) duration = "--:--";
+
+        // Views
+        std::string views = decodeJsonText(extractField(block, "\"shortViewCountText\"", "\"simpleText\""));
+        if (views.empty()) views = decodeJsonText(extractField(block, "\"shortViewCountText\"", "\"text\""));
+        if (views.empty()) views = decodeJsonText(extractField(block, "\"viewCountText\"", "\"simpleText\""));
+        if (views.empty()) views = decodeJsonText(extractField(block, "\"viewCountText\"", "\"text\""));
+
+        bool dup = false;
+        for (const auto& item : results) {
+            if (item.compare(0, 11, vid) == 0) {
+                dup = true;
+                break;
+            }
+        }
+        if (!dup) {
+            results.push_back(vid + "|" + title + "|" + duration + "|" + channel + "|" + views);
+        }
+    }
+    return results;
+}
+
+std::vector<std::string> UIManager::runYouTubeSearch(const std::string& query, int page) {
+    std::vector<std::string> results;
+    if (query.empty()) return results;
+
+    // 1. Ultra-fast YouTube Innertube MWEB API via HttpClient (~1-2 seconds)
+    try {
+        std::string jsonEscaped;
+        for (char c : query) {
+            if (c == '"') jsonEscaped += "\\\"";
+            else if (c == '\\') jsonEscaped += "\\\\";
+            else jsonEscaped += c;
+        }
+        std::string postBody = "{\"context\":{\"client\":{\"clientName\":\"MWEB\",\"clientVersion\":\"2.20231201.00.00\",\"hl\":\"vi\",\"gl\":\"VN\"}},\"query\":\"" + jsonEscaped + "\"}";
+        std::string apiUrl = "https://www.youtube.com/youtubei/v1/search?key=AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8";
+
+        Logger::info("[YouTube] Fast search via Innertube MWEB API: " + query);
+        HttpResponse resp = HttpClient::instance().post(apiUrl, postBody, {"Content-Type: application/json"}, 10);
+        if (resp.success && resp.statusCode == 200 && !resp.body.empty()) {
+            results = parseInnertubeSearchResponse(resp.body);
+            if (!results.empty()) {
+                Logger::info("[YouTube] Innertube API returned " + std::to_string(results.size()) + " items");
+                return results;
+            }
+        }
+        Logger::warn("[YouTube] Innertube API empty or failed (status=" + std::to_string(resp.statusCode) + ", err=" + resp.error + "), falling back to script");
+    } catch (const std::exception& e) {
+        Logger::warn("[YouTube] Innertube search exception: " + std::string(e.what()));
+    }
+
+    // 2. Fallback to youtube_search.sh (yt-dlp with --flat-playlist)
+    std::string appRoot = AppConfig::instance().getAppRoot();
+    if (appRoot.empty()) appRoot = "/mnt/SDCARD/Apps/RomCloud";
+    std::string scriptPath = appRoot + "/scripts/youtube_search.sh";
+
+    std::string escapedQuery;
+    for (char c : query) {
+        if (c == '"' || c == '\\') escapedQuery += '\\';
+        escapedQuery += c;
+    }
+
+    std::string cmd = "\"" + scriptPath + "\" search \"" + escapedQuery + "\" " + std::to_string(page) + " 6 2>/dev/null";
+    Logger::info("[YouTube] Fallback script search: " + cmd);
+
+    FILE* pipe = popen(cmd.c_str(), "r");
+    if (!pipe) return results;
+
+    char buffer[2048];
+    while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
+        std::string line(buffer);
+        while (!line.empty() && (line.back() == '\n' || line.back() == '\r')) {
+            line.pop_back();
+        }
+        if (line.find("ERROR:") == 0 || line.find("WARNING:") == 0) continue;
+        if (std::count(line.begin(), line.end(), '|') >= 4) {
+            results.push_back(line);
+        }
+    }
+    pclose(pipe);
+    return results;
+}
+
+std::string UIManager::resolveYouTubeStreamUrl(const std::string& videoId) {
+    if (videoId.empty()) return "";
+
+    {
+        std::lock_guard<std::mutex> lock(s_ytStreamMutex);
+        auto it = m_ytStreamUrlCache.find(videoId);
+        if (it != m_ytStreamUrlCache.end() && !it->second.empty()) {
+            Logger::info("[YouTube] Using cached stream URL for: " + videoId);
+            return it->second;
+        }
+    }
+
+    std::string appRoot = AppConfig::instance().getAppRoot();
+    if (appRoot.empty()) appRoot = "/mnt/SDCARD/Apps/RomCloud";
+    std::string scriptPath = appRoot + "/scripts/youtube_search.sh";
+    std::string cmd = "\"" + scriptPath + "\" url \"" + videoId + "\" 360 2>/dev/null";
+
+    Logger::info("[YouTube] Resolving video URL: " + cmd);
+    FILE* pipe = popen(cmd.c_str(), "r");
+    if (!pipe) {
+        Logger::error("[YouTube] popen failed for url resolver");
+        return "";
+    }
+
+    char buffer[4096];
+    std::string streamUrl;
+    while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
+        std::string line(buffer);
+        while (!line.empty() && (line.back() == '\n' || line.back() == '\r')) {
+            line.pop_back();
+        }
+        if (line.find("http://") == 0 || line.find("https://") == 0) {
+            streamUrl = line;
+            break;
+        }
+    }
+    pclose(pipe);
+
+    if (!streamUrl.empty()) {
+        std::lock_guard<std::mutex> lock(s_ytStreamMutex);
+        m_ytStreamUrlCache[videoId] = streamUrl;
+    }
+    return streamUrl;
+}
+
+void UIManager::preloadYouTubeStreamUrl(const std::string& videoId) {
+    if (videoId.empty()) return;
+    {
+        std::lock_guard<std::mutex> lock(s_ytStreamMutex);
+        if (m_ytStreamUrlCache.find(videoId) != m_ytStreamUrlCache.end()) return;
+    }
+    std::thread([this, videoId]() {
+        resolveYouTubeStreamUrl(videoId);
+    }).detach();
+}
+
+void UIManager::clearThumbnailCache() {
+    for (auto& pair : m_ytThumbnails) {
+        if (pair.second) {
+            SDL_DestroyTexture(pair.second);
+        }
+    }
+    m_ytThumbnails.clear();
+}
+
+void UIManager::startThumbnailDownloads(const std::vector<std::string>& videoIds) {
+    if (videoIds.empty()) return;
+    std::thread([videoIds]() {
+        mkdir("/tmp/yt_thumbs", 0777);
+        std::string batchCmd;
+        int count = 0;
+        for (const auto& vid : videoIds) {
+            if (vid.empty()) continue;
+            std::string outPath = "/tmp/yt_thumbs/" + vid + ".jpg";
+            struct stat st;
+            if (stat(outPath.c_str(), &st) == 0 && st.st_size > 1500) {
+                FILE* f = fopen(outPath.c_str(), "rb");
+                bool complete = false;
+                if (f) {
+                    if (fseek(f, -2, SEEK_END) == 0) {
+                        unsigned char eofBytes[2];
+                        if (fread(eofBytes, 1, 2, f) == 2 && eofBytes[0] == 0xFF && eofBytes[1] == 0xD9) {
+                            complete = true;
+                        }
+                    }
+                    fclose(f);
+                }
+                if (complete) continue;
+            }
+            std::string tmpPath = outPath + ".tmp";
+            std::string url = "https://i.ytimg.com/vi/" + vid + "/mqdefault.jpg";
+            batchCmd += "curl -4 -k -s -L --max-time 6 -o \"" + tmpPath + "\" \"" + url + "\" && mv -f \"" + tmpPath + "\" \"" + outPath + "\" >/dev/null 2>&1 & ";
+            count++;
+            if (count >= 6) {
+                batchCmd += "wait; ";
+                count = 0;
+            }
+        }
+        if (count > 0) {
+            batchCmd += "wait; ";
+        }
+        if (!batchCmd.empty()) {
+            system(batchCmd.c_str());
+        }
+    }).detach();
+}
+
+void UIManager::triggerYouTubeSearch() {
+    if (m_ytSearchQuery.empty()) {
+        showToast("Vui lòng nhập từ khóa tìm kiếm", {245, 158, 11, 255}, 2000);
+        return;
+    }
+    if (m_ytIsSearching) return;
+
+    m_ytCurrentPage = 1;
+    m_ytLastSearchQuery = m_ytSearchQuery;
+    m_ytAllCachedResults.clear();
+    clearThumbnailCache();
+
+    m_ytIsSearching = true;
+    m_ytSearchFinished = false;
+    m_ytErrorMessage.clear();
+    std::string query = m_ytSearchQuery;
+
+    std::thread([this, query]() {
+        auto results = runYouTubeSearch(query, 1);
+        if (!results.empty()) {
+            m_ytAllCachedResults = results;
+            int pageCount = std::min<int>(6, static_cast<int>(results.size()));
+            m_ytSearchResults.assign(results.begin(), results.begin() + pageCount);
+        } else {
+            m_ytSearchResults.clear();
+            m_ytErrorMessage = "Không tìm thấy video nào";
+        }
+        m_ytSearchSelectedIndex = 0;
+        m_ytSearchScrollOffset = 0;
+        m_ytSearchFinished = true;
+    }).detach();
+}
+
+void UIManager::playYouTubeVideo(const std::string& videoId) {
+    if (videoId.empty() || m_ytIsLoadingVideo) return;
+
+    // Check if already in memory cache
+    auto it = m_ytStreamUrlCache.find(videoId);
+    if (it != m_ytStreamUrlCache.end() && !it->second.empty()) {
+        m_ytPendingVideoId = videoId;
+        m_ytPendingStreamUrl = it->second;
+        m_ytVideoReady = true;
+        return;
+    }
+
+    m_ytIsLoadingVideo = true;
+    m_ytVideoReady = false;
+    m_ytPendingStreamUrl.clear();
+    m_ytPendingVideoId = videoId;
+
+    std::thread([this, videoId]() {
+        std::string streamUrl = resolveYouTubeStreamUrl(videoId);
+        m_ytPendingStreamUrl = streamUrl;
+        m_ytVideoReady = true;
+    }).detach();
+}
+
+static std::string trimUtf8(const std::string& str) {
+    if (str.empty()) return "";
+    size_t start = 0;
+    while (start < str.size()) {
+        unsigned char c = static_cast<unsigned char>(str[start]);
+        if (c <= 32) {
+            start++;
+        } else if (c == 0xC2 && start + 1 < str.size() && static_cast<unsigned char>(str[start + 1]) == 0xA0) {
+            // Non-breaking space \u00A0
+            start += 2;
+        } else if (c == 0xE2 && start + 2 < str.size()) {
+            // Check for \u200B..\u200F or \u2068..\u2069 or \uFEFF
+            unsigned char b1 = static_cast<unsigned char>(str[start + 1]);
+            unsigned char b2 = static_cast<unsigned char>(str[start + 2]);
+            if (b1 == 0x80 && (b2 >= 0x8B && b2 <= 0x8F)) {
+                start += 3;
+            } else if (b1 == 0x81 && (b2 >= 0xA6 && b2 <= 0xA9)) {
+                start += 3;
+            } else {
+                break;
+            }
+        } else {
+            break;
+        }
+    }
+    size_t end = str.size();
+    while (end > start) {
+        unsigned char c = static_cast<unsigned char>(str[end - 1]);
+        if (c <= 32) {
+            end--;
+        } else {
+            break;
+        }
+    }
+    return str.substr(start, end - start);
+}
+
+static std::pair<std::string, std::string> wrapUtf8TwoLines(const std::string& text, size_t maxCharsPerLine) {
+    std::string cleanText = trimUtf8(text);
+    auto chars = TelexHelper::splitUtf8(cleanText);
+    if (chars.empty()) return {"", ""};
+
+    // Filter out unrenderable 4-byte emojis and control codes that cause square box glyphs
+    std::vector<std::string> cleanChars;
+    for (const auto& c : chars) {
+        if (c.empty()) continue;
+        unsigned char b0 = static_cast<unsigned char>(c[0]);
+        if (b0 < 32) continue;
+        if (b0 >= 0xF0) continue; // 4-byte emojis (often missing in handheld TTF)
+        cleanChars.push_back(c);
+    }
+
+    if (cleanChars.size() <= maxCharsPerLine) {
+        std::string l1;
+        for (const auto& c : cleanChars) l1 += c;
+        return {trimUtf8(l1), ""};
+    }
+
+    // Try to word-wrap at a space
+    size_t breakIdx = maxCharsPerLine;
+    for (size_t i = maxCharsPerLine; i > maxCharsPerLine / 2; --i) {
+        if (cleanChars[i] == " ") {
+            breakIdx = i;
+            break;
+        }
+    }
+
+    std::string l1;
+    for (size_t i = 0; i < breakIdx; ++i) l1 += cleanChars[i];
+
+    size_t start2 = (breakIdx < cleanChars.size() && cleanChars[breakIdx] == " ") ? breakIdx + 1 : breakIdx;
+    std::string l2;
+    size_t count2 = cleanChars.size() - start2;
+    if (count2 <= maxCharsPerLine) {
+        for (size_t i = start2; i < cleanChars.size(); ++i) l2 += cleanChars[i];
+    } else {
+        size_t end2 = start2 + maxCharsPerLine - 1;
+        for (size_t i = start2; i < end2 && i < cleanChars.size(); ++i) l2 += cleanChars[i];
+        l2 += "..";
+    }
+
+    return {trimUtf8(l1), trimUtf8(l2)};
+}
+
+static int getBatteryLevel() {
+    static uint32_t lastCheck = 0;
+    static int cachedLevel = 100;
+    uint32_t now = SDL_GetTicks();
+    if (now - lastCheck > 10000 || lastCheck == 0) {
+        lastCheck = now;
+        FILE* f = fopen("/sys/class/power_supply/battery/capacity", "r");
+        if (f) {
+            int cap = 100;
+            if (fscanf(f, "%d", &cap) == 1 && cap >= 0 && cap <= 100) cachedLevel = cap;
+            fclose(f);
+        }
+    }
+    return cachedLevel;
+}
+
+static std::string getCurrentTimeString() {
+    time_t now = time(nullptr);
+    struct tm* t = localtime(&now);
+    char buf[16];
+    if (t) {
+        strftime(buf, sizeof(buf), "%H:%M", t);
+    } else {
+        strcpy(buf, "12:00");
+    }
+    return std::string(buf);
+}
+
+void UIManager::renderYouTubeSearchState() {
+    // ─── TrimUI Stock OS Ambient Teal Theme ───
+    drawRect(0, 0, 1024, 768, {7, 24, 33, 255}, true);
+
+    // Header bar
+    drawRect(0, 0, 1024, 52, {10, 32, 44, 255}, true);
+    drawRect(0, 52, 1024, 1, {20, 54, 70, 255}, true);
+
+    // Green chevron back arrow "<" badge
+    int backBadgeX = 44;
+    int backBadgeY = 12;
+    int backBadgeW = 28;
+    int backBadgeH = 28;
+    drawRoundedRect(backBadgeX, backBadgeY, backBadgeW, backBadgeH, 6, {0, 200, 83, 255}, true);
+    drawText("<", backBadgeX + backBadgeW / 2, backBadgeY + backBadgeH / 2 - 2, {255, 255, 255, 255}, m_fontSmall, true);
+
+    // Search header title
+    drawText("Search", 82, 16, {245, 250, 255, 255}, m_fontMedium, false);
+
+    // Current input mode badge (TELEX vs US)
+    std::string modeText = m_ytTelexMode ? "TELEX [R1]" : "US [R1]";
+    SDL_Color modeBg = m_ytTelexMode ? SDL_Color{0, 200, 83, 255} : SDL_Color{25, 60, 78, 255};
+    drawBadge(164, 12, 108, 28, modeText, modeBg, {255, 255, 255, 255});
+
+    // Right-side indicators: Battery & Clock (matching TrimUI Stock OS status bar)
+    int bat = getBatteryLevel();
+    std::string batStr = std::to_string(bat) + "%";
+    drawText(batStr, 910, 18, {190, 215, 228, 255}, m_fontSmall, false);
+
+    // Battery icon
+    drawRoundedBorder(962, 19, 24, 13, 3, {190, 215, 228, 255}, 1);
+    drawRect(986, 22, 2, 7, {190, 215, 228, 255}, true);
+    int bFill = (20 * bat) / 100;
+    if (bFill > 0) {
+        SDL_Color bColor = (bat <= 20) ? SDL_Color{239, 68, 68, 255} : SDL_Color{0, 200, 83, 255};
+        drawRect(964, 21, bFill, 9, bColor, true);
+    }
+
+    std::string timeStr = getCurrentTimeString();
+    drawText(timeStr, 842, 18, {190, 215, 228, 255}, m_fontSmall, false);
+
+    // ─── Input Field Box (Wide rounded rectangle) ───
+    int inX = 46;
+    int inY = 62;
+    int inW = 932;
+    int inH = 88;
+    drawRoundedRect(inX, inY, inW, inH, 8, {12, 38, 50, 230}, true);
+    drawRoundedBorder(inX, inY, inW, inH, 8, {26, 72, 92, 255}, 1);
+
+    std::string dispQ = m_ytSearchQuery.empty() ? "Nhập từ khóa tìm kiếm..." : (m_ytSearchQuery + " _");
+    SDL_Color qCol = m_ytSearchQuery.empty() ? SDL_Color{75, 115, 135, 255} : SDL_Color{255, 255, 255, 255};
+    drawText(dispQ, inX + 22, inY + 28, qCol, m_fontLarge, false);
+
+    // ─── TrimUI Stock OS 5-Row Virtual Keyboard Grid ───
+    static const char* lowerRows[] = {
+        "1234567890",
+        "qwertyuiop",
+        "asdfghjkl-",
+        "zxcvbnm()/"
+    };
+    static const char* upperRows[] = {
+        "1234567890",
+        "QWERTYUIOP",
+        "ASDFGHJKL-",
+        "ZXCVBNM()/"
+    };
+
+    int kbStartX = 46;
+    int kbStartY = 162;
+    int cellW = 86;
+    int cellH = 92;
+    int gap = 8;
+
+    for (int row = 0; row < 4; row++) {
+        for (int col = 0; col < 10; col++) {
+            int cx = kbStartX + col * (cellW + gap);
+            int cy = kbStartY + row * (cellH + gap);
+            bool isSel = (m_ytKbRow == row && m_ytKbCol == col);
+
+            char ch = m_ytKbShift ? upperRows[row][col] : lowerRows[row][col];
+            std::string label(1, ch);
+
+            if (isSel) {
+                // Focused: Vibrant TrimUI Emerald Green
+                drawRoundedRect(cx, cy, cellW, cellH, 6, {0, 200, 83, 255}, true);
+                drawRoundedBorder(cx, cy, cellW, cellH, 6, {130, 255, 180, 255}, 2);
+                drawText(label, cx + cellW / 2, cy + cellH / 2 - 2, {255, 255, 255, 255}, m_fontLarge, true);
+            } else {
+                // Inactive: Dark translucent teal keycap
+                drawRoundedRect(cx, cy, cellW, cellH, 6, {14, 36, 47, 210}, true);
+                drawRoundedBorder(cx, cy, cellW, cellH, 6, {22, 58, 74, 255}, 1);
+                drawText(label, cx + cellW / 2, cy + cellH / 2 - 2, {210, 228, 238, 255}, m_fontLarge, true);
+            }
+        }
+    }
+
+    // Row 4: 5 Action Keys (Width = 180 each, spanning 2 columns)
+    int actW = 180;
+    int row4Y = kbStartY + 4 * (cellH + gap);
+
+    struct ActionKey {
+        std::string label;
+        std::string badge;
+    };
+    ActionKey actKeys[5] = {
+        {m_ytKbShift ? "⇧ (HOA)" : "⇧ (thường)", "L"},
+        {m_ytTelexMode ? "TELEX" : "abc", "R"},
+        {"␣ Cách", "X"},
+        {"⌫ Xóa", "Y"},
+        {"OK Tìm", "START"}
+    };
+
+    for (int i = 0; i < 5; i++) {
+        int cx = kbStartX + i * (actW + gap);
+        bool isSel = (m_ytKbRow == 4 && (m_ytKbCol / 2) == i);
+
+        if (isSel) {
+            drawRoundedRect(cx, row4Y, actW, cellH, 6, {0, 200, 83, 255}, true);
+            drawRoundedBorder(cx, row4Y, actW, cellH, 6, {130, 255, 180, 255}, 2);
+            drawText(actKeys[i].label, cx + actW / 2 - 18, row4Y + cellH / 2 - 2, {255, 255, 255, 255}, m_fontMedium, true);
+            drawBadge(cx + actW - 46, row4Y + cellH / 2 - 13, 38, 26, actKeys[i].badge, {20, 100, 50, 255}, {255, 255, 255, 255});
+        } else {
+            drawRoundedRect(cx, row4Y, actW, cellH, 6, {14, 36, 47, 210}, true);
+            drawRoundedBorder(cx, row4Y, actW, cellH, 6, {22, 58, 74, 255}, 1);
+            drawText(actKeys[i].label, cx + actW / 2 - 18, row4Y + cellH / 2 - 2, {210, 228, 238, 255}, m_fontMedium, true);
+            drawBadge(cx + actW - 46, row4Y + cellH / 2 - 13, 38, 26, actKeys[i].badge, {24, 60, 76, 255}, {180, 210, 225, 255});
+        }
+    }
+
+    // Bottom Bar (TrimUI Stock style: [A] OK badge on bottom left, hints on right)
+    drawRect(0, 715, 1024, 53, {9, 24, 32, 255}, true);
+    drawBadge(46, 727, 82, 30, "[A] OK", {0, 200, 83, 255}, {255, 255, 255, 255});
+    drawText("[X] Cách   [Y] Xóa   [L1] Viết hoa   [R1] Telex/US   [START] Tìm kiếm   [B] Trở về",
+        560, 732, {160, 185, 200, 255}, m_fontSmall, true);
+
+    // Searching modal overlay
+    if (m_ytIsSearching) {
+        drawRect(0, 0, 1024, 768, {0, 0, 0, 200}, true);
+        drawRoundedRect(280, 290, 464, 140, 10, SDL_Color{14, 38, 50, 255}, true);
+        drawRoundedBorder(280, 290, 464, 140, 10, {0, 200, 83, 255}, 2);
+        drawText("ĐANG TÌM KIẾM...", 512, 325, {0, 200, 83, 255}, m_fontMedium, true);
+        std::string qText = "\"" + m_ytSearchQuery + "\"";
+        if (qText.length() > 36) qText = qText.substr(0, 33) + "...\"";
+        drawText(qText, 512, 370, {240, 240, 240, 255}, m_fontSmall, true);
+    }
+}
+
+void UIManager::renderYouTubeResultsState() {
+    // RAM Management: clean old thumbnails when switching pages or if cache exceeds 24
+    if (m_ytThumbnails.size() > 24) {
+        std::unordered_set<std::string> currentVisible;
+        for (const auto& item : m_ytSearchResults) {
+            size_t p = item.find('|');
+            if (p != std::string::npos) currentVisible.insert(item.substr(0, p));
+        }
+        for (auto it = m_ytThumbnails.begin(); it != m_ytThumbnails.end(); ) {
+            if (currentVisible.find(it->first) == currentVisible.end()) {
+                if (it->second) SDL_DestroyTexture(it->second);
+                it = m_ytThumbnails.erase(it);
+            } else {
+                ++it;
+            }
+        }
+    }
+
+    // Pure dark background matching Image 1
+    drawRect(0, 0, 1024, 768, {18, 18, 18, 255}, true);
+
+    // Top Bar: YouTube Logo + Search Query on top left
+    int logoH = 45;
+    int logoW = 45;
+    SDL_Texture* ytLogo = nullptr;
+    auto itLogo = m_gridIconCache.find("YOUTUBE.png");
+    if (itLogo != m_gridIconCache.end()) {
+        ytLogo = itLogo->second;
+    } else {
+        std::string iconPath = AppConfig::instance().getAssetsDir() + "/apps_icons/YOUTUBE.png";
+        SDL_Surface* surf = IMG_Load(iconPath.c_str());
+        if (surf) {
+            ytLogo = SDL_CreateTextureFromSurface(m_renderer, surf);
+            SDL_FreeSurface(surf);
+            m_gridIconCache["YOUTUBE.png"] = ytLogo;
+        }
+    }
+    int textStartX = 28;
+    if (ytLogo) {
+        int texW = 0, texH = 0;
+        SDL_QueryTexture(ytLogo, nullptr, nullptr, &texW, &texH);
+        if (texH > 0) {
+            logoW = (texW * logoH) / texH;
+        }
+        int slx = PlatformInfo::instance().scaleX(26);
+        int sly = PlatformInfo::instance().scaleY(12);
+        int slw = PlatformInfo::instance().scaleW(logoW);
+        int slh = PlatformInfo::instance().scaleH(logoH);
+        SDL_Rect dst = {slx, sly, slw, slh};
+        SDL_RenderCopy(m_renderer, ytLogo, nullptr, &dst);
+        textStartX = 26 + logoW + 10;
+    }
+
+    std::string queryDisplay = m_ytSearchQuery.empty() ? "" : (": " + m_ytSearchQuery);
+    if (!queryDisplay.empty()) {
+        if (queryDisplay.length() > 38) queryDisplay = queryDisplay.substr(0, 35) + "...";
+        drawText(queryDisplay, textStartX, 22, {245, 245, 245, 255}, m_fontMedium, false);
+    }
+
+    // Top Right: Battery Indicator & Clock matching Image 1
+    int bat = getBatteryLevel();
+    std::string batStr = std::to_string(bat) + "%";
+    drawText(batStr, 910, 20, {180, 185, 195, 255}, m_fontSmall, false);
+    drawRoundedBorder(962, 21, 24, 13, 3, {180, 185, 195, 255}, 1);
+    drawRect(986, 24, 2, 7, {180, 185, 195, 255}, true);
+    int bFill = (20 * bat) / 100;
+    if (bFill > 0) {
+        SDL_Color bColor = (bat <= 20) ? SDL_Color{239, 68, 68, 255} : SDL_Color{34, 197, 94, 255};
+        drawRect(964, 23, bFill, 9, bColor, true);
+    }
+
+    std::string timeStr = getCurrentTimeString();
+    drawText(timeStr, 842, 20, {180, 185, 195, 255}, m_fontSmall, false);
+
+    // 3 columns x 2 rows = 6 cards per page
+    const int itemsPerPage = 6;
+    const int cols = 3;
+    int totalResults = static_cast<int>(m_ytSearchResults.size());
+    int pageStartIndex = (m_ytSearchSelectedIndex / itemsPerPage) * itemsPerPage;
+
+    int cardW = 316;
+    int cardH = 295;
+    int gapX = 12;
+    int gapY = 14;
+    int startX = 26;
+    int startY = 62;
+
+    int pad = 8;
+    int thumbW = cardW - pad * 2;
+    int thumbH = (thumbW * 9) / 16;  // ~168 (16:9 ratio)
+
+    for (int i = 0; i < itemsPerPage; i++) {
+        int idx = pageStartIndex + i;
+        if (idx >= totalResults) break;
+
+        int row = i / cols;
+        int col = i % cols;
+        int cx = startX + col * (cardW + gapX);
+        int cy = startY + row * (cardH + gapY);
+        bool isSelected = (idx == m_ytSearchSelectedIndex);
+
+        // Card Background
+        SDL_Color cardBg = isSelected ? SDL_Color{34, 34, 34, 255} : SDL_Color{24, 24, 24, 255};
+        drawRoundedRect(cx, cy, cardW, cardH, 8, cardBg, true);
+
+        // Selected Card Focus: Crisp White Border
+        if (isSelected) {
+            drawRoundedBorder(cx, cy, cardW, cardH, 8, {255, 255, 255, 255}, 2);
+        }
+
+        auto parts = split(m_ytSearchResults[idx], '|');
+        std::string vid = !parts.empty() ? parts[0] : "";
+
+        // Thumbnail (16:9 with rounded border)
+        int thumbX = cx + pad;
+        int thumbY = cy + pad;
+
+        if (!vid.empty()) {
+            if (m_ytThumbnails.find(vid) == m_ytThumbnails.end()) {
+                std::string thumbPath = "/tmp/yt_thumbs/" + vid + ".jpg";
+                struct stat st;
+                if (stat(thumbPath.c_str(), &st) == 0 && st.st_size > 1500) {
+                    bool complete = false;
+                    FILE* f = fopen(thumbPath.c_str(), "rb");
+                    if (f) {
+                        if (fseek(f, -2, SEEK_END) == 0) {
+                            unsigned char eofBytes[2];
+                            if (fread(eofBytes, 1, 2, f) == 2 && eofBytes[0] == 0xFF && eofBytes[1] == 0xD9) {
+                                complete = true;
+                            }
+                        }
+                        fclose(f);
+                    }
+                    if (complete) {
+                        SDL_Surface* surf = IMG_Load(thumbPath.c_str());
+                        if (surf) {
+                            SDL_Texture* tex = SDL_CreateTextureFromSurface(m_renderer, surf);
+                            SDL_FreeSurface(surf);
+                            if (tex) m_ytThumbnails[vid] = tex;
+                        }
+                    }
+                }
+            }
+        }
+
+        if (!vid.empty() && m_ytThumbnails.find(vid) != m_ytThumbnails.end() && m_ytThumbnails[vid]) {
+            int stx = PlatformInfo::instance().scaleX(thumbX);
+            int sty = PlatformInfo::instance().scaleY(thumbY);
+            int stw = PlatformInfo::instance().scaleW(thumbW);
+            int sth = PlatformInfo::instance().scaleH(thumbH);
+            SDL_Rect dstRect = {stx, sty, stw, sth};
+            SDL_RenderCopy(m_renderer, m_ytThumbnails[vid], nullptr, &dstRect);
+            drawRoundedBorder(thumbX, thumbY, thumbW, thumbH, 6, {45, 45, 45, 180}, 1);
+        } else {
+            drawRoundedRect(thumbX, thumbY, thumbW, thumbH, 6, SDL_Color{32, 32, 32, 255}, true);
+            drawText("YouTube", thumbX + thumbW / 2, thumbY + thumbH / 2 - 6,
+                SDL_Color{229, 9, 20, 255}, m_fontSmall, true);
+        }
+
+        // Duration pill bottom-right of thumbnail (Image 1 style)
+        std::string durStr = parts.size() >= 3 ? formatDuration(parts[2]) : "";
+        if (!durStr.empty()) {
+            int pillW = 54;
+            int pillH = 20;
+            int pillX = thumbX + thumbW - pillW - 6;
+            int pillY = thumbY + thumbH - pillH - 6;
+            drawRoundedRect(pillX, pillY, pillW, pillH, 4, SDL_Color{0, 0, 0, 215}, true);
+            drawText(durStr, pillX + pillW / 2, pillY + 2, {255, 255, 255, 255}, m_fontSmall, true);
+        }
+
+        // Info area below thumbnail: infoX is EXACTLY thumbX (strict left-alignment)
+        int infoX = thumbX;
+        int infoY = thumbY + thumbH + 8;
+
+        // Title (UTF-8 safe wrapping & trimmed, left-aligned)
+        std::string title = parts.size() >= 2 ? parts[1] : "";
+        auto lines = wrapUtf8TwoLines(title, 24);
+
+        SDL_Color titleCol = {255, 255, 255, 255};
+        drawText(lines.first, infoX, infoY, titleCol, m_fontSmall, false);
+        if (!lines.second.empty()) {
+            drawText(lines.second, infoX, infoY + 22, titleCol, m_fontSmall, false);
+        }
+
+        // Channel & Views on a SINGLE line matching Image 1: [Channel] • [Views]
+        std::string uploader = parts.size() >= 4 ? trimUtf8(parts[3]) : "";
+        if (uploader.length() > 18) uploader = uploader.substr(0, 16) + "..";
+        std::string viewStr = parts.size() >= 5 ? formatViews(parts[4]) : "";
+        std::string metaLine = uploader;
+        if (!viewStr.empty()) {
+            if (!metaLine.empty()) metaLine += " • ";
+            metaLine += viewStr;
+        }
+        int metaY = infoY + (lines.second.empty() ? 26 : 48);
+        drawText(metaLine, infoX, metaY, {156, 163, 175, 255}, m_fontSmall, false);
+    }
+
+    // Footer matching Image 1
+    drawRect(0, 715, 1024, 53, {18, 18, 18, 255}, true);
+    drawRect(0, 715, 1024, 1, {35, 35, 35, 255}, true);
+
+    char pageInfo[64];
+    int maxPage = std::max(1, (static_cast<int>(m_ytAllCachedResults.size()) + itemsPerPage - 1) / itemsPerPage);
+    snprintf(pageInfo, sizeof(pageInfo), "Page %d/%d (%d videos)", m_ytCurrentPage, maxPage, totalResults);
+    drawText(pageInfo, 32, 730, {156, 163, 175, 255}, m_fontSmall, false);
+
+    drawText("[A] Play   [X] Search   [L1/R1] Page   [B] Exit",
+        992, 730, {210, 215, 225, 255}, m_fontSmall, true);
+
+    // Resolving stream overlay (Borderless)
+    if (m_ytIsLoadingVideo) {
+        drawRect(0, 0, 1024, 768, {0, 0, 0, 210}, true);
+        drawRoundedRect(272, 285, 480, 150, 12, SDL_Color{28, 28, 28, 255}, true);
+        drawText("ĐANG TẢI VIDEO...", 512, 325, {255, 255, 255, 255}, m_fontMedium, true);
+        drawText("Đang kết nối luồng phát...", 512, 372, {180, 190, 205, 255}, m_fontSmall, true);
+    }
+}
+
 } // namespace RomCloud
+

@@ -7,7 +7,7 @@
 
 namespace RomCloud {
 
-constexpr const char* APP_VERSION = "2.0.9";
+constexpr const char* APP_VERSION = "2.1.0";
 constexpr const char* GITHUB_REPO = "bun2it/RomCloud";
 constexpr const char* VERSION_MANIFEST_URL = "https://raw.githubusercontent.com/bun2it/RomCloud/main/version.json";
 

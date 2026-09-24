@@ -94,14 +94,15 @@ HttpResponse HttpClient::get(const std::string& url, const std::vector<std::stri
     curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, headerCallback);
     curl_easy_setopt(curl, CURLOPT_HEADERDATA, &response.headers);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, timeoutSec);
-    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 10);
+    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 6);
+    curl_easy_setopt(curl, CURLOPT_IPRESOLVE, CURL_IPRESOLVE_V4);
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
     if (access("/etc/ssl/certs/ca-certificates.crt", F_OK) == 0) {
         curl_easy_setopt(curl, CURLOPT_CAINFO, "/etc/ssl/certs/ca-certificates.crt");
     }
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
-    curl_easy_setopt(curl, CURLOPT_USERAGENT, "RomCloud-TrimUI-BrickPro/1.0");
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36");
     curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
 
     CURLcode res = curl_easy_perform(curl);
@@ -146,14 +147,15 @@ HttpResponse HttpClient::post(const std::string& url, const std::string& postDat
     curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, headerCallback);
     curl_easy_setopt(curl, CURLOPT_HEADERDATA, &response.headers);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, timeoutSec);
-    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 10);
+    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 6);
+    curl_easy_setopt(curl, CURLOPT_IPRESOLVE, CURL_IPRESOLVE_V4);
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
     if (access("/etc/ssl/certs/ca-certificates.crt", F_OK) == 0) {
         curl_easy_setopt(curl, CURLOPT_CAINFO, "/etc/ssl/certs/ca-certificates.crt");
     }
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
-    curl_easy_setopt(curl, CURLOPT_USERAGENT, "RomCloud-TrimUI-BrickPro/1.0");
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36");
     curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
 
     CURLcode res = curl_easy_perform(curl);

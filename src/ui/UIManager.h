@@ -26,6 +26,8 @@ enum class UIState {
   REVERSE_SYNC,
   IPTV_LIST,
   IPTV_SEARCH,
+  YOUTUBE_SEARCH,
+  YOUTUBE_RESULTS,
   EXIT_REQUESTED
 };
 
@@ -78,6 +80,26 @@ private:
   int m_iptvKbRow = 0;
   int m_iptvKbCol = 0;
   bool m_iptvKbInResults = false;
+
+  // YouTube Search State
+  std::string m_ytSearchQuery;
+  std::string m_ytLastSearchQuery;
+  std::vector<std::string> m_ytSearchResults;       // current page results (up to 6)
+  std::vector<std::string> m_ytAllCachedResults;    // cache of all fetched results for current query
+  int m_ytSearchSelectedIndex = 0;
+  int m_ytSearchScrollOffset = 0;
+  int m_ytCurrentPage = 1;           // current page (1-based, 6 results/page)
+  int m_ytKbRow = 0;
+  int m_ytKbCol = 0;
+  bool m_ytKbShift = false;
+  bool m_ytKbInResults = false;
+  std::string m_ytErrorMessage;
+  std::atomic<bool> m_ytIsSearching{false};
+  std::atomic<bool> m_ytSearchFinished{false};
+  std::atomic<bool> m_ytIsLoadingVideo{false};
+  std::atomic<bool> m_ytVideoReady{false};
+  std::string m_ytPendingStreamUrl;
+  std::string m_ytPendingVideoId;
 
   // System Selection State
   int m_selectedSystemIndex = 0;
@@ -143,6 +165,20 @@ private:
   void renderReverseSyncState();
   void renderIPTVState();
   void renderIPTVSearchState();
+  void renderYouTubeSearchState();
+  void renderYouTubeResultsState();
+
+  // YouTube integration
+  bool m_ytTelexMode = true;
+  std::unordered_map<std::string, SDL_Texture*> m_ytThumbnails;
+  std::unordered_map<std::string, std::string> m_ytStreamUrlCache;
+  std::vector<std::string> runYouTubeSearch(const std::string& query, int page = 1);
+  std::string resolveYouTubeStreamUrl(const std::string& videoId);
+  void preloadYouTubeStreamUrl(const std::string& videoId);
+  void triggerYouTubeSearch();
+  void playYouTubeVideo(const std::string& videoId);
+  void startThumbnailDownloads(const std::vector<std::string>& videoIds);
+  void clearThumbnailCache();
   void renderUploadOverlay();
   void renderToast();
 

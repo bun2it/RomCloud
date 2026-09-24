@@ -18,9 +18,11 @@ ZIP_NAME="RomCloud-v${VERSION}.zip"
 rm -rf "$STAGING_DIR"
 mkdir -p "$STAGING_DIR/Apps/RomCloud/bin"
 mkdir -p "$STAGING_DIR/Apps/RomCloud/lib"
+mkdir -p "$STAGING_DIR/Apps/RomCloud/scripts"
 mkdir -p "$STAGING_DIR/Apps/RomCloud/assets/fonts"
 mkdir -p "$STAGING_DIR/Apps/RomCloud/assets/icons"
 mkdir -p "$STAGING_DIR/Apps/RomCloud/assets/apps_icons"
+mkdir -p "$STAGING_DIR/Apps/RomCloud/assets/player_icons"
 mkdir -p "$STAGING_DIR/Apps/RomCloud/config"
 mkdir -p "$STAGING_DIR/Apps/RomCloud/iptv"
 
@@ -32,9 +34,24 @@ cp -f icontop.png "$STAGING_DIR/Apps/RomCloud/icontop.png" 2>/dev/null || cp ico
 cp launch.sh "$STAGING_DIR/Apps/RomCloud/"
 cp bin/RomCloud "$STAGING_DIR/Apps/RomCloud/bin/"
 
+# Copy YouTube support (python3 + yt-dlp)
+if [ -f bin/yt-dlp ]; then
+    cp bin/yt-dlp "$STAGING_DIR/Apps/RomCloud/bin/"
+    chmod +x "$STAGING_DIR/Apps/RomCloud/bin/yt-dlp"
+fi
+if [ -f bin/yt-dlp-glibc ]; then
+    cp bin/yt-dlp-glibc "$STAGING_DIR/Apps/RomCloud/bin/"
+    chmod +x "$STAGING_DIR/Apps/RomCloud/bin/yt-dlp-glibc"
+fi
+if [ -d scripts ]; then
+    cp -r scripts/* "$STAGING_DIR/Apps/RomCloud/scripts/"
+    chmod +x "$STAGING_DIR/Apps/RomCloud/scripts/"*.sh 2>/dev/null || true
+fi
+
 cp assets/fonts/font.ttf "$STAGING_DIR/Apps/RomCloud/assets/fonts/"
 cp assets/icons/*.png "$STAGING_DIR/Apps/RomCloud/assets/icons/"
 cp assets/apps_icons/*.png "$STAGING_DIR/Apps/RomCloud/assets/apps_icons/" 2>/dev/null || true
+cp -r assets/player_icons/* "$STAGING_DIR/Apps/RomCloud/assets/player_icons/" 2>/dev/null || true
 cp config/settings.json "$STAGING_DIR/Apps/RomCloud/config/"
 if [ -f config/input.conf ]; then
     cp config/input.conf "$STAGING_DIR/Apps/RomCloud/config/"
@@ -67,7 +84,7 @@ zip -r "$DIST_DIR/$ZIP_NAME" Apps
 
 # Create mpv_bundle.zip for OTA update delivery
 cd "$STAGING_DIR/Apps/RomCloud"
-zip -r -9 "$DIST_DIR/mpv_bundle.zip" bin/mpv lib
+zip -r -9 "$DIST_DIR/mpv_bundle.zip" bin/mpv lib bin/yt-dlp bin/yt-dlp-glibc scripts assets/player_icons assets/apps_icons/YOUTUBE.png
 cd "$SCRIPT_DIR"
 rm -rf "$STAGING_DIR"
 

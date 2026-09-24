@@ -3,6 +3,7 @@
 #include "../filesystem/FileSystemManager.h"
 #include "../config/AppConfig.h"
 #include "../input/InputManager.h"
+#include "../platform/PlatformInfo.h"
 #include <dirent.h>
 #include <unistd.h>
 #include <fcntl.h>
@@ -10,9 +11,13 @@
 #include <sys/wait.h>
 #include <signal.h>
 #include <cstring>
+#include <sys/socket.h>
+#include <sys/un.h>
 #include <fstream>
 #include <sstream>
 #include <vector>
+#include <thread>
+#include <atomic>
 #include <algorithm>
 #include <curl/curl.h>
 
@@ -770,6 +775,7 @@ bool IPTVManager::playChannel(const IPTVChannel& channel) {
         std::string libPath = appRoot + "/lib:" + sdRoot + "/Emu/MEDIA/lib64:" + sdRoot + "/Emu/MEDIA/lib32:" + sdRoot + "/System/lib:/usr/lib:/lib";
         setenv("LD_LIBRARY_PATH", libPath.c_str(), 1);
         setenv("HOME", appRoot.c_str(), 1);
+        setenv("YTDL_EXE", (appRoot + "/bin/yt-dlp").c_str(), 1);
 
         std::string inputConf = appRoot + "/config/input.conf";
 
@@ -900,6 +906,372 @@ bool IPTVManager::playChannel(const IPTVChannel& channel) {
 
     unlink("/tmp/stay_awake");
     Logger::error("Failed to fork IPTV player");
+    return false;
+}
+
+bool IPTVManager::sendMpvIpcCommand(const std::string& jsonCmd, std::string* response) {
+    int sock = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (sock < 0) return false;
+
+    struct sockaddr_un addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sun_family = AF_UNIX;
+    strncpy(addr.sun_path, "/tmp/mpv_youtube.sock", sizeof(addr.sun_path) - 1);
+
+    struct timeval tv;
+    tv.tv_sec = 0;
+    tv.tv_usec = 500000;
+    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof tv);
+    setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, (const char*)&tv, sizeof tv);
+
+    if (connect(sock, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
+        close(sock);
+        return false;
+    }
+
+    std::string cmd = jsonCmd + "\n";
+    send(sock, cmd.c_str(), cmd.length(), 0);
+
+    if (response) {
+        char buf[2048];
+        ssize_t n = recv(sock, buf, sizeof(buf) - 1, 0);
+        if (n > 0) {
+            buf[n] = '\0';
+            *response = std::string(buf);
+        }
+    }
+
+    close(sock);
+    return true;
+}
+
+void IPTVManager::showOverlayIcon(const std::string& iconName, uint32_t durationMs) {
+    std::string appRoot = AppConfig::instance().getAppRoot();
+    if (appRoot.empty()) appRoot = "/mnt/SDCARD/Apps/RomCloud";
+    std::string rawPath = appRoot + "/assets/player_icons/" + iconName + ".raw";
+    if (access(rawPath.c_str(), R_OK) != 0) return;
+
+    int screenW = 1024, screenH = 768;
+    float aspect = 4.0f / 3.0f;
+    PlatformInfo::instance().getDisplayMetrics(screenW, screenH, aspect);
+    if (screenW <= 0) screenW = 1024;
+    if (screenH <= 0) screenH = 768;
+
+    int iconW = 128;
+    int iconH = 128;
+    int iconX = (screenW - iconW) / 2;
+    int iconY = (screenH - iconH) / 2;
+
+    char cmd[512];
+    snprintf(cmd, sizeof(cmd),
+        "{\"command\":[\"overlay-add\",0,%d,%d,\"%s\",0,\"bgra\",%d,%d,%d]}",
+        iconX, iconY, rawPath.c_str(), iconW, iconH, iconW * 4);
+    sendMpvIpcCommand(cmd);
+
+    m_overlayExpireTime = SDL_GetTicks() + durationMs;
+}
+
+static std::string fetchYouTubeStreamUrl(const std::string& videoId, const std::string& quality) {
+    if (videoId.empty()) return "";
+    std::string appRoot = AppConfig::instance().getAppRoot();
+    if (appRoot.empty()) appRoot = "/mnt/SDCARD/Apps/RomCloud";
+    std::string scriptPath = appRoot + "/scripts/youtube_search.sh";
+    std::string cmd = "\"" + scriptPath + "\" url \"" + videoId + "\" " + quality + " 2>/dev/null";
+    FILE* pipe = popen(cmd.c_str(), "r");
+    if (!pipe) return "";
+    char buffer[4096];
+    std::string streamUrl;
+    while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
+        std::string line(buffer);
+        while (!line.empty() && (line.back() == '\n' || line.back() == '\r')) {
+            line.pop_back();
+        }
+        if (line.find("http://") == 0 || line.find("https://") == 0) {
+            streamUrl = line;
+            break;
+        }
+    }
+    pclose(pipe);
+    return streamUrl;
+}
+
+bool IPTVManager::switchYouTubeQuality(const std::string& videoId, const std::string& targetQuality) {
+    if (!m_isPlaying || m_mpvPid <= 0) return false;
+
+    // Show initial OSD
+    sendMpvIpcCommand("{\"command\":[\"show-text\",\"Đang đổi sang " + targetQuality + "p...\",5000]}");
+
+    // Query current time position from MPV
+    std::string resp;
+    double timePos = 0.0;
+    if (sendMpvIpcCommand("{\"command\":[\"get_property\",\"time-pos\"]}", &resp)) {
+        size_t p = resp.find("\"data\":");
+        if (p != std::string::npos) {
+            timePos = std::atof(resp.c_str() + p + 7);
+        }
+    }
+
+    // Resolve new stream URL
+    std::string newUrl = fetchYouTubeStreamUrl(videoId, targetQuality);
+    if (newUrl.empty()) {
+        sendMpvIpcCommand("{\"command\":[\"show-text\",\"Không thể lấy luồng " + targetQuality + "p\",3000]}");
+        return false;
+    }
+
+    std::string videoUrl = newUrl;
+    std::string audioUrl;
+    size_t pipePos = newUrl.find('|');
+    if (pipePos != std::string::npos) {
+        videoUrl = newUrl.substr(0, pipePos);
+        audioUrl = newUrl.substr(pipePos + 1);
+    }
+
+    char reloadCmd[2048];
+    snprintf(reloadCmd, sizeof(reloadCmd),
+        "{\"command\":[\"loadfile\",\"%s\",\"replace\",\"start=%.2f\"]}",
+        videoUrl.c_str(), timePos);
+    sendMpvIpcCommand(reloadCmd);
+
+    if (!audioUrl.empty()) {
+        char audioCmd[2048];
+        snprintf(audioCmd, sizeof(audioCmd),
+            "{\"command\":[\"audio-add\",\"%s\",\"select\"]}", audioUrl.c_str());
+        sendMpvIpcCommand(audioCmd);
+    }
+
+    sendMpvIpcCommand("{\"command\":[\"show-text\",\"Độ phân giải: " + targetQuality + "p\",3000]}");
+    return true;
+}
+
+bool IPTVManager::playYouTubeUrl(const std::string& url) {
+    return playYouTubeVideo("", url, "360");
+}
+
+bool IPTVManager::playYouTubeVideo(const std::string& videoId, const std::string& initialUrl, const std::string& quality) {
+    stop();
+
+    if (initialUrl.empty()) {
+        Logger::error("YouTube URL is empty");
+        return false;
+    }
+
+    ensureMediaPlayerAvailable();
+
+    Logger::info("Playing YouTube Video: " + videoId + " (quality=" + quality + ")");
+
+    std::string appRoot = AppConfig::instance().getAppRoot();
+    if (appRoot.empty()) appRoot = "/mnt/SDCARD/Apps/RomCloud";
+    std::string sdRoot = AppConfig::instance().getSdRoot();
+
+    std::vector<std::string> playerCandidates = {
+        appRoot + "/bin/mpv",
+        sdRoot + "/System/bin/mpv",
+        sdRoot + "/Emus/VIDEOS/mpv.sh",
+        sdRoot + "/Emu/MEDIA/bin64/ffplay",
+        sdRoot + "/Emu/MEDIA/bin32/ffplay",
+        "/usr/trimui/bin/mpv",
+        "/usr/bin/mpv",
+        appRoot + "/bin/ffplay",
+        sdRoot + "/System/bin/ffplay",
+        "/usr/bin/ffplay"
+    };
+
+    std::string playerPath;
+    for (const auto& candidate : playerCandidates) {
+        struct stat st;
+        if (stat(candidate.c_str(), &st) == 0 && st.st_size > 1000 && access(candidate.c_str(), X_OK) == 0) {
+            playerPath = candidate;
+            break;
+        }
+    }
+
+    if (playerPath.empty()) {
+        Logger::error("No media player found for YouTube playback");
+        return false;
+    }
+
+    Logger::info("YouTube player: " + playerPath);
+
+    unlink("/tmp/mpv_youtube.sock");
+
+    FILE* fwake = fopen("/tmp/stay_awake", "w");
+    if (fwake) {
+        fputs("1\n", fwake);
+        fclose(fwake);
+    }
+
+    pid_t pid = fork();
+    if (pid == 0) {
+        setpgid(0, 0);
+
+        std::string logPath = appRoot + "/youtube_mpv.log";
+        int logFd = open(logPath.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        if (logFd >= 0) {
+            dup2(logFd, STDOUT_FILENO);
+            dup2(logFd, STDERR_FILENO);
+            close(logFd);
+        }
+
+        std::string libPath = appRoot + "/lib:" + sdRoot + "/Emu/MEDIA/lib64:" + sdRoot + "/Emu/MEDIA/lib32:" + sdRoot + "/System/lib:/usr/lib:/lib";
+        setenv("LD_LIBRARY_PATH", libPath.c_str(), 1);
+        setenv("HOME", appRoot.c_str(), 1);
+        setenv("YTDL_EXE", (appRoot + "/bin/yt-dlp").c_str(), 1);
+
+        std::string inputConf = appRoot + "/config/input.conf";
+
+        std::string videoUrl = initialUrl;
+        std::string audioUrl = "";
+        size_t pipePos = initialUrl.find('|');
+        if (pipePos != std::string::npos) {
+            videoUrl = initialUrl.substr(0, pipePos);
+            audioUrl = initialUrl.substr(pipePos + 1);
+        }
+
+        if (playerPath.find("mpv.sh") != std::string::npos) {
+            execl("/bin/sh", "sh", playerPath.c_str(), videoUrl.c_str(), nullptr);
+        } else if (playerPath.find("mpv") != std::string::npos) {
+            std::vector<std::string> argList = {
+                playerPath,
+                videoUrl,
+                "--input-ipc-server=/tmp/mpv_youtube.sock",
+                "--fullscreen",
+                "--keepaspect=yes",
+                "--hwdec=auto",
+                "--vd-lavc-threads=4",
+                "--framedrop=vo",
+                "--demuxer-max-bytes=16M",
+                "--demuxer-readahead-secs=8",
+                "--audio-buffer=0.5",
+                "--terminal=no",
+                "--osd-level=1",
+                "--osd-font-size=48",
+                "--osd-align-x=center",
+                "--osd-align-y=center",
+                "--osd-color=#FFFFFF",
+                "--osd-border-color=#10141E",
+                "--osd-border-size=3",
+                "--osd-duration=1400"
+            };
+            std::string fontPath = appRoot + "/assets/fonts/font.ttf";
+            if (access(fontPath.c_str(), R_OK) == 0) {
+                argList.push_back("--osd-font=" + fontPath);
+            }
+            if (!audioUrl.empty()) {
+                argList.push_back("--audio-file=" + audioUrl);
+            }
+            if (access(inputConf.c_str(), R_OK) == 0) {
+                argList.push_back("--input-conf=" + inputConf);
+            }
+            std::vector<char*> cArgs;
+            for (auto& s : argList) cArgs.push_back(const_cast<char*>(s.c_str()));
+            cArgs.push_back(nullptr);
+            execv(playerPath.c_str(), cArgs.data());
+        } else {
+            const char* args[] = {
+                playerPath.c_str(), "-fs", "-autoexit",
+                "-loglevel", "warning", videoUrl.c_str(), nullptr
+            };
+            execvp(playerPath.c_str(), const_cast<char* const*>(args));
+        }
+        _exit(1);
+    } else if (pid > 0) {
+        m_mpvPid = pid;
+        m_isPlaying = true;
+        m_currentChannel = "YouTube";
+        uint32_t playStartTime = SDL_GetTicks();
+        std::string currentQuality = quality.empty() ? "360" : quality;
+        bool isPaused = false;
+        m_overlayExpireTime = 0;
+        Logger::info("YouTube player started with PID: " + std::to_string(pid));
+
+        SDL_PumpEvents();
+        SDL_FlushEvents(SDL_FIRSTEVENT, SDL_LASTEVENT);
+
+        int status = 0;
+        while (m_isPlaying && m_mpvPid > 0) {
+            pid_t res = waitpid(m_mpvPid, &status, WNOHANG);
+            if (res != 0) break;
+
+            if (m_overlayExpireTime > 0 && SDL_GetTicks() >= m_overlayExpireTime) {
+                sendMpvIpcCommand("{\"command\":[\"overlay-remove\",0]}");
+                m_overlayExpireTime = 0;
+            }
+
+            InputManager::instance().update();
+            auto& input = InputManager::instance();
+
+            if (SDL_GetTicks() - playStartTime >= 600) {
+                if (input.isButtonJustPressed(Button::B) || input.isButtonJustPressed(Button::MENU)) {
+                    stop();
+                    break;
+                } else if (input.isButtonJustPressed(Button::A)) {
+                    isPaused = !isPaused;
+                    sendMpvIpcCommand("{\"command\":[\"cycle\",\"pause\"]}");
+                    showOverlayIcon(isPaused ? "pause" : "play", 1400);
+                    sendMpvIpcCommand(isPaused
+                        ? "{\"command\":[\"show-text\",\"{\\\\an2\\\\fs44\\\\bord2\\\\b1}❚❚  TẠM DỪNG\", 1400]}"
+                        : "{\"command\":[\"show-text\",\"{\\\\an2\\\\fs44\\\\bord2\\\\b1}▶  ĐANG PHÁT\", 1400]}");
+                } else if (input.isButtonJustPressed(Button::RIGHT)) {
+                    sendMpvIpcCommand("{\"command\":[\"seek\",10,\"relative\"]}");
+                    showOverlayIcon("forward", 1200);
+                    sendMpvIpcCommand("{\"command\":[\"show-text\",\"{\\\\an2\\\\fs44\\\\bord2\\\\b1}▶▶  +10s\", 1200]}");
+                } else if (input.isButtonJustPressed(Button::LEFT)) {
+                    sendMpvIpcCommand("{\"command\":[\"seek\",-10,\"relative\"]}");
+                    showOverlayIcon("rewind", 1200);
+                    sendMpvIpcCommand("{\"command\":[\"show-text\",\"{\\\\an2\\\\fs44\\\\bord2\\\\b1}◀◀  -10s\", 1200]}");
+                } else if (input.isButtonJustPressed(Button::UP)) {
+                    sendMpvIpcCommand("{\"command\":[\"add\",\"volume\",5]}");
+                    sendMpvIpcCommand("{\"command\":[\"show-text\",\"{\\\\an5\\\\fs70\\\\bord3\\\\b1}▲  Âm lượng +5%\", 1200]}");
+                } else if (input.isButtonJustPressed(Button::DOWN)) {
+                    sendMpvIpcCommand("{\"command\":[\"add\",\"volume\",-5]}");
+                    sendMpvIpcCommand("{\"command\":[\"show-text\",\"{\\\\an5\\\\fs70\\\\bord3\\\\b1}▼  Âm lượng -5%\", 1200]}");
+                } else if (input.isButtonJustPressed(Button::R1)) {
+                    sendMpvIpcCommand("{\"command\":[\"seek\",60,\"relative\"]}");
+                    showOverlayIcon("forward", 1400);
+                    sendMpvIpcCommand("{\"command\":[\"show-text\",\"{\\\\an2\\\\fs44\\\\bord2\\\\b1}▶▶  +60s\", 1400]}");
+                } else if (input.isButtonJustPressed(Button::L1)) {
+                    sendMpvIpcCommand("{\"command\":[\"seek\",-60,\"relative\"]}");
+                    showOverlayIcon("rewind", 1400);
+                    sendMpvIpcCommand("{\"command\":[\"show-text\",\"{\\\\an2\\\\fs44\\\\bord2\\\\b1}◀◀  -60s\", 1400]}");
+                } else if (input.isButtonJustPressed(Button::X)) {
+                    sendMpvIpcCommand("{\"command\":[\"cycle-values\",\"video-aspect-override\",\"16:9\",\"4:3\",\"-1\"]}");
+                    sendMpvIpcCommand("{\"command\":[\"show-text\",\"{\\\\an5\\\\fs75\\\\bord3\\\\b1}Tỉ lệ màn hình\", 1400]}");
+                } else if (input.isButtonJustPressed(Button::Y)) {
+                    sendMpvIpcCommand("{\"command\":[\"cycle\",\"sub\"]}");
+                    sendMpvIpcCommand("{\"command\":[\"show-text\",\"{\\\\an5\\\\fs75\\\\bord3\\\\b1}Phụ đề (CC)\", 1400]}");
+                } else if (input.isButtonJustPressed(Button::START)) {
+                    sendMpvIpcCommand("{\"command\":[\"cycle-values\",\"speed\",\"1.0\",\"1.25\",\"1.5\",\"0.75\"]}");
+                    sendMpvIpcCommand("{\"command\":[\"show-text\",\"{\\\\an5\\\\fs80\\\\bord3\\\\b1}Tốc độ phát\", 1400]}");
+                } else if (input.isButtonJustPressed(Button::SELECT)) {
+                    if (!videoId.empty()) {
+                        std::string nextQ = (currentQuality == "720") ? "360" : "720";
+                        sendMpvIpcCommand("{\"command\":[\"show-text\",\"{\\\\an5\\\\fs75\\\\bord3\\\\b1}Đổi chất lượng: " + nextQ + "p...\", 1400]}");
+                        if (switchYouTubeQuality(videoId, nextQ)) {
+                            currentQuality = nextQ;
+                        }
+                    }
+                }
+            }
+            SDL_Delay(35);
+        }
+
+        if (m_overlayExpireTime > 0) {
+            sendMpvIpcCommand("{\"command\":[\"overlay-remove\",0]}");
+            m_overlayExpireTime = 0;
+        }
+
+        unlink("/tmp/stay_awake");
+        unlink("/tmp/mpv_youtube.sock");
+        m_isPlaying = false;
+        m_currentChannel = "";
+        m_mpvPid = -1;
+
+        SDL_PumpEvents();
+        SDL_FlushEvents(SDL_FIRSTEVENT, SDL_LASTEVENT);
+        InputManager::instance().reset();
+        Logger::info("YouTube player finished");
+        return true;
+    }
     return false;
 }
 

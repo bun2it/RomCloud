@@ -1,0 +1,12 @@
+#!/bin/sh
+# yt-dlp wrapper for RomCloud
+# Uses glibc ARM64 binary directly (no Python needed)
+
+BINDIR="$(cd "$(dirname "$0")" && pwd)"
+YTDLP="${BINDIR}/yt-dlp-glibc"
+
+if [ -x "$YTDLP" ]; then
+    exec "$YTDLP" "$@"
+fi
+echo "ERROR: yt-dlp not found" >&2
+exit 1

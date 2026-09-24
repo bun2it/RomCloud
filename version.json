@@ -1,17 +1,17 @@
 {
-  "version": "2.0.9",
+  "version": "2.1.0",
   "release_date": "2026-09-24",
   "target_os": "ALL",
   "icon_url": "https://raw.githubusercontent.com/bun2it/RomCloud/main/icon.png",
-  "binary_url": "https://github.com/bun2it/RomCloud/releases/download/v2.0.9/RomCloud",
-  "bundle_url": "https://github.com/bun2it/RomCloud/releases/download/v2.0.9/mpv_bundle.zip",
-  "STOCK_PS_bundle_url": "https://github.com/bun2it/RomCloud/releases/download/v2.0.9/bundle-STOCK_PS.zip",
-  "NEXTUI_bundle_url": "https://github.com/bun2it/RomCloud/releases/download/v2.0.9/bundle-NEXTUI.zip",
-  "SPRUCE_OS_bundle_url": "https://github.com/bun2it/RomCloud/releases/download/v2.0.9/bundle-SPRUCE_OS.zip",
+  "binary_url": "https://github.com/bun2it/RomCloud/releases/download/v2.1.0/RomCloud",
+  "bundle_url": "https://github.com/bun2it/RomCloud/releases/download/v2.1.0/mpv_bundle.zip",
+  "STOCK_PS_bundle_url": "https://github.com/bun2it/RomCloud/releases/download/v2.1.0/bundle-STOCK_PS.zip",
+  "NEXTUI_bundle_url": "https://github.com/bun2it/RomCloud/releases/download/v2.1.0/bundle-NEXTUI.zip",
+  "SPRUCE_OS_bundle_url": "https://github.com/bun2it/RomCloud/releases/download/v2.1.0/bundle-SPRUCE_OS.zip",
   "os_versions": {
-    "STOCK_PS": "2.0.9",
-    "NEXTUI": "2.0.9",
-    "SPRUCE_OS": "2.0.9"
+    "STOCK_PS": "2.1.0",
+    "NEXTUI": "2.1.0",
+    "SPRUCE_OS": "2.1.0"
   },
-  "changelog": "v2.0.9: Khôi phục đầy đủ thanh tiến trình OTA (tốc độ tải MB/s, % hoàn thành, dung lượng tệp và các bước cài đặt chi tiết)."
+  "changelog": "v2.1.0: Bổ sung tính năng xem YouTube trực tiếp trên RomCloud: tìm kiếm video hỗ trợ gõ tiếng Việt Telex, duyệt kết quả và phát video chất lượng cao."
 }
