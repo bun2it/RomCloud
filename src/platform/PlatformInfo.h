@@ -52,6 +52,7 @@ public:
     AspectRatio getAspectRatio();
     std::string getDeviceName();
     void getDisplayMetrics(int& width, int& height, float& aspectRatio);
+    void setDisplayMetrics(int width, int height);
 
     // Scaling helpers for different screen sizes
     int scaleX(int x);     // Scale X coordinate based on device

@@ -75,7 +75,13 @@ bool Application::initSDL() {
 
     SDL_ShowCursor(SDL_DISABLE);
     int w = 0, h = 0;
-    SDL_GetWindowSize(m_window, &w, &h);
+    SDL_GetRendererOutputSize(m_renderer, &w, &h);
+    if (w <= 0 || h <= 0) {
+        SDL_GetWindowSize(m_window, &w, &h);
+    }
+    if (w > 0 && h > 0) {
+        PlatformInfo::instance().setDisplayMetrics(w, h);
+    }
     Logger::info("Display window created successfully: " + std::to_string(w) + "x" + std::to_string(h));
     return true;
 }

@@ -56,8 +56,9 @@ DeviceType PlatformInfo::detectDeviceType() {
     if (m_displayWidth == 1024 && m_displayHeight == 768) {
         return DeviceType::TRIMUI_BRICK_PRO;
     }
-    // TrimUI Smart Pro: 640x480
-    if (m_displayWidth == 640 && m_displayHeight == 480) {
+    // TrimUI Smart Pro: 1280x720 (16:9 widescreen) or 640x480
+    if ((m_displayWidth == 1280 && m_displayHeight == 720) ||
+        (m_displayWidth == 640 && m_displayHeight == 480)) {
         return DeviceType::TRIMUI_SMART_PRO;
     }
     // TrimUI Beta: 480x320
@@ -122,6 +123,21 @@ void PlatformInfo::getDisplayMetrics(int& width, int& height, float& aspectRatio
     width = m_displayWidth;
     height = m_displayHeight;
     aspectRatio = m_aspectRatio;
+}
+
+void PlatformInfo::setDisplayMetrics(int width, int height) {
+    if (width <= 0 || height <= 0) return;
+    m_displayWidth = width;
+    m_displayHeight = height;
+    AspectRatio ratio = calculateAspectRatio(m_displayWidth, m_displayHeight);
+    switch (ratio) {
+        case AspectRatio::RATIO_4_3: m_aspectRatio = 4.0f / 3.0f; break;
+        case AspectRatio::RATIO_3_2: m_aspectRatio = 3.0f / 2.0f; break;
+        case AspectRatio::RATIO_16_9: m_aspectRatio = 16.0f / 9.0f; break;
+        default: m_aspectRatio = static_cast<float>(width) / static_cast<float>(height); break;
+    }
+    m_deviceType = detectDeviceType();
+    Logger::info("Display metrics set: " + std::to_string(width) + "x" + std::to_string(height) + ", device: " + getDeviceName());
 }
 
 int PlatformInfo::scaleX(int x) {

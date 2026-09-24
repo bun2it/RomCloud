@@ -1,6 +1,7 @@
 #include "CoverManager.h"
 #include "../logging/Logger.h"
 #include "../config/AppConfig.h"
+#include "../platform/PlatformInfo.h"
 #include <sys/stat.h>
 #include <algorithm>
 
@@ -149,8 +150,13 @@ SDL_Texture* CoverManager::getCoverTexture(const GameRecord& game, const SystemR
 void CoverManager::renderCoverBox(int x, int y, int w, int h, const GameRecord* game, const SystemRecord* sys, TTF_Font* font) {
     if (!m_renderer) return;
 
+    int sx = PlatformInfo::instance().scaleX(x);
+    int sy = PlatformInfo::instance().scaleY(y);
+    int sw = PlatformInfo::instance().scaleW(w);
+    int sh = PlatformInfo::instance().scaleH(h);
+
     // Drop shadow
-    SDL_Rect shadowRect = {x + 6, y + 6, w, h};
+    SDL_Rect shadowRect = {sx + 6, sy + 6, sw, sh};
     SDL_SetRenderDrawColor(m_renderer, 10, 13, 18, 160);
     SDL_RenderFillRect(m_renderer, &shadowRect);
 
@@ -159,16 +165,16 @@ void CoverManager::renderCoverBox(int x, int y, int w, int h, const GameRecord* 
         SDL_Texture* tex = getCoverTexture(*game, *sys, imgW, imgH);
         if (tex && imgW > 0 && imgH > 0) {
             // Draw background frame
-            SDL_Rect bgRect = {x, y, w, h};
+            SDL_Rect bgRect = {sx, sy, sw, sh};
             SDL_SetRenderDrawColor(m_renderer, 20, 24, 32, 255);
             SDL_RenderFillRect(m_renderer, &bgRect);
 
             // Compute aspect ratio preserving fit
-            float scale = std::min((float)(w - 8) / (float)imgW, (float)(h - 8) / (float)imgH);
+            float scale = std::min((float)(sw - 8) / (float)imgW, (float)(sh - 8) / (float)imgH);
             int destW = (int)(imgW * scale);
             int destH = (int)(imgH * scale);
-            int destX = x + (w - destW) / 2;
-            int destY = y + (h - destH) / 2;
+            int destX = sx + (sw - destW) / 2;
+            int destY = sy + (sh - destH) / 2;
 
             SDL_Rect dstRect = {destX, destY, destW, destH};
             SDL_RenderCopy(m_renderer, tex, nullptr, &dstRect);
@@ -181,18 +187,20 @@ void CoverManager::renderCoverBox(int x, int y, int w, int h, const GameRecord* 
     }
 
     // Fallback procedural box art
-    SDL_Rect bgRect = {x, y, w, h};
+    SDL_Rect bgRect = {sx, sy, sw, sh};
     SDL_SetRenderDrawColor(m_renderer, 24, 30, 42, 255);
     SDL_RenderFillRect(m_renderer, &bgRect);
 
     // Top system banner
-    int bannerH = 40;
-    SDL_Rect bannerRect = {x, y, w, bannerH};
+    int bannerH = PlatformInfo::instance().scaleH(40);
+    SDL_Rect bannerRect = {sx, sy, sw, bannerH};
     SDL_SetRenderDrawColor(m_renderer, 30, 58, 95, 255);
     SDL_RenderFillRect(m_renderer, &bannerRect);
 
     // Inner cartridge outline
-    SDL_Rect innerBox = {x + 16, y + bannerH + 16, w - 32, h - bannerH - 32};
+    int padX = PlatformInfo::instance().scaleW(16);
+    int padY = PlatformInfo::instance().scaleH(16);
+    SDL_Rect innerBox = {sx + padX, sy + bannerH + padY, sw - 2 * padX, sh - bannerH - 2 * padY};
     SDL_SetRenderDrawColor(m_renderer, 35, 42, 56, 255);
     SDL_RenderFillRect(m_renderer, &innerBox);
     SDL_SetRenderDrawColor(m_renderer, 60, 72, 92, 255);
@@ -209,7 +217,7 @@ void CoverManager::renderCoverBox(int x, int y, int w, int h, const GameRecord* 
         if (brandSurf) {
             SDL_Texture* brandTex = SDL_CreateTextureFromSurface(m_renderer, brandSurf);
             if (brandTex) {
-                SDL_Rect brandDst = {x + (w - brandSurf->w) / 2, y + (bannerH - brandSurf->h) / 2, brandSurf->w, brandSurf->h};
+                SDL_Rect brandDst = {sx + (sw - brandSurf->w) / 2, sy + (bannerH - brandSurf->h) / 2, brandSurf->w, brandSurf->h};
                 SDL_RenderCopy(m_renderer, brandTex, nullptr, &brandDst);
                 SDL_DestroyTexture(brandTex);
             }
@@ -228,7 +236,7 @@ void CoverManager::renderCoverBox(int x, int y, int w, int h, const GameRecord* 
         if (titleSurf) {
             SDL_Texture* titleTex = SDL_CreateTextureFromSurface(m_renderer, titleSurf);
             if (titleTex) {
-                SDL_Rect titleDst = {x + (w - titleSurf->w) / 2, y + bannerH + (h - bannerH - titleSurf->h) / 2, titleSurf->w, titleSurf->h};
+                SDL_Rect titleDst = {sx + (sw - titleSurf->w) / 2, sy + bannerH + (sh - bannerH - titleSurf->h) / 2, titleSurf->w, titleSurf->h};
                 SDL_RenderCopy(m_renderer, titleTex, nullptr, &titleDst);
                 SDL_DestroyTexture(titleTex);
             }

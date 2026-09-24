@@ -1370,23 +1370,28 @@ void UIManager::drawIcon(const std::string& iconName, int x, int y, int w, int h
         return;
     }
 
+    int sx = PlatformInfo::instance().scaleX(x);
+    int sy = PlatformInfo::instance().scaleY(y);
+    int sw = PlatformInfo::instance().scaleW(w);
+    int sh = PlatformInfo::instance().scaleH(h);
+
     int texW = 0, texH = 0;
     SDL_QueryTexture(texture, nullptr, nullptr, &texW, &texH);
-    int drawW = w;
-    int drawH = h;
+    int drawW = sw;
+    int drawH = sh;
     if (texW > 0 && texH > 0) {
         float aspect = static_cast<float>(texW) / static_cast<float>(texH);
         if (aspect >= 1.0f) {
-            drawW = std::min(w, static_cast<int>(h * aspect));
+            drawW = std::min(sw, static_cast<int>(sh * aspect));
             drawH = static_cast<int>(drawW / aspect);
         } else {
-            drawH = std::min(h, static_cast<int>(w / aspect));
+            drawH = std::min(sh, static_cast<int>(sw / aspect));
             drawW = static_cast<int>(drawH * aspect);
         }
     }
 
-    int dstX = x + (w - drawW) / 2;
-    int dstY = y + (h - drawH) / 2;
+    int dstX = sx + (sw - drawW) / 2;
+    int dstY = sy + (sh - drawH) / 2;
     SDL_Rect dst = {dstX, dstY, drawW, drawH};
     SDL_RenderCopy(m_renderer, texture, nullptr, &dst);
 }
@@ -1469,12 +1474,18 @@ void UIManager::drawGridIcon(const std::string &iconFile, int x, int y, int w, i
         return;
     }
 
+    // Scale destination coordinates and bounds
+    int sx = PlatformInfo::instance().scaleX(x);
+    int sy = PlatformInfo::instance().scaleY(y);
+    int sw = PlatformInfo::instance().scaleW(w);
+    int sh = PlatformInfo::instance().scaleH(h);
+
     // Preserve exact 1:1 square aspect ratio of icons, centered in the slot
     int texW = 0, texH = 0;
     SDL_QueryTexture(texture, nullptr, nullptr, &texW, &texH);
 
-    int maxW = w;
-    int maxH = h;
+    int maxW = sw;
+    int maxH = sh;
     int drawW = maxW;
     int drawH = maxH;
 
@@ -1493,8 +1504,8 @@ void UIManager::drawGridIcon(const std::string &iconFile, int x, int y, int w, i
         drawH = side;
     }
 
-    int dstX = x + (w - drawW) / 2;
-    int dstY = y + (h - drawH) / 2;
+    int dstX = sx + (sw - drawW) / 2;
+    int dstY = sy + (sh - drawH) / 2;
 
     SDL_Rect dst = {dstX, dstY, drawW, drawH};
     SDL_RenderCopy(m_renderer, texture, nullptr, &dst);
