@@ -76,7 +76,7 @@ public:
     bool playYouTubeUrl(const std::string& url);
     bool switchYouTubeQuality(const std::string& videoId, const std::string& targetQuality);
     void showOverlayIcon(const std::string& iconName, uint32_t durationMs = 1400);
-    bool sendMpvIpcCommand(const std::string& cmd, std::string* response = nullptr);
+    bool sendMpvIpcCommand(const std::string& cmd, std::string* response = nullptr, const std::string& sockPath = "");
     bool isYouTubePlaying() const { return m_isPlaying && m_currentChannel == "YouTube"; }
     bool stop();
 

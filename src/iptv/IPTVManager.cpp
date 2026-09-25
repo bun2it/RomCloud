@@ -1,5 +1,6 @@
 #include "IPTVManager.h"
 #include "../logging/Logger.h"
+#include "../network/HttpClient.h"
 #include "../filesystem/FileSystemManager.h"
 #include "../config/AppConfig.h"
 #include "../input/InputManager.h"
@@ -20,6 +21,9 @@
 #include <atomic>
 #include <algorithm>
 #include <curl/curl.h>
+#ifdef __GLIBC__
+#include <malloc.h>
+#endif
 
 #include <SDL2/SDL.h>
 
@@ -703,6 +707,126 @@ bool IPTVManager::ensureMediaPlayerAvailable() {
     return false;
 }
 
+static std::string resolveCappedHlsUrl(const std::string& url, int targetHeight = 720) {
+    if (url.empty()) return url;
+    if (url.find(".m3u") == std::string::npos && url.find(".mpd") == std::string::npos) {
+        return url;
+    }
+
+    try {
+        HttpResponse resp = HttpClient::instance().get(url, {
+            "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        }, 4);
+        if (!resp.success || resp.body.empty() || resp.body.find("#EXTM3U") == std::string::npos) {
+            return url;
+        }
+
+        if (resp.body.find("#EXT-X-STREAM-INF") == std::string::npos) {
+            return url;
+        }
+
+        std::string effectiveUrl = !resp.effectiveUrl.empty() ? resp.effectiveUrl : url;
+
+        std::istringstream stream(resp.body);
+        std::string line;
+        struct Variant {
+            int width = 0;
+            int height = 0;
+            int bandwidth = 0;
+            std::string uri;
+        };
+        std::vector<Variant> variants;
+        Variant curVariant;
+        bool hasVariant = false;
+
+        while (std::getline(stream, line)) {
+            while (!line.empty() && (line.back() == '\r' || line.back() == '\n' || line.back() == ' ')) line.pop_back();
+            if (line.rfind("#EXT-X-STREAM-INF:", 0) == 0) {
+                curVariant = Variant();
+                std::string upperLine = line;
+                for (char& c : upperLine) c = std::toupper((unsigned char)c);
+
+                size_t resPos = upperLine.find("RESOLUTION=");
+                if (resPos != std::string::npos) {
+                    size_t xPos = upperLine.find_first_of("X", resPos + 11);
+                    if (xPos != std::string::npos) {
+                        curVariant.width = std::atoi(line.c_str() + resPos + 11);
+                        curVariant.height = std::atoi(line.c_str() + xPos + 1);
+                    }
+                }
+                size_t bwPos = upperLine.find("BANDWIDTH=");
+                if (bwPos != std::string::npos) {
+                    curVariant.bandwidth = std::atoi(line.c_str() + bwPos + 10);
+                }
+                hasVariant = true;
+            } else if (hasVariant && !line.empty() && line[0] != '#') {
+                curVariant.uri = line;
+                variants.push_back(curVariant);
+                hasVariant = false;
+            }
+        }
+
+        if (variants.empty()) return url;
+
+        // Select best variant where height <= targetHeight (720) or bandwidth <= 4200000
+        const Variant* best = nullptr;
+        for (const auto& v : variants) {
+            bool matches = false;
+            if (v.height > 0) {
+                matches = (v.height <= targetHeight);
+            } else if (v.bandwidth > 0) {
+                matches = (v.bandwidth <= 4200000);
+            }
+            if (matches) {
+                if (!best || v.height > best->height || (v.height == best->height && v.bandwidth > best->bandwidth)) {
+                    best = &v;
+                }
+            }
+        }
+
+        // If none <= targetHeight, pick the lowest resolution available
+        if (!best) {
+            for (const auto& v : variants) {
+                if (!best || (v.height > 0 && (best->height == 0 || v.height < best->height))) {
+                    best = &v;
+                }
+            }
+        }
+
+        if (best && !best->uri.empty()) {
+            std::string resolved = best->uri;
+            if (resolved.find("http://") != 0 && resolved.find("https://") != 0) {
+                size_t qPos = effectiveUrl.find('?');
+                std::string baseUrlNoQuery = (qPos != std::string::npos) ? effectiveUrl.substr(0, qPos) : effectiveUrl;
+
+                if (!resolved.empty() && resolved[0] == '/') {
+                    size_t protoEnd = baseUrlNoQuery.find("://");
+                    size_t hostEnd = (protoEnd != std::string::npos) ? baseUrlNoQuery.find('/', protoEnd + 3) : std::string::npos;
+                    if (hostEnd != std::string::npos) {
+                        resolved = baseUrlNoQuery.substr(0, hostEnd) + resolved;
+                    } else {
+                        resolved = baseUrlNoQuery + resolved;
+                    }
+                } else {
+                    size_t lastSlash = baseUrlNoQuery.rfind('/');
+                    if (lastSlash != std::string::npos) {
+                        resolved = baseUrlNoQuery.substr(0, lastSlash + 1) + resolved;
+                    }
+                }
+
+                if (qPos != std::string::npos && resolved.find('?') == std::string::npos) {
+                    resolved += effectiveUrl.substr(qPos);
+                }
+            }
+            Logger::info("[IPTV] Auto-capped stream to 720p direct variant (" + std::to_string(best->width) + "x" +
+                         std::to_string(best->height) + "): " + resolved);
+            return resolved;
+        }
+    } catch (...) {}
+
+    return url;
+}
+
 bool IPTVManager::playChannel(const IPTVChannel& channel) {
     stop();
 
@@ -715,6 +839,7 @@ bool IPTVManager::playChannel(const IPTVChannel& channel) {
 
     Logger::info("Playing IPTV channel: " + channel.name);
     Logger::info("URL: " + channel.url);
+    std::string playUrl = resolveCappedHlsUrl(channel.url, 720);
 
     std::string appRoot = AppConfig::instance().getAppRoot();
     if (appRoot.empty()) appRoot = "/mnt/SDCARD/Apps/RomCloud";
@@ -750,6 +875,8 @@ bool IPTVManager::playChannel(const IPTVChannel& channel) {
 
     Logger::info("Selected IPTV player: " + playerPath);
 
+    unlink("/tmp/mpv_iptv.sock");
+
     // Prevent TrimUI screen standby while watching video
     FILE* fwake = fopen("/tmp/stay_awake", "w");
     if (fwake) {
@@ -780,15 +907,22 @@ bool IPTVManager::playChannel(const IPTVChannel& channel) {
         std::string inputConf = appRoot + "/config/input.conf";
 
         if (playerPath.find("mpv.sh") != std::string::npos) {
-            execl("/bin/sh", "sh", playerPath.c_str(), channel.url.c_str(), nullptr);
+            execl("/bin/sh", "sh", playerPath.c_str(), playUrl.c_str(), nullptr);
         } else if (playerPath.find("mpv") != std::string::npos) {
             std::vector<std::string> argList = {
                 playerPath,
-                channel.url,
+                playUrl,
+                "--input-ipc-server=/tmp/mpv_iptv.sock",
                 "--fullscreen",
                 "--keepaspect=yes",
                 "--hwdec=auto",
                 "--vd-lavc-threads=4",
+                "--vd-lavc-fast",
+                "--vd-lavc-skiploopfilter=nonref",
+                "--vd-lavc-framedrop=nonref",
+                "--sws-scaler=fast-bilinear",
+                "--dscale=bilinear",
+                "--scale=bilinear",
                 "--framedrop=vo",
                 "--demuxer-max-bytes=16M",
                 "--demuxer-readahead-secs=5",
@@ -811,8 +945,9 @@ bool IPTVManager::playChannel(const IPTVChannel& channel) {
                 playerPath.c_str(),
                 "-fs",
                 "-autoexit",
+                "-framedrop",
                 "-loglevel", "warning",
-                channel.url.c_str(),
+                playUrl.c_str(),
                 nullptr
             };
             execvp(playerPath.c_str(), const_cast<char* const*>(args));
@@ -909,18 +1044,29 @@ bool IPTVManager::playChannel(const IPTVChannel& channel) {
     return false;
 }
 
-bool IPTVManager::sendMpvIpcCommand(const std::string& jsonCmd, std::string* response) {
+bool IPTVManager::sendMpvIpcCommand(const std::string& jsonCmd, std::string* response, const std::string& sockPath) {
     int sock = socket(AF_UNIX, SOCK_STREAM, 0);
     if (sock < 0) return false;
 
     struct sockaddr_un addr;
     memset(&addr, 0, sizeof(addr));
     addr.sun_family = AF_UNIX;
-    strncpy(addr.sun_path, "/tmp/mpv_youtube.sock", sizeof(addr.sun_path) - 1);
+
+    std::string targetSock = sockPath;
+    if (targetSock.empty()) {
+        if (access("/tmp/mpv_iptv.sock", F_OK) == 0) {
+            targetSock = "/tmp/mpv_iptv.sock";
+        } else if (access("/tmp/mpv_youtube.sock", F_OK) == 0) {
+            targetSock = "/tmp/mpv_youtube.sock";
+        } else {
+            targetSock = "/tmp/mpv_iptv.sock";
+        }
+    }
+    strncpy(addr.sun_path, targetSock.c_str(), sizeof(addr.sun_path) - 1);
 
     struct timeval tv;
     tv.tv_sec = 0;
-    tv.tv_usec = 500000;
+    tv.tv_usec = 250000; // 250ms
     setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof tv);
     setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, (const char*)&tv, sizeof tv);
 
@@ -1138,6 +1284,12 @@ bool IPTVManager::playYouTubeVideo(const std::string& videoId, const std::string
                 "--keepaspect=yes",
                 "--hwdec=auto",
                 "--vd-lavc-threads=4",
+                "--vd-lavc-fast",
+                "--vd-lavc-skiploopfilter=nonref",
+                "--vd-lavc-framedrop=nonref",
+                "--sws-scaler=fast-bilinear",
+                "--dscale=bilinear",
+                "--scale=bilinear",
                 "--framedrop=vo",
                 "--demuxer-max-bytes=16M",
                 "--demuxer-readahead-secs=8",
@@ -1278,29 +1430,58 @@ bool IPTVManager::playYouTubeVideo(const std::string& videoId, const std::string
 bool IPTVManager::stop() {
     unlink("/tmp/stay_awake");
     if (m_mpvPid > 0) {
-        Logger::info("Stopping IPTV player (PID: " + std::to_string(m_mpvPid) + ")");
-        // Send SIGTERM to process group and direct PID
-        kill(-m_mpvPid, SIGTERM);
-        kill(m_mpvPid, SIGTERM);
+        Logger::info("Stopping media player (PID: " + std::to_string(m_mpvPid) + ")");
+
+        // 1. Try graceful IPC quit first on both possible sockets
+        sendMpvIpcCommand("{\"command\":[\"quit\"]}", nullptr, "/tmp/mpv_iptv.sock");
+        sendMpvIpcCommand("{\"command\":[\"quit\"]}", nullptr, "/tmp/mpv_youtube.sock");
 
         int status = 0;
-        for (int i = 0; i < 5; i++) {
+        bool stopped = false;
+        // Wait up to 300ms for graceful exit
+        for (int i = 0; i < 15; i++) {
             pid_t res = waitpid(m_mpvPid, &status, WNOHANG);
-            if (res != 0) break;
+            if (res > 0) {
+                stopped = true;
+                break;
+            }
             usleep(20000); // 20ms
         }
 
-        // If process is still active, force kill
-        if (kill(m_mpvPid, 0) == 0) {
+        // 2. If still running, send SIGTERM to process group and direct PID
+        if (!stopped && kill(m_mpvPid, 0) == 0) {
+            kill(-m_mpvPid, SIGTERM);
+            kill(m_mpvPid, SIGTERM);
+            for (int i = 0; i < 20; i++) { // up to 400ms
+                pid_t res = waitpid(m_mpvPid, &status, WNOHANG);
+                if (res > 0) {
+                    stopped = true;
+                    break;
+                }
+                usleep(20000);
+            }
+        }
+
+        // 3. Absolute last resort: SIGKILL and BLOCKING waitpid to reap process & free ALSA
+        if (!stopped && kill(m_mpvPid, 0) == 0) {
+            Logger::warn("Media player still running, sending SIGKILL to PID " + std::to_string(m_mpvPid));
             kill(-m_mpvPid, SIGKILL);
             kill(m_mpvPid, SIGKILL);
-            waitpid(m_mpvPid, &status, WNOHANG);
+            waitpid(m_mpvPid, &status, 0); // Blocking waitpid guarantees OS frees audio hardware and buffers
         }
         m_mpvPid = -1;
     }
 
+    unlink("/tmp/mpv_iptv.sock");
+    unlink("/tmp/mpv_youtube.sock");
+    unlink("/tmp/stay_awake");
     m_isPlaying = false;
     m_currentChannel = "";
+
+#ifdef __GLIBC__
+    malloc_trim(0);
+#endif
+
     return true;
 }
 

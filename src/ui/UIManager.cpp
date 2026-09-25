@@ -3814,6 +3814,14 @@ std::string UIManager::resolveYouTubeStreamUrl(const std::string& videoId) {
     std::string appRoot = AppConfig::instance().getAppRoot();
     if (appRoot.empty()) appRoot = "/mnt/SDCARD/Apps/RomCloud";
     std::string scriptPath = appRoot + "/scripts/youtube_search.sh";
+    std::string ytdl = appRoot + "/bin/yt-dlp";
+    std::string ytdlGlibc = appRoot + "/bin/yt-dlp-glibc";
+
+    if (access(scriptPath.c_str(), X_OK) != 0 || (access(ytdl.c_str(), X_OK) != 0 && access(ytdlGlibc.c_str(), X_OK) != 0)) {
+        Logger::warn("[YouTube] YouTube dependencies missing, auto-repairing...");
+        UpdateManager::instance().checkAndInstallDependencies();
+    }
+
     std::string cmd = "\"" + scriptPath + "\" url \"" + videoId + "\" 360 2>/dev/null";
 
     Logger::info("[YouTube] Resolving video URL: " + cmd);

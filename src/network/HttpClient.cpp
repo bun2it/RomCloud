@@ -111,6 +111,9 @@ HttpResponse HttpClient::get(const std::string& url, const std::vector<std::stri
         curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &httpCode);
         response.statusCode = static_cast<int>(httpCode);
         response.success = (response.statusCode >= 200 && response.statusCode < 300);
+        char* effUrl = nullptr;
+        curl_easy_getinfo(curl, CURLINFO_EFFECTIVE_URL, &effUrl);
+        if (effUrl) response.effectiveUrl = effUrl;
     } else {
         response.error = curl_easy_strerror(res);
         response.success = false;

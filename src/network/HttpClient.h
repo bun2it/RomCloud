@@ -11,6 +11,7 @@ struct HttpResponse {
     std::string body;
     std::unordered_map<std::string, std::string> headers;
     std::string error;
+    std::string effectiveUrl;
     bool success = false;
 };
 

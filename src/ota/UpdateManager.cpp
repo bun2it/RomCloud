@@ -351,6 +351,31 @@ std::vector<DependencyInfo> UpdateManager::getMissingDependencies() {
     }
   }
 
+  // Check YouTube backend binary (yt-dlp)
+  std::string ytdlPath = binDir + "/yt-dlp";
+  std::string ytdlGlibcPath = binDir + "/yt-dlp-glibc";
+  if (access(ytdlPath.c_str(), X_OK) != 0 && access(ytdlGlibcPath.c_str(), X_OK) != 0) {
+    DependencyInfo ytdl = {"yt-dlp", ytdlPath, "", true};
+    missing.push_back(ytdl);
+    Logger::info("Dependency missing: yt-dlp at " + ytdlPath);
+  }
+
+  // Check YouTube search script
+  std::string ytScript = appRoot + "/scripts/youtube_search.sh";
+  if (access(ytScript.c_str(), X_OK) != 0) {
+    DependencyInfo scriptDep = {"youtube_search.sh", ytScript, "", true};
+    missing.push_back(scriptDep);
+    Logger::info("Dependency missing: youtube_search.sh at " + ytScript);
+  }
+
+  // Check YouTube app icon
+  std::string ytIcon = appRoot + "/assets/apps_icons/YOUTUBE.png";
+  if (access(ytIcon.c_str(), R_OK) != 0) {
+    DependencyInfo iconDep = {"YOUTUBE.png", ytIcon, "", true};
+    missing.push_back(iconDep);
+    Logger::info("Dependency missing: YOUTUBE.png at " + ytIcon);
+  }
+
   return missing;
 }
 
@@ -493,6 +518,11 @@ bool UpdateManager::installMpvsBundle(const std::string& zipPath) {
   // Make executable
   std::string mpvPath = binDir + "/mpv";
   chmod(mpvPath.c_str(), 0755);
+  std::string ytdlPath = binDir + "/yt-dlp";
+  chmod(ytdlPath.c_str(), 0755);
+  std::string ytdlGlibcPath = binDir + "/yt-dlp-glibc";
+  chmod(ytdlGlibcPath.c_str(), 0755);
+  system(("chmod +x '" + appRoot + "/scripts/'*.sh 2>/dev/null").c_str());
 
   sync();
   return true;
@@ -808,8 +838,13 @@ bool UpdateManager::downloadAndInstallDependencies(const UpdateInfo& info) {
   }
 
   if (!downloadFile(bundleUrl, bundlePath, nullptr, true)) {
-    Logger::error("Failed to download media bundle");
-    return false;
+    Logger::warn("Failed to download media bundle from " + bundleUrl + ", trying fallback v2.1.0...");
+    std::string fallbackUrl = "https://github.com/" + std::string(GITHUB_REPO) +
+                              "/releases/download/v2.1.0/mpv_bundle.zip";
+    if (!downloadFile(fallbackUrl, bundlePath, nullptr, true)) {
+      Logger::error("Failed to download media bundle from all sources");
+      return false;
+    }
   }
 
   {
