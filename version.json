@@ -1,17 +1,17 @@
 {
-  "version": "2.1.1",
+  "version": "2.1.2",
   "release_date": "2026-09-25",
   "target_os": "ALL",
   "icon_url": "https://raw.githubusercontent.com/bun2it/RomCloud/main/icon.png",
-  "binary_url": "https://github.com/bun2it/RomCloud/releases/download/v2.1.1/RomCloud",
-  "bundle_url": "https://github.com/bun2it/RomCloud/releases/download/v2.1.1/mpv_bundle.zip",
-  "STOCK_PS_bundle_url": "https://github.com/bun2it/RomCloud/releases/download/v2.1.1/bundle-STOCK_PS.zip",
-  "NEXTUI_bundle_url": "https://github.com/bun2it/RomCloud/releases/download/v2.1.1/bundle-NEXTUI.zip",
-  "SPRUCE_OS_bundle_url": "https://github.com/bun2it/RomCloud/releases/download/v2.1.1/bundle-SPRUCE_OS.zip",
+  "binary_url": "https://github.com/bun2it/RomCloud/releases/download/v2.1.2/RomCloud",
+  "bundle_url": "https://github.com/bun2it/RomCloud/releases/download/v2.1.2/mpv_bundle.zip",
+  "STOCK_PS_bundle_url": "https://github.com/bun2it/RomCloud/releases/download/v2.1.2/bundle-STOCK_PS.zip",
+  "NEXTUI_bundle_url": "https://github.com/bun2it/RomCloud/releases/download/v2.1.2/bundle-NEXTUI.zip",
+  "SPRUCE_OS_bundle_url": "https://github.com/bun2it/RomCloud/releases/download/v2.1.2/bundle-SPRUCE_OS.zip",
   "os_versions": {
-    "STOCK_PS": "2.1.1",
-    "NEXTUI": "2.1.1",
-    "SPRUCE_OS": "2.1.1"
+    "STOCK_PS": "2.1.2",
+    "NEXTUI": "2.1.2",
+    "SPRUCE_OS": "2.1.2"
   },
-  "changelog": "v2.1.1: Tối ưu truyền hình IPTV mượt mà (cố định luồng 720p chống giật lag, chuyển kênh tức thì), sửa lỗi thiếu gói tài nguyên YouTube cho máy nâng cấp qua OTA."
+  "changelog": "v2.1.2: Cập nhật chức năng ghi debug log"
 }

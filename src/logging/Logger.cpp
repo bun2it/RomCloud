@@ -3,6 +3,7 @@
 #include <chrono>
 #include <iomanip>
 #include <sstream>
+#include <sys/stat.h>
 
 namespace RomCloud {
 
@@ -18,9 +19,27 @@ Logger::~Logger() {
 
 void Logger::init(const std::string& logFilePath) {
     std::lock_guard<std::mutex> lock(m_mutex);
+    m_filePath = logFilePath;
     if (m_logFile.is_open()) m_logFile.close();
+
+    // Check file size, if > 512KB rotate to keep debug log compact
+    struct stat st;
+    if (stat(logFilePath.c_str(), &st) == 0 && st.st_size > 512 * 1024) {
+        std::string oldPath = logFilePath + ".old";
+        rename(logFilePath.c_str(), oldPath.c_str());
+    }
+
     m_logFile.open(logFilePath, std::ios::out | std::ios::app);
     m_initialized = m_logFile.is_open();
+}
+
+void Logger::header(const std::string& message) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    std::cout << message << std::endl;
+    if (m_initialized && m_logFile.is_open()) {
+        m_logFile << message << std::endl;
+        m_logFile.flush();
+    }
 }
 
 void Logger::log(LogLevel level, const std::string& message) {
@@ -40,8 +59,14 @@ void Logger::log(LogLevel level, const std::string& message) {
 
     std::string line = "[" + ss.str() + "] [" + levelStr + "] " + message;
     std::cout << line << std::endl;
-    if (m_initialized && m_logFile.is_open()) {
-        m_logFile << line << std::endl;
+
+    // Filter out INFO and DEBUG from debug log file on disk!
+    // ONLY save WARNING and ERROR to disk so the log is clean and focused for developer debugging!
+    if (level == LogLevel::WARNING || level == LogLevel::LOG_ERROR) {
+        if (m_initialized && m_logFile.is_open()) {
+            m_logFile << line << std::endl;
+            m_logFile.flush();
+        }
     }
 }
 

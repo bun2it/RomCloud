@@ -18,6 +18,9 @@
 #include <unistd.h>
 #include <fstream>
 #include <sys/stat.h>
+#include <chrono>
+#include <iomanip>
+#include <sstream>
 
 namespace RomCloud {
 
@@ -98,11 +101,21 @@ bool Application::init(int argc, char* argv[]) {
         return false;
     }
 
-    Logger::instance().init(AppConfig::instance().getLogFilePath());
-    Logger::info("==========================================");
-    Logger::info("=== RomCloud Phase 6 (On-Demand DL) ======");
-    Logger::info("==========================================");
-    Logger::info("App Root: " + AppConfig::instance().getAppRoot());
+    Logger::instance().init(AppConfig::instance().getDebugLogPath());
+
+    auto now = std::chrono::system_clock::now();
+    auto in_time_t = std::chrono::system_clock::to_time_t(now);
+    std::stringstream timeSs;
+    timeSs << std::put_time(std::localtime(&in_time_t), "%Y-%m-%d %H:%M:%S");
+
+    auto diag = PlatformInfo::instance().getDiagnostics();
+
+    Logger::instance().header("======================================================================");
+    Logger::instance().header("[" + timeSs.str() + "] [DEBUG LOG] RomCloud v" + std::string(APP_VERSION) + " Session Started");
+    Logger::instance().header("Device: " + diag.socName + " (" + diag.osName + " " + diag.kernelRelease + ") | Screen: " + diag.displayResolution);
+    Logger::instance().header("RAM: " + diag.freeRam + " / " + diag.totalRam + " | App Root: " + AppConfig::instance().getAppRoot());
+    Logger::instance().header("Log Location: " + AppConfig::instance().getDebugLogPath());
+    Logger::instance().header("======================================================================");
 
     // Ensure official app icon is synchronized to all launcher icons
     std::string appRoot = AppConfig::instance().getAppRoot();

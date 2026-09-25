@@ -43,6 +43,7 @@ public:
 
     // Paths
     std::string getLogFilePath() const;
+    std::string getDebugLogPath() const;
     std::string getDatabasePath() const;
     std::string getSchemaVersionPath() const;
     std::string getSettingsPath() const;

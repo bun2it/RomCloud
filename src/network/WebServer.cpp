@@ -1217,6 +1217,19 @@ std::string WebServer::buildHtmlResponse() {
             <div id="personal-token-status" style="margin-top: 8px; font-size: 12px;"></div>
           </div>
         </div>
+
+        <div class="card" style="margin-top: 20px;">
+          <h3>🛠️ Hỗ trợ &amp; Chẩn đoán Lỗi (Debug Log)</h3>
+          <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 14px;">
+            Nếu gặp sự cố trong quá trình sử dụng (không phát được video, lỗi mạng, lỗi đồng bộ), bạn có thể bấm tải file <code>debug.log</code> bên dưới gửi cho Developer để được kiểm tra và xử lý nhanh nhất.
+          </p>
+          <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+            <a href="/debug.log" download="debug.log" class="btn btn-primary" style="text-decoration: none; display: inline-flex; align-items: center; gap: 6px;">
+              📥 Tải file debug.log gửi Developer
+            </a>
+            <span style="font-size: 12px; color: var(--text-dim);">Hoặc lấy trực tiếp trên thẻ nhớ tại: <code>Apps/RomCloud/debug.log</code></span>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -3281,6 +3294,25 @@ void WebServer::handleClient(int clientFd) {
                           "Content-Length: " + std::to_string(body.length()) + "\r\n"
                           "Connection: close\r\n\r\n" + body;
         send(clientFd, res.c_str(), res.length(), 0);
+    } else if (method == "GET" && (path == "/debug.log" || path == "/api/debug_log")) {
+        std::string logPath = AppConfig::instance().getDebugLogPath();
+        std::ifstream file(logPath, std::ios::binary);
+        std::string content;
+        if (file.is_open()) {
+            content.assign((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+            file.close();
+        } else {
+            content = "Chua co loi nao duoc ghi nhan trong debug.log.";
+        }
+        std::string res = "HTTP/1.1 200 OK\r\n"
+                          "Content-Type: text/plain; charset=UTF-8\r\n"
+                          "Content-Disposition: attachment; filename=\"debug.log\"\r\n"
+                          "Cache-Control: no-cache, no-store\r\n"
+                          "Access-Control-Allow-Origin: *\r\n"
+                          "Content-Length: " + std::to_string(content.length()) + "\r\n"
+                          "Connection: close\r\n\r\n" + content;
+        send(clientFd, res.c_str(), res.length(), 0);
+        return;
     } else if (method == "GET" && path == "/api/systems") {
         if (!AuthManager::instance().isLinked()) {
             std::string res = "HTTP/1.1 200 OK\r\n"

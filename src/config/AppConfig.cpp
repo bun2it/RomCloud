@@ -138,8 +138,12 @@ std::string AppConfig::getIptvDir() const {
 }
 
 // Paths
+std::string AppConfig::getDebugLogPath() const {
+    return getAppRoot() + "/debug.log";
+}
+
 std::string AppConfig::getLogFilePath() const {
-    return getLogsDir() + "/romcloud.log";
+    return getDebugLogPath();
 }
 
 std::string AppConfig::getDatabasePath() const {
