@@ -23,6 +23,7 @@ $ZIG c++ \
     -std=c++17 \
     -O3 \
     -Wall -Wextra \
+    -Wno-error=date-time \
     -Isrc \
     -Isysroot/include \
     -Isysroot/include/SDL2 \
