@@ -45,7 +45,7 @@ enum class UIState {
   LOCALSEND_SEND,       // Chọn file để gửi + danh sách target devices
   LOCALSEND_GAME_PICKER, // Chọn game LOCAL từ DB để gửi (thay vì raw file picker)
   LOCALSEND_PROGRESS,   // Xem progress upload/download
-  FILE_EXPLORER,      // P2-1: File Explorer dung chung FileListView + FileExplorer
+  FILE_EXPLORER,      // Explorer 2-pane: m_expL/m_expR + clipboard chung m_expClip
   EXIT_REQUESTED
 };
 
@@ -137,21 +137,30 @@ private:
   int m_localSendIncomingMode = 0;  // 0=picker, 1=confirm
   std::string m_localSendIncomingSavePath;  // path tuyệt đối đích lưu file
 
-  // P2-1: File Explorer dung chung FileListView + FileExplorer (logic header-only).
-  FileExplorer m_explorer;
-  int m_explorerScroll = 0;
+  // Explorer 2-side: 2 FileExplorer doc lap + clipboard chung.
+  FileExplorer m_expL, m_expR;
+  int m_expActive = 0; // 0=L, 1=R
+  int m_expScroll[2] = {0, 0};
+  ExplorerClipboard m_expClip;
+  bool m_expDeleteArmed = false;
+  FileExplorer& expA() { return m_expActive ? m_expR : m_expL; }
+  FileExplorer& expB() { return m_expActive ? m_expL : m_expR; }
+  const FileExplorer& expA() const { return m_expActive ? m_expR : m_expL; }
+
+  // 1-pane FileExplorer dùng chọn thư mục nhận file (LOCALSEND_FOLDER & LOCALSEND_INCOMING)
+  FileExplorer m_expPicker;
+  int m_expPickerScroll = 0;
+
   void renderFileExplorer();
   void renderExplorerKeyboard();
+  void renderExplorerKeyboardFor(FileExplorer& ex);
   bool handleExplorerInput();
   bool handleExplorerKeyboard();
+  bool handleExplorerKeyboardFor(FileExplorer& ex);
+  bool handleFolderPickerInput();
   bool handleExplorerBrowser();
   void syncExplorerDialogs();
   std::string suggestNewFolderName(const std::string& parentPath);
-  void startLsFolderRename(bool existing);
-  void commitLsFolderRename();
-  void cancelLsFolderRename();
-  void renderLsFolderKeyboard();
-  bool handleLsFolderKeyboardInput();
 
   // LocalSend: Apps picker (/mnt/SDCARD/Apps/ drill-down)
   struct LsAppEntry {

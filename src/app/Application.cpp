@@ -317,7 +317,11 @@ void Application::run() {
 
     InputManager::instance().update();
 
-    if (InputManager::instance().isButtonJustPressed(Button::MENU)) {
+    // MENU thoat app toan cuc — nhung bo qua khi dang o FILE_EXPLORER
+    // (MENU giua trong Explorer dung de xoa 2-step, SELECT trai de thoat Explorer).
+    // Check state TRUOC roi moi doc phim: tranh double-consume latch MENU cua Explorer.
+    if (UIManager::instance().getState() != UIState::FILE_EXPLORER &&
+        InputManager::instance().isButtonJustPressed(Button::MENU)) {
       Logger::info("Menu button pressed, exiting cleanly...");
       m_running = false;
       break;

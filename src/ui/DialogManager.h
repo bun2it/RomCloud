@@ -35,8 +35,8 @@ struct ConfirmDialog {
     bool visible = false;
     std::string title;
     std::vector<std::string> lines;
-    std::string okLabel = "[A] Xoa";
-    std::string cancelLabel = "[B] Huy";
+    std::string okLabel = "[A] Xác nhận";
+    std::string cancelLabel = "[B] Hủy";
     bool danger = true;
     std::function<void()> onOk;
     void open(const std::string& t, std::vector<std::string> b, std::function<void()> ok, bool d = true) {
@@ -84,7 +84,7 @@ public:
     void renderSyncOverlay(UiRenderer& ui, TTF_Font* fSmall, TTF_Font* fMedium, TTF_Font* fLarge);
     void renderDownloadOverlay(UiRenderer& ui, TTF_Font* fSmall, TTF_Font* fLarge);
     void renderUploadOverlay(UiRenderer& ui, TTF_Font* fSmall);
-    void renderLsRow(UiRenderer& ui, TTF_Font* fSmall,
+    void renderLsRow(UiRenderer& ui, TTF_Font* fSmall, TTF_Font* fMedium,
                      bool isSend, int idx, int x, int y, int w, bool sel);
     void renderLocalSendProgress(UiRenderer& ui, TTF_Font* fSmall, TTF_Font* fMedium,
                                  TTF_Font* fLarge, TTF_Font* fTitle,

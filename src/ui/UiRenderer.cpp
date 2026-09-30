@@ -395,6 +395,7 @@ void UiRenderer::drawButtonIcon(const std::string &button, int x, int y,
       {"R1", "r1.png"},
       {"L2", "l2.png"},
       {"R2", "r2.png"},
+      {"PLAY", "start_icon.png"},
       {"START", "start_icon.png"},
       {"SELECT", "view.png"},
       {"MENU", "options.png"},
@@ -564,6 +565,12 @@ void UiRenderer::drawRowMainSub(int x, int y, int h, const std::string &main,
   int thM = fMain ? TTF_FontHeight(fMain) : 0;
   int thS = (!sub.empty() && fSub) ? TTF_FontHeight(fSub) : 0;
   int blockH = thM + (thS > 0 ? gap + thS : 0);
+  if (blockH > h) {
+    // Chu lon hon row: uu tien ten file, giam gap -> khong de hang duoi
+    blockH = h;
+    if (thS > 0 && thM + gap + thS > h)
+      gap = 0;
+  }
   int ty = y + (h - blockH) / 2;
   std::string m = main;
   std::string s = sub;
@@ -797,6 +804,9 @@ void UiRenderer::drawPadIcon(UiTheme::PadBtn btn, int x, int y, int size) {
   case PB::SELECT:
     s = "SELECT";
     break;
+  case PB::MENU:
+    s = "MENU";
+    break;
   case PB::DPAD:
     s = "DPAD";
     break;
@@ -805,6 +815,15 @@ void UiRenderer::drawPadIcon(UiTheme::PadBtn btn, int x, int y, int size) {
     break;
   case PB::R1:
     s = "R1";
+    break;
+  case PB::L2:
+    s = "L2";
+    break;
+  case PB::R2:
+    s = "R2";
+    break;
+  case PB::PLAY:
+    s = "PLAY";
     break;
   case PB::AB:
     s = "A";
@@ -848,6 +867,9 @@ void UiRenderer::drawAppFooter(const std::vector<UiTheme::FooterHint> &hints) {
     case PB::SELECT:
       s = "SELECT";
       break;
+    case PB::MENU:
+      s = "MENU";
+      break;
     case PB::DPAD:
       s = "DPAD";
       break;
@@ -856,6 +878,15 @@ void UiRenderer::drawAppFooter(const std::vector<UiTheme::FooterHint> &hints) {
       break;
     case PB::R1:
       s = "R1";
+      break;
+    case PB::L2:
+      s = "L2";
+      break;
+    case PB::R2:
+      s = "R2";
+      break;
+    case PB::PLAY:
+      s = "PLAY";
       break;
     default:
       s = "A";

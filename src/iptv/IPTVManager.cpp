@@ -1464,7 +1464,7 @@ void IPTVManager::showIPTVChannelOSD(
     };
 
     SDL_Color white = {255, 255, 255, 255};
-    SDL_Color gold  = {255, 215, 0, 255};
+    SDL_Color gold  = {0, 180, 216, 255};
     SDL_Color gray  = {170, 180, 195, 255};
     SDL_Color dim   = {130, 140, 155, 255};
     SDL_Color green = {34, 197, 94, 255};
@@ -1482,9 +1482,9 @@ void IPTVManager::showIPTVChannelOSD(
         }
     };
 
-    // Nen den mo + vien vang tren
+    // Nen den mo + vien xanh tren (tone app)
     fillRect(0, 0, CW, CH, 14, 18, 26, 235);
-    fillRect(0, 0, CW, 3, 255, 215, 0, 255);
+    fillRect(0, 0, CW, 3, 0, 180, 216, 255);
 
     // Header: tên group + số kênh (giữ nguyên dấu tiếng Việt, font hệ thống đủ glyph)
     std::string grp = groupName;
@@ -1513,9 +1513,9 @@ void IPTVManager::showIPTVChannelOSD(
         bool isSel = (i == selectedIndex);
         bool isPlay = (i == (int)m_iptvCurrentIndex);
         if (isSel) {
-            fillRect(12, ry, CW - 24, rowH - 4, 37, 27, 18, 235);
-            fillRect(12, ry, CW - 24, 2, 255, 215, 0, 255);
-            fillRect(12, ry + rowH - 6, CW - 24, 2, 255, 215, 0, 255);
+            fillRect(12, ry, CW - 24, rowH - 4, 23, 55, 110, 235);
+            fillRect(12, ry, CW - 24, 2, 0, 180, 216, 255);
+            fillRect(12, ry + rowH - 6, CW - 24, 2, 0, 180, 216, 255);
         }
         std::string nm = truncateUtf8Chars(channels[i].name, 30);
         char idxBuf[16];

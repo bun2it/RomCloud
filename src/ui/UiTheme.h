@@ -76,7 +76,7 @@ inline constexpr int FORM_W = 680;
 inline const char *FONT_MAIN = "NotoSans-Regular.ttf";
 
 // ---- Footer component ----
-enum class PadBtn { A, B, X, Y, START, SELECT, DPAD, L1, R1, L1R1, UPDOWN, AB, NONE };
+enum class PadBtn { A, B, X, Y, START, SELECT, MENU, DPAD, L1, R1, L1R1, L2, R2, PLAY, UPDOWN, AB, NONE };
 struct FooterHint {
     PadBtn btn = PadBtn::NONE;
     const char *label = "";

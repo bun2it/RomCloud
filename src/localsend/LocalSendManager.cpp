@@ -9,8 +9,8 @@
 #include "../rom/RomOrganizer.h"
 #include "../ui/UIManager.h"
 
-
 #include <algorithm>
+#include <curl/curl.h>
 #include <arpa/inet.h>
 #include <cerrno>
 #include <cstdio>
@@ -36,6 +36,15 @@
 #include <unistd.h>
 
 namespace RomCloud {
+
+static inline void closeSocket(int fd) {
+  if (fd < 0) return;
+#ifdef _WIN32
+  closesocket(fd);
+#else
+  close(fd);
+#endif
+}
 
 // =============================================================
 // Singleton
@@ -112,10 +121,20 @@ void LocalSendManager::stop() {
   if (m_transferThread.joinable())
     m_transferThread.join();
 
-  // Dọn pending
+  // Dọn pending & preparing
   {
     std::lock_guard<std::mutex> lock(m_pendingMutex);
     m_pending.clear();
+  }
+  {
+    std::lock_guard<std::mutex> lock(m_prepareMutex);
+    for (auto &pp : m_preparing) {
+      if (pp.clientFd >= 0) {
+        sendJsonResponse(pp.clientFd, 503, "{\"error\":\"server stopping\"}");
+        closeSocket(pp.clientFd);
+      }
+    }
+    m_preparing.clear();
   }
 
   Logger::info("LocalSend: stopped");
@@ -727,8 +746,9 @@ void LocalSendManager::transferLoop() {
     setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
 
     std::thread([this, fd]() {
-      handleHttpClient(fd);
-      close(fd);
+      if (handleHttpClient(fd)) {
+        closeSocket(fd);
+      }
     }).detach();
   }
 }
@@ -743,10 +763,10 @@ void LocalSendManager::discoveryLoop() {
       sendMulticastAnnounce();
       lastPing = now;
     }
-    // Dọn thiết bị quá 20s không thấy announce (tránh list ma lúc thấy lúc
-    // không)
+    // Dọn thiết bị quá 20s không thấy announce + prune prepare quá 60s
     if (now - lastPrune >= std::chrono::seconds(5)) {
       pruneStaleDevices(20000);
+      pruneStalePrepares();
       lastPrune = now;
     }
     if (m_udpFd < 0) {
@@ -962,13 +982,13 @@ void LocalSendManager::sendEmptyResponse(int fd, int statusCode) {
 // =============================================================
 // HTTP Routing
 // =============================================================
-void LocalSendManager::handleHttpClient(int fd) {
+bool LocalSendManager::handleHttpClient(int fd) {
   std::string method, path, body;
   std::map<std::string, std::string> headers;
   if (!readHttpRequest(fd, method, path, headers, body)) {
     Logger::warn("LocalSend: HTTP read failed from peer");
     sendEmptyResponse(fd, 400);
-    return;
+    return true;
   }
 
   // Tách path & query
@@ -996,17 +1016,22 @@ void LocalSendManager::handleHttpClient(int fd) {
 
   if (method == "GET" && route == "/api/localsend/v2/info") {
     handleInfo(fd);
+    return true;
   } else if (method == "POST" && route == "/api/localsend/v2/register") {
     handleRegister(fd, body);
+    return true;
   } else if (method == "POST" && route == "/api/localsend/v2/prepare-upload") {
-    handlePrepareUpload(fd, body, fromIp);
+    return handlePrepareUpload(fd, body, fromIp);
   } else if (method == "POST" && route == "/api/localsend/v2/upload") {
     handleFileUpload(fd, query, headers, body);
+    return true;
   } else if (method == "POST" && route == "/api/localsend/v2/cancel") {
     handleCancel(fd, query);
+    return true;
   } else {
     Logger::warn("LocalSend: HTTP 404 " + method + " " + route);
     sendJsonResponse(fd, 404, "{\"error\":\"not found\"}");
+    return true;
   }
 }
 
@@ -1043,7 +1068,7 @@ void LocalSendManager::handleRegister(int fd, const std::string &body) {
 // =============================================================
 // prepare-upload (spec §4.1)
 // =============================================================
-void LocalSendManager::handlePrepareUpload(int fd, const std::string &body,
+bool LocalSendManager::handlePrepareUpload(int fd, const std::string &body,
                                            const std::string &fromIp) {
   LsUploadRequest req;
   req.sessionId = LsUtil::makeUuid();
@@ -1062,19 +1087,19 @@ void LocalSendManager::handlePrepareUpload(int fd, const std::string &body,
   std::string filesObj;
   if (!LsJson::getObject(body, "files", filesObj)) {
     sendJsonResponse(fd, 400, "{\"error\":\"missing files\"}");
-    return;
+    return true;
   }
 
   // Tìm "fid":{...} đầu tiên
   auto fidPos = filesObj.find('"');
   if (fidPos == std::string::npos) {
     sendJsonResponse(fd, 400, "{\"error\":\"empty files\"}");
-    return;
+    return true;
   }
   auto fidEnd = filesObj.find('"', fidPos + 1);
   if (fidEnd == std::string::npos) {
     sendJsonResponse(fd, 400, "{\"error\":\"bad file id\"}");
-    return;
+    return true;
   }
   req.fileId = filesObj.substr(fidPos + 1, fidEnd - fidPos - 1);
 
@@ -1082,7 +1107,7 @@ void LocalSendManager::handlePrepareUpload(int fd, const std::string &body,
   auto fileObjStart = filesObj.find('{', fidEnd);
   if (fileObjStart == std::string::npos) {
     sendJsonResponse(fd, 400, "{\"error\":\"no file body\"}");
-    return;
+    return true;
   }
   int depth = 1;
   size_t fileObjPos = fileObjStart + 1;
@@ -1106,7 +1131,7 @@ void LocalSendManager::handlePrepareUpload(int fd, const std::string &body,
   }
   if (fileObjEnd == std::string::npos) {
     sendJsonResponse(fd, 400, "{\"error\":\"bad file body\"}");
-    return;
+    return true;
   }
   std::string fileObj =
       filesObj.substr(fileObjStart, fileObjEnd - fileObjStart + 1);
@@ -1140,29 +1165,34 @@ void LocalSendManager::handlePrepareUpload(int fd, const std::string &body,
 
   if (req.file.fileName.empty()) {
     sendJsonResponse(fd, 400, "{\"error\":\"missing fileName\"}");
-    return;
+    return true;
   }
 
   // Resolve target path (3-tier)
   std::string target = resolveTargetPath(req.file);
   if (target.empty()) {
     sendJsonResponse(fd, 403, "{\"error\":\"unsafe path\"}");
-    return;
+    return true;
   }
   req.savedPath = target;
-
-  // Spec §4.1 response: { sessionId, files: { fileId: token } }
-  // token phải sinh TRƯỚC khi push pending để bản lưu có token.
   req.fileToken = LsUtil::makeUuid();
 
-  // Lưu pending
+  // Hold socket response and save into m_preparing
+  LsPendingPrepare pp;
+  pp.clientFd = fd;
+  pp.sessionId = req.sessionId;
+  pp.fileId = req.fileId;
+  pp.fileToken = req.fileToken;
+  pp.fromAlias = req.fromAlias;
+  pp.fromIp = fromIp;
+  pp.file = req.file;
+  pp.startTime = std::chrono::steady_clock::now();
+  pp.state = LsPendingPrepare::WAITING_USER;
+  pp.savePath = target;
+
   {
-    std::lock_guard<std::mutex> lock(m_pendingMutex);
-    // Evict cũ nếu vượt quá
-    if ((int)m_pending.size() >= LocalSendProto::kMaxPendingRequests) {
-      m_pending.erase(m_pending.begin());
-    }
-    m_pending.push_back(req);
+    std::lock_guard<std::mutex> lock(m_prepareMutex);
+    m_preparing.push_back(pp);
   }
 
   // Bắn callback cho UI
@@ -1172,15 +1202,12 @@ void LocalSendManager::handlePrepareUpload(int fd, const std::string &body,
       m_onUserPrompt(req);
   }
 
-  std::ostringstream ss;
-  ss << "{\"sessionId\":\"" << req.sessionId << "\",\"files\":{"
-     << "\"" << LsJson::escape(req.fileId) << "\":\"" << req.fileToken
-     << "\"}}";
-  sendJsonResponse(fd, 200, ss.str());
+  Logger::info("LocalSend: prepare-upload held for user approval from " +
+               req.fromAlias + " file=" + req.file.fileName +
+               " size=" + std::to_string(req.file.size) +
+               " initialTarget=" + req.savedPath);
 
-  Logger::info("LocalSend: prepare-upload from " + req.fromAlias + " file=" +
-               req.file.fileName + " size=" + std::to_string(req.file.size) +
-               " saved=" + req.savedPath);
+  return false; // HOLD clientFd, do not close or reply yet!
 }
 
 // =============================================================
@@ -1482,13 +1509,26 @@ void LocalSendManager::handleCancel(int fd, const std::string &query) {
     pos = amp + 1;
   }
   std::string sessionId = qparams["sessionId"];
-  std::lock_guard<std::mutex> lock(m_pendingMutex);
-  for (auto &r : m_pending) {
-    if (r.sessionId == sessionId) {
-      r.state = LsUploadRequest::FAILED;
-      if (!r.savedPath.empty())
-        ::unlink(r.savedPath.c_str());
-      break;
+  {
+    std::lock_guard<std::mutex> lock(m_pendingMutex);
+    for (auto &r : m_pending) {
+      if (r.sessionId == sessionId) {
+        r.state = LsUploadRequest::FAILED;
+        if (!r.savedPath.empty())
+          ::unlink(r.savedPath.c_str());
+        break;
+      }
+    }
+  }
+  {
+    std::lock_guard<std::mutex> lock(m_sendMutex);
+    for (auto &s : m_sends) {
+      if (s && s->sessionId == sessionId) {
+        s->state = LsSendProgress::FAILED;
+        s->errorMessage = "Người nhận đã hủy";
+        Logger::info("LocalSend: sender session cancelled by receiver: " + s->fileName);
+        break;
+      }
     }
   }
   sendJsonResponse(fd, 200, "{\"cancelled\":true}");
@@ -1498,6 +1538,20 @@ void LocalSendManager::handleCancel(int fd, const std::string &query) {
 // approve/reject từ UI
 // =============================================================
 void LocalSendManager::approveUpload(const std::string &sessionId) {
+  std::string defaultPath;
+  {
+    std::lock_guard<std::mutex> lock(m_prepareMutex);
+    for (const auto &pp : m_preparing) {
+      if (pp.sessionId == sessionId) {
+        defaultPath = pp.savePath;
+        break;
+      }
+    }
+  }
+  if (!defaultPath.empty()) {
+    approveUploadWithPath(sessionId, defaultPath);
+    return;
+  }
   std::lock_guard<std::mutex> lock(m_pendingMutex);
   for (auto &r : m_pending) {
     if (r.sessionId == sessionId && r.state == LsUploadRequest::PENDING) {
@@ -1508,14 +1562,116 @@ void LocalSendManager::approveUpload(const std::string &sessionId) {
   }
 }
 
-void LocalSendManager::rejectUpload(const std::string &sessionId) {
-  std::lock_guard<std::mutex> lock(m_pendingMutex);
-  for (auto &r : m_pending) {
-    if (r.sessionId == sessionId && r.state == LsUploadRequest::PENDING) {
-      r.state = LsUploadRequest::REJECTED;
-      Logger::info("LocalSend: rejected " + r.file.fileName);
-      return;
+void LocalSendManager::approveUploadWithPath(const std::string &sessionId,
+                                             const std::string &savePath) {
+  int clientFd = -1;
+  LsUploadRequest req;
+  bool found = false;
+  {
+    std::lock_guard<std::mutex> lock(m_prepareMutex);
+    for (auto it = m_preparing.begin(); it != m_preparing.end(); ++it) {
+      if (it->sessionId == sessionId && it->state == LsPendingPrepare::WAITING_USER) {
+        it->state = LsPendingPrepare::APPROVED;
+        it->savePath = savePath;
+        clientFd = it->clientFd;
+
+        req.sessionId = it->sessionId;
+        req.fileId = it->fileId;
+        req.fileToken = it->fileToken;
+        req.fromAlias = it->fromAlias;
+        req.fromIp = it->fromIp;
+        req.file = it->file;
+        req.lastUpdateMs = LsUtil::nowMs();
+        req.state = LsUploadRequest::APPROVED;
+
+        std::string base = LsUtil::basenameOf(req.file.fileName);
+        if (base.empty()) base = req.file.id;
+        std::string destDir = savePath.empty() ? it->savePath : savePath;
+        while (destDir.size() > 1 && destDir.back() == '/') destDir.pop_back();
+        if (destDir.size() >= base.size() && destDir.substr(destDir.size() - base.size()) == base) {
+          req.savedPath = destDir;
+        } else {
+          req.savedPath = destDir + "/" + base;
+        }
+
+        m_preparing.erase(it);
+        found = true;
+        break;
+      }
     }
+  }
+
+  if (!found) {
+    Logger::warn("LocalSend: approveUploadWithPath session not found: " + sessionId);
+    return;
+  }
+
+  if (clientFd >= 0) {
+    std::ostringstream ss;
+    ss << "{\"sessionId\":\"" << req.sessionId << "\",\"files\":{"
+       << "\"" << LsJson::escape(req.fileId) << "\":\"" << req.fileToken
+       << "\"}}";
+    sendJsonResponse(clientFd, 200, ss.str());
+    closeSocket(clientFd);
+  }
+
+  {
+    std::lock_guard<std::mutex> lock(m_pendingMutex);
+    if ((int)m_pending.size() >= LocalSendProto::kMaxPendingRequests) {
+      m_pending.erase(m_pending.begin());
+    }
+    m_pending.push_back(req);
+  }
+  Logger::info("LocalSend: upload approved for " + req.file.fileName + " -> " + req.savedPath);
+}
+
+void LocalSendManager::rejectUpload(const std::string &sessionId) {
+  int clientFd = -1;
+  {
+    std::lock_guard<std::mutex> lock(m_prepareMutex);
+    for (auto it = m_preparing.begin(); it != m_preparing.end(); ++it) {
+      if (it->sessionId == sessionId) {
+        clientFd = it->clientFd;
+        m_preparing.erase(it);
+        break;
+      }
+    }
+  }
+  if (clientFd >= 0) {
+    sendJsonResponse(clientFd, 403, "{\"error\":\"rejected by user\"}");
+    closeSocket(clientFd);
+  }
+  {
+    std::lock_guard<std::mutex> lock(m_pendingMutex);
+    for (auto &r : m_pending) {
+      if (r.sessionId == sessionId) {
+        r.state = LsUploadRequest::REJECTED;
+        break;
+      }
+    }
+  }
+  Logger::info("LocalSend: rejected " + sessionId);
+}
+
+void LocalSendManager::pruneStalePrepares() {
+  auto now = std::chrono::steady_clock::now();
+  std::vector<int> timeoutFds;
+  {
+    std::lock_guard<std::mutex> lock(m_prepareMutex);
+    for (auto it = m_preparing.begin(); it != m_preparing.end();) {
+      if (std::chrono::duration_cast<std::chrono::seconds>(now - it->startTime).count() > 60) {
+        if (it->clientFd >= 0) {
+          timeoutFds.push_back(it->clientFd);
+        }
+        it = m_preparing.erase(it);
+      } else {
+        ++it;
+      }
+    }
+  }
+  for (int fd : timeoutFds) {
+    sendJsonResponse(fd, 408, "{\"error\":\"request timeout\"}");
+    closeSocket(fd);
   }
 }
 
@@ -1879,181 +2035,183 @@ void LocalSendManager::postProcessUpload(const LsUploadRequest &req) {
 }
 
 // =============================================================
-// HTTP Client (sender side)
+// HTTP Client (sender side) - uses libcurl for HTTP and HTTPS support
 // =============================================================
-static int connectTcp(const std::string &ip, int port, int timeoutSec = 10) {
-  int fd = socket(AF_INET, SOCK_STREAM, 0);
-  if (fd < 0)
-    return -1;
-  sockaddr_in addr{};
-  addr.sin_family = AF_INET;
-  addr.sin_port = htons(port);
-  if (inet_pton(AF_INET, ip.c_str(), &addr.sin_addr) != 1) {
-    close(fd);
-    return -1;
-  }
 
-  // Non-blocking connect with timeout
-#ifndef _WIN32
-  int flags = fcntl(fd, F_GETFL, 0);
-  fcntl(fd, F_SETFL, flags | O_NONBLOCK);
-#else
-  u_long nonblock = 1;
-  ioctlsocket(fd, FIONBIO, &nonblock);
-#endif
-
-  int rc = connect(fd, (sockaddr *)&addr, sizeof(addr));
-  if (rc < 0 && errno != EINPROGRESS) {
-    close(fd);
-    return -1;
-  }
-
-  fd_set wfds;
-  FD_ZERO(&wfds);
-  FD_SET(fd, &wfds);
-  timeval tv{timeoutSec, 0};
-  rc = select(fd + 1, nullptr, &wfds, nullptr, &tv);
-  if (rc <= 0) {
-    close(fd);
-    return -1;
-  }
-
-  // Restore blocking
-#ifndef _WIN32
-  fcntl(fd, F_SETFL, flags);
-#else
-  nonblock = 0;
-  ioctlsocket(fd, FIONBIO, &nonblock);
-#endif
-  return fd;
-}
-
-bool LocalSendManager::httpPostJson(const std::string &ip, int port,
+bool LocalSendManager::httpPostJson(const std::string &protocol,
+                                    const std::string &ip, int port,
                                     const std::string &path,
                                     const std::string &jsonBody,
                                     std::string &respBody, int timeoutSec) {
-  int fd = connectTcp(ip, port, timeoutSec);
-  if (fd < 0)
+  CURL *curl = curl_easy_init();
+  if (!curl)
     return false;
 
-  std::ostringstream req;
-  req << "POST " << path << " HTTP/1.1\r\n";
-  req << "Host: " << ip << "\r\n";
-  req << "Content-Type: application/json\r\n";
-  req << "Content-Length: " << jsonBody.size() << "\r\n";
-  req << "Connection: close\r\n\r\n";
-  req << jsonBody;
+  std::string proto = protocol.empty() ? "https" : protocol;
+  std::string url = proto + "://" + ip + ":" + std::to_string(port) + path;
 
-  std::string s = req.str();
-  ::send(fd, s.data(), s.size(), 0);
+  struct curl_slist *headers = nullptr;
+  headers = curl_slist_append(headers, "Content-Type: application/json");
+  headers = curl_slist_append(headers, "Connection: close");
 
-  char buf[4096];
-  std::string resp;
-  while (true) {
-    ssize_t n = recv(fd, buf, sizeof(buf), 0);
-    if (n <= 0)
-      break;
-    resp.append(buf, n);
+  curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+  curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+  curl_easy_setopt(curl, CURLOPT_POST, 1L);
+  curl_easy_setopt(curl, CURLOPT_POSTFIELDS, jsonBody.c_str());
+  curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, (long)jsonBody.size());
+  curl_easy_setopt(curl, CURLOPT_TIMEOUT, (long)timeoutSec);
+  curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 6L);
+  curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
+  curl_easy_setopt(curl, CURLOPT_IPRESOLVE, CURL_IPRESOLVE_V4);
+
+  // LocalSend uses self-signed TLS certificates
+  curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
+  curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
+
+  respBody.clear();
+  auto writeCb = [](char *ptr, size_t size, size_t nmemb, void *userdata) -> size_t {
+    std::string *s = reinterpret_cast<std::string *>(userdata);
+    s->append(ptr, size * nmemb);
+    return size * nmemb;
+  };
+  curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, (size_t(*)(char*, size_t, size_t, void*))writeCb);
+  curl_easy_setopt(curl, CURLOPT_WRITEDATA, &respBody);
+
+  CURLcode res = curl_easy_perform(curl);
+  long httpCode = 0;
+  if (res == CURLE_OK) {
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &httpCode);
   }
-  close(fd);
 
-  auto bodyPos = resp.find("\r\n\r\n");
-  if (bodyPos == std::string::npos)
+  curl_slist_free_all(headers);
+  curl_easy_cleanup(curl);
+
+  if (res != CURLE_OK) {
+    Logger::warn("LocalSend: curl POST " + url + " failed: " + curl_easy_strerror(res));
     return false;
-  // Spec §4.1: receiver có thể trả 400/401/403/500 → phải fail, không coi như
-  // OK. Trích status code từ response line "HTTP/1.1 <code> ...".
-  int statusCode = 0;
-  {
-    auto sp1 = resp.find(' ');
-    if (sp1 != std::string::npos)
-      statusCode = std::atoi(resp.c_str() + sp1 + 1);
   }
-  respBody = resp.substr(bodyPos + 4);
-  if (statusCode != 200) {
-    Logger::warn("LocalSend: POST " + path + " -> HTTP " +
-                 std::to_string(statusCode) +
+
+  if (httpCode != 200) {
+    Logger::warn("LocalSend: POST " + url + " -> HTTP " + std::to_string(httpCode) +
                  " body=" + respBody.substr(0, 200));
     return false;
   }
   return true;
 }
 
-bool LocalSendManager::httpPostBinary(const std::string &ip, int port,
+bool LocalSendManager::httpPostBinary(const std::string &protocol,
+                                      const std::string &ip, int port,
                                       const std::string &path,
                                       const std::string &filePath,
                                       LsSendProgress &prog) {
-  int fd = connectTcp(ip, port, 30);
-  if (fd < 0)
-    return false;
-
-  std::ifstream in(filePath, std::ios::binary);
-  if (!in) {
-    close(fd);
+  FILE *fp = fopen(filePath.c_str(), "rb");
+  if (!fp) {
+    Logger::warn("LocalSend: cannot open file " + filePath);
     return false;
   }
 
-  // Headers first
-  std::ostringstream h;
-  h << "POST " << path << " HTTP/1.1\r\n";
-  h << "Host: " << ip << "\r\n";
-  h << "Content-Type: application/octet-stream\r\n";
-  h << "Content-Length: " << prog.totalBytes << "\r\n";
-  h << "Connection: close\r\n\r\n";
-  std::string hs = h.str();
-  ::send(fd, hs.data(), hs.size(), 0);
-
-  // Stream body
-  char buf[LocalSendProto::kUploadChunkSize];
-  uint64_t sent = 0;
-  int64_t lastTick = LsUtil::nowMs();
-  uint64_t lastTickBytes = 0;
-  while (in) {
-    in.read(buf, sizeof(buf));
-    ssize_t got = in.gcount();
-    if (got <= 0)
-      break;
-    ssize_t s = send(fd, buf, got, MSG_NOSIGNAL);
-    if (s < 0) {
-      close(fd);
-      return false;
-    }
-    sent += s;
-    prog.sentBytes = sent;
-
-    int64_t now = LsUtil::nowMs();
-    if (now - lastTick >= 500) {
-      uint32_t bps =
-          (uint32_t)((sent - lastTickBytes) * 1000 / (now - lastTick));
-      prog.bytesPerSec = bps;
-      lastTick = now;
-      lastTickBytes = sent;
-    }
+  struct stat st;
+  uint64_t fsize = 0;
+  if (stat(filePath.c_str(), &st) == 0) {
+    fsize = (uint64_t)st.st_size;
+  } else {
+    fsize = prog.totalBytes;
   }
-  // Read response — spec §4.2: receiver trả 200 + No body (Flutter),
-  // RomCloud receiver trả 200 {"success":true}. Chấp nhận mọi 2xx.
-  char rbuf[4096];
+
+  CURL *curl = curl_easy_init();
+  if (!curl) {
+    fclose(fp);
+    return false;
+  }
+
+  std::string proto = protocol.empty() ? "https" : protocol;
+  std::string url = proto + "://" + ip + ":" + std::to_string(port) + path;
+
+  struct curl_slist *headers = nullptr;
+  headers = curl_slist_append(headers, "Content-Type: application/octet-stream");
+  headers = curl_slist_append(headers, "Connection: close");
+
+  struct UploadContext {
+    FILE *file = nullptr;
+    LsSendProgress *prog = nullptr;
+    int64_t lastTick = 0;
+    uint64_t lastTickBytes = 0;
+  } ctx;
+  ctx.file = fp;
+  ctx.prog = &prog;
+  ctx.lastTick = LsUtil::nowMs();
+  ctx.lastTickBytes = 0;
+
+  auto readCb = [](char *buffer, size_t size, size_t nitems, void *userdata) -> size_t {
+    UploadContext *uctx = reinterpret_cast<UploadContext *>(userdata);
+    if (!uctx || !uctx->file)
+      return 0;
+    if (uctx->prog && uctx->prog->state == LsSendProgress::FAILED) {
+      return CURL_READFUNC_ABORT;
+    }
+    size_t bytes = fread(buffer, size, nitems, uctx->file);
+    if (bytes > 0 && uctx->prog) {
+      uctx->prog->sentBytes += (bytes * size);
+      int64_t now = LsUtil::nowMs();
+      if (now - uctx->lastTick >= 500) {
+        uint64_t diff = uctx->prog->sentBytes - uctx->lastTickBytes;
+        uctx->prog->bytesPerSec =
+            (uint32_t)(diff * 1000 / std::max<int64_t>(1, now - uctx->lastTick));
+        uctx->lastTick = now;
+        uctx->lastTickBytes = uctx->prog->sentBytes;
+      }
+    }
+    return bytes;
+  };
+
+  curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+  curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+  curl_easy_setopt(curl, CURLOPT_POST, 1L);
+  curl_easy_setopt(curl, CURLOPT_READFUNCTION, (size_t(*)(char*, size_t, size_t, void*))readCb);
+  curl_easy_setopt(curl, CURLOPT_READDATA, &ctx);
+  curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE_LARGE, (curl_off_t)fsize);
+  curl_easy_setopt(curl, CURLOPT_TIMEOUT, 1800L); // 30 minutes max
+  curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 10L);
+  curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
+  curl_easy_setopt(curl, CURLOPT_IPRESOLVE, CURL_IPRESOLVE_V4);
+
+  // LocalSend uses self-signed TLS certificates
+  curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
+  curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
+
   std::string resp;
-  while (true) {
-    ssize_t n = recv(fd, rbuf, sizeof(rbuf), 0);
-    if (n <= 0)
-      break;
-    resp.append(rbuf, n);
+  auto writeCb = [](char *ptr, size_t size, size_t nmemb, void *userdata) -> size_t {
+    std::string *s = reinterpret_cast<std::string *>(userdata);
+    s->append(ptr, size * nmemb);
+    return size * nmemb;
+  };
+  curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, (size_t(*)(char*, size_t, size_t, void*))writeCb);
+  curl_easy_setopt(curl, CURLOPT_WRITEDATA, &resp);
+
+  CURLcode res = curl_easy_perform(curl);
+  long httpCode = 0;
+  if (res == CURLE_OK) {
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &httpCode);
   }
-  close(fd);
-  auto eol = resp.find("\r\n");
-  std::string statusLine =
-      (eol == std::string::npos) ? resp : resp.substr(0, eol);
-  int code = 0;
-  {
-    auto sp = statusLine.find(' ');
-    if (sp != std::string::npos)
-      code = std::atoi(statusLine.c_str() + sp + 1);
+
+  fclose(fp);
+  curl_slist_free_all(headers);
+  curl_easy_cleanup(curl);
+
+  if (res != CURLE_OK) {
+    Logger::warn("LocalSend: curl upload to " + url + " failed: " + curl_easy_strerror(res));
+    return false;
   }
-  if (code == 200 || code == 201 || code == 204)
+
+  if (httpCode == 200 || httpCode == 201 || httpCode == 204) {
     return true;
-  // Fallback: bản cũ / receiver lạ không có status line chuẩn
-  if (code == 0 && resp.find("\"success\":true") != std::string::npos)
+  }
+  if (httpCode == 0 && resp.find("\"success\":true") != std::string::npos) {
     return true;
+  }
+
+  Logger::warn("LocalSend: upload to " + url + " returned HTTP " + std::to_string(httpCode) +
+               " body=" + resp.substr(0, 200));
   return false;
 }
 
@@ -2179,13 +2337,13 @@ std::string LocalSendManager::sendFileMeta(const LsFileMeta &inMeta,
     body.pop_back();
   body += "}}}";
 
-  // POST prepare-upload
+  // POST prepare-upload (timeout 60s để người dùng máy đích có thời gian bấm Đồng ý / Từ chối)
   std::string respBody;
-  if (!httpPostJson(target.ip, target.port, "/api/localsend/v2/prepare-upload",
-                    body, respBody)) {
+  if (!httpPostJson(target.protocol, target.ip, target.port, "/api/localsend/v2/prepare-upload",
+                    body, respBody, 60)) {
     prog->state = LsSendProgress::FAILED;
-    prog->errorMessage = "prepare-upload network error";
-    Logger::warn("LocalSend: prepare-upload failed to " + target.alias);
+    prog->errorMessage = "Người nhận từ chối / Hủy";
+    Logger::warn("LocalSend: prepare-upload failed / rejected by " + target.alias);
     return prog->sessionId;
   }
 
@@ -2194,10 +2352,13 @@ std::string LocalSendManager::sendFileMeta(const LsFileMeta &inMeta,
   LsJson::getString(respBody, "sessionId", sessionId);
   if (sessionId.empty()) {
     prog->state = LsSendProgress::FAILED;
-    prog->errorMessage = "receiver rejected";
+    prog->errorMessage = "Người nhận từ chối";
     Logger::warn("LocalSend: receiver rejected " + prog->fileName);
     return prog->sessionId;
   }
+
+  // Cập nhật sessionId thật của receiver để khi receiver gọi cancel?sessionId=... ta tìm thấy ngay!
+  prog->sessionId = sessionId;
 
   // Token: parse object "files" rồi lấy files[fileId] (string token).
   // Tương thích ngược: receiver cũ có thể trả files[fileId] = {...} object
@@ -2216,7 +2377,7 @@ std::string LocalSendManager::sendFileMeta(const LsFileMeta &inMeta,
       "/api/localsend/v2/upload?sessionId=" + sessionId + "&fileId=" + fileId;
   if (!fileToken.empty())
     path += "&token=" + fileToken;
-  if (!httpPostBinary(target.ip, target.port, path, absPath, *prog)) {
+  if (!httpPostBinary(target.protocol, target.ip, target.port, path, absPath, *prog)) {
     prog->state = LsSendProgress::FAILED;
     prog->errorMessage = "upload failed";
     Logger::warn("LocalSend: upload failed: " + prog->fileName);
@@ -2275,6 +2436,30 @@ std::vector<LsUploadRequest> LocalSendManager::receiveProgresses() {
   for (auto &r : m_pending)
     out.push_back(r);
   return out;
+}
+
+void LocalSendManager::clearFinishedTasks() {
+  {
+    std::lock_guard<std::mutex> lock(m_sendMutex);
+    m_sends.erase(
+        std::remove_if(m_sends.begin(), m_sends.end(),
+                       [](const std::shared_ptr<LsSendProgress> &s) {
+                         return !s || s->state == LsSendProgress::DONE ||
+                                s->state == LsSendProgress::FAILED;
+                       }),
+        m_sends.end());
+  }
+  {
+    std::lock_guard<std::mutex> lock(m_pendingMutex);
+    m_pending.erase(
+        std::remove_if(m_pending.begin(), m_pending.end(),
+                       [](const LsUploadRequest &r) {
+                         return r.state == LsUploadRequest::DONE ||
+                                r.state == LsUploadRequest::FAILED ||
+                                r.state == LsUploadRequest::REJECTED;
+                       }),
+        m_pending.end());
+  }
 }
 
 } // namespace RomCloud

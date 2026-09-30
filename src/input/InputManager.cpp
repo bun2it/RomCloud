@@ -91,6 +91,7 @@ void InputManager::mapKeyboardKey(SDL_Keycode key, bool isDown) {
         case SDLK_TAB:    btn = Button::SELECT; break;
         case SDLK_F1:     btn = Button::START; break;
         case SDLK_HOME:   btn = Button::MENU; break;
+        case SDLK_p:      btn = Button::PLAY; break;
         default: break;
     }
     if (btn != Button::COUNT) {
@@ -150,8 +151,12 @@ void InputManager::update() {
                     case SDL_CONTROLLER_BUTTON_LEFTSHOULDER:  setBtn(Button::L1, down); break;
                     case SDL_CONTROLLER_BUTTON_RIGHTSHOULDER: setBtn(Button::R1, down); break;
                     case SDL_CONTROLLER_BUTTON_START:      setBtn(Button::START, down); break;
-                    case SDL_CONTROLLER_BUTTON_BACK:       setBtn(Button::SELECT, down); break;
-                    case SDL_CONTROLLER_BUTTON_GUIDE:      setBtn(Button::MENU, down); break;
+                    // Brick: nut giua vat ly (options) bao BACK, nut trai ngoai bao GUIDE -> dao cho dung y muon
+                    case SDL_CONTROLLER_BUTTON_BACK:       setBtn(Button::MENU, down); break;
+                    case SDL_CONTROLLER_BUTTON_GUIDE:      setBtn(Button::SELECT, down); break;
+                    case SDL_CONTROLLER_BUTTON_MISC1:
+                    case SDL_CONTROLLER_BUTTON_TOUCHPAD:
+                        setBtn(Button::PLAY, down); break;
                     default: break;
                 }
                 break;
@@ -210,9 +215,10 @@ void InputManager::update() {
                         case 3: setBtn(Button::X, down); break; // Top X
                         case 4: setBtn(Button::L1, down); break;
                         case 5: setBtn(Button::R1, down); break;
-                        case 6: setBtn(Button::SELECT, down); break;
+                        // Brick fallback: nut giua vat ly = 6 (MENU=xoa), nut trai ngoai = 8 (SELECT=exit)
+                        case 6: setBtn(Button::MENU, down); break;
                         case 7: setBtn(Button::START, down); break;
-                        case 8: setBtn(Button::MENU, down); break;
+                        case 8: setBtn(Button::SELECT, down); break;
                         default: break;
                     }
                 }

@@ -20,6 +20,7 @@ enum class Button {
     START,
     SELECT,
     MENU,
+    PLAY,
     COUNT
 };
 

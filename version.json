@@ -1,17 +1,17 @@
 {
-  "version": "2.1.2",
-  "release_date": "2026-09-25",
+  "version": "2.2.0",
+  "release_date": "2026-09-30",
   "target_os": "ALL",
   "icon_url": "https://raw.githubusercontent.com/bun2it/RomCloud/main/icon.png",
-  "binary_url": "https://github.com/bun2it/RomCloud/releases/download/v2.1.2/RomCloud",
-  "bundle_url": "https://github.com/bun2it/RomCloud/releases/download/v2.1.2/mpv_bundle.zip",
-  "STOCK_PS_bundle_url": "https://github.com/bun2it/RomCloud/releases/download/v2.1.2/bundle-STOCK_PS.zip",
-  "NEXTUI_bundle_url": "https://github.com/bun2it/RomCloud/releases/download/v2.1.2/bundle-NEXTUI.zip",
-  "SPRUCE_OS_bundle_url": "https://github.com/bun2it/RomCloud/releases/download/v2.1.2/bundle-SPRUCE_OS.zip",
+  "binary_url": "https://github.com/bun2it/RomCloud/releases/download/v2.2.0/RomCloud",
+  "bundle_url": "https://github.com/bun2it/RomCloud/releases/download/v2.2.0/mpv_bundle.zip",
+  "STOCK_PS_bundle_url": "https://github.com/bun2it/RomCloud/releases/download/v2.2.0/bundle-STOCK_PS.zip",
+  "NEXTUI_bundle_url": "https://github.com/bun2it/RomCloud/releases/download/v2.2.0/bundle-NEXTUI.zip",
+  "SPRUCE_OS_bundle_url": "https://github.com/bun2it/RomCloud/releases/download/v2.2.0/bundle-SPRUCE_OS.zip",
   "os_versions": {
-    "STOCK_PS": "2.1.2",
-    "NEXTUI": "2.1.2",
-    "SPRUCE_OS": "2.1.2"
+    "STOCK_PS": "2.2.0",
+    "NEXTUI": "2.2.0",
+    "SPRUCE_OS": "2.2.0"
   },
-  "changelog": "v2.1.2: Cập nhật chức năng ghi debug log"
+  "changelog": "v2.2.0: Nâng cấp LocalSend v2 (hỗ trợ HTTPS/TLS, nhận tín hiệu hủy từ máy đích), Borderless UI cho Tiến trình truyền & Chọn ROM, tối ưu File Explorer"
 }

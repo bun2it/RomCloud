@@ -116,16 +116,15 @@ bool UIManager::init(SDL_Window* window, SDL_Renderer* renderer) {
     LocalSendManager::instance().setOnUserPrompt([this](const LsUploadRequest& req) {
         m_localSendCurrentPrompt = req;
         m_localSendPendingSessionId = req.sessionId;
-        // Reset folder picker về mặc định: Downloads
-        m_localSendFolderCurrentPath = "/mnt/SDCARD/Downloads";
-        m_localSendFolderLoaded = false;
-        m_localSendFolderSelected = 0;
-        m_localSendFolderFocus = 1;  // mặc định focus nút Chốt ở panel phải
-        m_localSendIncomingMode = 0;  // bắt đầu ở screen picker
-        m_localSendIncomingSavePath = "";
-        // Tự tạo Downloads nếu chưa có
-        FileSystemManager::instance().createDirectoryRecursive(
-            "/mnt/SDCARD/Downloads");
+        m_localSendIncomingMode = 0;
+        m_localSendIncomingSavePath = req.savedPath.empty() ? "/mnt/SDCARD/Downloads" : req.savedPath;
+        if (!m_localSendIncomingSavePath.empty()) {
+            size_t slash = m_localSendIncomingSavePath.find_last_of('/');
+            if (slash != std::string::npos && m_localSendIncomingSavePath.find('.', slash) != std::string::npos) {
+                m_localSendIncomingSavePath = m_localSendIncomingSavePath.substr(0, slash);
+            }
+        }
+        FileSystemManager::instance().createDirectoryRecursive(m_localSendIncomingSavePath);
         setState(UIState::LOCALSEND_INCOMING);
     });
 
@@ -399,8 +398,11 @@ void UIManager::update() {
                     m_localSendFolderSelected = 0;
                     setState(UIState::LOCALSEND_HOME);
                 } else if (selectedId == "explorer") {
-                    m_explorer.open("/mnt/SDCARD");
-                    m_explorerScroll = 0;
+                    m_expL.open("/mnt/SDCARD");
+                    m_expR.open("/mnt/SDCARD");
+                    m_expActive = 0;
+                    m_expScroll[0] = 0;
+                    m_expScroll[1] = 0;
                     setState(UIState::FILE_EXPLORER);
                 } else if (selectedId == "upload") {
                     if (!AuthManager::instance().isLinked()) {
@@ -1732,7 +1734,12 @@ void UIManager::update() {
                     m_lsRomSelected = 0; m_lsRomScrollOffset = 0;
                     showToast("Đã refresh ROMs", {100, 116, 139, 255}, 1000);
                 } else {
-                    m_localSendFolderSelected = 0;
+                    std::string cur = LocalSendManager::instance().currentTargetFolder();
+                    if (cur.empty()) cur = "/mnt/SDCARD";
+                    else cur = "/mnt/SDCARD/" + cur;
+                    if (!FileSystemManager::instance().directoryExists(cur)) cur = "/mnt/SDCARD";
+                    m_expPicker.setDirOnly(true);
+                    m_expPicker.open(cur);
                     setState(UIState::LOCALSEND_FOLDER);
                 }
             } else if (input.isButtonJustPressed(Button::LEFT) || input.isButtonJustPressed(Button::RIGHT)) {
@@ -1755,70 +1762,12 @@ void UIManager::update() {
         }
 
         case UIState::LOCALSEND_INCOMING: {
-            // m_localSendIncomingMode: 0=picker 2 cột, 1=confirm cuối
-            if (m_localSendIncomingMode == 0) {
-                // ===== Screen 1: Folder picker 2 cột =====
-                // Up/Down = chọn folder, L/R = chuyển focus, A = chọn folder → confirm
-                auto& entries = m_localSendFolderEntries;
-                if (input.isButtonJustPressed(Button::B)) {
-                    if (m_localSendFolderFocus == 1) {
-                        m_localSendFolderFocus = 0;
-                    } else {
-                        LocalSendManager::instance().rejectUpload(m_localSendPendingSessionId);
-                        showToast("Đã từ chối", {239, 68, 68, 255}, 1500);
-                        setState(UIState::LOCALSEND_HOME);
-                    }
-                } else if (input.isButtonJustPressed(Button::LEFT) ||
-                           input.isButtonJustPressed(Button::RIGHT)) {
-                    m_localSendFolderFocus = (m_localSendFolderFocus == 0) ? 1 : 0;
-                } else if (input.isButtonJustPressed(Button::UP)) {
-                    if (m_localSendFolderFocus == 0) {
-                        int n = (int)entries.size();
-                        if (n > 0) m_localSendFolderSelected =
-                            (m_localSendFolderSelected - 1 + n) % n;
-                    }
-                } else if (input.isButtonJustPressed(Button::DOWN)) {
-                    if (m_localSendFolderFocus == 0) {
-                        int n = (int)entries.size();
-                        if (n > 0) m_localSendFolderSelected =
-                            (m_localSendFolderSelected + 1) % n;
-                    }
-                } else if (input.isButtonJustPressed(Button::A)) {
-                    if (m_localSendFolderFocus == 1) {
-                        // Chốt folder hiện tại → chuyển sang screen confirm
-                        m_localSendIncomingSavePath = m_localSendFolderCurrentPath;
-                        m_localSendIncomingMode = 1;
-                    } else {
-                        // Vào folder con
-                        if (m_localSendFolderSelected >= 0 &&
-                            m_localSendFolderSelected < (int)entries.size()) {
-                            m_localSendFolderCurrentPath = entries[m_localSendFolderSelected];
-                            m_localSendFolderSelected = 0;
-                            m_localSendFolderLoaded = false;
-                        }
-                    }
-                }
+            if (m_localSendIncomingMode == 1) {
+                handleFolderPickerInput();
             } else {
-                // ===== Screen 2: Confirm cuối =====
-                if (input.isButtonJustPressed(Button::B)) {
-                    m_localSendIncomingMode = 0;
-                } else if (input.isButtonJustPressed(Button::Y)) {
-                    // Quay lại folder picker
-                    m_localSendFolderCurrentPath = "/mnt/SDCARD/Downloads";
-                    m_localSendFolderLoaded = false;
-                    m_localSendFolderSelected = 0;
-                    m_localSendFolderFocus = 0;
-                    m_localSendIncomingMode = 0;
-                } else if (input.isButtonJustPressed(Button::A)) {
-                    // Chốt save path
-                    std::string rel = m_localSendIncomingSavePath;
-                    const std::string root = "/mnt/SDCARD";
-                    if (rel.compare(0, root.size(), root) == 0)
-                        rel = rel.substr(root.size());
-                    if (!rel.empty() && rel.back() != '/') rel += '/';
-                    if (rel == "/") rel = "";
-                    LocalSendManager::instance().setPendingTargetFolder(
-                        m_localSendPendingSessionId, rel);
+                if (input.isButtonJustPressed(Button::A)) {
+                    std::string saveDir = m_localSendIncomingSavePath;
+                    if (saveDir.empty()) saveDir = "/mnt/SDCARD/Downloads";
                     uint64_t need = m_localSendCurrentPrompt.file.size;
                     if (need > 0) {
                         uint64_t freeB = LsUtil::sdFreeBytes("/mnt/SDCARD");
@@ -1826,90 +1775,32 @@ void UIManager::update() {
                             showToast("Thẻ đầy: cần " + LsUtil::humanSize(need) +
                                       ", trống " + LsUtil::humanSize(freeB),
                                       {239, 68, 68, 255}, 3000);
-                            m_localSendIncomingMode = 0;
                             break;
                         }
                     }
-                    LocalSendManager::instance().approveUpload(m_localSendPendingSessionId);
+                    LocalSendManager::instance().approveUploadWithPath(
+                        m_localSendPendingSessionId, saveDir);
                     showToast("Đã chấp nhận: " + m_localSendCurrentPrompt.file.fileName,
                               {34, 197, 94, 255}, 2000);
                     setState(UIState::LOCALSEND_PROGRESS);
+                } else if (input.isButtonJustPressed(Button::X)) {
+                    std::string p = m_localSendIncomingSavePath;
+                    if (p.empty() || !FileSystemManager::instance().directoryExists(p))
+                        p = "/mnt/SDCARD";
+                    m_expPicker.setDirOnly(true);
+                    m_expPicker.open(p);
+                    m_localSendIncomingMode = 1;
+                } else if (input.isButtonJustPressed(Button::B)) {
+                    LocalSendManager::instance().rejectUpload(m_localSendPendingSessionId);
+                    showToast("Đã từ chối", {239, 68, 68, 255}, 1500);
+                    setState(UIState::LOCALSEND_HOME);
                 }
             }
             break;
         }
 
         case UIState::LOCALSEND_FOLDER: {
-            // File Explorer full-screen tone xanh IPTV.
-            // Ban phim rename/new-folder uu tien xu ly truoc.
-            if (m_lsFolderRenaming) {
-                handleLsFolderKeyboardInput();
-                break;
-            }
-            // Up/Down = di chuyen, A = vao folder, B = lui,
-            // X = chon folder lam dich, Y = thu muc moi (ban phim),
-            // START = doi ten folder dang chon, SELECT = tai lai.
-            auto& entries = m_localSendFolderEntries;
-            if (input.isButtonJustPressed(Button::B)) {
-                if (m_localSendFolderFocus == 1) {
-                    m_localSendFolderFocus = 0;
-                } else if (m_localSendFolderCurrentPath == "/mnt/SDCARD") {
-                    setState(UIState::LOCALSEND_HOME);
-                } else {
-                    auto pos = m_localSendFolderCurrentPath.find_last_of('/');
-                    if (pos != std::string::npos && pos > 0) {
-                        m_localSendFolderCurrentPath = m_localSendFolderCurrentPath.substr(0, pos);
-                    }
-                    if (m_localSendFolderCurrentPath.empty()) m_localSendFolderCurrentPath = "/mnt/SDCARD";
-                    m_localSendFolderLoaded = false;
-                }
-            } else if (input.isButtonJustPressed(Button::LEFT) ||
-                       input.isButtonJustPressed(Button::RIGHT)) {
-                m_localSendFolderFocus = (m_localSendFolderFocus == 0) ? 1 : 0;
-            } else if (input.isButtonJustPressed(Button::UP)) {
-                if (m_localSendFolderFocus == 0) {
-                    int n = (int)entries.size();
-                    if (n > 0) m_localSendFolderSelected =
-                        (m_localSendFolderSelected - 1 + n) % n;
-                }
-            } else if (input.isButtonJustPressed(Button::DOWN)) {
-                if (m_localSendFolderFocus == 0) {
-                    int n = (int)entries.size();
-                    if (n > 0) m_localSendFolderSelected =
-                        (m_localSendFolderSelected + 1) % n;
-                }
-            } else if (input.isButtonJustPressed(Button::A)) {
-                // Mở folder đang chọn (vào trong)
-                if (m_localSendFolderSelected >= 0 &&
-                    m_localSendFolderSelected < (int)entries.size()) {
-                    m_localSendFolderCurrentPath = entries[m_localSendFolderSelected];
-                    m_localSendFolderSelected = 0;
-                    m_localSendFolderLoaded = false;
-                }
-            } else if (input.isButtonJustPressed(Button::X)) {
-                // Chọn folder hiện tại làm target cho LocalSend
-                std::string rel = m_localSendFolderCurrentPath;
-                const std::string root = "/mnt/SDCARD";
-                if (rel.compare(0, root.size(), root) == 0)
-                    rel = rel.substr(root.size());
-                if (!rel.empty() && rel.back() != '/') rel += '/';
-                if (rel == "/") rel = "";
-                LocalSendManager::instance().setTargetFolder(rel);
-                showToast("Đã chọn thư mục: " + (rel.empty()
-                                               ? std::string("(Tự động)")
-                                               : rel),
-                          {34, 197, 94, 255}, 2000);
-                setState(UIState::LOCALSEND_HOME);
-            } else if (input.isButtonJustPressed(Button::Y)) {
-                // Thu muc moi: mo ban phim QWERTY de dat ten (mac dinh NewFolder...)
-                startLsFolderRename(false);
-            } else if (input.isButtonJustPressed(Button::START)) {
-                // Doi ten folder dang chon
-                startLsFolderRename(true);
-            } else if (input.isButtonJustPressed(Button::SELECT)) {
-                m_localSendFolderLoaded = false;
-                showToast("Đang tải lại...", {100, 116, 139, 255}, 800);
-            }
+            handleFolderPickerInput();
             break;
         }
 
@@ -2001,26 +1892,31 @@ void UIManager::update() {
                 setState(UIState::LOCALSEND_HOME);
                 break;
             }
+            if (input.isButtonJustPressed(Button::Y)) {
+                LocalSendManager::instance().clearFinishedTasks();
+                m_localSendProgressSel = 0;
+                m_localSendProgressScroll = 0;
+                showToast("Đã xóa các tác vụ đã xong/lỗi", {34, 197, 94, 255}, 1500);
+            }
             if (input.isButtonJustPressed(Button::UP) && total > 0) {
                 m_localSendProgressSel = (m_localSendProgressSel - 1 + total) % total;
             } else if (input.isButtonJustPressed(Button::DOWN) && total > 0) {
                 m_localSendProgressSel = (m_localSendProgressSel + 1) % total;
             }
-            // Tu dong ve Home sau 3s khi tat ca xong (send DONE/FAILED + recv DONE/FAILED/REJECTED).
-            bool allDone = total > 0;
+            // Tự động về Home sau 3s khi tất cả gửi/nhận THÀNH CÔNG (nếu có lỗi giữ nguyên để user xem)
+            bool allSuccess = total > 0;
             for (auto& s : sends) {
-                if (s.state != LsSendProgress::DONE && s.state != LsSendProgress::FAILED) { allDone = false; break; }
+                if (s.state != LsSendProgress::DONE) { allSuccess = false; break; }
             }
-            if (allDone) {
+            if (allSuccess) {
                 for (auto& r : recvs) {
-                    if (r.state != LsUploadRequest::DONE && r.state != LsUploadRequest::FAILED &&
-                        r.state != LsUploadRequest::REJECTED) { allDone = false; break; }
+                    if (r.state != LsUploadRequest::DONE) { allSuccess = false; break; }
                 }
             }
             uint32_t now = SDL_GetTicks();
-            if (allDone) {
+            if (allSuccess) {
                 if (m_localSendProgressDoneMs == 0) m_localSendProgressDoneMs = now;
-                if (now - m_localSendProgressDoneMs > 3000) {
+                if (now - m_localSendProgressDoneMs > 3500) {
                     m_localSendProgressDoneMs = 0;
                     setState(UIState::LOCALSEND_HOME);
                 }
@@ -2263,7 +2159,11 @@ void UIManager::renderSearchState() {
 
 void UIManager::renderFooter() {
     if (m_currentState == UIState::IPTV_LIST || m_currentState == UIState::IPTV_SEARCH ||
-        m_currentState == UIState::YOUTUBE_SEARCH || m_currentState == UIState::YOUTUBE_RESULTS) {
+        m_currentState == UIState::YOUTUBE_SEARCH || m_currentState == UIState::YOUTUBE_RESULTS ||
+        m_currentState == UIState::LOCALSEND_HOME || m_currentState == UIState::LOCALSEND_INCOMING ||
+        m_currentState == UIState::LOCALSEND_FOLDER || m_currentState == UIState::LOCALSEND_SEND ||
+        m_currentState == UIState::LOCALSEND_GAME_PICKER || m_currentState == UIState::LOCALSEND_PROGRESS ||
+        m_currentState == UIState::FILE_EXPLORER) {
         return;
     }
 
@@ -3860,12 +3760,19 @@ void UIManager::render() {
         case UIState::YOUTUBE_SEARCH:   renderYouTubeSearchState(); break;
         case UIState::YOUTUBE_RESULTS:  renderYouTubeResultsState(); break;
         case UIState::LOCALSEND_HOME:       renderLocalSendHome(); break;
-        case UIState::LOCALSEND_INCOMING:   renderLocalSendHome(); renderLocalSendIncomingDialog(); break;
+        case UIState::LOCALSEND_INCOMING:
+            if (m_localSendIncomingMode == 1) {
+                renderLocalSendFolderPicker();
+            } else {
+                renderLocalSendHome();
+                renderLocalSendIncomingDialog();
+            }
+            break;
         case UIState::LOCALSEND_FOLDER:     renderLocalSendFolderPicker(); break;
         case UIState::LOCALSEND_SEND:       renderLocalSendSendPicker(); break;
-        case UIState::LOCALSEND_GAME_PICKER: renderLocalSendHome(); renderLocalSendGamePicker(); break;
-        case UIState::LOCALSEND_PROGRESS:   renderLocalSendHome(); renderLocalSendProgress(); break;
-        case UIState::FILE_EXPLORER:        renderFileExplorer(); break;
+        case UIState::LOCALSEND_GAME_PICKER: renderLocalSendGamePicker(); break;
+        case UIState::LOCALSEND_PROGRESS:   renderLocalSendProgress(); break;
+        case UIState::FILE_EXPLORER:        renderFileExplorer(); renderConfirmDialogFromState(); break;
         default: break;
     }
 
@@ -4821,7 +4728,6 @@ void UIManager::renderLocalSendHome() {
         drawPlayerIcon(iconFile, 40, ry+8, 36, 36);
         drawText(sbLabels[i], 96, ry+10, {255,255,255,255}, m_fontMedium, false);
     }
-    drawText("Settings", 96, 215+2*62+10, {180,180,180,255}, m_fontMedium, false);
     // Content phai
     int cx = sbW + 50;
     int cw = 1024 - cx - 40;
@@ -4853,14 +4759,21 @@ void UIManager::renderLocalSendHome() {
                 bool sel = (i == m_localSendSelectedDevice);
                 drawRoundedRect(cx, dy, cw, 96, UiTheme::RADIUS_MODAL, {55, 71, 79, 255}, true);
                 if (sel) drawRoundedBorder(cx, dy, cw, 96, UiTheme::RADIUS_MODAL, {0, 200, 150, 255}, 3);
-                // icon phone don gian
-                drawRoundedBorder(cx+22, dy+18, 34, 60, UiTheme::RADIUS_ROW, {255,255,255,255}, 3);
+                // Icon thiết bị
+                drawRoundedBorder(cx + 22, dy + 18, 34, 60, UiTheme::RADIUS_ROW, {255, 255, 255, 255}, 2);
+                drawRect(cx + 26, dy + 24, 26, 42, {30, 41, 59, 255}, true);
+                drawRect(cx + 36, dy + 70, 6, 2, {255, 255, 255, 255}, true);
+
                 std::string nm = d.alias.empty() ? d.ip : d.alias;
                 if ((int)nm.size() > 26) nm = nm.substr(0, 24) + "..";
-                drawText(nm, cx+72, dy+16, {255,255,255,255}, m_fontLarge, false);
+                drawText(nm, cx + 72, dy + 18, {255, 255, 255, 255}, m_fontLarge, false);
+
+                std::string proto = (d.protocol == "https") ? "HTTPS" : "HTTP";
+                SDL_Color protoBg = (d.protocol == "https") ? SDL_Color{30, 58, 138, 255} : SDL_Color{37, 99, 235, 255};
+                drawBadge(cx + 72, dy + 54, 66, 24, proto, protoBg, {255, 255, 255, 255});
+
                 std::string sub = d.deviceModel.empty() ? (d.ip + ":" + std::to_string(d.port)) : d.deviceModel;
-                drawBadge(cx+72, dy+56, 86, 26, "HTTP", {120,130,135,255}, {40,50,55,255});
-                drawText(sub, cx+170, dy+58, {180,190,185,255}, m_fontSmall, false);
+                drawText(sub, cx + 150, dy + 56, {180, 190, 185, 255}, m_fontSmall, false);
             }
         }
         drawText("Troubleshoot", cx+cw/2, 648, {120, 200, 190, 255}, m_fontSmall, true);
@@ -4868,9 +4781,9 @@ void UIManager::renderLocalSendHome() {
     }
     // Footer hint
     if (m_localSendMode == 0) {
-        drawAppFooter({{UiTheme::PadBtn::L1R1, "Chọn"}, {UiTheme::PadBtn::A, "Chọn"}, {UiTheme::PadBtn::Y, "Tải lại"}});
+        drawAppFooter({{UiTheme::PadBtn::DPAD, "Chuyển tab"}, {UiTheme::PadBtn::A, "Chọn gửi ROM"}, {UiTheme::PadBtn::Y, "Tìm lại"}});
     } else {
-        drawAppFooter({{UiTheme::PadBtn::X, "Chọn đích"}, {UiTheme::PadBtn::Y, "Tải lại"}});
+        drawAppFooter({{UiTheme::PadBtn::DPAD, "Chuyển tab"}, {UiTheme::PadBtn::X, "Chọn thư mục lưu"}, {UiTheme::PadBtn::Y, "Tìm lại"}});
     }
 }
 
@@ -4887,52 +4800,41 @@ void UIManager::renderLocalSendIncomingDialog() {
     drawText("(" + m_localSendCurrentPrompt.fromIp + ")",
              dlgX + dlgW - 40, dlgY + 142, {148, 163, 184, 255}, m_fontMedium, true);
 
-    // ---- Nếu sender gửi kèm game metadata (mở rộng RomCloud) → render cover + tên game
     const auto& file = m_localSendCurrentPrompt.file;
-    if (file.gameId > 0) {
-        // Cover bên trái
-        int cvX = dlgX + 40, cvY = dlgY + 200, cvW = 180, cvH = 240;
-        // Build temp GameRecord để CoverManager resolve
+    bool isGame = !file.gameTitle.empty() || !file.systemCode.empty();
+
+    if (isGame) {
+        int cvX = dlgX + 40, cvY = dlgY + 190, cvW = 120, cvH = 160;
         GameRecord tmpG;
-        tmpG.id = file.gameId;
-        tmpG.systemId = file.systemId;
+        tmpG.coverPath = file.coverPath;
         tmpG.title = file.gameTitle;
         tmpG.filename = file.fileName;
-        tmpG.coverPath = file.coverPath;
-        // Resolve system info
         SystemRecord sys;
-        if (!file.systemCode.empty() && DatabaseManager::instance().getSystemById(file.systemId, sys)) {
-            // OK
-        }
+        sys.code = file.systemCode;
+        sys.name = file.systemName;
         int texW=0, texH=0;
         SDL_Texture* tex = CoverManager::instance().getCoverTexture(tmpG, sys, texW, texH);
         if (tex) {
-            // Fit cover into cvW x cvH (preserve aspect ratio: cover = 4:3 thường)
             SDL_Rect dst{cvX, cvY, cvW, cvH};
             SDL_RenderCopy(m_renderer, tex, nullptr, &dst);
         } else {
-            // Placeholder box với system code
             drawRoundedRect(cvX, cvY, cvW, cvH, UiTheme::RADIUS_CARD, SDL_Color{30, 41, 59, 255}, true);
             drawText(file.systemCode.empty() ? "?" : file.systemCode,
                      cvX + cvW/2, cvY + cvH/2 - 12, {100, 116, 139, 255}, m_fontLarge, true);
         }
 
-        // Game title lớn (bên phải cover)
         int txtX = cvX + cvW + 30;
         std::string dispTitle = file.gameTitle.empty() ? file.fileName : file.gameTitle;
         drawText(dispTitle, txtX, cvY, {34, 197, 94, 255}, m_fontLarge, false);
 
-        // System
         if (!file.systemName.empty() || !file.systemCode.empty()) {
             std::string sysStr = "Hệ máy: " + (file.systemName.empty() ? file.systemCode : file.systemName);
             if (!file.systemCode.empty()) sysStr += "  (" + file.systemCode + ")";
             drawText(sysStr, txtX, cvY + 42, {250, 204, 21, 255}, m_fontMedium, false);
         }
 
-        // Filename
         drawText("File: " + file.fileName, txtX, cvY + 78, {148, 163, 184, 255}, m_fontSmall, false);
 
-        // Size + dung lượng trống (đỏ nếu thiếu chỗ)
         std::string sizeStr = "Kích thước: " + LsUtil::humanSize(file.size);
         uint64_t freeB0 = LsUtil::sdFreeBytes("/mnt/SDCARD");
         sizeStr += " | Trống: " + LsUtil::humanSize(freeB0);
@@ -4941,23 +4843,11 @@ void UIManager::renderLocalSendIncomingDialog() {
                      ? SDL_Color{239, 68, 68, 255} : SDL_Color{203, 213, 225, 255},
                  m_fontMedium, false);
 
-        // Chọn chỗ lưu tay (Up/Down) — 0 = Auto
-        {
-            static const char* kLbl[] = {"Auto", "GBA", "NES", "SNES", "PS1",
-                                         "MD", "N64", "Inbox", "RetroArch", "system"};
-            int idx = m_localSendIncomingFolderIdx;
-            if (idx < 0 || idx > 9) idx = 0;
-            drawText(std::string("Lưu vào: < ") + kLbl[idx] + " >",
-                     dlgX + 40, dlgY + dlgH - 108,
-                     SDL_Color{250, 204, 21, 255}, m_fontMedium, false);
-        }
-
-        // Saved path
+        std::string saveDisplay = m_localSendIncomingSavePath.empty() ? m_localSendCurrentPrompt.savedPath : m_localSendIncomingSavePath;
         drawText("Sẽ lưu vào:", dlgX + 40, dlgY + dlgH - 60, {148, 163, 184, 255}, m_fontSmall, false);
-        drawText(m_localSendCurrentPrompt.savedPath, dlgX + 40, dlgY + dlgH - 36,
+        drawText(saveDisplay, dlgX + 40, dlgY + dlgH - 36,
                  {34, 197, 94, 255}, m_fontSmall, false);
     } else {
-        // Fallback: raw file (không có game metadata)
         drawText("File:", dlgX + 40, dlgY + 200, {148, 163, 184, 255}, m_fontMedium, false);
         drawText(file.fileName, dlgX + 40, dlgY + 232,
                  {34, 197, 94, 255}, m_fontLarge, false);
@@ -4973,285 +4863,87 @@ void UIManager::renderLocalSendIncomingDialog() {
             drawText("Đường dẫn: " + file.relativePath,
                      dlgX + 40, dlgY + 310, {148, 163, 184, 255}, m_fontMedium, false);
         }
-        {
-            static const char* kLbl[] = {"Auto", "GBA", "NES", "SNES", "PS1",
-                                         "MD", "N64", "Inbox", "RetroArch", "system"};
-            int idx = m_localSendIncomingFolderIdx;
-            if (idx < 0 || idx > 9) idx = 0;
-            drawText(std::string("Lưu vào: < ") + kLbl[idx] + " >  (Up/Down đổi)",
-                     dlgX + 40, dlgY + 338, SDL_Color{250, 204, 21, 255}, m_fontMedium, false);
-        }
+
+        std::string saveDisplay = m_localSendIncomingSavePath.empty() ? m_localSendCurrentPrompt.savedPath : m_localSendIncomingSavePath;
         drawText("Sẽ lưu vào:", dlgX + 40, dlgY + 368, {148, 163, 184, 255}, m_fontMedium, false);
-        drawText(m_localSendCurrentPrompt.savedPath, dlgX + 40, dlgY + 398,
+        drawText(saveDisplay, dlgX + 40, dlgY + 398,
                  {34, 197, 94, 255}, m_fontMedium, false);
     }
 
-    // Footer với icon nút A (đồng ý) và B (từ chối) — pattern giống IPTV
-    drawAppFooter({{UiTheme::PadBtn::A, "Chọn"}});
-}
-
-void UIManager::startLsFolderRename(bool existing) {
-    m_lsFolderRenameExisting = existing;
-    m_lsFolderRenameOriginal.clear();
-    std::string init;
-    if (existing) {
-        if (m_localSendFolderSelected < 0 ||
-            m_localSendFolderSelected >= (int)m_localSendFolderEntries.size()) {
-            showToast("Chưa chọn thư mục để đổi tên", {239, 68, 68, 255}, 1500);
-            return;
-        }
-        m_lsFolderRenameOriginal = m_localSendFolderEntries[m_localSendFolderSelected];
-        init = m_lsFolderRenameOriginal.substr(
-            m_lsFolderRenameOriginal.find_last_of('/') + 1);
-    } else {
-        init = suggestNewFolderName(m_localSendFolderCurrentPath);
-    }
-    VirtualKeyboard::reset(m_lsFolderVk, false);
-    m_lsFolderVk.query = init;
-    m_lsFolderRenaming = true;
-}
-
-void UIManager::cancelLsFolderRename() {
-    m_lsFolderRenaming = false;
-    m_lsFolderVk.query.clear();
-    m_lsFolderRenameOriginal.clear();
-}
-
-static std::string lsTrimName(const std::string& s) {
-    size_t a = 0;
-    while (a < s.size() && (s[a] == ' ' || s[a] == '\t')) ++a;
-    size_t b = s.size();
-    while (b > a && (s[b - 1] == ' ' || s[b - 1] == '\t')) --b;
-    return s.substr(a, b - a);
-}
-
-void UIManager::commitLsFolderRename() {
-    std::string name = lsTrimName(m_lsFolderVk.query);
-    if (name.empty() || name.find('/') != std::string::npos ||
-        name == "." || name == "..") {
-        showToast("Tên không hợp lệ", {239, 68, 68, 255}, 1500);
-        return;
-    }
-    if (m_lsFolderRenameExisting) {
-        std::string parent = m_lsFolderRenameOriginal.substr(
-            0, m_lsFolderRenameOriginal.find_last_of('/'));
-        std::string dst = parent + "/" + name;
-        if (dst == m_lsFolderRenameOriginal) { cancelLsFolderRename(); return; }
-        if (FileSystemManager::instance().directoryExists(dst) ||
-            FileSystemManager::instance().fileExists(dst)) {
-            showToast("Tên đã tồn tại", {239, 68, 68, 255}, 1500);
-            return;
-        }
-        if (std::rename(m_lsFolderRenameOriginal.c_str(), dst.c_str()) == 0) {
-            showToast("Đã đổi tên: " + name, {34, 197, 94, 255}, 1500);
-            m_localSendFolderLoaded = false;
-            m_lsFolderRenaming = false;
-        } else {
-            showToast("Lỗi: không đổi tên được", {239, 68, 68, 255}, 1500);
-        }
-    } else {
-        std::string newPath = m_localSendFolderCurrentPath + "/" + name;
-        if (FileSystemManager::instance().directoryExists(newPath)) {
-            showToast("Tên đã tồn tại", {239, 68, 68, 255}, 1500);
-            return;
-        }
-        if (FileSystemManager::instance().createDirectoryRecursive(newPath)) {
-            showToast("Đã tạo thư mục: " + name, {34, 197, 94, 255}, 1500);
-            m_localSendFolderLoaded = false;
-            m_lsFolderRenaming = false;
-        } else {
-            showToast("Lỗi: không tạo được thư mục", {239, 68, 68, 255}, 1500);
-        }
-    }
-}
-
-bool UIManager::handleLsFolderKeyboardInput() {
-    InputManager& input = InputManager::instance();
-    VkState& vk = m_lsFolderVk;
-    if (input.isButtonJustPressed(Button::B)) { cancelLsFolderRename(); return true; }
-    if (input.isButtonJustPressed(Button::UP)) {
-        VirtualKeyboard::move(vk, -1, 0);
-        return true;
-    }
-    if (input.isButtonJustPressed(Button::DOWN)) {
-        VirtualKeyboard::move(vk, 1, 0);
-        return true;
-    }
-    if (input.isButtonJustPressed(Button::LEFT)) {
-        VirtualKeyboard::move(vk, 0, -1);
-        return true;
-    }
-    if (input.isButtonJustPressed(Button::RIGHT)) {
-        VirtualKeyboard::move(vk, 0, 1);
-        return true;
-    }
-    if (input.isButtonJustPressed(Button::X)) {
-        VirtualKeyboard::backspace(vk);
-        return true;
-    }
-    if (input.isButtonJustPressed(Button::Y)) {
-        vk.shift = !vk.shift;
-        return true;
-    }
-    if (input.isButtonJustPressed(Button::START)) { commitLsFolderRename(); return true; }
-    if (input.isButtonJustPressed(Button::A)) {
-        if (vk.row < 4) {
-            char ch = VirtualKeyboard::charAt(vk);
-            if (ch) VirtualKeyboard::typeChar(vk, ch);
-        } else {
-            int a = vk.col;
-            if (a == 0) vk.shift = !vk.shift;
-            else if (a == 1) VirtualKeyboard::typeSpace(vk);
-            else if (a == 2) VirtualKeyboard::backspace(vk);
-            else if (a == 3) commitLsFolderRename();
-            else cancelLsFolderRename();
-        }
-        return true;
-    }
-    return true;
-}
-
-void UIManager::renderLsFolderKeyboard() {
-    // Overlay ban phim QWERTY tai dung layout YouTube, tone xanh IPTV
-    drawAppBackground();
-    drawRect(0, 0, 1024, 100, {15, 23, 42, 255}, true);
-    drawRect(0, 100, 1024, 1, {30, 41, 59, 255}, true);
-    drawGridIcon("FOLDER.png", 32, 22, 52, 52);
-    drawText(m_lsFolderRenameExisting ? "ĐỔI TÊN THƯ MỤC" : "THƯ MỤC MỚI",
-             96, 24, {255, 255, 255, 255}, m_fontLarge, false);
-    drawText(m_localSendFolderCurrentPath, 96, 66,
-             {148, 163, 184, 255}, m_fontSmall, false);
-    // O nhap ten
-    drawRect(48, 130, 928, 64, {15, 23, 42, 255}, true);
-    drawBorder(48, 130, 928, 64, {59, 130, 246, 255}, 2);
-    std::string shown = m_lsFolderVk.query.empty() ? "Nhập tên..." : m_lsFolderVk.query;
-    drawText(shown, 68, 146,
-             m_lsFolderVk.query.empty() ? SDL_Color{100, 116, 139, 255}
-                                           : SDL_Color{255, 255, 255, 255},
-             m_fontLarge, false);
-    { static std::string ls0,ls1,ls2,ls3,ls4; ls0="Shift"; ls1="Space"; ls2="Xoa"; ls3="Xong"; ls4="Huy"; const char* lsA[5]={ls0.c_str(),ls1.c_str(),ls2.c_str(),ls3.c_str(),ls4.c_str()}; int lsCw=(1024-96-8*9)/10; m_ui.drawVirtualKeyboard(m_lsFolderVk,48,220,lsCw,64,8,10,SDL_Color{37,99,235,255},SDL_Color{147,197,253,255},lsA,false,false,1); }
-    drawRect(0, 715, 1024, 53, {15, 23, 42, 255}, true);
-    drawRect(0, 715, 1024, 1, {30, 41, 59, 255}, true);
-    drawAppFooter({{UiTheme::PadBtn::X, "Xóa"}, {UiTheme::PadBtn::Y, "Hoa"}, {UiTheme::PadBtn::START, "Xong"}});
+    drawAppFooter({{UiTheme::PadBtn::A, "Nhận file"},
+                   {UiTheme::PadBtn::X, "Chọn thư mục lưu"},
+                   {UiTheme::PadBtn::B, "Từ chối"}});
 }
 
 void UIManager::renderLocalSendFolderPicker() {
-    // Ban phim rename/new-folder uu tien render overlay
-    if (m_lsFolderRenaming) { renderLsFolderKeyboard(); return; }
-    // ===== File Explorer full-screen, tone xanh IPTV, khong border ngoai =====
+    if (m_expPicker.creatingFolder() || m_expPicker.renaming()) {
+        renderExplorerKeyboardFor(m_expPicker);
+        return;
+    }
+
     drawAppBackground();
 
-    // Header bar kieu IPTV
-    drawRect(0, 0, 1024, 112, {15, 23, 42, 255}, true);
-    drawRect(0, 112, 1024, 1, {30, 41, 59, 255}, true);
-    drawGridIcon("FOLDER.png", 28, 24, 56, 56);
-    drawText("FILE EXPLORER", 96, 24, {255, 255, 255, 255}, m_fontLarge, false);
-    {
-        std::string p = m_localSendFolderCurrentPath;
-        const std::string root = "/mnt/SDCARD";
-        if (p.compare(0, root.size(), root) == 0) p = p.substr(root.size());
-        if (p.empty()) p = "/";
-        if ((int)p.size() > 48) p = ".." + p.substr(p.size() - 46);
-        drawText(p, 96, 68, {148, 163, 184, 255}, m_fontSmall, false);
-    }
-    {
-        uint64_t freeB = LsUtil::sdFreeBytes("/mnt/SDCARD");
-        drawText("Trống: " + LsUtil::humanSize(freeB), 996, 68,
-                 {34, 197, 94, 255}, m_fontSmall, false);
-    }
+    // Header 0..64 borderless
+    drawRect(0, 0, 1024, 64, {15, 23, 42, 255}, true);
+    drawRect(0, 64, 1024, 1, {30, 41, 59, 255}, true);
+    drawGridIcon("FOLDER.png", 16, 14, 36, 36);
+    drawText("CHỌN THƯ MỤC NHẬN FILE", 60, 16, {255, 255, 255, 255}, m_fontLarge, false);
 
-    // Scan folder con neu can
-    if (!m_localSendFolderLoaded) {
-        m_localSendFolderLoaded = true;
-        m_localSendFolderEntries.clear();
-        if (FileSystemManager::instance().directoryExists(m_localSendFolderCurrentPath)) {
-            auto dirs = FileSystemManager::instance().listDirectory(
-                m_localSendFolderCurrentPath, true);
-            for (const auto& d : dirs) {
-                if (!d.name.empty() && d.name[0] == '.') continue;
-                m_localSendFolderEntries.push_back(d.path);
-            }
+    uint64_t freeB = LsUtil::sdFreeBytes("/mnt/SDCARD");
+    drawText("Trống: " + LsUtil::humanSize(freeB), 996, 22, {34, 197, 94, 255}, m_fontSmall, false);
+
+    // 1 single pane: width 976, x = 24, y = 72, h = 636
+    const int px = 24, paneY = 72, paneW = 976, paneH = 636;
+    drawRect(px, paneY, paneW, paneH, {15, 23, 42, 255}, true);
+    drawBorder(px, paneY, paneW, paneH, {59, 130, 246, 255}, 1);
+
+    // Path bar on top of the pane
+    std::string path = m_expPicker.currentPath();
+    const std::string root = "/mnt/SDCARD";
+    std::string sp = path;
+    if (sp.compare(0, root.size(), root) == 0) sp = sp.substr(root.size());
+    if (sp.empty()) sp = "/";
+    if ((int)sp.size() > 80) sp = ".." + sp.substr(sp.size() - 78);
+    drawText("Thư mục: " + sp, px + 16, paneY + 12, {255, 255, 255, 255}, m_fontMedium, false);
+    drawRect(px, paneY + 44, paneW, 1, {30, 41, 59, 255}, true);
+
+    const auto& entries = m_expPicker.entries();
+    int total = (int)entries.size();
+    int rowH = 54;
+    int listTop = paneY + 48;
+    int visibleRows = (paneH - 52) / rowH;
+    if (visibleRows < 1) visibleRows = 1;
+
+    m_expPickerScroll = FileListView::calcScroll(m_expPicker.selected(), visibleRows, m_expPickerScroll);
+
+    for (int i = 0; i < visibleRows && m_expPickerScroll + i < total; ++i) {
+        int idx = m_expPickerScroll + i;
+        int y = listTop + i * rowH;
+        bool sel = (idx == m_expPicker.selected());
+        if (sel) {
+            drawRect(px + 8, y, paneW - 16, rowH - 6, {30, 58, 138, 255}, true);
+            drawRect(px + 8, y, 4, rowH - 6, {59, 130, 246, 255}, true);
         }
-        if (m_localSendFolderSelected >= (int)m_localSendFolderEntries.size())
-            m_localSendFolderSelected = 0;
+        const auto& e = entries[(size_t)idx];
+        drawGridIcon("FOLDER.png", px + 16, y + 8, 34, 34);
+        drawText(e.name, px + 60, y + 12,
+                 sel ? SDL_Color{255, 255, 255, 255} : SDL_Color{203, 213, 225, 255},
+                 m_fontMedium, false);
     }
-
-    // Cot trai: danh sach folder (flat, khong border)
-    int leftX = 24, leftY = 128, leftW = 624, leftH = 574;
-    drawRect(leftX, leftY, leftW, leftW > 0 ? leftH : leftH, {15, 23, 42, 255}, true);
-    int listX = leftX + 12, listY = leftY + 12;
-    int rowH = 56;
-    int visibleRows = (leftH - 24) / rowH;
-    int total = (int)m_localSendFolderEntries.size();
 
     if (total == 0) {
-        drawText("(Thư mục trống)", leftX + leftW / 2,
-                 listY + leftH / 2 - 10, {100, 116, 139, 255}, m_fontMedium, true);
-    } else {
-        int scroll = 0;
-        if (m_localSendFolderSelected >= visibleRows)
-            scroll = m_localSendFolderSelected - visibleRows + 1;
-        for (int i = 0; i < total && i < visibleRows; ++i) {
-            int idx = i + scroll;
-            int y = listY + i * rowH;
-            bool sel = (m_localSendFolderFocus == 0 && idx == m_localSendFolderSelected);
-            if (sel) {
-                drawRect(listX, y, leftW - 24, rowH - 6, {30, 58, 138, 255}, true);
-                drawRect(listX, y, 4, rowH - 6, {59, 130, 246, 255}, true);
-            }
-            // Icon folder that (bo badge chu DIR)
-            drawGridIcon("FOLDER.png", listX + 10, y + 8, 36, 36);
-            const std::string& fp = m_localSendFolderEntries[idx];
-            std::string nm = fp.substr(fp.find_last_of('/') + 1);
-            if ((int)nm.size() > 26) nm = nm.substr(0, 25) + "..";
-            drawText(nm, listX + 56, y + 12,
-                     sel ? SDL_Color{255, 255, 255, 255}
-                         : SDL_Color{203, 213, 225, 255},
-                     m_fontMedium, false);
-        }
+        drawText("(Thư mục trống)", px + paneW / 2, listTop + 60, {100, 116, 139, 255}, m_fontMedium, true);
     }
 
-    // Cot phai: thong tin + nut thao tac (flat, tone xanh)
-    int rightX = leftX + leftW + 16;
-    int rightW = 1024 - rightX - 24;
-    int rightY = leftY;
-    int rightH = leftH;
-    drawRect(rightX, rightY, rightW, rightH, {15, 23, 42, 255}, true);
-    std::string folderName = m_localSendFolderCurrentPath.substr(
-        m_localSendFolderCurrentPath.find_last_of('/') + 1);
-    if (folderName.empty()) folderName = "SDCARD";
-    if ((int)folderName.size() > 18) folderName = folderName.substr(0, 17) + "..";
-    drawText(folderName, rightX + 16, rightY + 16,
-             {255, 255, 255, 255}, m_fontLarge, false);
-    drawText("Directory", rightX + 16, rightY + 56,
-             {148, 163, 184, 255}, m_fontSmall, false);
-    drawText(std::to_string(total) + " thư mục con", rightX + 16, rightY + 84,
-             {148, 163, 184, 255}, m_fontSmall, false);
-    // Hop goi y thao tac
-    drawRect(rightX + 16, rightY + 124, rightW - 32, 120, {29, 78, 216, 255}, true);
-    drawText("Y: thư mục mới", rightX + rightW / 2, rightY + 138,
-             {255, 255, 255, 255}, m_fontSmall, true);
-    drawText("START: đổi tên", rightX + rightW / 2, rightY + 164,
-             {255, 255, 255, 255}, m_fontSmall, true);
-    drawText("X: chọn làm đích", rightX + rightW / 2, rightY + 190,
-             {219, 234, 254, 255}, m_fontSmall, true);
-    // Nut Xac nhan (focus phai)
-    {
-        bool focusBtn = (m_localSendFolderFocus == 1);
-        SDL_Color bg = focusBtn ? SDL_Color{22, 163, 74, 255} : SDL_Color{20, 83, 45, 255};
-        drawRect(rightX + 16, rightY + rightH - 76, rightW - 32, 56, bg, true);
-        if (focusBtn) drawBorder(rightX + 16, rightY + rightH - 76, rightW - 32, 56,
-                                 {134, 239, 172, 255}, 2);
-        drawInlineHintsCentered("[A] Chọn thư mục này", rightX + rightW / 2,
-                                rightY + rightH - 62, {255, 255, 255, 255},
-                                m_fontMedium, 26, 6);
-    }
-
-    // Footer: icon nut that + label, dong nhat UI
-    drawRect(0, 715, 1024, 53, {15, 23, 42, 255}, true);
-    drawRect(0, 715, 1024, 1, {30, 41, 59, 255}, true);
-    drawAppFooter({{UiTheme::PadBtn::B, "Lùi"}, {UiTheme::PadBtn::X, "Chọn đích"}, {UiTheme::PadBtn::Y, "Thư mục mới"}, {UiTheme::PadBtn::START, "Đổi tên"}});
+    // Footer
+    drawRect(0, 715, 1024, 53, {18, 22, 30, 255}, true);
+    drawRect(0, 715, 1024, 1, {40, 48, 62, 255}, true);
+    drawAppFooter({{UiTheme::PadBtn::A, "Vào"},
+                   {UiTheme::PadBtn::START, "Xác nhận mục lưu"},
+                   {UiTheme::PadBtn::B, "Lùi"},
+                   {UiTheme::PadBtn::Y, "Thư mục mới"}});
 }
+
 void UIManager::renderLocalSendSendPicker() {
     drawText("GỬI FILE ĐẾN THIẾT BỊ", 512, 50, {255, 255, 255, 255}, m_fontTitle, true);
     drawText("Tính năng đang phát triển — CLI script sẵn:", 512, 102, {148, 163, 184, 255}, m_fontMedium, true);
@@ -5348,8 +5040,13 @@ void UIManager::renderLocalSendGamePicker() {
 
     // (Apps picker đã tạm ẩn — không quét /Apps ở màn SEND.)
 
-    // ---- Title (Apps tab tạm ẩn: chỉ ROMs) ----
-    drawText("CHỌN ROM ĐỂ GỬI", 512, 50, {255, 255, 255, 255}, m_fontTitle, true);
+    drawAppBackground();
+
+    // Header 0..64 borderless
+    drawRect(0, 0, 1024, 64, {15, 23, 42, 255}, true);
+    drawRect(0, 64, 1024, 1, {30, 41, 59, 255}, true);
+    drawGridIcon("FILES.png", 16, 14, 36, 36);
+    drawText("CHỌN ROM ĐỂ GỬI", 62, 16, {255, 255, 255, 255}, m_fontLarge, false);
 
     auto devices = LocalSendManager::instance().knownDevices();
     std::string sub = "Gửi tới: ";
@@ -5359,29 +5056,28 @@ void UIManager::renderLocalSendGamePicker() {
     } else {
         sub += "(chưa chọn thiết bị)";
     }
-    drawText(sub, 512, 102, {148, 163, 184, 255}, m_fontMedium, true);
+    drawTextRight(sub, 1000, 22, {0, 180, 216, 255}, m_fontMedium ? m_fontMedium : m_fontSmall);
 
-    int dlgX = 60, dlgY = 150, dlgW = 904, dlgH = 544;
-    drawRoundedRect(dlgX, dlgY, dlgW, dlgH, UiTheme::RADIUS_MODAL, SDL_Color{15, 23, 42, 220}, true);
-
-    {
-        int n = (int)m_lsRomList.size();
-        if (n == 0) {
-            drawText("Chưa có game LOCAL nào trên thẻ nhớ.",
-                     dlgX + dlgW/2, dlgY + dlgH/2 - 20,
-                     {148, 163, 184, 255}, m_fontLarge, true);
-            drawText("Bấm Y để làm mới sau khi quét ROM",
-                     dlgX + dlgW/2, dlgY + dlgH/2 + 20,
-                     {100, 116, 139, 255}, m_fontSmall, true);
-        } else {
-            renderLsRomsList(dlgX, dlgY, dlgW, dlgH);
-        }
+    const int px = 24, listY = 74, paneW = 976, paneH = 630;
+    int n = (int)m_lsRomList.size();
+    if (n == 0) {
+        drawText("Chưa có game LOCAL nào trên thẻ nhớ.",
+                 px + paneW / 2, listY + 220, {148, 163, 184, 255}, m_fontLarge, true);
+        drawText("Bấm Y để làm mới sau khi quét ROM",
+                 px + paneW / 2, listY + 265, {100, 116, 139, 255}, m_fontSmall, true);
+    } else {
+        renderLsRomsList(px, listY, paneW, paneH);
     }
 
-    drawAppFooter({{UiTheme::PadBtn::A, "Trang"}, {UiTheme::PadBtn::Y, "Tải lại"}});
+    // Footer 715..768 borderless
+    drawRect(0, 715, 1024, 53, {18, 22, 30, 255}, true);
+    drawRect(0, 715, 1024, 1, {40, 48, 62, 255}, true);
+    drawAppFooter({{UiTheme::PadBtn::A, "Gửi file"},
+                   {UiTheme::PadBtn::B, "Quay lại"},
+                   {UiTheme::PadBtn::Y, "Tải lại"}});
 }
 
-void UIManager::renderLsProgressRow(bool isSend, int idx, int x, int y, int w, bool sel) { m_dialogs.renderLsRow(m_ui, m_fontSmall, isSend, idx, x, y, w, sel); }
+void UIManager::renderLsProgressRow(bool isSend, int idx, int x, int y, int w, bool sel) { m_dialogs.renderLsRow(m_ui, m_fontSmall, m_fontMedium, isSend, idx, x, y, w, sel); }
 
 void UIManager::renderLocalSendProgress() { m_dialogs.renderLocalSendProgress(m_ui, m_fontSmall, m_fontMedium, m_fontLarge, m_fontTitle, m_localSendProgressSel, m_localSendProgressScroll); }
 
@@ -5389,10 +5085,10 @@ void UIManager::renderLocalSendProgress() { m_dialogs.renderLocalSendProgress(m_
 void UIManager::renderLsRomsList(int dlgX, int dlgY, int dlgW, int dlgH) {
     int n = (int)m_lsRomList.size();
     if (n == 0) return;
-    const int headerH = 22;
-    const int itemH = 60;
-    const int padding = 12;
-    const int pageSize = 5;
+    const int headerH = 26;
+    const int itemH = 68;
+    const int padding = 4;
+    const int pageSize = 6;
     int availH = dlgH - 2 * padding;
     auto drawnRowsFrom = [&](int startIdx) -> int {
         int rows = 0;
@@ -5428,25 +5124,43 @@ void UIManager::renderLsRomsList(int dlgX, int dlgY, int dlgW, int dlgH) {
         if (y + need > dlgY + dlgH - 8) break;
         if (firstRow || e.systemDir != curSys) {
             curSys = e.systemDir;
-            drawText(curSys.empty() ? "ROMS" : curSys, dlgX + padding, y + 2, {16, 185, 129, 255}, m_fontSmall);
+            drawText(curSys.empty() ? "ROMS" : curSys, dlgX + 8, y + 2, {0, 180, 216, 255}, m_fontSmall);
             y += headerH;
         }
         firstRow = false;
         bool sel = (i == m_lsRomSelected);
-        int itemX = dlgX + padding;
-        int itemW = dlgW - 2 * padding;
-        if (sel) drawRoundedRect(itemX, y, itemW, itemH, UiTheme::RADIUS_ROW, {16, 185, 129, 255}, true);
-        else drawRoundedRect(itemX, y, itemW, itemH, UiTheme::RADIUS_ROW, {30, 41, 59, 255}, true);
-        int tx = itemX + 14;
-        int ty = y + 5;
-        SDL_Color titleC = sel ? SDL_Color{6, 40, 28, 255} : SDL_Color{241, 245, 249, 255};
-        SDL_Color metaC = sel ? SDL_Color{6, 60, 40, 255} : SDL_Color{148, 163, 184, 255};
-        std::string title = e.name;
-        if ((int)title.size() > 42) title = title.substr(0, 40) + "..";
-        drawText(title, tx, ty, titleC, m_fontSmall);
-        std::string meta = curSys + "  |  " + FileSystemManager::instance().formatBytes(e.sizeBytes);
-        drawText(meta, tx, ty + 26, metaC, m_fontSmall);
-        y += itemH;
+        int itemX = dlgX;
+        int itemW = dlgW;
+        if (sel) {
+            drawFocusRow(itemX, y, itemW, itemH);
+        } else {
+            drawRoundedRect(itemX, y, itemW, itemH, UiTheme::RADIUS_ROW, UiTheme::ROW_BG, true);
+            drawRoundedBorder(itemX, y, itemW, itemH, UiTheme::RADIUS_ROW, UiTheme::CARD_BORDER, 1);
+        }
+
+        std::string badgeText = e.systemDir.empty() ? "ROM" : e.systemDir;
+        if (badgeText.size() > 8) badgeText = badgeText.substr(0, 8);
+        drawBadge(itemX + 14, y + (itemH - 32) / 2, 72, 32, badgeText,
+                  sel ? SDL_Color{30, 58, 138, 255} : SDL_Color{30, 41, 59, 255},
+                  {255, 255, 255, 255});
+
+        int tx = itemX + 98;
+        SDL_Color titleC = sel ? SDL_Color{255, 255, 255, 255} : SDL_Color{226, 232, 240, 255};
+        SDL_Color metaC = sel ? SDL_Color{200, 225, 245, 255} : SDL_Color{148, 163, 184, 255};
+
+        std::string sizeStr = FileSystemManager::instance().formatBytes(e.sizeBytes);
+        drawTextRight(sizeStr, itemX + itemW - 18, y + 24, metaC, m_fontSmall);
+
+        int maxTitleW = itemW - 120 - textWidth(sizeStr, m_fontSmall) - 24;
+        if (maxTitleW < 200) maxTitleW = 200;
+        std::string title = truncateToWidth(e.name, m_fontMedium ? m_fontMedium : m_fontSmall, maxTitleW);
+        drawText(title, tx, y + 12, titleC, m_fontMedium ? m_fontMedium : m_fontSmall);
+
+        std::string meta = e.systemDir + "  •  " + e.path;
+        std::string truncMeta = truncateToWidth(meta, m_fontSmall, maxTitleW);
+        drawText(truncMeta, tx, y + 38, metaC, m_fontSmall);
+
+        y += itemH + 6;
     }
     int totalPages = (n + pageSize - 1) / pageSize;
     int curPage = (m_lsRomSelected / pageSize) + 1;

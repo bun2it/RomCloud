@@ -78,8 +78,8 @@ void DialogManager::renderConfirm(UiRenderer& ui, TTF_Font* fSmall, TTF_Font* fM
         y += (i == 0 ? 38 : 30);
         if (y > dlgY + dlgH - 90) break;
     }
-    ui.drawBadge(dlgX + 60, dlgY + dlgH - 70, 240, 50, UiStrings::MULTI_BATCH_DELETE_CONFIRM, {185, 28, 28, 255}, {255, 255, 255, 255});
-    ui.drawBadge(dlgX + dlgW - 300, dlgY + dlgH - 70, 240, 50, UiStrings::BTN_CANCEL_DELETE, {55, 65, 81, 255}, {255, 255, 255, 255});
+    ui.drawBadge(dlgX + 60, dlgY + dlgH - 70, 240, 50, confirm.okLabel, {185, 28, 28, 255}, {255, 255, 255, 255});
+    ui.drawBadge(dlgX + dlgW - 300, dlgY + dlgH - 70, 240, 50, confirm.cancelLabel, {55, 65, 81, 255}, {255, 255, 255, 255});
 }
 void DialogManager::renderSyncOverlay(UiRenderer& ui, TTF_Font* fSmall, TTF_Font* fMedium, TTF_Font* fLarge) {
     if (!DriveSyncEngine::instance().isSyncing()) return;
@@ -161,17 +161,23 @@ void DialogManager::renderUploadOverlay(UiRenderer& ui, TTF_Font* fSmall) {
     ui.drawText(text, bannerX + bannerW / 2, bannerY + 10, {200, 210, 225, 255}, fSmall, true);
 }
 
-void DialogManager::renderLsRow(UiRenderer& ui, TTF_Font* fSmall,
+void DialogManager::renderLsRow(UiRenderer& ui, TTF_Font* fSmall, TTF_Font* fMedium,
                                 bool isSend, int idx, int x, int y, int w, bool sel) {
-    ui.drawRoundedRect(x, y, w, 110, UiTheme::RADIUS_ROW,
-                    sel ? SDL_Color{16, 185, 129, 255} : SDL_Color{30, 41, 59, 255}, true);
-    SDL_Color titleC = sel ? SDL_Color{6, 40, 28, 255} : SDL_Color{241, 245, 249, 255};
-    SDL_Color metaC  = sel ? SDL_Color{6, 60, 40, 255}  : SDL_Color{148, 163, 184, 255};
-    int tx = x + 14;
+    const int rowH = 88;
+    if (sel) {
+        ui.drawFocusRow(x, y, w, rowH);
+    } else {
+        ui.drawRoundedRect(x, y, w, rowH, UiTheme::RADIUS_ROW, UiTheme::ROW_BG, true);
+        ui.drawRoundedBorder(x, y, w, rowH, UiTheme::RADIUS_ROW, UiTheme::CARD_BORDER, 1);
+    }
+
     std::string name, pathVal, peer, status;
     uint64_t done = 0, tot = 0;
     uint32_t bps = 0;
-    SDL_Color statusC = metaC;
+    SDL_Color statusC = {148, 163, 184, 255};
+    bool isDone = false;
+    bool isFailed = false;
+
     if (isSend) {
         auto v = LocalSendManager::instance().sendProgresses();
         if (idx < 0 || idx >= (int)v.size()) return;
@@ -179,12 +185,18 @@ void DialogManager::renderLsRow(UiRenderer& ui, TTF_Font* fSmall,
         name = s.fileName; pathVal = s.absPath;
         peer = s.toAlias.empty() ? s.toIp : s.toAlias;
         done = s.sentBytes; tot = s.totalBytes; bps = s.bytesPerSec;
-        if (s.state == LsSendProgress::UPLOADING) { status = "Dang gui"; statusC = {96,165,250,255}; }
-        else if (s.state == LsSendProgress::DONE) { status = "HOAN THANH"; statusC = {34,197,94,255}; }
-        else if (s.state == LsSendProgress::FAILED) { status = "LOI"; statusC = {239,68,68,255}; }
-        else if (s.state == LsSendProgress::NEGOTIATING) { status = "Dang dam phan"; statusC = {250,204,21,255}; }
-        else status = "Cho gui";
-        ui.drawBadge(tx, y + 8, 70, 24, "GUI", {37, 99, 235, 255}, {255, 255, 255, 255});
+        if (s.state == LsSendProgress::UPLOADING) {
+            status = "Đang gửi..."; statusC = {0, 180, 216, 255};
+        } else if (s.state == LsSendProgress::DONE) {
+            status = "Hoàn thành"; statusC = {34, 197, 94, 255}; isDone = true;
+        } else if (s.state == LsSendProgress::FAILED) {
+            status = "Thất bại"; statusC = {239, 68, 68, 255}; isFailed = true;
+        } else if (s.state == LsSendProgress::NEGOTIATING) {
+            status = "Đang đàm phán..."; statusC = {250, 204, 21, 255};
+        } else {
+            status = "Chờ gửi..."; statusC = {148, 163, 184, 255};
+        }
+        ui.drawBadge(x + 16, y + (rowH - 34) / 2, 72, 34, "GỬI", {30, 58, 138, 255}, {255, 255, 255, 255});
     } else {
         auto v = LocalSendManager::instance().receiveProgresses();
         if (idx < 0 || idx >= (int)v.size()) return;
@@ -192,60 +204,110 @@ void DialogManager::renderLsRow(UiRenderer& ui, TTF_Font* fSmall,
         name = r.file.fileName; pathVal = r.savedPath;
         peer = r.fromAlias.empty() ? r.fromIp : r.fromAlias;
         done = r.receivedBytes; tot = r.file.size; bps = r.bytesPerSec;
-        if (r.state == LsUploadRequest::RECEIVING) { status = "Dang nhan"; statusC = {96,165,250,255}; }
-        else if (r.state == LsUploadRequest::DONE) { status = "HOAN THANH"; statusC = {34,197,94,255}; }
-        else if (r.state == LsUploadRequest::FAILED || r.state == LsUploadRequest::REJECTED) { status = "LOI/Tu choi"; statusC = {239,68,68,255}; }
-        else status = "Cho duyet";
-        ui.drawBadge(tx, y + 8, 70, 24, "NHAN", {16, 185, 129, 255}, {6, 40, 28, 255});
+        if (r.state == LsUploadRequest::RECEIVING) {
+            status = "Đang nhận..."; statusC = {0, 180, 216, 255};
+        } else if (r.state == LsUploadRequest::DONE) {
+            status = "Hoàn thành"; statusC = {34, 197, 94, 255}; isDone = true;
+        } else if (r.state == LsUploadRequest::FAILED || r.state == LsUploadRequest::REJECTED) {
+            status = (r.state == LsUploadRequest::REJECTED) ? "Bị từ chối" : "Thất bại";
+            statusC = {239, 68, 68, 255}; isFailed = true;
+        } else if (r.state == LsUploadRequest::PENDING) {
+            status = "Chờ duyệt"; statusC = {250, 204, 21, 255};
+        } else {
+            status = "Đã chấp nhận"; statusC = {34, 197, 94, 255};
+        }
+        ui.drawBadge(x + 16, y + (rowH - 34) / 2, 72, 34, "NHẬN", {22, 101, 52, 255}, {255, 255, 255, 255});
     }
-    std::string title = name.size() > 44 ? name.substr(0, 42) + ".." : name;
-    ui.drawText(title, tx + 80, y + 8, titleC, fSmall, false);
-    ui.drawText(peer, x + w - 14, y + 10, metaC, fSmall, true);
-    std::string pv = pathVal.size() > 72 ? std::string("...") + pathVal.substr(pathVal.size() - 69) : pathVal;
-    ui.drawText((isSend ? "Nguon: " : "Luu: ") + pv, tx, y + 34, metaC, fSmall, false);
-    double frac = tot == 0 ? 0 : (double)done / (double)tot;
-    drawBar(ui, tx, y + 58, w - 28, 14, frac, SDL_Color{59, 130, 246, 255}, true, SDL_Color{15, 23, 42, 255});
-    char info[160];
-    snprintf(info, sizeof(info), "%d%%  %s / %s  %s  %s",
+
+    int contentX = x + 102;
+    int contentW = w - 120;
+
+    // Line 1: Title and Peer
+    std::string peerDisp = (isSend ? "Đích: " : "Nguồn: ") + peer;
+    int peerW = ui.textWidth(peerDisp, fSmall);
+    ui.drawTextRight(peerDisp, x + w - 18, y + 10, {148, 163, 184, 255}, fSmall);
+
+    TTF_Font* titleFont = fMedium ? fMedium : fSmall;
+    int maxTitleW = contentW - peerW - 24;
+    if (maxTitleW < 220) maxTitleW = 220;
+    std::string dispTitle = ui.truncateToWidth(name, titleFont, maxTitleW);
+    ui.drawText(dispTitle, contentX, y + 8, {255, 255, 255, 255}, titleFont, false);
+
+    // Line 2: Rounded Progress bar
+    int barY = y + 42;
+    int barH = 6;
+    double frac = (tot == 0) ? 0.0 : (double)done / (double)tot;
+    if (frac < 0.0) frac = 0.0;
+    if (frac > 1.0) frac = 1.0;
+
+    ui.drawRoundedRect(contentX, barY, contentW, barH, 3, {35, 45, 60, 255}, true);
+    SDL_Color barCol = {0, 180, 216, 255};
+    if (isDone) barCol = {34, 197, 94, 255};
+    else if (isFailed) barCol = {239, 68, 68, 255};
+    int fillW = (int)(contentW * frac);
+    if (fillW > 0) {
+        ui.drawRoundedRect(contentX, barY, std::max(fillW, 6), barH, 3, barCol, true);
+    }
+
+    // Line 3: Info & Status
+    char infoBuf[160];
+    snprintf(infoBuf, sizeof(infoBuf), "%d%%  •  %s / %s  •  %s",
              (int)(frac * 100 + 0.5), LsUtil::humanSize(done).c_str(),
-             LsUtil::humanSize(tot).c_str(), LsUtil::humanSpeed(bps).c_str(), status.c_str());
-    ui.drawText(info, tx, y + 76, statusC, fSmall, false);
+             LsUtil::humanSize(tot).c_str(), LsUtil::humanSpeed(bps).c_str());
+    ui.drawText(infoBuf, contentX, y + 56, {180, 190, 205, 255}, fSmall, false);
+    ui.drawTextRight(status, x + w - 18, y + 56, statusC, fSmall);
 }
 
 void DialogManager::renderLocalSendProgress(UiRenderer& ui, TTF_Font* fSmall, TTF_Font* fMedium,
                                             TTF_Font* fLarge, TTF_Font* fTitle,
                                             int& sel, int& scroll) {
+    ui.drawAppBackground();
+
+    // Header 0..64 borderless
+    ui.drawRect(0, 0, 1024, 64, {15, 23, 42, 255}, true);
+    ui.drawRect(0, 64, 1024, 1, {30, 41, 59, 255}, true);
+    ui.drawGridIcon("FILES.png", 16, 14, 36, 36);
+    ui.drawText("TRUYỀN FILE", 62, 16, {255, 255, 255, 255}, fLarge ? fLarge : fTitle, false);
+
     auto sends = LocalSendManager::instance().sendProgresses();
     auto recvs = LocalSendManager::instance().receiveProgresses();
     int ns = (int)sends.size(), nr = (int)recvs.size();
     int total = ns + nr;
-    ui.drawText("TRUYEN FILE", 512, 36, {255, 255, 255, 255}, fTitle, true);
-    char sub[128]; snprintf(sub, sizeof(sub), "Gui: %d | Nhan: %d", ns, nr);
-    ui.drawText(sub, 512, 78, {148, 163, 184, 255}, fMedium, true);
-    int dlgX = 60, dlgY = 112, dlgW = 904, dlgH = 556;
-    ui.drawRoundedRect(dlgX, dlgY, dlgW, dlgH, UiTheme::RADIUS_MODAL, SDL_Color{15, 23, 42, 220}, true);
+
+    char sub[128];
+    snprintf(sub, sizeof(sub), "Gửi: %d  |  Nhận: %d", ns, nr);
+    ui.drawTextRight(sub, 1024 - 24, 22, {0, 180, 216, 255}, fMedium ? fMedium : fSmall);
+
+    // List area: 24..1000 (w=976), listY=74, listH=630
+    const int px = 24, listY = 74, paneW = 976;
+    const int rowH = 88, rowGap = 10;
+    const int visibleRows = 6;
+
     if (total <= 0) {
-        ui.drawText("Chua co tac vu gui/nhan.", dlgX + dlgW/2, dlgY + 200, {148,163,184,255}, fLarge, true);
-        ui.drawText("Chon ROM + A de gui, hoac cho may khac gui toi.", dlgX + dlgW/2, dlgY + 250, {100,116,139,255}, fSmall, true);
+        ui.drawText("Chưa có tác vụ truyền file nào.", px + paneW / 2, listY + 220,
+                    {148, 163, 184, 255}, fLarge ? fLarge : fMedium, true);
+        ui.drawText("Chọn ROM để gửi, hoặc chờ thiết bị khác gửi file đến.",
+                    px + paneW / 2, listY + 265, {100, 116, 139, 255}, fSmall, true);
     } else {
         if (sel >= total) sel = total - 1;
         if (sel < 0) sel = 0;
-        const int rowH = 118, pad = 12;
-        int vis = std::max(1, (dlgH - pad*2) / rowH);
         if (sel < scroll) scroll = sel;
-        if (sel >= scroll + vis) scroll = sel - vis + 1;
-        int y = dlgY + pad;
-        for (int i = scroll; i < total && y + 110 <= dlgY + dlgH - 4; ++i) {
-            bool isS = i < ns;
-            renderLsRow(ui, fSmall, isS, isS ? i : i - ns, dlgX + pad, y, dlgW - pad*2, i == sel);
-            y += rowH;
+        if (sel >= scroll + visibleRows) scroll = sel - visibleRows + 1;
+
+        for (int i = 0; i < visibleRows && scroll + i < total; ++i) {
+            int idx = scroll + i;
+            int y = listY + i * (rowH + rowGap);
+            bool isS = idx < ns;
+            renderLsRow(ui, fSmall, fMedium, isS, isS ? idx : idx - ns, px, y, paneW, idx == sel);
         }
     }
-    bool allDone = total > 0;
-    for (auto& s : sends) if (s.state != LsSendProgress::DONE && s.state != LsSendProgress::FAILED) allDone = false;
-    if (allDone) for (auto& r : recvs) if (r.state != LsUploadRequest::DONE && r.state != LsUploadRequest::FAILED && r.state != LsUploadRequest::REJECTED) allDone = false;
-    if (allDone) ui.drawText("Xong! A/B ve Home (tu ve sau 3s).", dlgX + dlgW/2, dlgY + dlgH - 20, {34,197,94,255}, fSmall, true);
-    ui.drawAppFooter({{UiTheme::PadBtn::UPDOWN, "Chon"}, {UiTheme::PadBtn::AB, "Lui"}});
+
+    // Footer 715..768 borderless
+    ui.drawRect(0, 715, 1024, 53, {18, 22, 30, 255}, true);
+    ui.drawRect(0, 715, 1024, 1, {40, 48, 62, 255}, true);
+    ui.drawAppFooter({{UiTheme::PadBtn::DPAD, "Chọn tác vụ"},
+                      {UiTheme::PadBtn::B, "Quay lại"},
+                      {UiTheme::PadBtn::Y, "Xóa đã xong/lỗi"}});
 }
 
 void DialogManager::renderGlobalOverlays(UiRenderer& ui, TTF_Font* fSmall, TTF_Font* fMedium, TTF_Font* fLarge) {
