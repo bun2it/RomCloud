@@ -7,6 +7,10 @@ cd "$SCRIPT_DIR"
 ZIG=""
 if command -v zig &>/dev/null; then
     ZIG="zig"
+elif [ -f "C:/Users/Tai/zig013/zig-windows-x86_64-0.13.0/zig.exe" ]; then
+    ZIG="C:/Users/Tai/zig013/zig-windows-x86_64-0.13.0/zig.exe"
+elif [ -f "C:/zig/zig.exe" ]; then
+    ZIG="C:/zig/zig.exe"
 elif [ -f "/Users/tai/.gemini/antigravity-ide/brain/00d3b56c-d55c-4262-81a8-0cf5fe35825f/tools/zig-macos-aarch64-0.13.0/zig" ]; then
     ZIG="/Users/tai/.gemini/antigravity-ide/brain/00d3b56c-d55c-4262-81a8-0cf5fe35825f/tools/zig-macos-aarch64-0.13.0/zig"
 fi
@@ -35,6 +39,7 @@ $ZIG c++ \
     src/ui/ExplorerInput.cpp \
     src/ui/ExplorerRender.cpp \
     src/ui/ExplorerRenderKb.cpp \
+    src/ui/DialogManager.cpp \
     src/ui/CoverManager.cpp \
     src/ui/BoxartScraper.cpp \
     src/ui/QrRenderer.cpp \
@@ -51,7 +56,6 @@ $ZIG c++ \
     src/logging/Logger.cpp \
     src/logging/IssueLogger.cpp \
     src/iptv/IPTVManager.cpp \
-    src/iptv/TikTokManager.cpp \
     src/media/MpvPlayer.cpp \
     src/config/AppConfig.cpp \
     src/database/DatabaseManager.cpp \

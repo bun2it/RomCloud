@@ -175,10 +175,13 @@ pacman -S mingw-w64-x86_64-SDL2 mingw-w64-x86_64-SDL2_image mingw-w64-x86_64-SDL
 | ESC | B (Lùi) |
 | X | X button |
 | Y | Y button |
-| Q | L1 |
-| E | R1 |
+| Q / PageUp | L1 |
+| E / PageDown | R1 |
+| 1 / Z | L2 |
+| 2 / C | R2 |
 | TAB | SELECT |
 | F1 | START |
+| Home | MENU (Thoát) |
 
 ## Verification
 

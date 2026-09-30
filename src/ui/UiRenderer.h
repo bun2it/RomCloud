@@ -13,6 +13,7 @@
 
 #include "UiTheme.h"
 #include "ImageCache.h"
+#include "VirtualKeyboard.h"
 
 namespace RomCloud {
 
@@ -82,6 +83,15 @@ public:
     void drawPadIcon(UiTheme::PadBtn btn, int x, int y, int size);
     void drawAppFooter(const std::vector<UiTheme::FooterHint>& hints);
     void beginModalDim();
+
+    // ---- virtual keyboard chung (P0-2: gom 6 ban phim ve tay) ----
+    // Ve 4 hang phim QWERTY (VirtualKeyboard::lower/upperRows) + hang action 5 o.
+    // actionLabels: 5 nhan (vd {"Thường","TELEX","Cách","Xóa","Tìm"}); withIcons: ve icon nut L1/R1/X/Y/START.
+    // actionStride: 1 = col 0..4 (Explorer/LsFolder/VirtualKeyboard::move), 2 = col 0..9 kieu YT/TT cu (col/2).
+    void drawVirtualKeyboard(const VkState& vk, int x, int y, int cellW, int cellH,
+                             int gapX, int gapY, SDL_Color accent, SDL_Color accentEdge,
+                             const char* actionLabels[5], bool withIcons, bool rounded = true,
+                             int actionStride = 1);
 
     void clearTextCache();
     // P2-2: cache anh LRU dung chung (logo/icon/button/thumb/cover).

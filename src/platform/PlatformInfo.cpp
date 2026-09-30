@@ -4,15 +4,18 @@
 #include "../logging/Logger.h"
 #include "../ota/UpdateManager.h"
 
-#include <sys/utsname.h>
 #include <fstream>
 #include <sstream>
 #include <cstring>
+#include <sqlite3.h>
+
+#ifndef _WIN32
+#include <sys/utsname.h>
 #include <unistd.h>
 #include <net/if.h>
 #include <sys/ioctl.h>
 #include <arpa/inet.h>
-#include <sqlite3.h>
+#endif
 
 namespace RomCloud {
 
@@ -165,6 +168,7 @@ int PlatformInfo::scaleH(int h) {
 }
 
 std::string PlatformInfo::getIpAddress(const std::string& interfaceName) {
+#ifndef _WIN32
     int fd = socket(AF_INET, SOCK_DGRAM, 0);
     if (fd < 0) return "Disconnected";
 
@@ -181,11 +185,15 @@ std::string PlatformInfo::getIpAddress(const std::string& interfaceName) {
     close(fd);
     struct sockaddr_in* ipaddr = (struct sockaddr_in*)&ifr.ifr_addr;
     return std::string(inet_ntoa(ipaddr->sin_addr));
+#else
+    (void)interfaceName;
+    return "127.0.0.1";
+#endif
 }
 
 bool PlatformInfo::isNetworkConnected() {
     std::string ip = getIpAddress("wlan0");
-    return (ip != "Disconnected" && ip != "127.0.0.1" && !ip.empty());
+    return (ip != "Disconnected" && !ip.empty());
 }
 
 SystemDiagnostics PlatformInfo::getDiagnostics() {
@@ -193,6 +201,7 @@ SystemDiagnostics PlatformInfo::getDiagnostics() {
     diag.appVersion = std::string(APP_VERSION);
     diag.buildDate = __DATE__ " " __TIME__;
 
+#ifndef _WIN32
     struct utsname uts;
     if (uname(&uts) == 0) {
         diag.osName = uts.sysname;
@@ -203,6 +212,11 @@ SystemDiagnostics PlatformInfo::getDiagnostics() {
         diag.kernelRelease = "Unknown";
         diag.cpuArch = "aarch64";
     }
+#else
+    diag.osName = "Windows (PC Simulator)";
+    diag.kernelRelease = "PC";
+    diag.cpuArch = "x86_64";
+#endif
 
     // SOC name based on device type
     switch (m_deviceType) {

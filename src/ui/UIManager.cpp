@@ -46,10 +46,8 @@ void UIManager::initGridMenu() {
         {"games", "THƯ VIỆN GAME", "GAMES.png", "Danh sách ROM"},
         {"iptv", "XEM TV", "TV.png", "Kênh TV online"},
         {"youtube", "YOUTUBE", "YOUTUBE.png", "YouTube"},
-        {"tiktok", "TIKTOK", "TIKTOK.png", "TikTok"},
         {"localsend", "LOCAL SEND", "LOCALSEND.png", "Chia se P2P trong LAN"},
         {"explorer", "FILE EXPLORER", "FOLDER.png", "Duyet file SD"},
-        {"sync", "ĐỒNG BỘ", "SYNC.png", "Đồng bộ Google Drive"},
         {"upload", "TẢI LÊN", "UPLOAD.png", "Upload lên Drive"},
         {"ota", "CẬP NHẬT", "OTA.png", "Cập nhật OTA"},
         {"settings", "CÀI ĐẶT", "SETTINGS.png", "Cấu hình"},
@@ -165,10 +163,6 @@ void UIManager::setState(UIState state) {
         loadYouTubeHistory();
         m_ytFocusInTags = false;
         m_ytSelectedTagIndex = 0;
-    } else if (state == UIState::TIKTOK_SEARCH) {
-        initTikTokTags();
-        m_ttFocusInTags = false;
-        m_ttSelectedTagIndex = 0;
     } else if (state == UIState::CONFIRM_DELETE) {
         openConfirmDeleteDialog();
     } else if (state == UIState::CONFIRM_BATCH_DELETE) {
@@ -337,59 +331,6 @@ void UIManager::update() {
         }
     }
 
-    // Check if TikTok search finished
-    if (m_ttSearchFinished.exchange(false)) {
-        m_ttIsSearching = false;
-        if (!m_ttSearchResults.empty()) {
-            std::vector<TikTokVideo> feed;
-            for (const auto& item : m_ttSearchResults) {
-                size_t p1 = item.find('|');
-                size_t p2 = (p1 != std::string::npos) ? item.find('|', p1 + 1) : std::string::npos;
-                size_t p3 = (p2 != std::string::npos) ? item.find('|', p2 + 1) : std::string::npos;
-                if (p1 != std::string::npos && p2 != std::string::npos && p3 != std::string::npos) {
-                    TikTokVideo v;
-                    v.id = item.substr(0, p1);
-                    v.title = item.substr(p1 + 1, p2 - p1 - 1);
-                    v.author = item.substr(p2 + 1, p3 - p2 - 1);
-                    v.playUrl = item.substr(p3 + 1);
-                    if (!v.playUrl.empty()) feed.push_back(v);
-                }
-            }
-
-            if (!feed.empty()) {
-                IPTVManager::instance().playTikTokFeed(feed, 0, m_ttLastSearchQuery);
-                setState(UIState::TIKTOK_SEARCH);
-            } else {
-                showToast("Không tìm thấy link phát TikTok", {239, 68, 68, 255}, 3000);
-            }
-        } else {
-            if (m_currentState == UIState::TIKTOK_SEARCH) {
-                std::string msg = m_ttErrorMessage.empty() ? "Không tìm thấy video nào" : m_ttErrorMessage;
-                showToast(msg, {245, 158, 11, 255}, 3500);
-            }
-        }
-    }
-
-    // Check if TikTok single video stream resolution finished
-    if (m_ttVideoReady.exchange(false)) {
-        m_ttIsLoadingVideo = false;
-        if (!m_ttPendingStreamUrl.empty()) {
-            TikTokVideo v;
-            v.id = m_ttPendingVideoId;
-            v.title = m_ttPendingTitle;
-            v.author = "TikTok";
-            v.playUrl = m_ttPendingStreamUrl;
-            m_ttPendingStreamUrl.clear();
-            m_ttPendingVideoId.clear();
-            m_ttPendingTitle.clear();
-            std::vector<TikTokVideo> singleFeed = { v };
-            IPTVManager::instance().playTikTokFeed(singleFeed, 0, "Video");
-            setState(UIState::TIKTOK_SEARCH);
-        } else {
-            showToast("Không thể kết nối luồng phát video", {239, 68, 68, 255}, 3000);
-        }
-    }
-
     static AuthState lastAuthState = AuthManager::instance().getState();
     AuthState curAuthState = AuthManager::instance().getState();
     if (curAuthState == AuthState::LINKED && lastAuthState != AuthState::LINKED) {
@@ -416,14 +357,13 @@ void UIManager::update() {
                 }
             } else if (input.isButtonJustPressed(Button::START)) {
                 setState(UIState::SETTINGS);
-            } else if (input.isButtonJustPressed(Button::SELECT)) {
-                triggerManualSync();
             } else if (input.isButtonJustPressed(Button::A)) {
                 // Handle menu selection based on id
                 std::string selectedId = m_gridMenuItems[m_selectedMenuIndex].id;
 
                 if (selectedId == "games") {
                     setState(UIState::SYSTEM_SELECT);
+                    triggerManualSync();
                 } else if (selectedId == "iptv") {
                     if (IPTVManager::instance().playlistCount() == 0) {
                         IPTVManager::instance().loadPlaylists();
@@ -440,13 +380,11 @@ void UIManager::update() {
                         setState(UIState::IPTV_LIST);
                     }
                 } else if (selectedId == "youtube") {
-                    m_ytVk.query.clear();
+                    VirtualKeyboard::reset(m_ytVk, true);
+                    m_ytVk.charset = 1;
                     m_ytSearchResults.clear();
                     m_ytSearchSelectedIndex = 0;
                     m_ytSearchScrollOffset = 0;
-                    m_ytVk.row = 0;
-                    m_ytVk.col = 0;
-                    m_ytVk.inResults = false;
                     m_ytErrorMessage.clear();
                     m_ytIsSearching = false;
                     m_ytSearchFinished = false;
@@ -454,24 +392,6 @@ void UIManager::update() {
                     m_ytVideoReady = false;
                     m_ytPendingStreamUrl.clear();
                     setState(UIState::YOUTUBE_SEARCH);
-                } else if (selectedId == "tiktok") {
-                    m_ttVk.query.clear();
-                    m_ttSearchResults.clear();
-                    m_ttSearchSelectedIndex = 0;
-                    m_ttSearchScrollOffset = 0;
-                    m_ttVk.row = 0;
-                    m_ttVk.col = 0;
-                    m_ttVk.shift = false;
-                    m_ttVk.telexMode = true;
-                    m_ttErrorMessage.clear();
-                    m_ttIsSearching = false;
-                    m_ttSearchFinished = false;
-                    m_ttIsLoadingVideo = false;
-                    m_ttVideoReady = false;
-                    m_ttPendingStreamUrl.clear();
-                    m_ttPendingVideoId.clear();
-                    m_ttPendingTitle.clear();
-                    setState(UIState::TIKTOK_SEARCH);
                 } else if (selectedId == "localsend") {
                     LocalSendManager::instance().start();
                     LocalSendManager::instance().refreshDiscovery();
@@ -482,8 +402,6 @@ void UIManager::update() {
                     m_explorer.open("/mnt/SDCARD");
                     m_explorerScroll = 0;
                     setState(UIState::FILE_EXPLORER);
-                } else if (selectedId == "sync") {
-                    triggerManualSync();
                 } else if (selectedId == "upload") {
                     if (!AuthManager::instance().isLinked()) {
                         showToast(UiStrings::TOAST_CONNECT_DRIVE_FIRST, {245, 158, 11, 255});
@@ -753,14 +671,13 @@ void UIManager::update() {
                 }
 
                 if (input.isButtonJustPressed(Button::START)) {
-                    // Open on-device search
-                    m_searchVk.query.clear();
+                    // Open on-device search (unified keyboard, charset media nhu YT/IPTV)
+                    VirtualKeyboard::reset(m_searchVk, true);
+                    m_searchVk.charset = 1;
+                    m_searchVk.maxLen = 30;
                     m_searchResults.clear();
                     m_searchSelectedIndex = 0;
                     m_searchScrollOffset = 0;
-                    m_searchVk.row = 0;
-                    m_searchVk.col = 0;
-                    m_searchVk.inResults = false;
                     setState(UIState::SEARCH);
                 }
 
@@ -794,54 +711,53 @@ void UIManager::update() {
         }
 
         case UIState::SEARCH: {
-            static const char* kbRows[] = {
-                "1234567890",
-                "QWERTYUIOP",
-                "ASDFGHJKL-",
-                "ZXCVBNM<_*"  // '<' = DEL, '_' = SPACE, '*' = OK
-            };
-            static const int kbRowCount = 4;
-            static const int kbColCount = 10;
-
             if (!m_searchVk.inResults) {
-                // Navigate keyboard
+                // Unified keyboard (P0-2): giong YouTube — move/pressA stride2.
                 if (input.isButtonJustPressed(Button::UP)) {
-                    if (m_searchVk.row > 0) {
-                        m_searchVk.row--;
-                    }
+                    VirtualKeyboard::move(m_searchVk, -1, 0, true);
                 } else if (input.isButtonJustPressed(Button::DOWN)) {
-                    if (m_searchVk.row < kbRowCount - 1) {
-                        m_searchVk.row++;
-                    } else {
+                    if (m_searchVk.row == 4) {
                         // Go to results if any
                         if (!m_searchResults.empty()) {
                             m_searchVk.inResults = true;
                             m_searchSelectedIndex = 0;
                             m_searchScrollOffset = 0;
                         }
+                    } else {
+                        VirtualKeyboard::move(m_searchVk, 1, 0, true);
                     }
                 } else if (input.isButtonJustPressed(Button::LEFT)) {
-                    if (m_searchVk.col > 0) m_searchVk.col--;
-                    else m_searchVk.col = kbColCount - 1;
+                    VirtualKeyboard::move(m_searchVk, 0, -1, true);
                 } else if (input.isButtonJustPressed(Button::RIGHT)) {
-                    if (m_searchVk.col < kbColCount - 1) m_searchVk.col++;
-                    else m_searchVk.col = 0;
+                    VirtualKeyboard::move(m_searchVk, 0, 1, true);
                 } else if (input.isButtonJustPressed(Button::A)) {
-                    char ch = kbRows[m_searchVk.row][m_searchVk.col];
-                    if (ch == '<') { // Backspace
-                        if (!m_searchVk.query.empty()) m_searchVk.query.pop_back();
-                    } else if (ch == '*') { // OK
+                    VkAction act = VirtualKeyboard::pressA(m_searchVk, [this](const char* m) {
+                        showToast(m_searchVk.telexMode ? "Che do: TELEX" : "Che do: TIENG ANH (US)", {0, 180, 216, 255}, 1200);
+                    }, true);
+                    if (act == VkAction::Commit) {
                         if (!m_searchResults.empty()) {
                             m_searchVk.inResults = true;
                             m_searchSelectedIndex = 0;
                             m_searchScrollOffset = 0;
                         }
-                    } else if (ch == '_') {
-                        if (m_searchVk.query.size() < 30) m_searchVk.query += ' ';
                     } else {
-                        if (m_searchVk.query.size() < 30) m_searchVk.query += ch;
+                        // Auto-search as user types
+                        if (m_searchVk.query.length() >= 2) {
+                            m_searchResults = DatabaseManager::instance().searchAllGames(m_searchVk.query, 50);
+                        } else {
+                            m_searchResults.clear();
+                        }
+                        m_searchSelectedIndex = 0;
+                        m_searchScrollOffset = 0;
                     }
-                    // Auto-search as user types
+                } else if (input.isButtonJustPressed(Button::X)) {
+                    // Clear query
+                    m_searchVk.query.clear();
+                    m_searchResults.clear();
+                    m_searchSelectedIndex = 0;
+                    m_searchScrollOffset = 0;
+                } else if (input.isButtonJustPressed(Button::Y)) {
+                    VirtualKeyboard::backspace(m_searchVk);
                     if (m_searchVk.query.length() >= 2) {
                         m_searchResults = DatabaseManager::instance().searchAllGames(m_searchVk.query, 50);
                     } else {
@@ -849,12 +765,17 @@ void UIManager::update() {
                     }
                     m_searchSelectedIndex = 0;
                     m_searchScrollOffset = 0;
-                } else if (input.isButtonJustPressed(Button::X)) {
-                    // Clear query
-                    m_searchVk.query.clear();
-                    m_searchResults.clear();
-                    m_searchSelectedIndex = 0;
-                    m_searchScrollOffset = 0;
+                } else if (input.isButtonJustPressed(Button::L1)) {
+                    m_searchVk.shift = !m_searchVk.shift;
+                } else if (input.isButtonJustPressed(Button::R1)) {
+                    m_searchVk.telexMode = !m_searchVk.telexMode;
+                    showToast(m_searchVk.telexMode ? "Che do: TELEX" : "Che do: TIENG ANH (US)", {0, 180, 216, 255}, 1200);
+                } else if (input.isButtonJustPressed(Button::START)) {
+                    if (!m_searchResults.empty()) {
+                        m_searchVk.inResults = true;
+                        m_searchSelectedIndex = 0;
+                        m_searchScrollOffset = 0;
+                    }
                 }
             } else {
                 // Browse results
@@ -929,8 +850,19 @@ void UIManager::update() {
             }
 
             if (input.isButtonJustPressed(Button::B)) {
-                // Return to game list or menu
-                if (m_activeSystem.id > 0) {
+                if (m_searchVk.inResults) {
+                    m_searchVk.inResults = false; // ve ban phim nhu IPTV
+                } else if (!m_searchVk.query.empty()) {
+                    // Unified nhu YouTube: con chu thi xoa dan, het chu thi thoat.
+                    VirtualKeyboard::backspace(m_searchVk);
+                    if (m_searchVk.query.length() >= 2) {
+                        m_searchResults = DatabaseManager::instance().searchAllGames(m_searchVk.query, 50);
+                    } else {
+                        m_searchResults.clear();
+                    }
+                    m_searchSelectedIndex = 0;
+                    m_searchScrollOffset = 0;
+                } else if (m_activeSystem.id > 0) {
                     setState(UIState::GAME_LIST);
                 } else {
                     setState(UIState::MENU);
@@ -1395,10 +1327,10 @@ void UIManager::update() {
                 m_iptvScrollOffset = 0;
                 showToast(m_iptvShowFavoritesOnly ? "★ Đang lọc: Kênh Yêu Thích" : "Đang lọc: Tất cả kênh", {0, 180, 216, 255}, 2000);
             } else if (input.isButtonJustPressed(Button::SELECT) || input.isButtonJustPressed(Button::START)) {
-                m_iptvVk.query.clear();
+                VirtualKeyboard::reset(m_iptvVk, true);
+                m_iptvVk.charset = 1;
+                m_iptvVk.maxLen = 30;
                 m_iptvSearchResults.clear();
-                m_iptvVk.row = 0; m_iptvVk.col = 0;
-                m_iptvVk.inResults = false;
                 m_iptvSearchSelectedIndex = 0;
                 m_iptvSearchScrollOffset = 0;
                 setState(UIState::IPTV_SEARCH);
@@ -1409,61 +1341,50 @@ void UIManager::update() {
 
 
         case UIState::IPTV_SEARCH: {
-            static const char* qwertyRows[] = {
-                "1234567890",
-                "QWERTYUIOP",
-                "ASDFGHJKL-",
-                "ZXCVBNM<_*"  // '<' = DEL, '_' = SPACE, '*' = OK
-            };
-            static const int kbRowCount = 4;
-            static const int kbColCount = 10;
-
             if (!m_iptvVk.inResults) {
+                // Unified keyboard (P0-2): giong YouTube — move/pressA stride2.
                 if (input.isButtonJustPressed(Button::UP)) {
-                    if (m_iptvVk.row > 0) {
-                        m_iptvVk.row--;
-                    }
+                    VirtualKeyboard::move(m_iptvVk, -1, 0, true);
                 } else if (input.isButtonJustPressed(Button::DOWN)) {
-                    if (m_iptvVk.row < kbRowCount - 1) {
-                        m_iptvVk.row++;
-                    } else if (!m_iptvSearchResults.empty()) {
-                        m_iptvVk.inResults = true;
-                        m_iptvSearchSelectedIndex = 0;
-                        m_iptvSearchScrollOffset = 0;
-                    }
-                } else if (input.isButtonJustPressed(Button::LEFT)) {
-                    if (m_iptvVk.col > 0) {
-                        m_iptvVk.col--;
-                    } else {
-                        m_iptvVk.col = kbColCount - 1;
-                    }
-                } else if (input.isButtonJustPressed(Button::RIGHT)) {
-                    if (m_iptvVk.col < kbColCount - 1) {
-                        m_iptvVk.col++;
-                    } else {
-                        m_iptvVk.col = 0;
-                    }
-                } else if (input.isButtonJustPressed(Button::A)) {
-                    char ch = qwertyRows[m_iptvVk.row][m_iptvVk.col];
-                    if (ch == '<') {
-                        if (!m_iptvVk.query.empty()) {
-                            m_iptvVk.query.pop_back();
-                        }
-                    } else if (ch == '_') {
-                        if (m_iptvVk.query.length() < 30) {
-                            m_iptvVk.query += ' ';
-                        }
-                    } else if (ch == '*') {
+                    if (m_iptvVk.row == 4) {
                         if (!m_iptvSearchResults.empty()) {
                             m_iptvVk.inResults = true;
                             m_iptvSearchSelectedIndex = 0;
                             m_iptvSearchScrollOffset = 0;
                         }
                     } else {
-                        if (m_iptvVk.query.length() < 30) {
-                            m_iptvVk.query += ch;
-                        }
+                        VirtualKeyboard::move(m_iptvVk, 1, 0, true);
                     }
+                } else if (input.isButtonJustPressed(Button::LEFT)) {
+                    VirtualKeyboard::move(m_iptvVk, 0, -1, true);
+                } else if (input.isButtonJustPressed(Button::RIGHT)) {
+                    VirtualKeyboard::move(m_iptvVk, 0, 1, true);
+                } else if (input.isButtonJustPressed(Button::A)) {
+                    VkAction act = VirtualKeyboard::pressA(m_iptvVk, [this](const char* m) {
+                        showToast(m_iptvVk.telexMode ? "Che do: TELEX" : "Che do: TIENG ANH (US)", {0, 180, 216, 255}, 1200);
+                    }, true);
+                    if (act == VkAction::Commit) {
+                        if (!m_iptvSearchResults.empty()) {
+                            m_iptvVk.inResults = true;
+                            m_iptvSearchSelectedIndex = 0;
+                            m_iptvSearchScrollOffset = 0;
+                        }
+                    } else {
+                        if (!m_iptvVk.query.empty()) {
+                            m_iptvSearchResults = IPTVManager::instance().search(m_iptvVk.query);
+                        } else {
+                            m_iptvSearchResults.clear();
+                        }
+                        m_iptvSearchSelectedIndex = 0;
+                        m_iptvSearchScrollOffset = 0;
+                    }
+                } else if (input.isButtonJustPressed(Button::X)) {
+                    m_iptvVk.query.clear();
+                    m_iptvSearchResults.clear();
+                    m_iptvSearchSelectedIndex = 0;
+                    m_iptvSearchScrollOffset = 0;
+                } else if (input.isButtonJustPressed(Button::Y)) {
+                    VirtualKeyboard::backspace(m_iptvVk);
                     if (!m_iptvVk.query.empty()) {
                         m_iptvSearchResults = IPTVManager::instance().search(m_iptvVk.query);
                     } else {
@@ -1471,11 +1392,11 @@ void UIManager::update() {
                     }
                     m_iptvSearchSelectedIndex = 0;
                     m_iptvSearchScrollOffset = 0;
-                } else if (input.isButtonJustPressed(Button::X)) {
-                    m_iptvVk.query.clear();
-                    m_iptvSearchResults.clear();
-                    m_iptvSearchSelectedIndex = 0;
-                    m_iptvSearchScrollOffset = 0;
+                } else if (input.isButtonJustPressed(Button::L1)) {
+                    m_iptvVk.shift = !m_iptvVk.shift;
+                } else if (input.isButtonJustPressed(Button::R1)) {
+                    m_iptvVk.telexMode = !m_iptvVk.telexMode;
+                    showToast(m_iptvVk.telexMode ? "Che do: TELEX" : "Che do: TIENG ANH (US)", {0, 180, 216, 255}, 1200);
                 } else if (input.isButtonJustPressed(Button::START)) {
                     if (!m_iptvSearchResults.empty()) {
                         m_iptvVk.inResults = true;
@@ -1483,7 +1404,19 @@ void UIManager::update() {
                         m_iptvSearchScrollOffset = 0;
                     }
                 } else if (input.isButtonJustPressed(Button::B)) {
-                    setState(UIState::IPTV_LIST);
+                    // Unified nhu YouTube: con chu thi xoa dan, het chu thi ve list.
+                    if (!m_iptvVk.query.empty()) {
+                        VirtualKeyboard::backspace(m_iptvVk);
+                        if (!m_iptvVk.query.empty()) {
+                            m_iptvSearchResults = IPTVManager::instance().search(m_iptvVk.query);
+                        } else {
+                            m_iptvSearchResults.clear();
+                        }
+                        m_iptvSearchSelectedIndex = 0;
+                        m_iptvSearchScrollOffset = 0;
+                    } else {
+                        setState(UIState::IPTV_LIST);
+                    }
                 }
             } else {
                 int resultCount = static_cast<int>(m_iptvSearchResults.size());
@@ -1556,19 +1489,6 @@ void UIManager::update() {
                 break; // Ignore input while searching
             }
 
-            static const char* lowerRows[] = {
-                "1234567890",
-                "qwertyuiop",
-                "asdfghjkl-",
-                "zxcvbnm()/"
-            };
-            static const char* upperRows[] = {
-                "1234567890",
-                "QWERTYUIOP",
-                "ASDFGHJKL-",
-                "ZXCVBNM()/"
-            };
-
             if (m_ytFocusInTags) {
                 int tagCount = std::min(8, static_cast<int>(m_ytSearchHistory.size()));
                 if (input.isButtonJustPressed(Button::UP)) {
@@ -1602,64 +1522,29 @@ void UIManager::update() {
                 break;
             }
 
+            // Dieu huong unified (stride2 = kieu media cu: action col chan).
             if (input.isButtonJustPressed(Button::UP)) {
-                if (m_ytVk.row > 0) {
-                    m_ytVk.row--;
-                } else if (!m_ytSearchHistory.empty()) {
+                if (m_ytVk.row == 0 && !m_ytSearchHistory.empty()) {
                     m_ytFocusInTags = true;
                     int tagCount = std::min(8, static_cast<int>(m_ytSearchHistory.size()));
                     m_ytSelectedTagIndex = std::min(tagCount - 1, m_ytVk.col / 2);
+                } else {
+                    VirtualKeyboard::move(m_ytVk, -1, 0, true);
                 }
             } else if (input.isButtonJustPressed(Button::DOWN)) {
-                if (m_ytVk.row < 4) m_ytVk.row++;
+                VirtualKeyboard::move(m_ytVk, 1, 0, true);
             } else if (input.isButtonJustPressed(Button::LEFT)) {
-                if (m_ytVk.row == 4) {
-                    int actionIdx = m_ytVk.col / 2;
-                    if (actionIdx > 0) actionIdx--;
-                    else actionIdx = 4;
-                    m_ytVk.col = actionIdx * 2;
-                } else {
-                    if (m_ytVk.col > 0) m_ytVk.col--;
-                    else m_ytVk.col = 9;
-                }
+                VirtualKeyboard::move(m_ytVk, 0, -1, true);
             } else if (input.isButtonJustPressed(Button::RIGHT)) {
-                if (m_ytVk.row == 4) {
-                    int actionIdx = m_ytVk.col / 2;
-                    if (actionIdx < 4) actionIdx++;
-                    else actionIdx = 0;
-                    m_ytVk.col = actionIdx * 2;
-                } else {
-                    if (m_ytVk.col < 9) m_ytVk.col++;
-                    else m_ytVk.col = 0;
-                }
+                VirtualKeyboard::move(m_ytVk, 0, 1, true);
             } else if (input.isButtonJustPressed(Button::A)) {
-                if (m_ytVk.row < 4) {
-                    char ch = m_ytVk.shift ? upperRows[m_ytVk.row][m_ytVk.col] : lowerRows[m_ytVk.row][m_ytVk.col];
-                    if (m_ytVk.query.length() < 60) {
-                        if (m_ytVk.telexMode) {
-                            m_ytVk.query = TelexHelper::processTelex(m_ytVk.query, ch);
-                        } else {
-                            m_ytVk.query += ch;
-                        }
-                    }
-                } else {
-                    int actionIdx = m_ytVk.col / 2;
-                    if (actionIdx == 0) {
-                        m_ytVk.shift = !m_ytVk.shift;
-                    } else if (actionIdx == 1) {
-                        m_ytVk.telexMode = !m_ytVk.telexMode;
-                        showToast(m_ytVk.telexMode ? "Chế độ: TELEX" : "Chế độ: TIẾNG ANH (US)", {0, 200, 83, 255}, 1200);
-                    } else if (actionIdx == 2) {
-                        if (m_ytVk.query.length() < 60) m_ytVk.query += ' ';
-                    } else if (actionIdx == 3) {
-                        TelexHelper::popUtf8(m_ytVk.query);
-                    } else if (actionIdx == 4) {
-                        if (!m_ytVk.query.empty()) {
-                            triggerYouTubeSearch();
-                        } else if (!m_ytSearchResults.empty()) {
-                            setState(UIState::YOUTUBE_RESULTS);
-                        }
-                    }
+                VkAction act = VirtualKeyboard::pressA(m_ytVk, [this](const char* m) {
+                    showToast(m_ytVk.telexMode ? "Chế độ: TELEX" : "Chế độ: TIẾNG ANH (US)", {0, 200, 83, 255}, 1200);
+                }, true);
+                if (act == VkAction::Commit) {
+                    triggerYouTubeSearch();
+                } else if (act == VkAction::Cancel && !m_ytSearchResults.empty()) {
+                    setState(UIState::YOUTUBE_RESULTS);
                 }
             } else if (input.isButtonJustPressed(Button::L1)) {
                 m_ytVk.shift = !m_ytVk.shift;
@@ -1667,9 +1552,9 @@ void UIManager::update() {
                 m_ytVk.telexMode = !m_ytVk.telexMode;
                 showToast(m_ytVk.telexMode ? "Chế độ: TELEX" : "Chế độ: TIẾNG ANH (US)", {0, 200, 83, 255}, 1200);
             } else if (input.isButtonJustPressed(Button::X)) {
-                if (m_ytVk.query.length() < 60) m_ytVk.query += ' ';
+                VirtualKeyboard::typeSpace(m_ytVk);
             } else if (input.isButtonJustPressed(Button::Y)) {
-                TelexHelper::popUtf8(m_ytVk.query);
+                VirtualKeyboard::backspace(m_ytVk);
             } else if (input.isButtonJustPressed(Button::START)) {
                 if (!m_ytVk.query.empty()) {
                     triggerYouTubeSearch();
@@ -1824,199 +1709,7 @@ void UIManager::update() {
             break;
         }
 
-        case UIState::TIKTOK_SEARCH: {
-            if (m_ttIsSearching) {
-                break;
-            }
-
-            static const char* lowerRows[] = {
-                "1234567890",
-                "qwertyuiop",
-                "asdfghjkl-",
-                "zxcvbnm()/"
-            };
-            static const char* upperRows[] = {
-                "1234567890",
-                "QWERTYUIOP",
-                "ASDFGHJKL-",
-                "ZXCVBNM()/"
-            };
-
-            if (m_ttFocusInTags) {
-                int tagCount = static_cast<int>(m_ttTrendingTags.size());
-                if (input.isButtonJustPressed(Button::UP)) {
-                    if (m_ttSelectedTagIndex >= 4) {
-                        m_ttSelectedTagIndex -= 4;
-                    }
-                } else if (input.isButtonJustPressed(Button::DOWN)) {
-                    if (m_ttSelectedTagIndex + 4 < tagCount) {
-                        m_ttSelectedTagIndex += 4;
-                    } else {
-                        m_ttFocusInTags = false;
-                        m_ttVk.row = 0;
-                        m_ttVk.col = (m_ttSelectedTagIndex % 4) * 2 + 1;
-                    }
-                } else if (input.isButtonJustPressed(Button::LEFT)) {
-                    if (m_ttSelectedTagIndex > 0) m_ttSelectedTagIndex--;
-                    else m_ttSelectedTagIndex = tagCount - 1;
-                } else if (input.isButtonJustPressed(Button::RIGHT)) {
-                    if (m_ttSelectedTagIndex + 1 < tagCount) m_ttSelectedTagIndex++;
-                    else m_ttSelectedTagIndex = 0;
-                } else if (input.isButtonJustPressed(Button::A) || input.isButtonJustPressed(Button::START)) {
-                    if (m_ttSelectedTagIndex >= 0 && m_ttSelectedTagIndex < tagCount) {
-                        m_ttVk.query = m_ttTrendingTags[m_ttSelectedTagIndex];
-                        triggerTikTokSearch();
-                    }
-                } else if (input.isButtonJustPressed(Button::B)) {
-                    m_ttFocusInTags = false;
-                } else if (input.isButtonJustPressed(Button::SELECT)) {
-                    setState(UIState::MENU);
-                }
-                break;
-            }
-
-            if (input.isButtonJustPressed(Button::UP)) {
-                if (m_ttVk.row > 0) {
-                    m_ttVk.row--;
-                } else if (!m_ttTrendingTags.empty()) {
-                    m_ttFocusInTags = true;
-                    int tagCount = static_cast<int>(m_ttTrendingTags.size());
-                    m_ttSelectedTagIndex = std::min(tagCount - 1, m_ttVk.col / 2);
-                }
-            } else if (input.isButtonJustPressed(Button::DOWN)) {
-                if (m_ttVk.row < 4) m_ttVk.row++;
-            } else if (input.isButtonJustPressed(Button::LEFT)) {
-                if (m_ttVk.row == 4) {
-                    int actionIdx = m_ttVk.col / 2;
-                    if (actionIdx > 0) actionIdx--;
-                    else actionIdx = 4;
-                    m_ttVk.col = actionIdx * 2;
-                } else {
-                    if (m_ttVk.col > 0) m_ttVk.col--;
-                    else m_ttVk.col = 9;
-                }
-            } else if (input.isButtonJustPressed(Button::RIGHT)) {
-                if (m_ttVk.row == 4) {
-                    int actionIdx = m_ttVk.col / 2;
-                    if (actionIdx < 4) actionIdx++;
-                    else actionIdx = 0;
-                    m_ttVk.col = actionIdx * 2;
-                } else {
-                    if (m_ttVk.col < 9) m_ttVk.col++;
-                    else m_ttVk.col = 0;
-                }
-            } else if (input.isButtonJustPressed(Button::A)) {
-                if (m_ttVk.row < 4) {
-                    char ch = m_ttVk.shift ? upperRows[m_ttVk.row][m_ttVk.col] : lowerRows[m_ttVk.row][m_ttVk.col];
-                    if (m_ttVk.query.length() < 60) {
-                        if (m_ttVk.telexMode) {
-                            m_ttVk.query = TelexHelper::processTelex(m_ttVk.query, ch);
-                        } else {
-                            m_ttVk.query += ch;
-                        }
-                    }
-                } else {
-                    int actionIdx = m_ttVk.col / 2;
-                    if (actionIdx == 0) {
-                        m_ttVk.shift = !m_ttVk.shift;
-                    } else if (actionIdx == 1) {
-                        m_ttVk.telexMode = !m_ttVk.telexMode;
-                        showToast(m_ttVk.telexMode ? "Chế độ: TELEX" : "Chế độ: TIẾNG ANH (US)", {0, 200, 83, 255}, 1200);
-                    } else if (actionIdx == 2) {
-                        if (m_ttVk.query.length() < 60) m_ttVk.query += ' ';
-                    } else if (actionIdx == 3) {
-                        TelexHelper::popUtf8(m_ttVk.query);
-                    } else if (actionIdx == 4) {
-                        if (!m_ttVk.query.empty()) {
-                            triggerTikTokSearch();
-                        }
-                    }
-                }
-            } else if (input.isButtonJustPressed(Button::L1)) {
-                m_ttVk.shift = !m_ttVk.shift;
-            } else if (input.isButtonJustPressed(Button::R1)) {
-                m_ttVk.telexMode = !m_ttVk.telexMode;
-                showToast(m_ttVk.telexMode ? "Chế độ: TELEX" : "Chế độ: TIẾNG ANH (US)", {0, 200, 83, 255}, 1200);
-            } else if (input.isButtonJustPressed(Button::X)) {
-                if (m_ttVk.query.length() < 60) m_ttVk.query += ' ';
-            } else if (input.isButtonJustPressed(Button::Y)) {
-                TelexHelper::popUtf8(m_ttVk.query);
-            } else if (input.isButtonJustPressed(Button::START)) {
-                if (!m_ttVk.query.empty()) {
-                    triggerTikTokSearch();
-                } else {
-                    triggerTikTokTrending();
-                }
-            } else if (input.isButtonJustPressed(Button::B)) {
-                if (!m_ttVk.query.empty()) {
-                    TelexHelper::popUtf8(m_ttVk.query);
-                } else {
-                    setState(UIState::MENU);
-                }
-            } else if (input.isButtonJustPressed(Button::SELECT)) {
-                setState(UIState::MENU);
-            }
-            break;
-        }
-
-        case UIState::TIKTOK_RESULTS: {
-            if (m_ttIsLoadingVideo) {
-                break;
-            }
-
-            int resultCount = static_cast<int>(m_ttSearchResults.size());
-            if (resultCount == 0) {
-                setState(UIState::TIKTOK_SEARCH);
-                break;
-            }
-
-            const int gridCols = 3;
-
-            if (input.isButtonJustPressed(Button::LEFT)) {
-                if (m_ttSearchSelectedIndex % gridCols > 0) {
-                    m_ttSearchSelectedIndex--;
-                }
-            } else if (input.isButtonJustPressed(Button::RIGHT)) {
-                if (m_ttSearchSelectedIndex % gridCols < gridCols - 1 &&
-                    m_ttSearchSelectedIndex + 1 < resultCount) {
-                    m_ttSearchSelectedIndex++;
-                }
-            } else if (input.isButtonJustPressed(Button::UP)) {
-                if (m_ttSearchSelectedIndex >= gridCols) {
-                    m_ttSearchSelectedIndex -= gridCols;
-                }
-            } else if (input.isButtonJustPressed(Button::DOWN)) {
-                if (m_ttSearchSelectedIndex + gridCols < resultCount) {
-                    m_ttSearchSelectedIndex += gridCols;
-                } else if (m_ttSearchSelectedIndex + 1 < resultCount && (m_ttSearchSelectedIndex % gridCols == 0)) {
-                    m_ttSearchSelectedIndex = resultCount - 1;
-                }
-            } else if (input.isButtonJustPressed(Button::X)) {
-                setState(UIState::TIKTOK_SEARCH);
-            } else if (input.isButtonJustPressed(Button::A)) {
-                if (m_ttSearchSelectedIndex >= 0 && m_ttSearchSelectedIndex < resultCount) {
-                    std::string selected = m_ttSearchResults[m_ttSearchSelectedIndex];
-                    std::string videoId = selected.substr(0, selected.find('|'));
-                    std::string title;
-                    size_t p1 = selected.find('|');
-                    if (p1 != std::string::npos) {
-                        size_t p2 = selected.find('|', p1 + 1);
-                        if (p2 != std::string::npos) {
-                            title = selected.substr(p1 + 1, p2 - p1 - 1);
-                        }
-                    }
-                    playTikTokVideo(videoId, title);
-                }
-            } else if (input.isButtonJustPressed(Button::B)) {
-                setState(UIState::TIKTOK_SEARCH);
-            } else if (input.isButtonJustPressed(Button::SELECT)) {
-                setState(UIState::MENU);
-            }
-            break;
-        }
-
-        // ===========================================================
-        // LocalSend P2P states
+        // ===========================================================\r\n        // LocalSend P2P states
         // ===========================================================
         case UIState::LOCALSEND_HOME: {
             auto devices = LocalSendManager::instance().knownDevices();
@@ -2477,15 +2170,6 @@ void UIManager::renderHeader() {
 }
 
 void UIManager::renderSearchState() {
-    static const char* kbRows[] = {
-        "1234567890",
-        "QWERTYUIOP",
-        "ASDFGHJKL-",
-        "ZXCVBNM<_*"  // '<' = DEL, '_' = SPACE, '*' = OK
-    };
-    static const int kbRowCount = 4;
-    static const int kbColCount = 10;
-
     // ─── Left panel: keyboard + query bar (Borderless) ───
     int panelW = 430;
     int panelX = 24;
@@ -2498,32 +2182,17 @@ void UIManager::renderSearchState() {
     SDL_Color qColor = m_searchVk.query.empty() ? SDL_Color{80, 95, 115, 255} : SDL_Color{255, 255, 255, 255};
     drawText(displayQuery, panelX + 16, panelY + 14, qColor, m_fontMedium);
 
-    // Keyboard with rounded keycaps
-    int kbStartY = panelY + 68;
-    int cellW = 37;
-    int cellH = 46;
-    int gap = 4;
-    int kbPadX = 12;
-
-    for (int row = 0; row < kbRowCount; row++) {
-        for (int col = 0; col < kbColCount; col++) {
-            int cx = panelX + kbPadX + col * (cellW + gap);
-            int cy = kbStartY + row * (cellH + 8);
-            bool isSel = (!m_searchVk.inResults && m_searchVk.row == row && m_searchVk.col == col);
-
-            char ch = kbRows[row][col];
-            std::string label;
-            if (ch == '<') label = "DEL";
-            else if (ch == '_') label = "SPC";
-            else if (ch == '*') label = "OK";
-            else label = std::string(1, ch);
-
-            SDL_Color bg = isSel ? SDL_Color{0, 180, 216, 255} : SDL_Color{28, 38, 55, 255};
-            SDL_Color fg = isSel ? SDL_Color{0, 0, 0, 255} : SDL_Color{220, 230, 240, 255};
-            drawRoundedRect(cx, cy, cellW, cellH, UiTheme::RADIUS_ROW, bg, true);
-            drawRoundedBorder(cx, cy, cellW, cellH, UiTheme::RADIUS_ROW, isSel ? SDL_Color{255, 255, 255, 255} : SDL_Color{45, 60, 80, 255}, 1);
-            drawText(label, cx + cellW / 2, cy + cellH / 2 - 10, fg, m_fontSmall, true);
-        }
+    // Unified keyboard (P0-2): charset media + action row, stride2 nhu YouTube.
+    {
+        static std::string s0, s1, s2, s3, s4;
+        s0 = m_searchVk.shift ? "HOA" : "Thuong";
+        s1 = m_searchVk.telexMode ? "TELEX" : "US";
+        s2 = "Cach"; s3 = "Xoa"; s4 = "Tim";
+        const char* sActs[5] = {s0.c_str(), s1.c_str(), s2.c_str(), s3.c_str(), s4.c_str()};
+        VkState sDraw = m_searchVk;
+        if (m_searchVk.inResults) sDraw.row = -1;
+        m_ui.drawVirtualKeyboard(sDraw, panelX + 12, panelY + 68, 37, 40, 4, 6,
+            SDL_Color{0, 180, 216, 255}, SDL_Color{160, 230, 255, 255}, sActs, true, true, 2);
     }
 
     // ─── Divider line ───
@@ -2631,6 +2300,7 @@ void UIManager::renderFooter() {
     } else if (m_currentState == UIState::SEARCH) {
         if (!m_searchVk.inResults) {
             x = drawFooterHint("A", UiStrings::BTN_SELECT_CHAR, x, barY, barH, fg, m_fontSmall, iconSize, gap) + 30;
+            x = drawFooterHint("Y", "Xoa", x, barY, barH, fg, m_fontSmall, iconSize, gap) + 30;
             x = drawFooterHint("X", UiStrings::BTN_CLEAR_ALL, x, barY, barH, fg, m_fontSmall, iconSize, gap) + 30;
         } else {
             x = drawFooterHint("A", UiStrings::BTN_DOWNLOAD, x, barY, barH, fg, m_fontSmall, iconSize, gap) + 30;
@@ -2684,22 +2354,7 @@ void UIManager::renderFooter() {
     drawTextRight(verText, 1012, barY + (barH - textHeight(m_fontSmall)) / 2, UiTheme::TEXT_FAINT, m_fontSmall);
 }
 
-void UIManager::renderToast() {
-    if (!m_dialogs.toast.visible()) return;
-    uint32_t packed = m_dialogs.toast.colorPacked;
-    SDL_Color border = {(uint8_t)(packed >> 24), (uint8_t)(packed >> 16), (uint8_t)(packed >> 8), (uint8_t)packed};
-    {
-        int toastW = 620;
-        int toastH = 48;
-        int toastX = (1024 - toastW) / 2;
-        int toastY = 645;
-
-        drawRoundedRect(toastX, toastY, toastW, toastH, 24, {20, 24, 32, 245}, true);
-        drawRoundedBorder(toastX, toastY, toastW, toastH, 24, border, 2);
-        // Toast co the chua token [NUT] -> ve icon that can giua
-        drawInlineHintsCentered(m_dialogs.toast.message, 512, toastY + 14, {255, 255, 255, 255}, m_fontSmall, 24);
-    }
-}
+void UIManager::renderToast() { m_dialogs.renderToast(m_ui, m_fontSmall); }
 
 void UIManager::renderMenuState() {
     // OTA update info
@@ -3175,43 +2830,7 @@ void UIManager::openConfirmBatchDeleteDialog() {
         }, true);
 }
 
-void UIManager::renderConfirmDialogFromState() {
-    if (!m_dialogs.confirm.visible) return;
-    beginModalDim();
-
-    const auto& lines = m_dialogs.confirm.lines;
-    // Chieu cao co gian theo so dong (giong 340 don / 400 batch cu)
-    int dlgW = 680;
-    int dlgH = 200 + static_cast<int>(lines.size()) * 34;
-    if (dlgH < 300) dlgH = 300;
-    if (dlgH > 460) dlgH = 460;
-    int dlgX = (1024 - dlgW) / 2;
-    int dlgY = (768 - dlgH) / 2;
-    SDL_Color titleBg = m_dialogs.confirm.danger ? SDL_Color{185, 28, 28, 255} : SDL_Color{18, 55, 95, 255};
-
-    drawRoundedRect(dlgX, dlgY, dlgW, dlgH, UiTheme::RADIUS_MODAL, {24, 28, 38, 255}, true);
-    drawRect(dlgX, dlgY, dlgW, 48, titleBg, true);
-    drawText(m_dialogs.confirm.title, dlgX + dlgW / 2, dlgY + 14, {255, 255, 255, 255}, m_fontLarge, true);
-
-    int y = dlgY + 80;
-    for (size_t i = 0; i < lines.size(); ++i) {
-        SDL_Color c = {220, 225, 235, 255};
-        TTF_Font* f = m_fontSmall;
-        bool centered = true;
-        if (i == 0) { c = {255, 255, 255, 255}; f = m_fontMedium; }
-        else if (lines[i].rfind("- ", 0) == 0) { centered = false; }
-        else if (lines[i].rfind("File:", 0) == 0 || lines[i].rfind("Tổng", 0) == 0) { c = {0, 180, 216, 255}; }
-        if (centered) drawText(lines[i], dlgX + dlgW / 2, y, c, f, true);
-        else drawText(lines[i], dlgX + 60, y, {200, 210, 225, 255}, f, false);
-        y += (i == 0 ? 38 : 30);
-        if (y > dlgY + dlgH - 90) break;
-    }
-
-    int btnW = 240;
-    int btnH = 50;
-    drawBadge(dlgX + 60, dlgY + dlgH - 70, btnW, btnH, UiStrings::MULTI_BATCH_DELETE_CONFIRM, {185, 28, 28, 255}, {255, 255, 255, 255});
-    drawBadge(dlgX + dlgW - 60 - btnW, dlgY + dlgH - 70, btnW, btnH, UiStrings::BTN_CANCEL_DELETE, {55, 65, 81, 255}, {255, 255, 255, 255});
-}
+void UIManager::renderConfirmDialogFromState() { m_dialogs.renderConfirm(m_ui, m_fontSmall, m_fontMedium, m_fontLarge); }
 
 void UIManager::renderConfirmDeleteDialog() {
     renderConfirmDialogFromState();
@@ -3221,31 +2840,7 @@ void UIManager::renderConfirmBatchDeleteDialog() {
     renderConfirmDialogFromState();
 }
 
-void UIManager::renderProgressDialogFromState() {
-    if (!m_dialogs.progress.visible) return;
-    beginModalDim();
-
-    int dlgW = 620;
-    int dlgH = 220;
-    int dlgX = (1024 - dlgW) / 2;
-    int dlgY = (768 - dlgH) / 2;
-    drawRoundedRect(dlgX, dlgY, dlgW, dlgH, UiTheme::RADIUS_MODAL, {24, 28, 38, 255}, true);
-    drawRect(dlgX, dlgY, dlgW, 48, {18, 55, 95, 255}, true);
-    drawText(m_dialogs.progress.title, dlgX + dlgW / 2, dlgY + 14, {255, 255, 255, 255}, m_fontLarge, true);
-
-    if (!m_dialogs.progress.detail.empty()) {
-        drawText(m_dialogs.progress.detail, dlgX + dlgW / 2, dlgY + 80,
-                 {0, 180, 216, 255}, m_fontSmall, true);
-    }
-    int barW = dlgW - 120;
-    int barX = dlgX + 60;
-    int barY = dlgY + 120;
-    drawProgressBar(barX, barY, barW, 18, m_dialogs.progress.fraction(),
-                    {0, 180, 216, 255}, true);
-    char pctBuf[32];
-    std::snprintf(pctBuf, sizeof(pctBuf), "%.0f%%", m_dialogs.progress.fraction() * 100.0);
-    drawText(pctBuf, dlgX + dlgW / 2, barY + 28, {255, 255, 255, 255}, m_fontSmall, true);
-}
+void UIManager::renderProgressDialogFromState() { m_dialogs.renderProgress(m_ui, m_fontSmall, m_fontLarge); }
 void UIManager::drawProgressBar(int x, int y, int w, int h, double frac, SDL_Color fill, bool rounded, SDL_Color bg) {
     if (frac < 0) frac = 0;
     if (frac > 1) frac = 1;
@@ -3532,121 +3127,9 @@ void UIManager::renderCloudLoginState() {
     }
 }
 
-void UIManager::renderSyncOverlay() {
-    if (!DriveSyncEngine::instance().isSyncing()) return;
+void UIManager::renderSyncOverlay() { m_dialogs.renderSyncOverlay(m_ui, m_fontSmall, m_fontMedium, m_fontLarge); }
 
-    // Semi-transparent dim background
-    beginModalDim();
-
-    int boxW = 700;
-    int boxH = 380;
-    int boxX = (1024 - boxW) / 2;
-    int boxY = (768 - boxH) / 2;
-
-    drawRect(boxX, boxY, boxW, boxH, {22, 27, 36, 255}, true);
-    drawBorder(boxX, boxY, boxW, boxH, {0, 180, 216, 255}, 3);
-
-    // Title banner
-    drawRect(boxX, boxY, boxW, 55, {18, 55, 95, 255}, true);
-    drawText(UiStrings::HEADER_SYNC, boxX + boxW / 2, boxY + 16, {0, 180, 216, 255}, m_fontLarge, true);
-
-    auto prog = DriveSyncEngine::instance().getProgress();
-
-    int contentY = boxY + 85;
-    if (prog.status == SyncStatus::CONNECTING) {
-        drawText(UiStrings::SYNC_API_CONNECTING, boxX + boxW / 2, contentY, {255, 255, 255, 255}, m_fontMedium, true);
-        drawText(UiStrings::SYNC_AUTH_TOKEN, boxX + boxW / 2, contentY + 35, {150, 165, 180, 255}, m_fontSmall, true);
-    } else if (prog.status == SyncStatus::DISCOVERING_FOLDERS) {
-        drawText(UiStrings::SYNC_SCANNING_GAMES, boxX + boxW / 2, contentY, {255, 255, 255, 255}, m_fontMedium, true);
-        drawText(UiStrings::SYNC_SEARCH_FOLDERS, boxX + boxW / 2, contentY + 35, {150, 165, 180, 255}, m_fontSmall, true);
-    } else if (prog.status == SyncStatus::SYNCING_FILES) {
-        std::string platText = "Đang quét hệ máy: " + prog.currentPlatform;
-        drawText(platText, boxX + boxW / 2, contentY, {255, 255, 255, 255}, m_fontMedium, true);
-
-        std::string progressStr = "Hệ máy " + std::to_string(prog.currentSystemIndex) + " / " + std::to_string(prog.totalSystems);
-        drawText(progressStr, boxX + boxW / 2, contentY + 35, {0, 180, 216, 255}, m_fontSmall, true);
-
-        // Progress bar (ve chung drawProgressBar)
-        int barW = 540;
-        int barH = 16;
-        int barX = boxX + (boxW - barW) / 2;
-        int barY = contentY + 70;
-        float syncPct = prog.totalSystems > 0 ? (float)prog.currentSystemIndex / (float)prog.totalSystems : 0.0f;
-        drawProgressBar(barX, barY, barW, barH, syncPct, {0, 180, 216, 255});
-
-        int statY = contentY + 110;
-        std::string stats = "Đã lưu vào kho: " + std::to_string(prog.cloudGamesFound) +
-                            "  (Mới: " + std::to_string(prog.newGamesIndexed) +
-                            ", Cập nhật: " + std::to_string(prog.updatedGames) + ")";
-        drawText(stats, boxX + boxW / 2, statY, {34, 197, 94, 255}, m_fontSmall, true);
-    }
-
-    drawBadge(boxX + (boxW - 220) / 2, boxY + 295, 220, 50, UiStrings::SYNC_CANCEL_BTN, {55, 65, 81, 255}, {255, 255, 255, 255});
-}
-
-void UIManager::renderDownloadOverlay() {
-    if (!DownloadManager::instance().isDownloading()) return;
-
-    // Semi-transparent dim background
-    beginModalDim();
-
-    int boxW = 720;
-    int boxH = 390;
-    int boxX = (1024 - boxW) / 2;
-    int boxY = (768 - boxH) / 2;
-
-    drawRect(boxX, boxY, boxW, boxH, {22, 27, 36, 255}, true);
-    drawBorder(boxX, boxY, boxW, boxH, {0, 180, 216, 255}, 3);
-
-    // Title banner
-    drawRect(boxX, boxY, boxW, 55, {18, 55, 95, 255}, true);
-    drawText(UiStrings::HEADER_DOWNLOAD, boxX + boxW / 2, boxY + 16, {0, 180, 216, 255}, m_fontLarge, true);
-
-    auto prog = DownloadManager::instance().getProgress();
-
-    int contentY = boxY + 80;
-    std::string title = prog.gameTitle;
-    if (title.length() > 32) title = title.substr(0, 29) + "...";
-    drawText(title, boxX + boxW / 2, contentY, {255, 255, 255, 255}, m_fontLarge, true);
-
-    std::string sysSub = "Hệ máy: " + prog.systemCode + "  |  Tập tin: " + prog.filename;
-    drawText(sysSub, boxX + boxW / 2, contentY + 38, {0, 180, 216, 255}, m_fontSmall, true);
-
-    // State text
-    std::string statusMsg = UiStrings::DL_FROM_DRIVE;
-    if (prog.state == DownloadState::INITIALIZING) {
-        statusMsg = UiStrings::DL_CONNECTING;
-    } else if (prog.state == DownloadState::VERIFYING) {
-        statusMsg = UiStrings::DL_CHECKING_FILE;
-    }
-    drawText(statusMsg, boxX + boxW / 2, contentY + 75, {245, 158, 11, 255}, m_fontSmall, true);
-
-    // Progress bar (ve chung drawProgressBar)
-    int barW = 560;
-    int barH = 18;
-    int barX = boxX + (boxW - barW) / 2;
-    int barY = contentY + 105;
-    float pct = std::max(0.0, std::min(100.0, prog.progressPct));
-    drawProgressBar(barX, barY, barW, barH, pct / 100.0, {34, 197, 94, 255});
-
-    // Size details
-    std::string downloadedStr = FileSystemManager::instance().formatBytes(prog.bytesDownloaded);
-    std::string totalStr = FileSystemManager::instance().formatBytes(prog.totalBytes);
-    char pctBuf[32];
-    std::snprintf(pctBuf, sizeof(pctBuf), "%.1f%%", pct);
-
-    std::string progressInfo = downloadedStr + " / " + totalStr + "  (" + pctBuf + ")";
-    drawText(progressInfo, boxX + boxW / 2, barY + 28, {255, 255, 255, 255}, m_fontSmall, true);
-
-    // Queue remaining count
-    int remaining = DownloadManager::instance().queueSize();
-    if (remaining > 0) {
-        std::string qStr = "Còn " + std::to_string(remaining) + " game trong hàng chờ.";
-        drawText(qStr, boxX + boxW / 2, barY + 56, {168, 85, 247, 255}, m_fontSmall, true);
-    }
-
-    drawBadge(boxX + (boxW - 220) / 2, boxY + 320, 220, 50, UiStrings::DL_CANCEL_BTN, {55, 65, 81, 255}, {255, 255, 255, 255});
-}
+void UIManager::renderDownloadOverlay() { m_dialogs.renderDownloadOverlay(m_ui, m_fontSmall, m_fontLarge); }
 
 void UIManager::renderDiagnosticsState() {
     // ─── Borderless Full-Width Sub-Header ───
@@ -3825,28 +3308,7 @@ void UIManager::renderReverseSyncState() {
     }
 }
 
-void UIManager::renderUploadOverlay() {
-    // If reverse sync is active, show persistent overlay
-    if (!UploadManager::instance().isUploading()) return;
-
-    auto prog = UploadManager::instance().getProgress();
-    if (prog.state != UploadState::UPLOADING) return;
-
-    // Small persistent banner at bottom
-    int bannerW = 500;
-    int bannerH = 40;
-    int bannerX = (1024 - bannerW) / 2;
-    int bannerY = 720;
-
-    drawRoundedRect(bannerX, bannerY, bannerW, bannerH, UiTheme::RADIUS_CARD, {30, 20, 45, 255}, true);
-    drawRoundedBorder(bannerX, bannerY, bannerW, bannerH, UiTheme::RADIUS_CARD, {168, 85, 247, 255}, 1);
-
-    char pctBuf[16];
-    std::snprintf(pctBuf, sizeof(pctBuf), "%.0f%%", prog.progressPct);
-    std::string text = std::string(UiStrings::REVERSE_SYNC_UPLOADING) + prog.gameTitle + " " + pctBuf;
-    if (text.length() > 55) text = text.substr(0, 52) + "...";
-    drawText(text, bannerX + bannerW / 2, bannerY + 10, {200, 210, 225, 255}, m_fontSmall, true);
-}
+void UIManager::renderUploadOverlay() { m_dialogs.renderUploadOverlay(m_ui, m_fontSmall); }
 
 void UIManager::renderOTAUpdateState() {
     // ─── Borderless Full-Width Sub-Header ───
@@ -4256,9 +3718,7 @@ void UIManager::renderIPTVState() {
     // -----------------------------------------------------------------------
     // Footer (ve qua drawAppFooter — tu ve nen + chong tran)
     // -----------------------------------------------------------------------
-    if (false) {
-        drawAppFooter({{UiTheme::PadBtn::B, "Dừng"}, {UiTheme::PadBtn::DPAD, "Nhóm"}, {UiTheme::PadBtn::L1, "Trang"}});
-    } else if (m_iptvShowFavoritesOnly) {
+    if (m_iptvShowFavoritesOnly) {
         drawAppFooter({{UiTheme::PadBtn::B, "Lùi"}, {UiTheme::PadBtn::X, "Thích"}, {UiTheme::PadBtn::DPAD, "Nhóm"}});
     } else {
         drawAppFooter({{UiTheme::PadBtn::B, "Lùi"}, {UiTheme::PadBtn::X, "Thích"}, {UiTheme::PadBtn::Y, "Lọc"}, {UiTheme::PadBtn::DPAD, "Nhóm"}});
@@ -4267,15 +3727,6 @@ void UIManager::renderIPTVState() {
 
 
 void UIManager::renderIPTVSearchState() {
-    static const char* qwertyRows[] = {
-        "1234567890",
-        "QWERTYUIOP",
-        "ASDFGHJKL-",
-        "ZXCVBNM<_*"  // '<' = DEL, '_' = SPACE, '*' = OK
-    };
-    static const int kbRowCount = 4;
-    static const int kbColCount = 10;
-
     // Header
     drawRect(0, 0, 1024, 64, {18, 22, 30, 255}, true);
     drawRect(0, 63, 1024, 1, {40, 48, 62, 255}, true);
@@ -4297,34 +3748,18 @@ void UIManager::renderIPTVSearchState() {
     SDL_Color qColor = m_iptvVk.query.empty() ? SDL_Color{80, 95, 115, 255} : SDL_Color{255, 255, 255, 255};
     drawText(displayQuery, panelX + 16, panelY + 14, qColor, m_fontMedium);
 
-    // QWERTY Virtual Keyboard
-    int kbStartY = panelY + 68;
-    int cellW = 37;
-    int cellH = 46;
-    int gap = 4;
-    int kbPadX = 12;
-
-    for (int row = 0; row < kbRowCount; row++) {
-        for (int col = 0; col < kbColCount; col++) {
-            int cx = panelX + kbPadX + col * (cellW + gap);
-            int cy = kbStartY + row * (cellH + 8);
-            bool isSel = (!m_iptvVk.inResults && m_iptvVk.row == row && m_iptvVk.col == col);
-
-            char ch = qwertyRows[row][col];
-            std::string label;
-            if (ch == '<') label = "DEL";
-            else if (ch == '_') label = "SPC";
-            else if (ch == '*') label = "OK";
-            else label = std::string(1, ch);
-
-            SDL_Color bg = isSel ? SDL_Color{0, 180, 216, 255} : SDL_Color{28, 38, 55, 255};
-            SDL_Color fg = isSel ? SDL_Color{0, 0, 0, 255} : SDL_Color{220, 230, 240, 255};
-            drawRoundedRect(cx, cy, cellW, cellH, UiTheme::RADIUS_ROW, bg, true);
-            drawRoundedBorder(cx, cy, cellW, cellH, UiTheme::RADIUS_ROW, isSel ? SDL_Color{255, 255, 255, 255} : SDL_Color{45, 60, 80, 255}, 1);
-            drawText(label, cx + cellW / 2, cy + cellH / 2 - 10, fg, m_fontSmall, true);
-        }
+    // Unified keyboard (P0-2): charset media + action row, stride2 nhu YouTube.
+    {
+        static std::string i0, i1, i2, i3, i4;
+        i0 = m_iptvVk.shift ? "HOA" : "Thuong";
+        i1 = m_iptvVk.telexMode ? "TELEX" : "US";
+        i2 = "Cach"; i3 = "Xoa"; i4 = "Tim";
+        const char* iActs[5] = {i0.c_str(), i1.c_str(), i2.c_str(), i3.c_str(), i4.c_str()};
+        VkState iDraw = m_iptvVk;
+        if (m_iptvVk.inResults) iDraw.row = -1;
+        m_ui.drawVirtualKeyboard(iDraw, panelX + 12, panelY + 68, 37, 40, 4, 6,
+            SDL_Color{0, 180, 216, 255}, SDL_Color{160, 230, 255, 255}, iActs, true, true, 2);
     }
-
     // Divider line
     drawRect(476, 64, 1, 651, {38, 48, 64, 255}, true);
 
@@ -4424,8 +3859,6 @@ void UIManager::render() {
         case UIState::IPTV_SEARCH:      renderIPTVSearchState(); break;
         case UIState::YOUTUBE_SEARCH:   renderYouTubeSearchState(); break;
         case UIState::YOUTUBE_RESULTS:  renderYouTubeResultsState(); break;
-        case UIState::TIKTOK_SEARCH:   renderTikTokSearchState(); break;
-        case UIState::TIKTOK_RESULTS:  renderTikTokResultsState(); break;
         case UIState::LOCALSEND_HOME:       renderLocalSendHome(); break;
         case UIState::LOCALSEND_INCOMING:   renderLocalSendHome(); renderLocalSendIncomingDialog(); break;
         case UIState::LOCALSEND_FOLDER:     renderLocalSendFolderPicker(); break;
@@ -4681,18 +4114,6 @@ void UIManager::saveYouTubeHistory(const std::string& query) {
             file << q << "\n";
         }
     }
-}
-
-void UIManager::initTikTokTags() {
-    if (!m_ttTrendingTags.empty()) return;
-    m_ttTrendingTags = {
-        "#xuhuong", "#trending",
-        "#haihuoc", "#nhactre",
-        "#dance", "#review",
-        "#food", "#gocnhin",
-        "#vlog", "#gaming",
-        "#pets", "#travel"
-    };
 }
 
 std::vector<std::string> UIManager::runYouTubeSearch(const std::string& query, int page) {
@@ -5133,88 +4554,20 @@ void UIManager::renderYouTubeSearchState() {
     // Divider line above keyboard
     drawRect(46, 444, 932, 1, {20, 48, 64, 180}, true);
 
-    // ─── Compact Virtual Keyboard (Pinned to bottom, Y = 456 to 708) ───
-    static const char* lowerRows[] = {
-        "1234567890",
-        "qwertyuiop",
-        "asdfghjkl-",
-        "zxcvbnm()/"
-    };
-    static const char* upperRows[] = {
-        "1234567890",
-        "QWERTYUIOP",
-        "ASDFGHJKL-",
-        "ZXCVBNM()/"
-    };
-
-    int kbStartX = 46;
-    int kbStartY = 456;
-    int cellW = 86;
-    int cellH = 44; // Compact & well-proportioned
-    int gapX = 8;
-    int gapY = 6;
-
-    for (int row = 0; row < 4; row++) {
-        for (int col = 0; col < 10; col++) {
-            int cx = kbStartX + col * (cellW + gapX);
-            int cy = kbStartY + row * (cellH + gapY);
-            bool isSel = (!m_ytFocusInTags && m_ytVk.row == row && m_ytVk.col == col);
-
-            char ch = m_ytVk.shift ? upperRows[row][col] : lowerRows[row][col];
-            std::string label(1, ch);
-
-            if (isSel) {
-                drawRoundedRect(cx, cy, cellW, cellH, UiTheme::RADIUS_ROW, {0, 200, 83, 255}, true);
-                drawRoundedBorder(cx, cy, cellW, cellH, UiTheme::RADIUS_ROW, {140, 255, 190, 255}, 2);
-                drawText(label, cx + cellW / 2, cy + (cellH - textHeight(m_fontLarge)) / 2, {255, 255, 255, 255}, m_fontLarge, true);
-            } else {
-                drawRoundedRect(cx, cy, cellW, cellH, UiTheme::RADIUS_ROW, {14, 32, 44, 210}, true);
-                drawRoundedBorder(cx, cy, cellW, cellH, UiTheme::RADIUS_ROW, {22, 54, 70, 255}, 1);
-                drawText(label, cx + cellW / 2, cy + (cellH - textHeight(m_fontLarge)) / 2, {210, 228, 238, 255}, m_fontLarge, true);
-            }
-        }
+    // Compact Virtual Keyboard (Pinned to bottom, Y = 456 to 708)
+    const char* ytActs[5] = {nullptr, nullptr, nullptr, nullptr, nullptr};
+    {
+        static std::string s0, s1, s2, s3, s4;
+        s0 = m_ytVk.shift ? "HOA" : "Thuong";
+        s1 = m_ytVk.telexMode ? "TELEX" : "US";
+        s2 = "Cach"; s3 = "Xoa"; s4 = "Tim";
+        ytActs[0] = s0.c_str(); ytActs[1] = s1.c_str(); ytActs[2] = s2.c_str();
+        ytActs[3] = s3.c_str(); ytActs[4] = s4.c_str();
+        VkState ytDraw = m_ytVk;
+        if (m_ytFocusInTags) ytDraw.row = -1;
+        m_ui.drawVirtualKeyboard(ytDraw, 46, 456, 86, 44, 8, 6,
+            SDL_Color{0, 200, 83, 255}, SDL_Color{140, 255, 190, 255}, ytActs, true, true, 2);
     }
-
-    // Row 4: 5 Action Keys (Clean text without emojis)
-    int actW = 180;
-    int row4Y = kbStartY + 4 * (cellH + gapY);
-
-    struct ActionKey {
-        std::string btn;
-        std::string label;
-    };
-    ActionKey actKeys[5] = {
-        {"L1", m_ytVk.shift ? "HOA" : "Thường"},
-        {"R1", m_ytVk.telexMode ? "TELEX" : "US"},
-        {"X", "Cách"},
-        {"Y", "Xóa"},
-        {"START", "Tìm"}
-    };
-
-    for (int i = 0; i < 5; i++) {
-        int cx = kbStartX + i * (actW + gapX);
-        bool isSel = (!m_ytFocusInTags && m_ytVk.row == 4 && (m_ytVk.col / 2) == i);
-
-        // Ve icon nut + label can giua trong phim (thay text "[L]" cu)
-        int iconSz = 30, kgap = 8;
-        int lwTmp = textWidth(actKeys[i].label, m_fontMedium);
-        int totW = iconSz + kgap + lwTmp;
-        int kxc = cx + (actW - totW) / 2;
-        int kyc = row4Y + (cellH - 30) / 2;
-        int kth = textHeight(m_fontMedium);
-        if (isSel) {
-            drawRoundedRect(cx, row4Y, actW, cellH, UiTheme::RADIUS_ROW, {0, 200, 83, 255}, true);
-            drawRoundedBorder(cx, row4Y, actW, cellH, UiTheme::RADIUS_ROW, {140, 255, 190, 255}, 2);
-            drawButtonIcon(actKeys[i].btn, kxc, kyc, iconSz);
-            drawText(actKeys[i].label, kxc + iconSz + kgap, kyc + (30 - kth) / 2, {255, 255, 255, 255}, m_fontMedium);
-        } else {
-            drawRoundedRect(cx, row4Y, actW, cellH, UiTheme::RADIUS_ROW, {14, 32, 44, 210}, true);
-            drawRoundedBorder(cx, row4Y, actW, cellH, UiTheme::RADIUS_ROW, {22, 54, 70, 255}, 1);
-            drawButtonIcon(actKeys[i].btn, kxc, kyc, iconSz);
-            drawText(actKeys[i].label, kxc + iconSz + kgap, kyc + (30 - kth) / 2, {210, 228, 238, 255}, m_fontMedium);
-        }
-    }
-
     // ─── Bottom Bar ───
     drawRect(0, 716, 1024, 52, {9, 20, 28, 255}, true);
     if (m_ytFocusInTags) {
@@ -5431,495 +4784,6 @@ void UIManager::renderYouTubeResultsState() {
 
     // Resolving stream overlay (Borderless)
     if (m_ytIsLoadingVideo) {
-        beginModalDim();
-        drawRoundedRect(272, 285, 480, 150, UiTheme::RADIUS_MODAL, SDL_Color{28, 28, 28, 255}, true);
-        drawText("ĐANG TẢI VIDEO...", 512, 325, {255, 255, 255, 255}, m_fontMedium, true);
-        drawText("Đang kết nối luồng phát...", 512, 372, {180, 190, 205, 255}, m_fontSmall, true);
-    }
-}
-
-// ─────────────────────────────────────────────
-// TikTok Search Logic
-// ─────────────────────────────────────────────
-
-std::vector<std::string> UIManager::runTikTokSearch(const std::string& query, int page) {
-    std::vector<std::string> results;
-    if (query.empty()) return results;
-
-    // 1. Direct high-speed API call via TikTokManager
-    auto feed = TikTokManager::instance().getFeedForTag(query);
-    if (!feed.empty()) {
-        for (const auto& item : feed) {
-            results.push_back(item.id + "|" + item.title + "|" + item.author + "|" + item.playUrl);
-        }
-        return results;
-    }
-
-    // 2. Fallback to shell script
-    std::string appRoot = AppConfig::instance().getAppRoot();
-    if (appRoot.empty()) appRoot = "/mnt/SDCARD/Apps/RomCloud";
-    std::string scriptPath = appRoot + "/scripts/tiktok_search.sh";
-
-    std::string escapedQuery;
-    for (char c : query) {
-        if (c == '"' || c == '\\') escapedQuery += '\\';
-        escapedQuery += c;
-    }
-
-    std::string cmd = "\"" + scriptPath + "\" search \"" + escapedQuery + "\" " +
-                      std::to_string(page) + " 20 2>/dev/null";
-    Logger::info("[TikTok] Searching via script: " + cmd);
-
-    FILE* pipe = popen(cmd.c_str(), "r");
-    if (!pipe) return results;
-
-    char buffer[2048];
-    while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
-        std::string line(buffer);
-        while (!line.empty() && (line.back() == '\n' || line.back() == '\r')) {
-            line.pop_back();
-        }
-        if (line.find("ERROR:") == 0 || line.find("WARNING:") == 0) continue;
-        if (std::count(line.begin(), line.end(), '|') >= 2) {
-            results.push_back(line);
-        }
-    }
-    pclose(pipe);
-    return results;
-}
-
-std::vector<std::string> UIManager::runTikTokTrending(int page) {
-    std::vector<std::string> results;
-
-    // 1. Direct high-speed API call via TikTokManager
-    auto feed = TikTokManager::instance().getFeedForTag("trend");
-    if (!feed.empty()) {
-        for (const auto& item : feed) {
-            results.push_back(item.id + "|" + item.title + "|" + item.author + "|" + item.playUrl);
-        }
-        return results;
-    }
-
-    // 2. Fallback to shell script
-    std::string appRoot = AppConfig::instance().getAppRoot();
-    if (appRoot.empty()) appRoot = "/mnt/SDCARD/Apps/RomCloud";
-    std::string scriptPath = appRoot + "/scripts/tiktok_search.sh";
-
-    std::string cmd = "\"" + scriptPath + "\" trending " +
-                      std::to_string(page) + " 20 2>/dev/null";
-    Logger::info("[TikTok] Fetching trending via script");
-
-    FILE* pipe = popen(cmd.c_str(), "r");
-    if (!pipe) return results;
-
-    char buffer[2048];
-    while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
-        std::string line(buffer);
-        while (!line.empty() && (line.back() == '\n' || line.back() == '\r')) {
-            line.pop_back();
-        }
-        if (line.find("ERROR:") == 0 || line.find("WARNING:") == 0) continue;
-        if (std::count(line.begin(), line.end(), '|') >= 2) {
-            results.push_back(line);
-        }
-    }
-    pclose(pipe);
-    return results;
-}
-
-std::string UIManager::resolveTikTokStreamUrl(const std::string& tiktokUrl) {
-    if (tiktokUrl.empty()) return "";
-    return TikTokManager::instance().resolveStreamUrl(tiktokUrl);
-}
-
-void UIManager::triggerTikTokSearch() {
-    if (m_ttIsSearching) return;
-
-    m_ttCurrentPage = 1;
-    m_ttLastSearchQuery = m_ttVk.query;
-
-    m_ttIsSearching = true;
-    m_ttSearchFinished = false;
-    m_ttErrorMessage.clear();
-    std::string query = m_ttVk.query;
-
-    m_ttSearchTask.run([this, query](TaskProgress&) {
-        auto results = runTikTokSearch(query, 1);
-        if (!results.empty()) {
-            m_ttSearchResults = results;
-        } else {
-            m_ttSearchResults.clear();
-            m_ttErrorMessage = "Không tìm thấy video nào";
-        }
-        m_ttSearchSelectedIndex = 0;
-        m_ttSearchScrollOffset = 0;
-        m_ttSearchFinished = true;
-    });
-}
-
-void UIManager::triggerTikTokTrending() {
-    if (m_ttIsSearching) return;
-
-    m_ttCurrentPage = 1;
-    m_ttLastSearchQuery = "Thịnh hành";
-
-    m_ttIsSearching = true;
-    m_ttSearchFinished = false;
-    m_ttErrorMessage.clear();
-
-    m_ttSearchTask.run([this](TaskProgress&) {
-        auto results = runTikTokTrending(1);
-        if (!results.empty()) {
-            m_ttSearchResults = results;
-        } else {
-            m_ttSearchResults.clear();
-            m_ttErrorMessage = "Không tìm thấy video nào";
-        }
-        m_ttSearchSelectedIndex = 0;
-        m_ttSearchScrollOffset = 0;
-        m_ttSearchFinished = true;
-    });
-}
-
-void UIManager::playTikTokVideo(const std::string& tiktokUrl, const std::string& title) {
-    if (tiktokUrl.empty() || m_ttIsLoadingVideo) return;
-
-    m_ttIsLoadingVideo = true;
-    m_ttVideoReady = false;
-    m_ttPendingStreamUrl.clear();
-    m_ttPendingVideoId = tiktokUrl;
-    m_ttPendingTitle = title;
-
-    m_resolveTask.run([this, tiktokUrl](TaskProgress&) {
-        std::string streamUrl = resolveTikTokStreamUrl(tiktokUrl);
-        if (!streamUrl.empty()) {
-            m_ttPendingStreamUrl = streamUrl;
-        }
-        m_ttVideoReady = true;
-    });
-}
-
-// ─────────────────────────────────────────────
-// TikTok Rendering
-// ─────────────────────────────────────────────
-
-void UIManager::renderTikTokSearchState() {
-    initTikTokTags();
-
-    // TikTok dark theme
-    drawAppBackground();
-
-    // Header bar
-    drawRect(0, 0, 1024, 50, {18, 18, 26, 255}, true);
-    drawRect(0, 50, 1024, 1, {35, 30, 45, 255}, true);
-
-    // Back badge
-    int backBadgeX = 46;
-    int backBadgeY = 11;
-    drawRoundedRect(backBadgeX, backBadgeY, 28, 28, UiTheme::RADIUS_ROW, {255, 0, 80, 255}, true);
-    drawText("<", backBadgeX + 14, backBadgeY + 14, {255, 255, 255, 255}, m_fontSmall, true);
-
-    // TikTok header title
-    drawText("TikTok", 84, 15, {245, 250, 255, 255}, m_fontMedium, false);
-
-    // Mode badge offset to 220 to avoid collision with title
-    std::string modeText = m_ttVk.telexMode ? "[R1] TELEX" : "[R1] US";
-    SDL_Color modeBg = m_ttVk.telexMode ? SDL_Color{255, 0, 80, 255} : SDL_Color{45, 45, 60, 255};
-    drawBadge(220, 11, 108, 28, modeText, modeBg, {255, 255, 255, 255});
-
-    // Battery & Clock
-    int bat = getBatteryLevel();
-    std::string batStr = std::to_string(bat) + "%";
-    drawText(batStr, 910, 16, {190, 215, 228, 255}, m_fontSmall, false);
-    drawRoundedBorder(962, 17, 24, 13, 3, {190, 215, 228, 255}, 1);
-    drawRect(986, 20, 2, 7, {190, 215, 228, 255}, true);
-    int bFill = (20 * bat) / 100;
-    if (bFill > 0) {
-        SDL_Color bColor = (bat <= 20) ? SDL_Color{239, 68, 68, 255} : SDL_Color{255, 0, 80, 255};
-        drawRect(964, 19, bFill, 9, bColor, true);
-    }
-    std::string timeStr = getCurrentTimeString();
-    drawText(timeStr, 842, 16, {190, 215, 228, 255}, m_fontSmall, false);
-
-    // ─── Input Field Box (Y = 58 to 114) ───
-    int inX = 46;
-    int inY = 58;
-    int inW = 932;
-    int inH = 56;
-    drawRoundedRect(inX, inY, inW, inH, UiTheme::RADIUS_CARD, {22, 20, 32, 230}, true);
-    drawRoundedBorder(inX, inY, inW, inH, UiTheme::RADIUS_CARD, {255, 0, 80, 180}, 1);
-
-    std::string dispQ = m_ttVk.query.empty() ? "Nhập từ khóa hoặc hashtag TikTok..." : (m_ttVk.query + " _");
-    SDL_Color qCol = m_ttVk.query.empty() ? SDL_Color{110, 100, 125, 255} : SDL_Color{255, 255, 255, 255};
-    drawText(dispQ, inX + 20, inY + (inH - textHeight(m_fontLarge)) / 2, qCol, m_fontLarge, false);
-
-    // ─── Upper Section: Trending Hashtag Grid (Y = 124 to 445) ───
-    drawText("CHỦ ĐỀ & HASHTAG THỊNH HÀNH", 46, 124, {255, 0, 80, 255}, m_fontSmall, false);
-    if (m_ttFocusInTags) {
-        drawText("D-pad: Chọn hashtag  |  [A]: Xem video  |  [Xuống]: Bàn phím", 520, 124, {255, 0, 80, 255}, m_fontSmall, false);
-    } else {
-        drawText("Bấm [Lên] từ hàng phím trên cùng để chọn hashtag", 630, 124, {140, 140, 160, 255}, m_fontSmall, false);
-    }
-
-    int tagCols = 4;
-    int tagW = 222;
-    int tagH = 44;
-    int tagGapX = 14;
-    int tagGapY = 10;
-    int tagStartX = 46;
-    int tagStartY = 152;
-
-    int tagCount = std::min(12, static_cast<int>(m_ttTrendingTags.size()));
-    for (int i = 0; i < tagCount; i++) {
-        int col = i % tagCols;
-        int row = i / tagCols;
-        int tx = tagStartX + col * (tagW + tagGapX);
-        int ty = tagStartY + row * (tagH + tagGapY);
-        bool isFocused = (m_ttFocusInTags && m_ttSelectedTagIndex == i);
-
-        std::string tagText = m_ttTrendingTags[i];
-
-        if (isFocused) {
-            drawRoundedRect(tx, ty, tagW, tagH, UiTheme::RADIUS_CARD, {255, 0, 80, 240}, true);
-            drawRoundedBorder(tx, ty, tagW, tagH, UiTheme::RADIUS_CARD, {255, 170, 200, 255}, 2);
-            drawText(tagText, tx + tagW / 2, ty + (tagH - textHeight(m_fontMedium)) / 2, {255, 255, 255, 255}, m_fontMedium, true);
-        } else {
-            drawRoundedRect(tx, ty, tagW, tagH, UiTheme::RADIUS_CARD, {26, 20, 32, 210}, true);
-            drawRoundedBorder(tx, ty, tagW, tagH, UiTheme::RADIUS_CARD, {60, 40, 65, 255}, 1);
-            drawText(tagText, tx + tagW / 2, ty + (tagH - textHeight(m_fontSmall)) / 2, {220, 210, 230, 255}, m_fontSmall, true);
-        }
-    }
-
-    // Divider line above keyboard
-    drawRect(46, 444, 932, 1, {40, 30, 50, 180}, true);
-
-    // ─── Compact Virtual Keyboard (Pinned to bottom, Y = 456 to 708) ───
-    static const char* lowerRows[] = {
-        "1234567890",
-        "qwertyuiop",
-        "asdfghjkl-",
-        "zxcvbnm()/"
-    };
-    static const char* upperRows[] = {
-        "1234567890",
-        "QWERTYUIOP",
-        "ASDFGHJKL-",
-        "ZXCVBNM()/"
-    };
-
-    int kbStartX = 46;
-    int kbStartY = 456;
-    int cellW = 86;
-    int cellH = 44; // Compact & well-proportioned
-    int gapX = 8;
-    int gapY = 6;
-
-    for (int row = 0; row < 4; row++) {
-        for (int col = 0; col < 10; col++) {
-            int cx = kbStartX + col * (cellW + gapX);
-            int cy = kbStartY + row * (cellH + gapY);
-            bool isSel = (!m_ttFocusInTags && m_ttVk.row == row && m_ttVk.col == col);
-
-            char ch = m_ttVk.shift ? upperRows[row][col] : lowerRows[row][col];
-            std::string label(1, ch);
-
-            if (isSel) {
-                drawRoundedRect(cx, cy, cellW, cellH, UiTheme::RADIUS_ROW, {255, 0, 80, 255}, true);
-                drawRoundedBorder(cx, cy, cellW, cellH, UiTheme::RADIUS_ROW, {255, 140, 175, 255}, 2);
-                drawText(label, cx + cellW / 2, cy + (cellH - textHeight(m_fontLarge)) / 2, {255, 255, 255, 255}, m_fontLarge, true);
-            } else {
-                drawRoundedRect(cx, cy, cellW, cellH, UiTheme::RADIUS_ROW, {22, 20, 34, 210}, true);
-                drawRoundedBorder(cx, cy, cellW, cellH, UiTheme::RADIUS_ROW, {44, 38, 58, 255}, 1);
-                drawText(label, cx + cellW / 2, cy + (cellH - textHeight(m_fontLarge)) / 2, {215, 215, 235, 255}, m_fontLarge, true);
-            }
-        }
-    }
-
-    // Row 4: 5 Action Keys
-    int actW = 180;
-    int row4Y = kbStartY + 4 * (cellH + gapY);
-
-    struct ActionKey {
-        std::string btn;
-        std::string label;
-    };
-    ActionKey actKeys[5] = {
-        {"L1", m_ttVk.shift ? "HOA" : "Thường"},
-        {"R1", m_ttVk.telexMode ? "TELEX" : "US"},
-        {"X", "Cách"},
-        {"Y", "Xóa"},
-        {"START", "Tìm"}
-    };
-
-    for (int i = 0; i < 5; i++) {
-        int cx = kbStartX + i * (actW + gapX);
-        bool isSel = (!m_ttFocusInTags && m_ttVk.row == 4 && (m_ttVk.col / 2) == i);
-
-        int iconSz = 30, kgap = 8;
-        int lwTmp = textWidth(actKeys[i].label, m_fontMedium);
-        int totW = iconSz + kgap + lwTmp;
-        int kxc = cx + (actW - totW) / 2;
-        int kyc = row4Y + (cellH - 30) / 2;
-        int kth = textHeight(m_fontMedium);
-        if (isSel) {
-            drawRoundedRect(cx, row4Y, actW, cellH, UiTheme::RADIUS_ROW, {255, 0, 80, 255}, true);
-            drawRoundedBorder(cx, row4Y, actW, cellH, UiTheme::RADIUS_ROW, {255, 140, 175, 255}, 2);
-            drawButtonIcon(actKeys[i].btn, kxc, kyc, iconSz);
-            drawText(actKeys[i].label, kxc + iconSz + kgap, kyc + (30 - kth) / 2, {255, 255, 255, 255}, m_fontMedium);
-        } else {
-            drawRoundedRect(cx, row4Y, actW, cellH, UiTheme::RADIUS_ROW, {22, 20, 34, 210}, true);
-            drawRoundedBorder(cx, row4Y, actW, cellH, UiTheme::RADIUS_ROW, {44, 38, 58, 255}, 1);
-            drawButtonIcon(actKeys[i].btn, kxc, kyc, iconSz);
-            drawText(actKeys[i].label, kxc + iconSz + kgap, kyc + (30 - kth) / 2, {215, 215, 235, 255}, m_fontMedium);
-        }
-    }
-
-    // ─── Bottom Bar ───
-    drawRect(0, 716, 1024, 52, {14, 14, 20, 255}, true);
-    if (m_ttFocusInTags) {
-        drawBadge(46, 726, 140, 30, "[A] Xem video", {255, 0, 80, 255}, {255, 255, 255, 255});
-        drawAppFooter({{UiTheme::PadBtn::A, "Phát"}, {UiTheme::PadBtn::UPDOWN, "Bàn phím"}});
-    } else {
-        drawBadge(46, 726, 82, 30, "[A] OK", {255, 0, 80, 255}, {255, 255, 255, 255});
-        drawAppFooter({{UiTheme::PadBtn::X, "Cách"}, {UiTheme::PadBtn::Y, "Xóa"}, {UiTheme::PadBtn::L1, "Hoa"}, {UiTheme::PadBtn::R1, "Telex"}, {UiTheme::PadBtn::START, "Tìm"}});
-    }
-
-    // Searching modal overlay
-    if (m_ttIsSearching) {
-        beginModalDim();
-        drawRoundedRect(280, 290, 464, 140, UiTheme::RADIUS_ROW, SDL_Color{25, 20, 35, 255}, true);
-        drawRoundedBorder(280, 290, 464, 140, UiTheme::RADIUS_ROW, {255, 0, 80, 255}, 2);
-        drawText("ĐANG TẢI TIKTOK...", 512, 325, {255, 0, 80, 255}, m_fontMedium, true);
-        std::string qText = m_ttVk.query.empty() ? "Video thịnh hành hôm nay" : ("\"" + m_ttVk.query + "\"");
-        if (qText.length() > 36) qText = qText.substr(0, 33) + "...\"";
-        drawText(qText, 512, 370, {240, 240, 240, 255}, m_fontSmall, true);
-    }
-}
-
-void UIManager::renderTikTokResultsState() {
-    // Dark background
-    drawAppBackground();
-
-    // Top Bar: TikTok logo + query
-    std::string ttLogoPath = AppConfig::instance().getAssetsDir() + "/apps_icons/TIKTOK.png";
-    SDL_Texture* ttLogo = m_ui.getOrLoadImage("grid/TIKTOK.png", ttLogoPath);
-
-    int logoH = 40;
-    int logoW = 40;
-    int textStartX = 28;
-    if (ttLogo) {
-        int texW = 0, texH = 0;
-        SDL_QueryTexture(ttLogo, nullptr, nullptr, &texW, &texH);
-        if (texH > 0) logoW = (texW * logoH) / texH;
-        int slx = PlatformInfo::instance().scaleX(26);
-        int sly = PlatformInfo::instance().scaleY(12);
-        int slw = PlatformInfo::instance().scaleW(logoW);
-        int slh = PlatformInfo::instance().scaleH(logoH);
-        SDL_Rect dst = {slx, sly, slw, slh};
-        SDL_RenderCopy(m_renderer, ttLogo, nullptr, &dst);
-        textStartX = 26 + logoW + 10;
-    }
-
-    std::string queryDisplay = m_ttLastSearchQuery.empty() ? "" : (": " + m_ttLastSearchQuery);
-    if (!queryDisplay.empty()) {
-        if (queryDisplay.length() > 38) queryDisplay = queryDisplay.substr(0, 35) + "...";
-        drawText(queryDisplay, textStartX, 22, {245, 245, 245, 255}, m_fontMedium, false);
-    }
-
-    // Battery & Clock
-    int bat = getBatteryLevel();
-    drawText(std::to_string(bat) + "%", 910, 20, {180, 185, 195, 255}, m_fontSmall, false);
-    drawRoundedBorder(962, 21, 24, 13, 3, {180, 185, 195, 255}, 1);
-    drawRect(986, 24, 2, 7, {180, 185, 195, 255}, true);
-    int bFill = (20 * bat) / 100;
-    if (bFill > 0) {
-        SDL_Color bColor = (bat <= 20) ? SDL_Color{239, 68, 68, 255} : SDL_Color{34, 197, 94, 255};
-        drawRect(964, 23, bFill, 9, bColor, true);
-    }
-    drawText(getCurrentTimeString(), 842, 20, {180, 185, 195, 255}, m_fontSmall, false);
-
-    // 3 cols × 2 rows grid — no thumbnails, text cards only
-    const int itemsPerPage = 6;
-    const int cols = 3;
-    int totalResults = static_cast<int>(m_ttSearchResults.size());
-    int pageStartIndex = (m_ttSearchSelectedIndex / itemsPerPage) * itemsPerPage;
-
-    int cardW = 316;
-    int cardH = 210;  // shorter than YouTube (no thumbnail)
-    int gapX = 12;
-    int gapY = 14;
-    int startX = 26;
-    int startY = 62;
-
-    for (int i = 0; i < itemsPerPage; i++) {
-        int idx = pageStartIndex + i;
-        if (idx >= totalResults) break;
-
-        int row = i / cols;
-        int col = i % cols;
-        int cx = startX + col * (cardW + gapX);
-        int cy = startY + row * (cardH + gapY);
-        bool isSelected = (idx == m_ttSearchSelectedIndex);
-
-        // Card Background
-        SDL_Color cardBg = isSelected ? SDL_Color{38, 38, 38, 255} : SDL_Color{24, 24, 24, 255};
-        drawRoundedRect(cx, cy, cardW, cardH, UiTheme::RADIUS_CARD, cardBg, true);
-
-        // Selected: TikTok pink border
-        if (isSelected) {
-            drawRoundedBorder(cx, cy, cardW, cardH, UiTheme::RADIUS_CARD, {255, 0, 80, 255}, 2);
-        }
-
-        auto parts = split(m_ttSearchResults[idx], '|');
-        std::string vid = !parts.empty() ? parts[0] : "";
-        std::string title = parts.size() >= 2 ? parts[1] : "";
-        std::string author = parts.size() >= 3 ? parts[2] : "";
-        std::string desc = parts.size() >= 4 ? parts[3] : "";
-
-        int pad = 12;
-        int infoX = cx + pad;
-        int infoY = cy + pad;
-
-        // Author (muted, top)
-        if (!author.empty()) {
-            std::string dispAuthor = "@" + author;
-            if (dispAuthor.length() > 22) dispAuthor = dispAuthor.substr(0, 20) + "..";
-            drawText(dispAuthor, infoX, infoY, {255, 0, 80, 200}, m_fontSmall, false);
-            infoY += 22;
-        }
-
-        // Title (bold, 2 lines)
-        auto lines = wrapUtf8TwoLines(title, 22);
-        SDL_Color titleCol = {255, 255, 255, 255};
-        drawText(lines.first, infoX, infoY, titleCol, m_fontSmall, false);
-        if (!lines.second.empty()) {
-            drawText(lines.second, infoX, infoY + 22, titleCol, m_fontSmall, false);
-            infoY += 48;
-        } else {
-            infoY += 28;
-        }
-
-        // Description excerpt (muted)
-        if (!desc.empty()) {
-            std::string dispDesc = desc;
-            if (dispDesc.length() > 40) dispDesc = dispDesc.substr(0, 38) + "..";
-            drawText(dispDesc, infoX, infoY, {120, 120, 140, 255}, m_fontSmall, false);
-        }
-    }
-
-    // Footer
-    drawRect(0, 715, 1024, 53, {18, 18, 18, 255}, true);
-    drawRect(0, 715, 1024, 1, {35, 35, 35, 255}, true);
-
-    char pageInfo[64];
-    int maxPage = std::max(1, (totalResults + itemsPerPage - 1) / itemsPerPage);
-    snprintf(pageInfo, sizeof(pageInfo), "Page %d/%d (%d videos)", m_ttCurrentPage, maxPage, totalResults);
-    drawText(pageInfo, 32, 730, {156, 163, 175, 255}, m_fontSmall, false);
-
-    drawAppFooter({{UiTheme::PadBtn::X, "Tìm"}});
-
-    // Loading overlay
-    if (m_ttIsLoadingVideo) {
         beginModalDim();
         drawRoundedRect(272, 285, 480, 150, UiTheme::RADIUS_MODAL, SDL_Color{28, 28, 28, 255}, true);
         drawText("ĐANG TẢI VIDEO...", 512, 325, {255, 255, 255, 255}, m_fontMedium, true);
@@ -6265,47 +5129,7 @@ void UIManager::renderLsFolderKeyboard() {
              m_lsFolderVk.query.empty() ? SDL_Color{100, 116, 139, 255}
                                            : SDL_Color{255, 255, 255, 255},
              m_fontLarge, false);
-    static const char* lowerRows[4] = {
-        "qwertyuiop", "asdfghjkl\'", "zxcvbnm,.?", "1234567890"
-    };
-    static const char* upperRows[4] = {
-        "QWERTYUIOP", "ASDFGHJKL\"", "ZXCVBNM;:/", "!@#$%^&*()"
-    };
-    int kbStartX = 48, kbStartY = 220, gapX = 8, gapY = 10;
-    int cellW = (1024 - 96 - gapX * 9) / 10, cellH = 64;
-    for (int row = 0; row < 4; row++) {
-        for (int col = 0; col < 10; col++) {
-            int cx = kbStartX + col * (cellW + gapX);
-            int cy = kbStartY + row * (cellH + gapY);
-            bool isSel = (m_lsFolderVk.row == row && m_lsFolderVk.col == col);
-            char ch = VirtualKeyboard::charAt(VkState{m_lsFolderVk.query, row, col, m_lsFolderVk.shift, false});
-            drawRect(cx, cy, cellW, cellH, isSel ? SDL_Color{37, 99, 235, 255}
-                                                 : SDL_Color{15, 23, 42, 255}, true);
-            if (isSel) drawBorder(cx, cy, cellW, cellH, {147, 197, 253, 255}, 2);
-            else drawBorder(cx, cy, cellW, cellH, {30, 41, 59, 255}, 1);
-            char buf[2] = {ch, '\0'};
-            drawText(std::string(buf), cx + cellW / 2, cy + 14,
-                     isSel ? SDL_Color{255, 255, 255, 255} : SDL_Color{203, 213, 225, 255},
-                     m_fontLarge, true);
-        }
-    }
-    const char* actions[5] = {"Shift", "Space", "Xóa", "Xong", "Hủy"};
-    int actW = (1024 - 96 - gapX * 4) / 5;
-    int actY = kbStartY + 4 * (cellH + gapY);
-    for (int i = 0; i < 5; i++) {
-        int cx = kbStartX + i * (actW + gapX);
-        bool isSel = (m_lsFolderVk.row == 4 && m_lsFolderVk.col == i);
-        SDL_Color bg = isSel ? SDL_Color{37, 99, 235, 255} : SDL_Color{15, 23, 42, 255};
-        if (i == 3) bg = isSel ? SDL_Color{22, 163, 74, 255} : SDL_Color{20, 83, 45, 255};
-        if (i == 4) bg = isSel ? SDL_Color{220, 38, 38, 255} : SDL_Color{69, 10, 10, 255};
-        if (i == 0 && m_lsFolderVk.shift) bg = SDL_Color{29, 78, 216, 255};
-        drawRect(cx, actY, actW, cellH, bg, true);
-        drawBorder(cx, actY, actW, cellH,
-                   isSel ? SDL_Color{147, 197, 253, 255} : SDL_Color{30, 41, 59, 255},
-                   isSel ? 2 : 1);
-        drawText(actions[i], cx + actW / 2, actY + 16,
-                 {255, 255, 255, 255}, m_fontMedium, true);
-    }
+    { static std::string ls0,ls1,ls2,ls3,ls4; ls0="Shift"; ls1="Space"; ls2="Xoa"; ls3="Xong"; ls4="Huy"; const char* lsA[5]={ls0.c_str(),ls1.c_str(),ls2.c_str(),ls3.c_str(),ls4.c_str()}; int lsCw=(1024-96-8*9)/10; m_ui.drawVirtualKeyboard(m_lsFolderVk,48,220,lsCw,64,8,10,SDL_Color{37,99,235,255},SDL_Color{147,197,253,255},lsA,false,false,1); }
     drawRect(0, 715, 1024, 53, {15, 23, 42, 255}, true);
     drawRect(0, 715, 1024, 1, {30, 41, 59, 255}, true);
     drawAppFooter({{UiTheme::PadBtn::X, "Xóa"}, {UiTheme::PadBtn::Y, "Hoa"}, {UiTheme::PadBtn::START, "Xong"}});
@@ -6557,90 +5381,9 @@ void UIManager::renderLocalSendGamePicker() {
     drawAppFooter({{UiTheme::PadBtn::A, "Trang"}, {UiTheme::PadBtn::Y, "Tải lại"}});
 }
 
-void UIManager::renderLsProgressRow(bool isSend, int idx, int x, int y, int w, bool sel) {
-    drawRoundedRect(x, y, w, 110, UiTheme::RADIUS_ROW,
-                    sel ? SDL_Color{16, 185, 129, 255} : SDL_Color{30, 41, 59, 255}, true);
-    SDL_Color titleC = sel ? SDL_Color{6, 40, 28, 255} : SDL_Color{241, 245, 249, 255};
-    SDL_Color metaC  = sel ? SDL_Color{6, 60, 40, 255}  : SDL_Color{148, 163, 184, 255};
-    int tx = x + 14;
-    std::string name, pathVal, peer, status;
-    uint64_t done = 0, tot = 0;
-    uint32_t bps = 0;
-    SDL_Color statusC = metaC;
-    if (isSend) {
-        auto v = LocalSendManager::instance().sendProgresses();
-        if (idx < 0 || idx >= (int)v.size()) return;
-        const auto& s = v[(size_t)idx];
-        name = s.fileName; pathVal = s.absPath;
-        peer = s.toAlias.empty() ? s.toIp : s.toAlias;
-        done = s.sentBytes; tot = s.totalBytes; bps = s.bytesPerSec;
-        if (s.state == LsSendProgress::UPLOADING) { status = "Đang gửi"; statusC = {96,165,250,255}; }
-        else if (s.state == LsSendProgress::DONE) { status = "HOÀN THÀNH"; statusC = {34,197,94,255}; }
-        else if (s.state == LsSendProgress::FAILED) { status = "LỖI"; statusC = {239,68,68,255}; }
-        else if (s.state == LsSendProgress::NEGOTIATING) { status = "Đang đàm phán"; statusC = {250,204,21,255}; }
-        else status = "Chờ gửi";
-        drawBadge(tx, y + 8, 70, 24, "GUI", {37, 99, 235, 255}, {255, 255, 255, 255});
-    } else {
-        auto v = LocalSendManager::instance().receiveProgresses();
-        if (idx < 0 || idx >= (int)v.size()) return;
-        const auto& r = v[(size_t)idx];
-        name = r.file.fileName; pathVal = r.savedPath;
-        peer = r.fromAlias.empty() ? r.fromIp : r.fromAlias;
-        done = r.receivedBytes; tot = r.file.size; bps = r.bytesPerSec;
-        if (r.state == LsUploadRequest::RECEIVING) { status = "Đang nhận"; statusC = {96,165,250,255}; }
-        else if (r.state == LsUploadRequest::DONE) { status = "HOÀN THÀNH"; statusC = {34,197,94,255}; }
-        else if (r.state == LsUploadRequest::FAILED || r.state == LsUploadRequest::REJECTED) { status = "LỖI/Từ chối"; statusC = {239,68,68,255}; }
-        else status = "Chờ duyệt";
-        drawBadge(tx, y + 8, 70, 24, "NHAN", {16, 185, 129, 255}, {6, 40, 28, 255});
-    }
-    std::string title = name.size() > 44 ? name.substr(0, 42) + ".." : name;
-    drawText(title, tx + 80, y + 8, titleC, m_fontSmall, false);
-    drawText(peer, x + w - 14, y + 10, metaC, m_fontSmall, true);
-    std::string pv = pathVal.size() > 72 ? std::string("...") + pathVal.substr(pathVal.size() - 69) : pathVal;
-    drawText((isSend ? "Nguồn: " : "Lưu: ") + pv, tx, y + 34, metaC, m_fontSmall, false);
-    double frac = tot == 0 ? 0 : (double)done / (double)tot;
-    int barW = w - 28;
-    drawProgressBar(tx, y + 58, barW, 14, frac, SDL_Color{59, 130, 246, 255}, true, SDL_Color{15, 23, 42, 255});
-    char info[160];
-    snprintf(info, sizeof(info), "%d%%  %s / %s  %s  %s",
-             (int)(frac * 100 + 0.5), LsUtil::humanSize(done).c_str(),
-             LsUtil::humanSize(tot).c_str(), LsUtil::humanSpeed(bps).c_str(), status.c_str());
-    drawText(info, tx, y + 76, statusC, m_fontSmall, false);
-}
+void UIManager::renderLsProgressRow(bool isSend, int idx, int x, int y, int w, bool sel) { m_dialogs.renderLsRow(m_ui, m_fontSmall, isSend, idx, x, y, w, sel); }
 
-void UIManager::renderLocalSendProgress() {
-    auto sends = LocalSendManager::instance().sendProgresses();
-    auto recvs = LocalSendManager::instance().receiveProgresses();
-    int ns = (int)sends.size(), nr = (int)recvs.size();
-    int total = ns + nr;
-    drawText("TRUYỀN FILE", 512, 36, {255, 255, 255, 255}, m_fontTitle, true);
-    char sub[128]; snprintf(sub, sizeof(sub), "Gửi: %d  |  Nhận: %d", ns, nr);
-    drawText(sub, 512, 78, {148, 163, 184, 255}, m_fontMedium, true);
-    int dlgX = 60, dlgY = 112, dlgW = 904, dlgH = 556;
-    drawRoundedRect(dlgX, dlgY, dlgW, dlgH, UiTheme::RADIUS_MODAL, SDL_Color{15, 23, 42, 220}, true);
-    if (total <= 0) {
-        drawText("Chưa có tác vụ gửi/nhận.", dlgX + dlgW/2, dlgY + 200, {148,163,184,255}, m_fontLarge, true);
-        drawText("Chọn ROM + A để gửi, hoặc chờ máy khác gửi tới.", dlgX + dlgW/2, dlgY + 250, {100,116,139,255}, m_fontSmall, true);
-    } else {
-        if (m_localSendProgressSel >= total) m_localSendProgressSel = total - 1;
-        if (m_localSendProgressSel < 0) m_localSendProgressSel = 0;
-        const int rowH = 118, pad = 12;
-        int vis = std::max(1, (dlgH - pad*2) / rowH);
-        if (m_localSendProgressSel < m_localSendProgressScroll) m_localSendProgressScroll = m_localSendProgressSel;
-        if (m_localSendProgressSel >= m_localSendProgressScroll + vis) m_localSendProgressScroll = m_localSendProgressSel - vis + 1;
-        int y = dlgY + pad;
-        for (int i = m_localSendProgressScroll; i < total && y + 110 <= dlgY + dlgH - 4; ++i) {
-            bool isS = i < ns;
-            renderLsProgressRow(isS, isS ? i : i - ns, dlgX + pad, y, dlgW - pad*2, i == m_localSendProgressSel);
-            y += rowH;
-        }
-    }
-    bool allDone = total > 0;
-    for (auto& s : sends) if (s.state != LsSendProgress::DONE && s.state != LsSendProgress::FAILED) allDone = false;
-    if (allDone) for (auto& r : recvs) if (r.state != LsUploadRequest::DONE && r.state != LsUploadRequest::FAILED && r.state != LsUploadRequest::REJECTED) allDone = false;
-    if (allDone) drawText("Xong! A/B về Home (tự về sau 3s).", dlgX + dlgW/2, dlgY + dlgH - 20, {34,197,94,255}, m_fontSmall, true);
-    drawAppFooter({{UiTheme::PadBtn::UPDOWN, "Chọn"}, {UiTheme::PadBtn::AB, "Lùi"}});
-}
+void UIManager::renderLocalSendProgress() { m_dialogs.renderLocalSendProgress(m_ui, m_fontSmall, m_fontMedium, m_fontLarge, m_fontTitle, m_localSendProgressSel, m_localSendProgressScroll); }
 
 // Helper: render ROMS list với track thực tế Y để tránh overlap khi có system separator.
 void UIManager::renderLsRomsList(int dlgX, int dlgY, int dlgW, int dlgH) {

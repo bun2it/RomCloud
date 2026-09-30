@@ -7,6 +7,8 @@
 #include "LocalSendProtocol.h"
 #include <functional>
 #include <thread>
+#include <memory>
+#include <vector>
 
 namespace RomCloud {
 

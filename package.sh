@@ -65,11 +65,23 @@ cp -f iptv/sources.txt "$STAGING_DIR/Apps/RomCloud/iptv/" 2>/dev/null || true
 # Ensure execution permissions
 chmod +x "$STAGING_DIR/Apps/RomCloud/launch.sh" "$STAGING_DIR/Apps/RomCloud/bin/RomCloud"
 
+make_zip() {
+    local out="$1"
+    shift
+    if command -v zip &>/dev/null; then
+        zip -r "$out" "$@"
+    elif command -v tar.exe &>/dev/null; then
+        tar.exe -a -cf "$out" "$@"
+    elif command -v tar &>/dev/null; then
+        tar -a -cf "$out" "$@"
+    fi
+}
+
 # Create Lite Installer zip (no heavy mpv/lib bundles, only ~5MB, ideal for first-time copy)
 mkdir -p "$DIST_DIR"
 rm -f "$DIST_DIR/$ZIP_NAME" "$DIST_DIR/RomCloud-Lite-Installer.zip" "$DIST_DIR/mpv_bundle.zip"
 cd "$STAGING_DIR"
-zip -r "$DIST_DIR/RomCloud-Lite-Installer.zip" Apps
+make_zip "$DIST_DIR/RomCloud-Lite-Installer.zip" Apps
 
 # Now add mpv and libraries for Full package
 cd "$SCRIPT_DIR"
@@ -83,11 +95,11 @@ fi
 
 # Create Full package zip
 cd "$STAGING_DIR"
-zip -r "$DIST_DIR/$ZIP_NAME" Apps
+make_zip "$DIST_DIR/$ZIP_NAME" Apps
 
 # Create mpv_bundle.zip for OTA update delivery
 cd "$STAGING_DIR/Apps/RomCloud"
-zip -r -9 "$DIST_DIR/mpv_bundle.zip" bin/mpv lib bin/yt-dlp bin/yt-dlp-glibc scripts assets/player_icons assets/apps_icons/YOUTUBE.png
+make_zip "$DIST_DIR/mpv_bundle.zip" bin/mpv lib bin/yt-dlp bin/yt-dlp-glibc scripts assets/player_icons assets/apps_icons/YOUTUBE.png
 cd "$SCRIPT_DIR"
 rm -rf "$STAGING_DIR"
 

@@ -1,29 +1,34 @@
 #include "Application.h"
+#include "../auth/AuthManager.h"
 #include "../config/AppConfig.h"
-#include "../logging/Logger.h"
-#include "../filesystem/FileSystemManager.h"
 #include "../database/DatabaseManager.h"
 #include "../database/RomIndexer.h"
-#include "../network/HttpClient.h"
-#include "../auth/AuthManager.h"
-#include "../sync/DriveSyncEngine.h"
 #include "../download/DownloadManager.h"
-#include "../ota/UpdateManager.h"
+#include "../filesystem/FileSystemManager.h"
 #include "../input/InputManager.h"
-#include "../ui/UIManager.h"
-#include "../platform/PlatformInfo.h"
-#include "../network/WebServer.h"
 #include "../localsend/LocalSendManager.h"
+#include "../logging/Logger.h"
+#include "../network/HttpClient.h"
+#include "../network/WebServer.h"
+#include "../ota/UpdateManager.h"
+#include "../platform/PlatformInfo.h"
+#include "../sync/DriveSyncEngine.h"
+#include "../ui/UIManager.h"
 
-#include <csignal>
-#include <unistd.h>
-#include <fstream>
-#include <sys/stat.h>
+
 #include <chrono>
+#include <csignal>
+#include <fstream>
 #include <iomanip>
 #include <sstream>
+#include <sys/stat.h>
+#include <unistd.h>
 
-// PC Simulator mode - set by build_pc.sh
+
+#ifdef _WIN32
+#define sync() (void)0
+#endif
+
 #ifdef PC_SIMULATOR_MODE
 #include <iostream>
 #endif
@@ -31,373 +36,404 @@
 namespace RomCloud {
 
 static void signalHandler(int signum) {
-    Logger::info("Caught signal " + std::to_string(signum) + ", requesting clean shutdown...");
-    Application::instance().requestExit();
+  Logger::info("Caught signal " + std::to_string(signum) +
+               ", requesting clean shutdown...");
+  Application::instance().requestExit();
 }
 
-Application& Application::instance() {
-    static Application instance;
-    return instance;
+Application &Application::instance() {
+  static Application instance;
+  return instance;
 }
 
-void Application::requestExit() {
-    m_running = false;
-}
+void Application::requestExit() { m_running = false; }
 
 bool Application::initSDL() {
-    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER | SDL_INIT_JOYSTICK | SDL_INIT_EVENTS) < 0) {
-        Logger::error(std::string("SDL_Init failed: ") + SDL_GetError());
-        return false;
-    }
+  if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER | SDL_INIT_JOYSTICK |
+               SDL_INIT_EVENTS) < 0) {
+    Logger::error(std::string("SDL_Init failed: ") + SDL_GetError());
+    return false;
+  }
 
-    SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "1");
-    SDL_SetHint(SDL_HINT_RENDER_VSYNC, "1");
+  SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "1");
+  SDL_SetHint(SDL_HINT_RENDER_VSYNC, "1");
 
 #ifdef PC_SIMULATOR_MODE
-    // PC Simulator: Windowed mode with title bar
-    m_window = SDL_CreateWindow(
-        "RomCloud Simulator [1024x768]",
-        SDL_WINDOWPOS_CENTERED,
-        SDL_WINDOWPOS_CENTERED,
-        1024,
-        768,
-        SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE
-    );
-    SDL_ShowCursor(SDL_ENABLE);
-    std::cout << "=== PC SIMULATOR MODE ===" << std::endl;
-    std::cout << "Controls: Arrow keys=D-pad, Enter=A, ESC=B, X=X, Y=Y, Q=L1, E=R1, TAB=SELECT, F1=START" << std::endl;
-    std::cout << "========================" << std::endl;
+  // PC Simulator: Windowed mode with title bar
+  m_window =
+      SDL_CreateWindow("RomCloud Simulator [1024x768]", SDL_WINDOWPOS_CENTERED,
+                       SDL_WINDOWPOS_CENTERED, 1024, 768,
+                       SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
+  std::cout << "=== PC SIMULATOR MODE ===" << std::endl;
+  std::cout << "Controls: Arrow keys=D-pad, Enter=A, ESC=B, X=X, Y=Y, Q=L1, "
+               "E=R1, 1=L2, 2=R2, TAB=SELECT, F1=START"
+            << std::endl;
+  std::cout << "========================" << std::endl;
 #else
-    // TrimUI: Fullscreen mode
-    m_window = SDL_CreateWindow(
-        "RomCloud",
-        SDL_WINDOWPOS_CENTERED,
-        SDL_WINDOWPOS_CENTERED,
-        1024,
-        768,
-        SDL_WINDOW_SHOWN | SDL_WINDOW_FULLSCREEN_DESKTOP
-    );
-    SDL_ShowCursor(SDL_DISABLE);
+  // TrimUI: Fullscreen mode
+  m_window = SDL_CreateWindow("RomCloud", SDL_WINDOWPOS_CENTERED,
+                              SDL_WINDOWPOS_CENTERED, 1024, 768,
+                              SDL_WINDOW_SHOWN | SDL_WINDOW_FULLSCREEN_DESKTOP);
 #endif
 
-    if (!m_window) {
-        Logger::error(std::string("SDL_CreateWindow failed: ") + SDL_GetError());
-        return false;
-    }
+  if (!m_window) {
+    Logger::error(std::string("SDL_CreateWindow failed: ") + SDL_GetError());
+    return false;
+  }
 
-    m_renderer = SDL_CreateRenderer(
-        m_window,
-        -1,
-        SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC
-    );
+  m_renderer = SDL_CreateRenderer(
+      m_window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
 
+  if (!m_renderer) {
+    Logger::warn(std::string("Hardware accelerated renderer failed, falling "
+                             "back to software: ") +
+                 SDL_GetError());
+    m_renderer = SDL_CreateRenderer(m_window, -1, SDL_RENDERER_SOFTWARE);
     if (!m_renderer) {
-        Logger::warn(std::string("Hardware accelerated renderer failed, falling back to software: ") + SDL_GetError());
-        m_renderer = SDL_CreateRenderer(m_window, -1, SDL_RENDERER_SOFTWARE);
-        if (!m_renderer) {
-            Logger::error(std::string("SDL_CreateRenderer software fallback also failed: ") + SDL_GetError());
-            return false;
-        }
+      Logger::error(
+          std::string("SDL_CreateRenderer software fallback also failed: ") +
+          SDL_GetError());
+      return false;
     }
+  }
 
-    SDL_ShowCursor(SDL_DISABLE);
-    int w = 0, h = 0;
-    SDL_GetRendererOutputSize(m_renderer, &w, &h);
-    if (w <= 0 || h <= 0) {
-        SDL_GetWindowSize(m_window, &w, &h);
-    }
-    if (w > 0 && h > 0) {
-        PlatformInfo::instance().setDisplayMetrics(w, h);
-    }
-    Logger::info("Display window created successfully: " + std::to_string(w) + "x" + std::to_string(h));
-    return true;
+  // Lock logical rendering size to 1024x768 so SDL automatically scales UI
+  // preserving aspect ratio
+  SDL_RenderSetLogicalSize(m_renderer, 1024, 768);
+
+#ifdef PC_SIMULATOR_MODE
+  SDL_ShowCursor(SDL_ENABLE);
+#else
+  SDL_ShowCursor(SDL_DISABLE);
+#endif
+
+  int w = 0, h = 0;
+  SDL_GetRendererOutputSize(m_renderer, &w, &h);
+  if (w <= 0 || h <= 0) {
+    SDL_GetWindowSize(m_window, &w, &h);
+  }
+  if (w > 0 && h > 0) {
+    PlatformInfo::instance().setDisplayMetrics(w, h);
+  }
+  Logger::info("Display window created successfully: " + std::to_string(w) +
+               "x" + std::to_string(h));
+  return true;
 }
 
-bool Application::init(int argc, char* argv[]) {
-    std::signal(SIGINT, signalHandler);
-    std::signal(SIGTERM, signalHandler);
+bool Application::init(int argc, char *argv[]) {
+  std::signal(SIGINT, signalHandler);
+  std::signal(SIGTERM, signalHandler);
 
-    if (argc > 1 && argv[1] != nullptr) {
-        AppConfig::instance().setAppRoot(std::string(argv[1]));
+  if (argc > 1 && argv[1] != nullptr) {
+    AppConfig::instance().setAppRoot(std::string(argv[1]));
+  }
+
+  if (!FileSystemManager::instance().initializeAppDirectories()) {
+    return false;
+  }
+
+  Logger::instance().init(AppConfig::instance().getDebugLogPath());
+
+  auto now = std::chrono::system_clock::now();
+  auto in_time_t = std::chrono::system_clock::to_time_t(now);
+  std::stringstream timeSs;
+  timeSs << std::put_time(std::localtime(&in_time_t), "%Y-%m-%d %H:%M:%S");
+
+  auto diag = PlatformInfo::instance().getDiagnostics();
+
+  Logger::instance().header(
+      "======================================================================");
+  Logger::instance().header("[" + timeSs.str() + "] [DEBUG LOG] RomCloud v" +
+                            std::string(APP_VERSION) + " Session Started");
+  Logger::instance().header("Device: " + diag.socName + " (" + diag.osName +
+                            " " + diag.kernelRelease +
+                            ") | Screen: " + diag.displayResolution);
+  Logger::instance().header(
+      "RAM: " + diag.freeRam + " / " + diag.totalRam +
+      " | App Root: " + AppConfig::instance().getAppRoot());
+  Logger::instance().header("Log Location: " +
+                            AppConfig::instance().getDebugLogPath());
+  Logger::instance().header(
+      "======================================================================");
+
+  // Ensure official app icon is synchronized to all launcher icons
+  std::string appRoot = AppConfig::instance().getAppRoot();
+  std::string officialCandidate1 = appRoot + "/assets/apps_icons/app_main.png";
+  std::string officialCandidate2 = appRoot + "/icon.png";
+  std::string officialCandidate3 = "/mnt/SDCARD/Apps/RomCloud/icon.png";
+
+  // Find the best valid high-res icon source (> 100KB)
+  std::string bestSource = "";
+  struct stat stBest;
+  stBest.st_size = 0;
+
+  const std::string candidates[] = {officialCandidate1, officialCandidate2,
+                                    officialCandidate3};
+  for (const auto &cand : candidates) {
+    struct stat st;
+    if (stat(cand.c_str(), &st) == 0 && st.st_size > 100000) {
+      bestSource = cand;
+      stBest = st;
+      break;
     }
+  }
 
-    if (!FileSystemManager::instance().initializeAppDirectories()) {
-        return false;
-    }
-
-    Logger::instance().init(AppConfig::instance().getDebugLogPath());
-
-    auto now = std::chrono::system_clock::now();
-    auto in_time_t = std::chrono::system_clock::to_time_t(now);
-    std::stringstream timeSs;
-    timeSs << std::put_time(std::localtime(&in_time_t), "%Y-%m-%d %H:%M:%S");
-
-    auto diag = PlatformInfo::instance().getDiagnostics();
-
-    Logger::instance().header("======================================================================");
-    Logger::instance().header("[" + timeSs.str() + "] [DEBUG LOG] RomCloud v" + std::string(APP_VERSION) + " Session Started");
-    Logger::instance().header("Device: " + diag.socName + " (" + diag.osName + " " + diag.kernelRelease + ") | Screen: " + diag.displayResolution);
-    Logger::instance().header("RAM: " + diag.freeRam + " / " + diag.totalRam + " | App Root: " + AppConfig::instance().getAppRoot());
-    Logger::instance().header("Log Location: " + AppConfig::instance().getDebugLogPath());
-    Logger::instance().header("======================================================================");
-
-    // Ensure official app icon is synchronized to all launcher icons
-    std::string appRoot = AppConfig::instance().getAppRoot();
-    std::string officialCandidate1 = appRoot + "/assets/apps_icons/app_main.png";
-    std::string officialCandidate2 = appRoot + "/icon.png";
-    std::string officialCandidate3 = "/mnt/SDCARD/Apps/RomCloud/icon.png";
-
-    // Find the best valid high-res icon source (> 100KB)
-    std::string bestSource = "";
-    struct stat stBest;
-    stBest.st_size = 0;
-
-    const std::string candidates[] = { officialCandidate1, officialCandidate2, officialCandidate3 };
-    for (const auto& cand : candidates) {
-        struct stat st;
-        if (stat(cand.c_str(), &st) == 0 && st.st_size > 100000) {
-            bestSource = cand;
-            stBest = st;
-            break;
+  if (!bestSource.empty()) {
+    std::vector<std::string> iconDestinations = {
+        appRoot + "/icon.png",
+        appRoot + "/iconsel.png",
+        appRoot + "/icontop.png",
+        appRoot + "/assets/apps_icons/APP.png",
+        appRoot + "/assets/icon.png",
+        "/mnt/SDCARD/Apps/RomCloud/icon.png",
+        "/mnt/SDCARD/Apps/RomCloud/iconsel.png",
+        "/mnt/SDCARD/Apps/RomCloud/icontop.png",
+        "/mnt/SDCARD/App/RomCloud/icon.png"};
+    for (const auto &dest : iconDestinations) {
+      struct stat stDest;
+      bool needCopy = false;
+      if (stat(dest.c_str(), &stDest) != 0 ||
+          stDest.st_size != stBest.st_size) {
+        if (dest.find(appRoot) == 0 || stat(dest.c_str(), &stDest) == 0) {
+          needCopy = true;
         }
-    }
-
-    if (!bestSource.empty()) {
-        std::vector<std::string> iconDestinations = {
-            appRoot + "/icon.png",
-            appRoot + "/iconsel.png",
-            appRoot + "/icontop.png",
-            appRoot + "/assets/apps_icons/APP.png",
-            appRoot + "/assets/icon.png",
-            "/mnt/SDCARD/Apps/RomCloud/icon.png",
-            "/mnt/SDCARD/Apps/RomCloud/iconsel.png",
-            "/mnt/SDCARD/Apps/RomCloud/icontop.png",
-            "/mnt/SDCARD/App/RomCloud/icon.png"
-        };
-        for (const auto& dest : iconDestinations) {
-            struct stat stDest;
-            bool needCopy = false;
-            if (stat(dest.c_str(), &stDest) != 0 || stDest.st_size != stBest.st_size) {
-                if (dest.find(appRoot) == 0 || stat(dest.c_str(), &stDest) == 0) {
-                    needCopy = true;
-                }
-            }
-            if (needCopy && dest != bestSource) {
-                std::ifstream src(bestSource, std::ios::binary);
-                std::ofstream dst(dest, std::ios::binary | std::ios::trunc);
-                if (src && dst) {
-                    dst << src.rdbuf();
-                    Logger::info("Synchronized official app icon to: " + dest + " (" + std::to_string(stBest.st_size) + " bytes)");
-                }
-            }
+      }
+      if (needCopy && dest != bestSource) {
+        std::ifstream src(bestSource, std::ios::binary);
+        std::ofstream dst(dest, std::ios::binary | std::ios::trunc);
+        if (src && dst) {
+          dst << src.rdbuf();
+          Logger::info("Synchronized official app icon to: " + dest + " (" +
+                       std::to_string(stBest.st_size) + " bytes)");
         }
+      }
+    }
+    sync();
+  }
+
+  // Ensure config.json uses only icontop to prevent dual stacked icons in
+  // TrimUI
+  std::string configPath = appRoot + "/config.json";
+  std::ifstream cfgIn(configPath);
+  if (cfgIn.is_open()) {
+    std::string content((std::istreambuf_iterator<char>(cfgIn)),
+                        std::istreambuf_iterator<char>());
+    cfgIn.close();
+    bool changed = false;
+    size_t p = 0;
+    while ((p = content.find("\"icon\": \"icon.png\"")) != std::string::npos) {
+      content.replace(p, 18, "\"icon\": \"\"");
+      changed = true;
+    }
+    while ((p = content.find("\"icon\":\"icon.png\"")) != std::string::npos) {
+      content.replace(p, 17, "\"icon\":\"\"");
+      changed = true;
+    }
+    while ((p = content.find("\"iconsel\": \"icon.png\"")) !=
+           std::string::npos) {
+      content.replace(p, 21, "\"iconsel\": \"\"");
+      changed = true;
+    }
+    while ((p = content.find("\"iconsel\":\"icon.png\"")) !=
+           std::string::npos) {
+      content.replace(p, 20, "\"iconsel\":\"\"");
+      changed = true;
+    }
+    if (changed) {
+      std::ofstream cfgOut(configPath, std::ios::trunc);
+      if (cfgOut.is_open()) {
+        cfgOut << content;
+        cfgOut.close();
         sync();
+        Logger::info("Sanitized config.json: removed background icon, kept "
+                     "icontop foreground logo");
+      }
     }
+  }
 
-    // Ensure config.json uses only icontop to prevent dual stacked icons in TrimUI
-    std::string configPath = appRoot + "/config.json";
-    std::ifstream cfgIn(configPath);
-    if (cfgIn.is_open()) {
-        std::string content((std::istreambuf_iterator<char>(cfgIn)), std::istreambuf_iterator<char>());
-        cfgIn.close();
-        bool changed = false;
-        size_t p = 0;
-        while ((p = content.find("\"icon\": \"icon.png\"")) != std::string::npos) {
-            content.replace(p, 18, "\"icon\": \"\"");
-            changed = true;
-        }
-        while ((p = content.find("\"icon\":\"icon.png\"")) != std::string::npos) {
-            content.replace(p, 17, "\"icon\":\"\"");
-            changed = true;
-        }
-        while ((p = content.find("\"iconsel\": \"icon.png\"")) != std::string::npos) {
-            content.replace(p, 21, "\"iconsel\": \"\"");
-            changed = true;
-        }
-        while ((p = content.find("\"iconsel\":\"icon.png\"")) != std::string::npos) {
-            content.replace(p, 20, "\"iconsel\":\"\"");
-            changed = true;
-        }
-        if (changed) {
-            std::ofstream cfgOut(configPath, std::ios::trunc);
-            if (cfgOut.is_open()) {
-                cfgOut << content;
-                cfgOut.close();
-                sync();
-                Logger::info("Sanitized config.json: removed background icon, kept icontop foreground logo");
-            }
-        }
-    }
+  // Initialize Network, OAuth, Sync & Download
+  HttpClient::instance().init();
+  WebServer::instance().start(8080);
 
-    // Initialize Network, OAuth, Sync & Download
-    HttpClient::instance().init();
-    WebServer::instance().start(8080);
+  // Initialize Database
+  if (!DatabaseManager::instance().init(
+          AppConfig::instance().getDatabasePath())) {
+    Logger::error("Failed to initialize SQLite database");
+    return false;
+  }
 
-    // Initialize Database
-    if (!DatabaseManager::instance().init(AppConfig::instance().getDatabasePath())) {
-        Logger::error("Failed to initialize SQLite database");
-        return false;
-    }
+  AuthManager::instance().init();
+  DriveSyncEngine::instance().init();
+  DownloadManager::instance().init();
 
-    AuthManager::instance().init();
-    DriveSyncEngine::instance().init();
-    DownloadManager::instance().init();
+  // Initialize SDL & Display
+  if (!initSDL()) {
+    return false;
+  }
 
-    // Initialize SDL & Display
-    if (!initSDL()) {
-        return false;
-    }
+  if (!InputManager::instance().init()) {
+    Logger::error("InputManager initialization failed");
+    return false;
+  }
 
-    if (!InputManager::instance().init()) {
-        Logger::error("InputManager initialization failed");
-        return false;
-    }
+  // Manual sync mode: do not scan or sync automatically on startup
+  int localCount = 0, cloudCount = 0;
+  DatabaseManager::instance().getTotalGameCounts(localCount, cloudCount);
+  Logger::info("Database loaded: " + std::to_string(localCount) + " local, " +
+               std::to_string(cloudCount) + " cloud games (Manual sync mode).");
 
-    // Manual sync mode: do not scan or sync automatically on startup
-    int localCount = 0, cloudCount = 0;
-    DatabaseManager::instance().getTotalGameCounts(localCount, cloudCount);
-    Logger::info("Database loaded: " + std::to_string(localCount) + " local, " + std::to_string(cloudCount) + " cloud games (Manual sync mode).");
+  // Initialize OTA Update Manager and check GitHub in background
+  UpdateManager::instance().init();
+  UpdateManager::instance().checkForUpdatesAsync();
 
-    // Initialize OTA Update Manager and check GitHub in background
-    UpdateManager::instance().init();
-    UpdateManager::instance().checkForUpdatesAsync();
+  if (!UIManager::instance().init(m_window, m_renderer)) {
+    Logger::error("UIManager initialization failed");
+    return false;
+  }
 
-    if (!UIManager::instance().init(m_window, m_renderer)) {
-        Logger::error("UIManager initialization failed");
-        return false;
-    }
+  // Auto-start LocalSendManager ở background (TCP listener + multicast
+  // announce). QUAN TRỌNG: phải chạy NGAY khi app launch, không chờ user vào
+  // LocalSend screen. Nếu service không listen, các peer (laptop / TrimUI khác)
+  // sẽ thấy TrimUI qua multicast discovery nhưng POST prepare-upload trả về
+  // "Connection refused".
+  if (!LocalSendManager::instance().start()) {
+    Logger::warn(
+        "LocalSendManager failed to start (continuing without LocalSend)");
+  }
 
-    // Auto-start LocalSendManager ở background (TCP listener + multicast announce).
-    // QUAN TRỌNG: phải chạy NGAY khi app launch, không chờ user vào LocalSend screen.
-    // Nếu service không listen, các peer (laptop / TrimUI khác) sẽ thấy TrimUI qua
-    // multicast discovery nhưng POST prepare-upload trả về "Connection refused".
-    if (!LocalSendManager::instance().start()) {
-        Logger::warn("LocalSendManager failed to start (continuing without LocalSend)");
-    }
-
-    m_running = true;
-    Logger::info("RomCloud initialization complete. Entering main loop.");
-    return true;
+  m_running = true;
+  Logger::info("RomCloud initialization complete. Entering main loop.");
+  return true;
 }
 
 void Application::run() {
-    const int TARGET_FPS = 60;
-    const int FRAME_DELAY = 1000 / TARGET_FPS;
-    int frameCount = 0;
-    uint32_t lastPerfLog = SDL_GetTicks();
+  const int TARGET_FPS = 60;
+  const int FRAME_DELAY = 1000 / TARGET_FPS;
+  int frameCount = 0;
+  uint32_t lastPerfLog = SDL_GetTicks();
 
-    while (m_running) {
-        uint32_t frameStart = SDL_GetTicks();
+  while (m_running) {
+    uint32_t frameStart = SDL_GetTicks();
 
-        InputManager::instance().update();
+    InputManager::instance().update();
 
-        if (InputManager::instance().isButtonJustPressed(Button::MENU)) {
-            Logger::info("Menu button pressed, exiting cleanly...");
-            m_running = false;
-            break;
-        }
-
-        UIManager::instance().update();
-
-        if (UIManager::instance().getState() == UIState::EXIT_REQUESTED) {
-            Logger::info("User requested exit from UI menu.");
-            m_running = false;
-            break;
-        }
-
-        UIManager::instance().render();
-
-        uint32_t frameTime = SDL_GetTicks() - frameStart;
-        if (frameTime < FRAME_DELAY) {
-            uint32_t remaining = FRAME_DELAY - frameTime;
-            if (remaining > 2) {
-                SDL_Delay(remaining - 1);
-            }
-        }
-
-        // Log performance stats every 5 seconds
-        frameCount++;
-        uint32_t now = SDL_GetTicks();
-        if (now - lastPerfLog >= 5000) {
-            float fps = (frameCount * 1000.0f) / (now - lastPerfLog);
-
-            // Get system memory info
-            FILE* memFile = fopen("/proc/meminfo", "r");
-            uint64_t memTotal = 0, memFree = 0, memAvailable = 0;
-            if (memFile) {
-                char line[256];
-                while (fgets(line, sizeof(line), memFile)) {
-                    if (sscanf(line, "MemTotal: %lu kB", &memTotal) == 1) continue;
-                    if (sscanf(line, "MemFree: %lu kB", &memFree) == 1) continue;
-                    if (sscanf(line, "MemAvailable: %lu kB", &memAvailable) == 1) continue;
-                }
-                fclose(memFile);
-            }
-
-            // Calculate memory usage
-            uint64_t memUsed = (memTotal > memAvailable) ? (memTotal - memAvailable) : 0;
-            float memUsedMB = memUsed / 1024.0f;
-            float memTotalMB = memTotal / 1024.0f;
-            float memPct = (memTotal > 0) ? (memUsed * 100.0f / memTotal) : 0;
-
-            // Get CPU usage from /proc/stat
-            static uint64_t lastIdle = 0, lastTotal = 0;
-            uint64_t cpuIdle = 0, cpuTotal = 0;
-            FILE* cpuFile = fopen("/proc/stat", "r");
-            if (cpuFile) {
-                char line[128];
-                if (fgets(line, sizeof(line), cpuFile)) {
-                    uint64_t u, n, s, i, w, irq, softirq;
-                    if (sscanf(line, "cpu %lu %lu %lu %lu %lu %lu %lu",
-                               &u, &n, &s, &i, &w, &irq, &softirq) == 7) {
-                        cpuTotal = u + n + s + i + w + irq + softirq;
-                        cpuIdle = i + w;
-                    }
-                }
-                fclose(cpuFile);
-            }
-
-            float cpuPct = 0;
-            if (cpuTotal > lastTotal) {
-                cpuPct = 100.0f * (1.0f - (float)(cpuIdle - lastIdle) / (cpuTotal - lastTotal));
-                lastIdle = cpuIdle;
-                lastTotal = cpuTotal;
-            }
-
-            Logger::info("[PERF] FPS: " + std::to_string((int)fps) +
-                         " | CPU: " + std::to_string((int)cpuPct) + "%" +
-                         " | RAM: " + std::to_string((int)memUsedMB) + "/" + std::to_string((int)memTotalMB) + " MB (" + std::to_string((int)memPct) + "%)");
-
-            frameCount = 0;
-            lastPerfLog = now;
-        }
+    if (InputManager::instance().isButtonJustPressed(Button::MENU)) {
+      Logger::info("Menu button pressed, exiting cleanly...");
+      m_running = false;
+      break;
     }
+
+    UIManager::instance().update();
+
+    if (UIManager::instance().getState() == UIState::EXIT_REQUESTED) {
+      Logger::info("User requested exit from UI menu.");
+      m_running = false;
+      break;
+    }
+
+    UIManager::instance().render();
+
+    uint32_t frameTime = SDL_GetTicks() - frameStart;
+    if (frameTime < FRAME_DELAY) {
+      uint32_t remaining = FRAME_DELAY - frameTime;
+      if (remaining > 2) {
+        SDL_Delay(remaining - 1);
+      }
+    }
+
+    // Log performance stats every 5 seconds
+    frameCount++;
+    uint32_t now = SDL_GetTicks();
+    if (now - lastPerfLog >= 5000) {
+      float fps = (frameCount * 1000.0f) / (now - lastPerfLog);
+
+      uint64_t memTotal = 0, memFree = 0, memAvailable = 0;
+      float cpuPct = 0;
+
+#ifndef _WIN32
+      // Get system memory info
+      FILE *memFile = fopen("/proc/meminfo", "r");
+      if (memFile) {
+        char line[256];
+        while (fgets(line, sizeof(line), memFile)) {
+          if (sscanf(line, "MemTotal: %lu kB", &memTotal) == 1)
+            continue;
+          if (sscanf(line, "MemFree: %lu kB", &memFree) == 1)
+            continue;
+          if (sscanf(line, "MemAvailable: %lu kB", &memAvailable) == 1)
+            continue;
+        }
+        fclose(memFile);
+      }
+
+      // Get CPU usage from /proc/stat
+      static uint64_t lastIdle = 0, lastTotal = 0;
+      uint64_t cpuIdle = 0, cpuTotal = 0;
+      FILE *cpuFile = fopen("/proc/stat", "r");
+      if (cpuFile) {
+        char line[128];
+        if (fgets(line, sizeof(line), cpuFile)) {
+          uint64_t u, n, s, i, w, irq, softirq;
+          if (sscanf(line, "cpu %lu %lu %lu %lu %lu %lu %lu", &u, &n, &s, &i,
+                     &w, &irq, &softirq) == 7) {
+            cpuTotal = u + n + s + i + w + irq + softirq;
+            cpuIdle = i + w;
+          }
+        }
+        fclose(cpuFile);
+      }
+
+      if (cpuTotal > lastTotal) {
+        cpuPct = 100.0f *
+                 (1.0f - (float)(cpuIdle - lastIdle) / (cpuTotal - lastTotal));
+        lastIdle = cpuIdle;
+        lastTotal = cpuTotal;
+      }
+#endif
+
+      // Calculate memory usage
+      uint64_t memUsed =
+          (memTotal > memAvailable) ? (memTotal - memAvailable) : 0;
+      float memUsedMB = memUsed / 1024.0f;
+      float memTotalMB = memTotal / 1024.0f;
+      float memPct = (memTotal > 0) ? (memUsed * 100.0f / memTotal) : 0;
+
+      Logger::info("[PERF] FPS: " + std::to_string((int)fps) +
+                   " | CPU: " + std::to_string((int)cpuPct) + "%" +
+                   " | RAM: " + std::to_string((int)memUsedMB) + "/" +
+                   std::to_string((int)memTotalMB) + " MB (" +
+                   std::to_string((int)memPct) + "%)");
+
+      frameCount = 0;
+      lastPerfLog = now;
+    }
+  }
 }
 
 void Application::shutdown() {
-    Logger::info("Beginning clean shutdown sequence...");
-    WebServer::instance().stop();
-    DownloadManager::instance().shutdown();
-    DriveSyncEngine::instance().shutdown();
-    AuthManager::instance().shutdown();
-    UIManager::instance().shutdown();
-    InputManager::instance().shutdown();
+  Logger::info("Beginning clean shutdown sequence...");
+  WebServer::instance().stop();
+  DownloadManager::instance().shutdown();
+  DriveSyncEngine::instance().shutdown();
+  AuthManager::instance().shutdown();
+  UIManager::instance().shutdown();
+  InputManager::instance().shutdown();
 
-    if (m_renderer) {
-        SDL_DestroyRenderer(m_renderer);
-        m_renderer = nullptr;
-    }
-    if (m_window) {
-        SDL_DestroyWindow(m_window);
-        m_window = nullptr;
-    }
+  if (m_renderer) {
+    SDL_DestroyRenderer(m_renderer);
+    m_renderer = nullptr;
+  }
+  if (m_window) {
+    SDL_DestroyWindow(m_window);
+    m_window = nullptr;
+  }
 
-    DatabaseManager::instance().close();
-    HttpClient::instance().shutdown();
-    SDL_Quit();
+  DatabaseManager::instance().close();
+  HttpClient::instance().shutdown();
+  SDL_Quit();
 
-    Logger::info("RomCloud shut down cleanly. Goodbye!");
-    Logger::instance().flush();
+  Logger::info("RomCloud shut down cleanly. Goodbye!");
+  Logger::instance().flush();
 }
 
 } // namespace RomCloud

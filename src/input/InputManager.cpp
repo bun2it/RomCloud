@@ -1,5 +1,6 @@
 #include "InputManager.h"
 #include "../logging/Logger.h"
+#include "../platform/PlatformInfo.h"
 
 namespace RomCloud {
 
@@ -83,6 +84,10 @@ void InputManager::mapKeyboardKey(SDL_Keycode key, bool isDown) {
         case SDLK_PAGEUP: btn = Button::L1; break;
         case SDLK_e:
         case SDLK_PAGEDOWN: btn = Button::R1; break;
+        case SDLK_1:
+        case SDLK_z:      btn = Button::L2; break;
+        case SDLK_2:
+        case SDLK_c:      btn = Button::R2; break;
         case SDLK_TAB:    btn = Button::SELECT; break;
         case SDLK_F1:     btn = Button::START; break;
         case SDLK_HOME:   btn = Button::MENU; break;
@@ -105,6 +110,13 @@ void InputManager::update() {
         switch (event.type) {
             case SDL_QUIT:
                 m_currentStates[static_cast<int>(Button::MENU)] = true;
+                break;
+
+            case SDL_WINDOWEVENT:
+                if (event.window.event == SDL_WINDOWEVENT_RESIZED ||
+                    event.window.event == SDL_WINDOWEVENT_SIZE_CHANGED) {
+                    PlatformInfo::instance().setDisplayMetrics(event.window.data1, event.window.data2);
+                }
                 break;
 
             case SDL_KEYDOWN:

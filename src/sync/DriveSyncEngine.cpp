@@ -5,6 +5,7 @@
 #include "../logging/Logger.h"
 #include <algorithm>
 #include <chrono>
+#include <iomanip>
 
 namespace RomCloud {
 

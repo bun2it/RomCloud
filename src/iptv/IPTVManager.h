@@ -5,7 +5,6 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <algorithm>
-#include "TikTokManager.h"
 
 namespace RomCloud {
 
@@ -210,7 +209,6 @@ public:
     bool playYouTubeVideo(const std::string& videoId, const std::string& initialUrl, const std::string& quality = "360");
     bool playYouTubeUrl(const std::string& url);
     bool switchYouTubeQuality(const std::string& videoId, const std::string& targetQuality);
-    bool playTikTokFeed(const std::vector<struct TikTokVideo>& feed, size_t initialIndex = 0, const std::string& tagName = "");
     void showOverlayIcon(const std::string& iconName, uint32_t durationMs = 1400);
     bool sendMpvIpcCommand(const std::string& cmd, std::string* response = nullptr, const std::string& sockPath = "");
     bool isYouTubePlaying() const { return m_isPlaying && m_currentChannel == "YouTube"; }
@@ -224,7 +222,7 @@ public:
                             int selectedIndex,
                             const std::string& groupName = "",
                             int durationMs = 4000);
-    bool isIPTVPlaying() const { return m_mpvPid > 0; }
+    bool isIPTVPlaying() const;
 
     // Status
     bool isPlaying() const { return m_isPlaying; }
@@ -273,9 +271,9 @@ private:
 
     bool m_isPlaying = false;
     std::string m_currentChannel;
-    int m_mpvPid = -1;
-    int m_iptvIpcSocket = -1;
-    bool sendMpvIpcOverSocket(const std::string& jsonCmd);
+    // P1-3: PID mpv do MpvPlayer giu duy nhat (isPlaying()/pid()/pollExited()).
+    // Dùng MpvPlayer::instance() thay cho mirror m_mpvPid.
+    bool isMpvPlaying() const;
     uint32_t m_overlayExpireTime = 0;
     int m_lastPlayingIndex = 0;
 

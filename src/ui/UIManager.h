@@ -1,7 +1,6 @@
 #pragma once
 #include "../database/DatabaseManager.h"
 #include "../iptv/IPTVManager.h"
-#include "../iptv/TikTokManager.h"
 #include "../localsend/LocalSendProtocol.h"
 #include "CoverManager.h"
 #include "UiRenderer.h"
@@ -40,8 +39,6 @@ enum class UIState {
   IPTV_SEARCH,
   YOUTUBE_SEARCH,
   YOUTUBE_RESULTS,
-  TIKTOK_SEARCH,
-  TIKTOK_RESULTS,
   LOCALSEND_HOME,       // Trang chính LocalSend: devices + pending + send queue
   LOCALSEND_INCOMING,   // Modal duyệt file gửi đến (A=đồng ý, B=từ chối)
   LOCALSEND_FOLDER,     // Chọn folder đích
@@ -192,10 +189,6 @@ private:
   int m_ytSearchSelectedIndex = 0;
   int m_ytSearchScrollOffset = 0;
   int m_ytCurrentPage = 1;           // current page (1-based, 6 results/page)
-  int m_ytKbRow = 0;
-  int m_ytKbCol = 0;
-  bool m_ytKbShift = false;
-  bool m_ytKbInResults = false;
   std::string m_ytErrorMessage;
   std::atomic<bool> m_ytIsSearching{false};
   std::atomic<bool> m_ytSearchFinished{false};
@@ -209,25 +202,6 @@ private:
   void loadYouTubeHistory();
   void saveYouTubeHistory(const std::string& query);
 
-  // TikTok Search State
-  std::string m_ttLastSearchQuery;
-  std::vector<std::string> m_ttSearchResults;
-  int m_ttSearchSelectedIndex = 0;
-  int m_ttSearchScrollOffset = 0;
-  int m_ttCurrentPage = 1;
-  VkState m_ttVk; // query/row/col/shift/telex unified
-  std::string m_ttErrorMessage;
-  std::atomic<bool> m_ttIsSearching{false};
-  std::atomic<bool> m_ttSearchFinished{false};
-  std::atomic<bool> m_ttIsLoadingVideo{false};
-  std::atomic<bool> m_ttVideoReady{false};
-  std::string m_ttPendingStreamUrl;
-  std::string m_ttPendingVideoId;
-  std::string m_ttPendingTitle;
-  std::vector<std::string> m_ttTrendingTags;
-  int m_ttSelectedTagIndex = 0;
-  bool m_ttFocusInTags = false;
-  void initTikTokTags();
 
   // System Selection State
   int m_selectedSystemIndex = 0;
@@ -295,8 +269,6 @@ private:
   void renderIPTVSearchState();
   void renderYouTubeSearchState();
   void renderYouTubeResultsState();
-  void renderTikTokSearchState();
-  void renderTikTokResultsState();
 
   // LocalSend P2P
   void renderLocalSendHome();
@@ -320,13 +292,6 @@ private:
   void renderUploadOverlay();
   void renderToast();
 
-  // TikTok integration
-  std::vector<std::string> runTikTokSearch(const std::string& query, int page = 1);
-  std::vector<std::string> runTikTokTrending(int page = 1);
-  std::string resolveTikTokStreamUrl(const std::string& tiktokUrl);
-  void triggerTikTokSearch();
-  void triggerTikTokTrending();
-  void playTikTokVideo(const std::string& tiktokUrl, const std::string& title);
 
   // Primitive drawing
   void drawText(const std::string &text, int x, int y, SDL_Color color,
@@ -400,7 +365,6 @@ private:
   // Media tasks: search YT/TT rieng (tranh wait-block UI khi chuyen man hinh),
   // resolve (stream URL) + thumb (tai thumbnail) dung chung.
   BackgroundTask m_ytSearchTask;
-  BackgroundTask m_ttSearchTask;
   BackgroundTask m_resolveTask;
   BackgroundTask m_thumbTask;
   std::atomic<bool> m_needLibraryRefresh{false};

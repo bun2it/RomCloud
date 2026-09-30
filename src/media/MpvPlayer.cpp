@@ -3,15 +3,18 @@
 #include "../logging/Logger.h"
 #include "../platform/PlatformInfo.h"
 #include <SDL2/SDL.h>
-#include <unistd.h>
 #include <fcntl.h>
 #include <signal.h>
 #include <cstring>
+#include <sys/stat.h>
+#include <cstdio>
+
+#ifndef _WIN32
+#include <unistd.h>
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <sys/wait.h>
-#include <sys/stat.h>
-#include <cstdio>
+#endif
 
 namespace RomCloud {
 
@@ -38,6 +41,7 @@ std::string MpvPlayer::resolveOsdFont(const std::string& appRoot) {
     return appRoot + "/assets/fonts/font.ttf";
 }
 
+#ifndef _WIN32
 bool MpvPlayer::sendOneShot(const std::string& sock,
                             const std::string& json, std::string* response) {
     int s = socket(AF_UNIX, SOCK_STREAM, 0);
@@ -218,4 +222,30 @@ bool MpvPlayer::stop() {
     m_overlayExpireMs = 0;
     return true;
 }
+#else
+// Windows PC Simulator Stubs
+bool MpvPlayer::sendOneShot(const std::string&, const std::string&, std::string*) { return true; }
+bool MpvPlayer::sendPersistent(const std::string&) { return true; }
+bool MpvPlayer::sendCmd(const std::string&, std::string*, const std::string&) { return true; }
+bool MpvPlayer::seekRelative(int, const std::string&) { return true; }
+bool MpvPlayer::cyclePause(const std::string&) { return true; }
+bool MpvPlayer::showOverlayIcon(const std::string&, const std::string&, unsigned, const std::string&) { return true; }
+bool MpvPlayer::showText(const std::string&, int, const std::string&) { return true; }
+bool MpvPlayer::pollExited() { return m_pid <= 0; }
+bool MpvPlayer::waitForSocket(int) { return true; }
+bool MpvPlayer::play(const std::string& url, const std::vector<std::string>&, const std::string&, const std::string&) {
+    stop();
+    if (url.empty()) return false;
+    Logger::info("MpvPlayer [PC Simulator]: Playing media URL -> " + url);
+    m_pid = 9999;
+    return true;
+}
+bool MpvPlayer::stop() {
+    if (m_pid > 0) {
+        Logger::info("MpvPlayer [PC Simulator]: Stopped playback.");
+        m_pid = -1;
+    }
+    return true;
+}
+#endif
 } // namespace RomCloud

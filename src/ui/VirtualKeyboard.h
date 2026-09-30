@@ -23,6 +23,7 @@ struct VkState {
     bool telexMode = true;
     bool inResults = false;
     size_t maxLen = 60;
+    int charset = 0;      // 0 = Explorer (qwerty/asdf...), 1 = Media YT/TT (123/qwerty/asdf/zxcv)
 };
 
 enum class VkAction {
@@ -36,6 +37,9 @@ class VirtualKeyboard {
 public:
     static const char* lowerRows[4];
     static const char* upperRows[4];
+    // Charset media YT/TT cu: hang so + qwerty thieu o (pixel-identical legacy).
+    static const char* mediaLowerRows[4];
+    static const char* mediaUpperRows[4];
 
     static void reset(VkState& s, bool telexDefault = true) {
         s.query.clear();
@@ -49,6 +53,8 @@ public:
     // Lay ky tu tai o hien tai (hang 0..3). Tra '\0' neu dang o hang action.
     static char charAt(const VkState& s) {
         if (s.row < 0 || s.row > 3 || s.col < 0 || s.col > 9) return '\0';
+        if (s.charset == 1)
+            return s.shift ? mediaUpperRows[s.row][s.col] : mediaLowerRows[s.row][s.col];
         return s.shift ? upperRows[s.row][s.col] : lowerRows[s.row][s.col];
     }
 
@@ -70,7 +76,8 @@ public:
 
     // Dieu huong D-pad. Tra true neu da xu ly (de caller return early).
     // upFromResults: khi focus dang o list ket qua, UP quay ve ban phim.
-    static bool move(VkState& s, int dRow, int dCol) {
+    // stride2: kieu media YT/TT cu — hang action col 0..9 buoc chan (col/2).
+    static bool move(VkState& s, int dRow, int dCol, bool stride2 = false) {
         if (s.inResults) {
             if (dRow < 0) { s.inResults = false; s.row = 4; s.col = 0; return true; }
             return false; // dieu huong trong results do caller xu ly
@@ -79,12 +86,17 @@ public:
             s.row += dRow;
             if (s.row < 0) s.row = 4;
             if (s.row > 4) s.row = 0;
-            clampCol(s);
+            clampCol(s, stride2);
+            // Vao hang action kieu stride2: snap ve o chan gan nhat.
+            if (stride2 && s.row == 4) s.col = (s.col / 2) * 2;
             return true;
         }
         if (dCol != 0) {
             if (s.row < 4) {
                 s.col = (s.col + dCol + 10) % 10;
+            } else if (stride2) {
+                int a = (s.col / 2 + dCol + 5) % 5;
+                s.col = a * 2;
             } else {
                 s.col = (s.col + dCol + 5) % 5;
             }
@@ -96,17 +108,18 @@ public:
     // Nhan nut A (chon o hien tai). onToggleTelexNotice: callback hien toast
     // khi doi che do TELEX/US (truyen nullptr neu khong can).
     template <typename ToastFn>
-    static VkAction pressA(VkState& s, ToastFn&& toast) {
+    static VkAction pressA(VkState& s, ToastFn&& toast, bool stride2 = false) {
         if (s.row < 4) {
             char ch = charAt(s);
             if (ch) typeChar(s, ch);
             return VkAction::None;
         }
-        return pressAction(s.col, s, toast);
+        int idx = stride2 ? (s.col / 2) : s.col;
+        return pressAction(idx, s, toast);
     }
 
-    static VkAction pressA(VkState& s) {
-        return pressA(s, [](const char*) {});
+    static VkAction pressA(VkState& s, bool stride2 = false) {
+        return pressA(s, [](const char*) {}, stride2);
     }
 
     template <typename ToastFn>
@@ -131,9 +144,9 @@ public:
     }
 
 private:
-    static void clampCol(VkState& s) {
+    static void clampCol(VkState& s, bool stride2 = false) {
         if (s.row < 4) { if (s.col > 9) s.col = 9; }
-        else { if (s.col > 4) s.col = 4; }
+        else { int mx = stride2 ? 9 : 4; if (s.col > mx) s.col = mx; }
         if (s.col < 0) s.col = 0;
     }
 };
@@ -143,6 +156,12 @@ inline const char* VirtualKeyboard::lowerRows[4] = {
 };
 inline const char* VirtualKeyboard::upperRows[4] = {
     "QWERTYUIOP", "ASDFGHJKL\"", "ZXCVBNM;:/", "!@#$%^&*()"
+};
+inline const char* VirtualKeyboard::mediaLowerRows[4] = {
+    "1234567890", "qwertyuiop", "asdfghjkl-", "zxcvbnm()/"
+};
+inline const char* VirtualKeyboard::mediaUpperRows[4] = {
+    "1234567890", "QWERTYUIOP", "ASDFGHJKL-", "ZXCVBNM()/"
 };
 
 } // namespace RomCloud

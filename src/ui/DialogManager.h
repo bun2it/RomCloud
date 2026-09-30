@@ -1,13 +1,18 @@
 #pragma once
-// RomCloud DialogManager — state logic cho toast/confirm/progress, khong SDL.
-// UIManager giu render hien tai; dan chuyen render ve day sau khi UiRenderer xong.
+// RomCloud DialogManager — state logic cho toast/confirm/progress + render overlays.
+// P0-3: gom 6 overlay tu UIManager ve day; UIManager chi giu wrapper 1 dong.
 #include <chrono>
 #include <cstdint>
 #include <functional>
 #include <string>
 #include <vector>
 
+#include <SDL2/SDL.h>
+#include <SDL2/SDL_ttf.h>
+
 namespace RomCloud {
+
+class UiRenderer;
 
 struct ToastState {
     std::string message;
@@ -71,6 +76,22 @@ public:
     void toastMsg(const std::string& m, uint32_t c = 0x00C853FF, uint32_t ms = 1200) {
         toast.show(m, c, ms);
     }
+
+    // ---- Render overlays (port 1:1 tu UIManager) ----
+    void renderToast(UiRenderer& ui, TTF_Font* fSmall);
+    void renderConfirm(UiRenderer& ui, TTF_Font* fSmall, TTF_Font* fMedium, TTF_Font* fLarge);
+    void renderProgress(UiRenderer& ui, TTF_Font* fSmall, TTF_Font* fLarge);
+    void renderSyncOverlay(UiRenderer& ui, TTF_Font* fSmall, TTF_Font* fMedium, TTF_Font* fLarge);
+    void renderDownloadOverlay(UiRenderer& ui, TTF_Font* fSmall, TTF_Font* fLarge);
+    void renderUploadOverlay(UiRenderer& ui, TTF_Font* fSmall);
+    void renderLsRow(UiRenderer& ui, TTF_Font* fSmall,
+                     bool isSend, int idx, int x, int y, int w, bool sel);
+    void renderLocalSendProgress(UiRenderer& ui, TTF_Font* fSmall, TTF_Font* fMedium,
+                                 TTF_Font* fLarge, TTF_Font* fTitle,
+                                 int& sel, int& scroll);
+    // 4 overlay global goi moi frame (toast + progress + sync + upload).
+    void renderGlobalOverlays(UiRenderer& ui, TTF_Font* fSmall, TTF_Font* fMedium, TTF_Font* fLarge);
 };
 
 } // namespace RomCloud
+

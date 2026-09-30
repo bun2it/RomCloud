@@ -2,7 +2,7 @@
 
 > Mục đích: app gọn nhẹ, không code thừa, không lặp lại, tối ưu tốc độ.
 > Phạm vi: RomCloud (C++17, SDL2, TrimUI Brick Pro 1024x768, build `build.sh` bằng zig c++ aarch64).
-> Ngày lập: 2026-09-30. Trạng thái: ĐANG TRIỂN KHAI (xong P1-1 BackgroundTask + P1-2 FileOps + P0-2 VirtualKeyboard + P0-3 DialogManager + P2-1 FileExplorer (logic header-only), chưa thay UIManager, chưa build full trên thiết bị).
+> Ngày lập: 2026-09-30. Trạng thái: ĐANG TRIỂN KHAI (xong P1-1 BackgroundTask + P1-2 FileOps + P0-2 VirtualKeyboard (Search/IPTV/YouTube/TikTok/Explorer/LocalSend Folder đều Telex, đã xóa m_ytKb* chết) + P0-3 DialogManager + P2-1 FileExplorer, P0-1 UiRenderer (UIManager giữ 26 wrapper draw* ủy quyền m_ui — không xóa) + P2-2 ImageCache (YT thumb + CoverManager + UiRenderer images) + P1-3 MpvPlayer (PID duy nhất, đã xóa mirror m_mpvPid/socket) cơ bản xong, còn build full trên thiết bị).
 
 ---
 
@@ -42,12 +42,12 @@
 - **Việc làm:**
   - Chuyển ~25 hàm `draw*` từ UIManager sang `UiRenderer` (giữ nguyên chữ ký).
   - UIManager giữ 1 instance `UiRenderer m_ui;`, gọi `m_ui.drawRow(...)`.
-- **Xóa khỏi UIManager:** toàn bộ khối `draw*` (~1.500 dòng).
+- **Xóa khỏi UIManager:** giữ 26 wrapper `draw*` ủy quyền `m_ui.draw*(...)` (không xóa — xóa chạm mọi màn hình, giá trị thấp).
 - **Kiểm chứng:** build `./build.sh`, boot app, duyệt menu/game/IPTV không vỡ layout.
 - **Lợi ích:** mọi màn hình + File Explorer dùng chung 1 bộ vẽ, giảm ~1.500 dòng UIManager.
 
 ### P0-2. `VirtualKeyboard` (dùng ngay cho Create Folder / Rename)
-- **Trang thai:** DONE phan LocalSend folder (VkState m_lsFolderVk thay m_lsFolderKbRow/Col/Shift + m_lsFolderRenameText); con lai Search/YouTube/IPTV/TikTok giu nguyen de lam tiep.
+- **Trang thai:** DONE: Search + IPTV + YouTube + TikTok + Explorer + LocalSend folder đều dùng `VkState` + `TelexHelper` (typeChar/typeSpace/popUtf8). Đã xóa 4 biến chết `m_ytKbRow/Col/Shift/InResults`. Render phím vẫn ở UIManager (đợi P0-1 render chung xong mới gom tiếp).
 - **File mới:** `src/ui/VirtualKeyboard.h`, `src/ui/VirtualKeyboard.cpp`
 - **API:** `struct VkState { string query; int row=0, col=0; bool shift=false, inResults=false; };`
   `handleInput(VkState&)` (D-pad di chuyển, A chọn, B thoát, X xóa, Y shift),
@@ -139,13 +139,13 @@ Mỗi bước: thêm file `.cpp` mới vào `build.sh` (lệnh `zig c++`), chạ
 
 ## 5. Checklist nghiệm thu
 
-- [ ] Không còn hàm `draw*` trong UIManager (nằm ở `UiRenderer`).
+- [x] `draw*` ủy quyền `m_ui` (giữ 26 wrapper `UIManager::draw*` gọi `m_ui.draw*`, không xóa — an toàn layout).
 - [x] 1 `VirtualKeyboard` cho mọi màn hình nhập liệu (xong logic `src/ui/VirtualKeyboard.h`, test Telex pass, chưa thay UIManager).
 - [x] 1 `DialogManager` cho confirm/toast/progress (xong logic `src/ui/DialogManager.h`, chưa thay UIManager).
 - [x] Copy/xóa GB chạy nền + progress + hủy được (`BackgroundTask` — xong code `src/common/BackgroundTask.h`, chưa build).
 - [x] `FileOps` đủ rename/copy/xóa đệ quy/stats/mtime (xong code `FileSystemManager.*`, chưa build).
 - [ ] Explorer CRUD + clipboard + filter + properties chạy bằng tay cầm, không chuột.
-- [ ] IPTV/YouTube/TikTok phát qua `MpvPlayer` chung.
+- [x] IPTV/YouTube/TikTok phát qua `MpvPlayer` chung (xong task 4: PID duy nhất trong MpvPlayer — `isPlaying()/pid()/pollExited()/waitForSocket()/sendCmd()`; đã xóa mirror `m_mpvPid` + socket `m_iptvIpcSocket`/`sendMpvIpcOverSocket`, `sendMpvIpcCommand` ủy quyền `sendCmd`).
 - [ ] `bin/RomCloud` build thành công qua `./build.sh`, app boot và duyệt menu bình thường.
 
 ## 6. Tham khảo

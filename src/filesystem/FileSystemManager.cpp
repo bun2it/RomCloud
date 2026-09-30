@@ -4,8 +4,19 @@
 #include "../logging/Logger.h"
 
 #include <sys/stat.h>
+#ifndef _WIN32
 #include <sys/statvfs.h>
 #include <unistd.h>
+#else
+#include <direct.h>
+#include <io.h>
+#ifndef lstat
+#define lstat stat
+#endif
+#ifndef S_ISLNK
+#define S_ISLNK(m) 0
+#endif
+#endif
 #include <dirent.h>
 #include <algorithm>
 #include <cstdio>
@@ -83,12 +94,19 @@ uint64_t FileSystemManager::getFileSize(const std::string& path) {
 
 DiskSpaceInfo FileSystemManager::getDiskSpace(const std::string& path) {
     DiskSpaceInfo info;
+#ifndef _WIN32
     struct statvfs stat;
     if (statvfs(path.c_str(), &stat) == 0) {
         info.totalBytes = static_cast<uint64_t>(stat.f_blocks) * stat.f_frsize;
         info.freeBytes = static_cast<uint64_t>(stat.f_bfree) * stat.f_frsize;
         info.availableBytes = static_cast<uint64_t>(stat.f_bavail) * stat.f_frsize;
     }
+#else
+    (void)path;
+    info.totalBytes = 64ULL * 1024 * 1024 * 1024;
+    info.freeBytes = 32ULL * 1024 * 1024 * 1024;
+    info.availableBytes = 32ULL * 1024 * 1024 * 1024;
+#endif
     return info;
 }
 
@@ -330,6 +348,8 @@ int64_t FileSystemManager::getModTime(const std::string& path) {
     if (stat(path.c_str(), &st) != 0) return 0;
 #if defined(__APPLE__)
     return static_cast<int64_t>(st.st_mtimespec.tv_sec);
+#elif defined(_WIN32)
+    return static_cast<int64_t>(st.st_mtime);
 #else
     return static_cast<int64_t>(st.st_mtim.tv_sec);
 #endif

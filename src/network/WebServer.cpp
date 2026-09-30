@@ -1,236 +1,262 @@
 #include "WebServer.h"
-#include "../logging/Logger.h"
-#include "../auth/AuthManager.h"
-#include "../database/DatabaseManager.h"
-#include "../platform/PlatformInfo.h"
-#include "../sync/DriveSyncEngine.h"
-#include "../ota/UpdateManager.h"
-#include "../download/DownloadManager.h"
-#include "../sync/UploadManager.h"
-#include "../filesystem/FileSystemManager.h"
-#include "../ui/BoxartScraper.h"
-#include "../rom/RomOrganizer.h"
-#include "../rom/RomDetector.h"
 #include "../app/Application.h"
+#include "../auth/AuthManager.h"
 #include "../config/AppConfig.h"
-#include "../iptv/IPTVManager.h"
+#include "../database/DatabaseManager.h"
 #include "../database/RomIndexer.h"
+#include "../download/DownloadManager.h"
+#include "../filesystem/FileSystemManager.h"
+#include "../iptv/IPTVManager.h"
+#include "../logging/Logger.h"
+#include "../ota/UpdateManager.h"
+#include "../platform/PlatformInfo.h"
+#include "../rom/RomDetector.h"
+#include "../rom/RomOrganizer.h"
+#include "../sync/DriveSyncEngine.h"
+#include "../sync/UploadManager.h"
+#include "../ui/BoxartScraper.h"
 #include "HttpClient.h"
 
-#include <sys/socket.h>
-#include <sys/stat.h>
-#include <netinet/in.h>
-#include <unistd.h>
+
+#include <algorithm>
+#include <cstring>
 #include <dirent.h>
 #include <fcntl.h>
-#include <sstream>
-#include <cstring>
-#include <vector>
-#include <algorithm>
-#include <iomanip>
 #include <fstream>
+#include <iomanip>
+#include <netinet/in.h>
+#include <sstream>
+#include <sys/socket.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#include <vector>
+
 
 namespace RomCloud {
 
-static std::string urlDecode(const std::string& in) {
-    std::string out;
-    out.reserve(in.size());
-    for (size_t i = 0; i < in.size(); ++i) {
-        if (in[i] == '%') {
-            if (i + 2 < in.size()) {
-                int hexVal = 0;
-                std::istringstream hexStream(in.substr(i + 1, 2));
-                if (hexStream >> std::hex >> hexVal) {
-                    out += static_cast<char>(hexVal);
-                    i += 2;
-                } else {
-                    out += in[i];
-                }
-            } else {
-                out += in[i];
-            }
-        } else if (in[i] == '+') {
-            out += ' ';
+static std::string urlDecode(const std::string &in) {
+  std::string out;
+  out.reserve(in.size());
+  for (size_t i = 0; i < in.size(); ++i) {
+    if (in[i] == '%') {
+      if (i + 2 < in.size()) {
+        int hexVal = 0;
+        std::istringstream hexStream(in.substr(i + 1, 2));
+        if (hexStream >> std::hex >> hexVal) {
+          out += static_cast<char>(hexVal);
+          i += 2;
         } else {
-            out += in[i];
+          out += in[i];
         }
+      } else {
+        out += in[i];
+      }
+    } else if (in[i] == '+') {
+      out += ' ';
+    } else {
+      out += in[i];
     }
-    return out;
+  }
+  return out;
 }
 
-static std::string extractFolderId(const std::string& url) {
-    size_t fPos = url.find("folders/");
-    if (fPos != std::string::npos) {
-        std::string id = url.substr(fPos + 8);
-        size_t endPos = id.find_first_of("?/#& ");
-        if (endPos != std::string::npos) id = id.substr(0, endPos);
-        return id;
-    }
-    size_t idPos = url.find("id=");
-    if (idPos != std::string::npos) {
-        std::string id = url.substr(idPos + 3);
-        size_t endPos = id.find_first_of("?/#& ");
-        if (endPos != std::string::npos) id = id.substr(0, endPos);
-        return id;
-    }
-    if (url.find('/') == std::string::npos && url.length() >= 20) {
-        return url;
-    }
-    return "";
+static std::string extractFolderId(const std::string &url) {
+  size_t fPos = url.find("folders/");
+  if (fPos != std::string::npos) {
+    std::string id = url.substr(fPos + 8);
+    size_t endPos = id.find_first_of("?/#& ");
+    if (endPos != std::string::npos)
+      id = id.substr(0, endPos);
+    return id;
+  }
+  size_t idPos = url.find("id=");
+  if (idPos != std::string::npos) {
+    std::string id = url.substr(idPos + 3);
+    size_t endPos = id.find_first_of("?/#& ");
+    if (endPos != std::string::npos)
+      id = id.substr(0, endPos);
+    return id;
+  }
+  if (url.find('/') == std::string::npos && url.length() >= 20) {
+    return url;
+  }
+  return "";
 }
 
-static std::string extractPostParam(const std::string& postBody, const std::string& paramName) {
-    std::string key = paramName + "=";
-    size_t keyPos = 0;
-    while (true) {
-        keyPos = postBody.find(key, keyPos);
-        if (keyPos == std::string::npos) return "";
-        if (keyPos == 0 || postBody[keyPos - 1] == '&') break;
-        keyPos += key.length();
+static std::string extractPostParam(const std::string &postBody,
+                                    const std::string &paramName) {
+  std::string key = paramName + "=";
+  size_t keyPos = 0;
+  while (true) {
+    keyPos = postBody.find(key, keyPos);
+    if (keyPos == std::string::npos)
+      return "";
+    if (keyPos == 0 || postBody[keyPos - 1] == '&')
+      break;
+    keyPos += key.length();
+  }
+  std::string rawVal = postBody.substr(keyPos + key.length());
+  size_t ampersand = rawVal.find('&');
+  if (ampersand != std::string::npos)
+    rawVal = rawVal.substr(0, ampersand);
+  return urlDecode(rawVal);
+}
+
+static std::string extractQueryParam(const std::string &queryStr,
+                                     const std::string &paramName) {
+  std::string key = paramName + "=";
+  size_t keyPos = 0;
+  while (true) {
+    keyPos = queryStr.find(key, keyPos);
+    if (keyPos == std::string::npos)
+      return "";
+    if (keyPos == 0 || queryStr[keyPos - 1] == '&' ||
+        queryStr[keyPos - 1] == '?')
+      break;
+    keyPos += key.length();
+  }
+  std::string rawVal = queryStr.substr(keyPos + key.length());
+  size_t ampersand = rawVal.find('&');
+  if (ampersand != std::string::npos)
+    rawVal = rawVal.substr(0, ampersand);
+  return urlDecode(rawVal);
+}
+
+static std::string escapeJson(const std::string &in) {
+  std::string out;
+  out.reserve(in.size() + 10);
+  for (char c : in) {
+    if (c == '"')
+      out += "\\\"";
+    else if (c == '\\')
+      out += "\\\\";
+    else if (c == '\b')
+      out += "\\b";
+    else if (c == '\f')
+      out += "\\f";
+    else if (c == '\n')
+      out += "\\n";
+    else if (c == '\r')
+      out += "\\r";
+    else if (c == '\t')
+      out += "\\t";
+    else if (static_cast<unsigned char>(c) < 32) {
+      // drop non-printable
+    } else {
+      out += c;
     }
-    std::string rawVal = postBody.substr(keyPos + key.length());
-    size_t ampersand = rawVal.find('&');
-    if (ampersand != std::string::npos) rawVal = rawVal.substr(0, ampersand);
-    return urlDecode(rawVal);
+  }
+  return out;
 }
 
-static std::string extractQueryParam(const std::string& queryStr, const std::string& paramName) {
-    std::string key = paramName + "=";
-    size_t keyPos = 0;
-    while (true) {
-        keyPos = queryStr.find(key, keyPos);
-        if (keyPos == std::string::npos) return "";
-        if (keyPos == 0 || queryStr[keyPos - 1] == '&' || queryStr[keyPos - 1] == '?') break;
-        keyPos += key.length();
-    }
-    std::string rawVal = queryStr.substr(keyPos + key.length());
-    size_t ampersand = rawVal.find('&');
-    if (ampersand != std::string::npos) rawVal = rawVal.substr(0, ampersand);
-    return urlDecode(rawVal);
+WebServer &WebServer::instance() {
+  static WebServer instance;
+  return instance;
 }
 
-static std::string escapeJson(const std::string& in) {
-    std::string out;
-    out.reserve(in.size() + 10);
-    for (char c : in) {
-        if (c == '"') out += "\\\"";
-        else if (c == '\\') out += "\\\\";
-        else if (c == '\b') out += "\\b";
-        else if (c == '\f') out += "\\f";
-        else if (c == '\n') out += "\\n";
-        else if (c == '\r') out += "\\r";
-        else if (c == '\t') out += "\\t";
-        else if (static_cast<unsigned char>(c) < 32) {
-            // drop non-printable
-        } else {
-            out += c;
-        }
-    }
-    return out;
-}
-
-WebServer& WebServer::instance() {
-    static WebServer instance;
-    return instance;
-}
-
-WebServer::~WebServer() {
-    stop();
-}
+WebServer::~WebServer() { stop(); }
 
 bool WebServer::start(int port) {
-    if (m_running) return true;
-    m_port = port;
-
-    m_serverFd = socket(AF_INET, SOCK_STREAM, 0);
-    if (m_serverFd < 0) {
-        Logger::error("WebServer: Failed to create socket.");
-        return false;
-    }
-
-    int opt = 1;
-    setsockopt(m_serverFd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
-
-    struct sockaddr_in address;
-    std::memset(&address, 0, sizeof(address));
-    address.sin_family = AF_INET;
-    address.sin_addr.s_addr = INADDR_ANY;
-    address.sin_port = htons(m_port);
-
-    if (bind(m_serverFd, (struct sockaddr*)&address, sizeof(address)) < 0) {
-        Logger::error("WebServer: Bind failed on port " + std::to_string(m_port));
-        close(m_serverFd);
-        m_serverFd = -1;
-        return false;
-    }
-
-    if (listen(m_serverFd, 10) < 0) {
-        Logger::error("WebServer: Listen failed.");
-        close(m_serverFd);
-        m_serverFd = -1;
-        return false;
-    }
-
-    m_running = true;
-    m_thread = std::thread(&WebServer::serverLoop, this);
-    Logger::info("WebServer: Portal started on port " + std::to_string(m_port));
+  if (m_running)
     return true;
+  m_port = port;
+
+  m_serverFd = socket(AF_INET, SOCK_STREAM, 0);
+  if (m_serverFd < 0) {
+    Logger::error("WebServer: Failed to create socket.");
+    return false;
+  }
+
+  int opt = 1;
+  setsockopt(m_serverFd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+
+  struct sockaddr_in address;
+  std::memset(&address, 0, sizeof(address));
+  address.sin_family = AF_INET;
+  address.sin_addr.s_addr = INADDR_ANY;
+  address.sin_port = htons(m_port);
+
+  if (bind(m_serverFd, (struct sockaddr *)&address, sizeof(address)) < 0) {
+    Logger::error("WebServer: Bind failed on port " + std::to_string(m_port));
+    close(m_serverFd);
+    m_serverFd = -1;
+    return false;
+  }
+
+  if (listen(m_serverFd, 10) < 0) {
+    Logger::error("WebServer: Listen failed.");
+    close(m_serverFd);
+    m_serverFd = -1;
+    return false;
+  }
+
+  m_running = true;
+  m_thread = std::thread(&WebServer::serverLoop, this);
+  Logger::info("WebServer: Portal started on port " + std::to_string(m_port));
+  return true;
 }
 
 void WebServer::stop() {
-    if (!m_running) return;
-    m_running = false;
+  if (!m_running)
+    return;
+  m_running = false;
 
-    if (m_serverFd >= 0) {
-        shutdown(m_serverFd, SHUT_RDWR);
-        close(m_serverFd);
-        m_serverFd = -1;
-    }
+  if (m_serverFd >= 0) {
+    shutdown(m_serverFd, SHUT_RDWR);
+    close(m_serverFd);
+    m_serverFd = -1;
+  }
 
-    if (m_thread.joinable()) {
-        m_thread.join();
-    }
-    Logger::info("WebServer: Stopped.");
+  if (m_thread.joinable()) {
+    m_thread.join();
+  }
+  Logger::info("WebServer: Stopped.");
 }
 
 void WebServer::serverLoop() {
-    while (m_running) {
-        struct sockaddr_in clientAddr;
-        socklen_t clientLen = sizeof(clientAddr);
-        int clientFd = accept(m_serverFd, (struct sockaddr*)&clientAddr, &clientLen);
-        if (clientFd < 0) {
-            if (m_running) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(50));
-            }
-            continue;
-        }
-
-        struct timeval tv;
-        tv.tv_sec = 4;
-        tv.tv_usec = 0;
-        setsockopt(clientFd, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof(tv));
-        setsockopt(clientFd, SOL_SOCKET, SO_SNDTIMEO, (const char*)&tv, sizeof(tv));
-
-        handleClient(clientFd);
-        close(clientFd);
+  while (m_running) {
+    struct sockaddr_in clientAddr;
+    socklen_t clientLen = sizeof(clientAddr);
+    int clientFd =
+        accept(m_serverFd, (struct sockaddr *)&clientAddr, &clientLen);
+    if (clientFd < 0) {
+      if (m_running) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+      }
+      continue;
     }
+
+    struct timeval tv;
+    tv.tv_sec = 4;
+    tv.tv_usec = 0;
+    setsockopt(clientFd, SOL_SOCKET, SO_RCVTIMEO, (const char *)&tv,
+               sizeof(tv));
+    setsockopt(clientFd, SOL_SOCKET, SO_SNDTIMEO, (const char *)&tv,
+               sizeof(tv));
+
+    handleClient(clientFd);
+    close(clientFd);
+  }
 }
 
 std::string WebServer::buildHtmlResponse() {
-    std::string ip = PlatformInfo::instance().getIpAddress("wlan0");
-    if (ip.empty()) ip = "192.168.1.164";
+  std::string ip = PlatformInfo::instance().getIpAddress("wlan0");
+  if (ip.empty())
+    ip = "192.168.1.164";
 
-    auto& db = DatabaseManager::instance();
-    bool isLinked = AuthManager::instance().isLinked();
-    std::string savedDriveUrl = isLinked ? db.getSetting("drive_folder_url", "") : "";
-    std::string lastSyncTime = DriveSyncEngine::instance().getLastSyncTime();
+  auto &db = DatabaseManager::instance();
+  bool isLinked = AuthManager::instance().isLinked();
+  std::string savedDriveUrl =
+      isLinked ? db.getSetting("drive_folder_url", "") : "";
+  std::string lastSyncTime = DriveSyncEngine::instance().getLastSyncTime();
 
-    int totalLocal = 0, totalCloud = 0;
-    if (isLinked) {
-        db.getTotalGameCounts(totalLocal, totalCloud);
-    }
+  int totalLocal = 0, totalCloud = 0;
+  if (isLinked) {
+    db.getTotalGameCounts(totalLocal, totalCloud);
+  }
 
-    std::string html = R"HTML(<!DOCTYPE html>
+  std::string html =
+      R"HTML(<!DOCTYPE html>
 <html lang="vi">
 <head>
   <meta charset="utf-8">
@@ -893,7 +919,10 @@ std::string WebServer::buildHtmlResponse() {
       <div class="header-stats">
         <div class="stat-pill" id="head-auth-pill">Drive: <b>Đang tải...</b></div>
         <div class="stat-pill" id="head-storage-pill">SD: <b>Đang tải...</b></div>
-        <div class="stat-pill">Games: <b id="head-local-count">)HTML" + std::to_string(totalLocal) + R"HTML(</b> thẻ / <b id="head-cloud-count">)HTML" + std::to_string(totalCloud) + R"HTML(</b> cloud</div>
+        <div class="stat-pill">Games: <b id="head-local-count">)HTML" +
+      std::to_string(totalLocal) +
+      R"HTML(</b> thẻ / <b id="head-cloud-count">)HTML" +
+      std::to_string(totalCloud) + R"HTML(</b> cloud</div>
         <button class="btn btn-danger hide-mobile" id="btn-head-logout" onclick="logoutGoogleDrive()" style="display:none; padding: 4px 10px; font-size: 11px;">🚪 Đăng xuất</button>
       </div>
     </header>
@@ -1129,7 +1158,8 @@ std::string WebServer::buildHtmlResponse() {
             Trạng thái: <b style="color:var(--text-dim);">Đang kiểm tra...</b>
           </div>
           <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 14px;">
-            Lần đồng bộ gần nhất: <b id="last-sync-time">)HTML" + lastSyncTime + R"HTML(</b>
+            Lần đồng bộ gần nhất: <b id="last-sync-time">)HTML" +
+      lastSyncTime + R"HTML(</b>
           </p>
           <div style="display: flex; gap: 10px; margin-bottom: 16px; flex-wrap: wrap;">
             <button class="btn btn-primary" id="btn-trigger-sync" onclick="triggerSync()">🔄 Quét &amp; Đồng bộ lại ngay</button>
@@ -1143,7 +1173,9 @@ std::string WebServer::buildHtmlResponse() {
             <label style="font-size: 12px; font-weight: 600; color: var(--accent); display: block; margin-bottom: 4px;">📥 1. Kho ROM Tải về (Link Google Drive Công khai):</label>
             <p style="font-size: 11px; color: var(--text-muted); margin-bottom: 8px;">Dán link thư mục Google Drive chứa game để duyệt và tải ROM về máy TrimUI (hoàn toàn miễn phí, không cần đăng nhập).</p>
             <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-              <input type="text" id="input-drive-url" name="drive_url" value=")HTML" + savedDriveUrl + R"HTML(" placeholder="https://drive.google.com/drive/folders/... (Dán link vào đây)" autocomplete="off" style="flex: 1; min-width: 220px; padding: 8px 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: #fff; font-size: 12px;" required>
+              <input type="text" id="input-drive-url" name="drive_url" value=")HTML" +
+      savedDriveUrl +
+      R"HTML(" placeholder="https://drive.google.com/drive/folders/... (Dán link vào đây)" autocomplete="off" style="flex: 1; min-width: 220px; padding: 8px 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: #fff; font-size: 12px;" required>
               <button type="submit" class="btn btn-primary">🔗 Kết nối &amp; Quét ngay</button>
               <button type="button" class="btn btn-secondary" onclick="clearDriveInput()">✕ Xóa trắng</button>
             </div>
@@ -1524,7 +1556,8 @@ std::string WebServer::buildHtmlResponse() {
       <div class="card" style="max-width: 600px; margin: 0 auto;">
         <h3>🚀 Cập nhật ứng dụng RomCloud (OTA)</h3>
         <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 16px;">
-          Phiên bản trên máy hiện tại: <b style="color: var(--accent);">v)HTML" + UpdateManager::instance().getCurrentVersion() + R"HTML(</b>
+          Phiên bản trên máy hiện tại: <b style="color: var(--accent);">v)HTML" +
+      UpdateManager::instance().getCurrentVersion() + R"HTML(</b>
         </p>
 
         <div style="display: flex; gap: 10px; margin-bottom: 16px;">
@@ -3231,11 +3264,12 @@ std::string WebServer::buildHtmlResponse() {
   </script>
 </body>
 </html>)HTML";
-    return html;
+  return html;
 }
 
-std::string WebServer::buildSuccessResponse(const std::string& message) {
-    std::string html = R"(<!DOCTYPE html>
+std::string WebServer::buildSuccessResponse(const std::string &message) {
+  std::string html =
+      R"(<!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8">
@@ -3254,1226 +3288,1675 @@ std::string WebServer::buildSuccessResponse(const std::string& message) {
   <div class="card">
     <div class="icon">&#10004;</div>
     <h1>ĐÃ LƯU THÀNH CÔNG!</h1>
-    <p>)" + message + R"(<br><br>Quá trình đồng bộ kho game đang diễn ra tự động!</p>
+    <p>)" +
+      message +
+      R"(<br><br>Quá trình đồng bộ kho game đang diễn ra tự động!</p>
     <a href="/">&larr; Quay lại trang quản lý ROM</a>
   </div>
 </body>
 </html>)";
-    return html;
+  return html;
 }
 
 void WebServer::handleClient(int clientFd) {
-    char buffer[4096];
-    int bytesRead = recv(clientFd, buffer, sizeof(buffer) - 1, 0);
-    if (bytesRead <= 0) return;
-    buffer[bytesRead] = '\0';
+  char buffer[4096];
+  int bytesRead = recv(clientFd, buffer, sizeof(buffer) - 1, 0);
+  if (bytesRead <= 0)
+    return;
+  buffer[bytesRead] = '\0';
 
-    std::string req(buffer);
-    std::string method, fullPath;
-    std::istringstream iss(req);
-    iss >> method >> fullPath;
+  std::string req(buffer);
+  std::string method, fullPath;
+  std::istringstream iss(req);
+  iss >> method >> fullPath;
 
-    std::string path = fullPath;
-    std::string queryString = "";
-    size_t qPos = fullPath.find('?');
-    if (qPos != std::string::npos) {
-        path = fullPath.substr(0, qPos);
-        queryString = fullPath.substr(qPos + 1);
-    }
+  std::string path = fullPath;
+  std::string queryString = "";
+  size_t qPos = fullPath.find('?');
+  if (qPos != std::string::npos) {
+    path = fullPath.substr(0, qPos);
+    queryString = fullPath.substr(qPos + 1);
+  }
 
-    size_t bodyPos = req.find("\r\n\r\n");
-    std::string postBody = (bodyPos != std::string::npos) ? req.substr(bodyPos + 4) : "";
+  size_t bodyPos = req.find("\r\n\r\n");
+  std::string postBody =
+      (bodyPos != std::string::npos) ? req.substr(bodyPos + 4) : "";
 
-    if (method == "GET" && (path == "/" || path == "/index.html")) {
-        std::string body = buildHtmlResponse();
-        std::string res = "HTTP/1.1 200 OK\r\n"
-                          "Content-Type: text/html; charset=UTF-8\r\n"
-                          "Cache-Control: no-cache, no-store, must-revalidate, max-age=0\r\n"
-                          "Pragma: no-cache\r\n"
-                          "Expires: 0\r\n"
-                          "Content-Length: " + std::to_string(body.length()) + "\r\n"
-                          "Connection: close\r\n\r\n" + body;
-        send(clientFd, res.c_str(), res.length(), 0);
-    } else if (method == "GET" && (path == "/debug.log" || path == "/api/debug_log")) {
-        std::string logPath = AppConfig::instance().getDebugLogPath();
-        std::ifstream file(logPath, std::ios::binary);
-        std::string content;
-        if (file.is_open()) {
-            content.assign((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-            file.close();
-        } else {
-            content = "Chua co loi nao duoc ghi nhan trong debug.log.";
-        }
-        std::string res = "HTTP/1.1 200 OK\r\n"
-                          "Content-Type: text/plain; charset=UTF-8\r\n"
-                          "Content-Disposition: attachment; filename=\"debug.log\"\r\n"
-                          "Cache-Control: no-cache, no-store\r\n"
-                          "Access-Control-Allow-Origin: *\r\n"
-                          "Content-Length: " + std::to_string(content.length()) + "\r\n"
-                          "Connection: close\r\n\r\n" + content;
-        send(clientFd, res.c_str(), res.length(), 0);
-        return;
-    } else if (method == "GET" && path == "/api/systems") {
-        if (!AuthManager::instance().isLinked()) {
-            std::string res = "HTTP/1.1 200 OK\r\n"
-                              "Content-Type: application/json; charset=UTF-8\r\n"
-                              "Cache-Control: no-cache, no-store, must-revalidate\r\n"
-                              "Access-Control-Allow-Origin: *\r\n"
-                              "Content-Length: 2\r\n"
-                              "Connection: close\r\n\r\n[]";
-            send(clientFd, res.c_str(), res.length(), 0);
-            return;
-        }
-        auto systems = DatabaseManager::instance().getSystems(true);
-        std::string json = "[";
-        for (size_t i = 0; i < systems.size(); ++i) {
-            const auto& s = systems[i];
-            if (i > 0) json += ",";
-            json += "{\"id\":" + std::to_string(s.id) + ",";
-            json += "\"code\":\"" + escapeJson(s.code) + "\",";
-            json += "\"name\":\"" + escapeJson(s.name) + "\",";
-            json += "\"local_count\":" + std::to_string(s.localCount) + ",";
-            json += "\"cloud_count\":" + std::to_string(s.cloudCount) + "}";
-        }
-        json += "]";
-        std::string res = "HTTP/1.1 200 OK\r\n"
-                          "Content-Type: application/json; charset=UTF-8\r\n"
-                          "Cache-Control: no-cache, no-store, must-revalidate\r\n"
-                          "Access-Control-Allow-Origin: *\r\n"
-                          "Content-Length: " + std::to_string(json.length()) + "\r\n"
-                          "Connection: close\r\n\r\n" + json;
-        send(clientFd, res.c_str(), res.length(), 0);
-    } else if (method == "GET" && path == "/api/games") {
-        if (!AuthManager::instance().isLinked()) {
-            std::string json = "{\"total\":0,\"games\":[]}";
-            std::string res = "HTTP/1.1 200 OK\r\n"
-                              "Content-Type: application/json; charset=UTF-8\r\n"
-                              "Cache-Control: no-cache, no-store, must-revalidate\r\n"
-                              "Access-Control-Allow-Origin: *\r\n"
-                              "Content-Length: " + std::to_string(json.length()) + "\r\n"
-                              "Connection: close\r\n\r\n" + json;
-            send(clientFd, res.c_str(), res.length(), 0);
-            return;
-        }
-        std::string sysIdStr = extractQueryParam(queryString, "system_id");
-        std::string stateStr = extractQueryParam(queryString, "state");
-        std::string q = extractQueryParam(queryString, "q");
-        std::string limitStr = extractQueryParam(queryString, "limit");
-        std::string offsetStr = extractQueryParam(queryString, "offset");
-
-        int systemId = 0;
-        int stateFilter = -1;
-        int limit = 50;
-        int offset = 0;
-
-        try { if (!sysIdStr.empty()) systemId = std::stoi(sysIdStr); } catch(...) {}
-        try { if (!stateStr.empty()) stateFilter = std::stoi(stateStr); } catch(...) {}
-        try { if (!limitStr.empty()) limit = std::stoi(limitStr); } catch(...) {}
-        try { if (!offsetStr.empty()) offset = std::stoi(offsetStr); } catch(...) {}
-
-        int totalCount = 0;
-        auto games = DatabaseManager::instance().getGamesFiltered(systemId, stateFilter, q, limit, offset, totalCount);
-
-        std::string json = "{\"total\":" + std::to_string(totalCount) + ",\"games\":[";
-        for (size_t i = 0; i < games.size(); ++i) {
-            const auto& g = games[i];
-            bool inQueue = DownloadManager::instance().isInQueue(g.id);
-            if (i > 0) json += ",";
-            json += "{\"id\":" + std::to_string(g.id) + ",";
-            json += "\"title\":\"" + escapeJson(g.title) + "\",";
-            json += "\"filename\":\"" + escapeJson(g.filename) + "\",";
-            json += "\"sys_code\":\"" + escapeJson(g.systemCode.empty() ? "GAME" : g.systemCode) + "\",";
-            json += "\"size_str\":\"" + FileSystemManager::instance().formatBytes(g.sizeBytes) + "\",";
-            json += "\"local_state\":" + std::to_string(static_cast<int>(g.localState)) + ",";
-            json += "\"in_queue\":" + std::string(inQueue ? "true" : "false") + ",";
-            json += "\"has_cover\":" + std::string(g.coverPath.empty() ? "false" : "true") + ",";
-            json += "\"release_year\":\"" + escapeJson(g.releaseYear) + "\",";
-            json += "\"genre\":\"" + escapeJson(g.genre) + "\",";
-            json += "\"developer\":\"" + escapeJson(g.developer) + "\",";
-            json += "\"description\":\"" + escapeJson(g.description) + "\"}";
-        }
-        json += "]}";
-
-        std::string res = "HTTP/1.1 200 OK\r\n"
-                          "Content-Type: application/json; charset=UTF-8\r\n"
-                          "Cache-Control: no-cache, no-store, must-revalidate\r\n"
-                          "Access-Control-Allow-Origin: *\r\n"
-                          "Content-Length: " + std::to_string(json.length()) + "\r\n"
-                          "Connection: close\r\n\r\n" + json;
-        send(clientFd, res.c_str(), res.length(), 0);
-    } else if (method == "GET" && path == "/api/game_detail") {
-        std::string gameIdStr = extractQueryParam(queryString, "game_id");
-        int64_t gameId = 0;
-        try { gameId = std::stoll(gameIdStr); } catch(...) {}
-        GameRecord g;
-        if (gameId > 0 && DatabaseManager::instance().getGameById(gameId, g)) {
-            SystemRecord sys;
-            DatabaseManager::instance().getSystemById(g.systemId, sys);
-            bool inQueue = DownloadManager::instance().isInQueue(g.id);
-            std::string json = "{";
-            json += "\"id\":" + std::to_string(g.id) + ",";
-            json += "\"title\":\"" + escapeJson(g.title) + "\",";
-            json += "\"filename\":\"" + escapeJson(g.filename) + "\",";
-            json += "\"system_id\":" + std::to_string(g.systemId) + ",";
-            json += "\"sys_code\":\"" + escapeJson(sys.code.empty() ? g.systemCode : sys.code) + "\",";
-            json += "\"sys_name\":\"" + escapeJson(sys.name) + "\",";
-            json += "\"size_str\":\"" + FileSystemManager::instance().formatBytes(g.sizeBytes) + "\",";
-            json += "\"local_state\":" + std::to_string(static_cast<int>(g.localState)) + ",";
-            json += "\"in_queue\":" + std::string(inQueue ? "true" : "false") + ",";
-            json += "\"has_cover\":" + std::string(g.coverPath.empty() ? "false" : "true") + ",";
-            json += "\"release_year\":\"" + escapeJson(g.releaseYear) + "\",";
-            json += "\"genre\":\"" + escapeJson(g.genre) + "\",";
-            json += "\"developer\":\"" + escapeJson(g.developer) + "\",";
-            json += "\"description\":\"" + escapeJson(g.description) + "\"";
-            json += "}";
-            std::string res = "HTTP/1.1 200 OK\r\n"
-                              "Content-Type: application/json; charset=UTF-8\r\n"
-                              "Cache-Control: no-cache, no-store, must-revalidate\r\n"
-                              "Access-Control-Allow-Origin: *\r\n"
-                              "Content-Length: " + std::to_string(json.length()) + "\r\n"
-                              "Connection: close\r\n\r\n" + json;
-            send(clientFd, res.c_str(), res.length(), 0);
-            return;
-        } else {
-            std::string json = "{\"error\":\"Game not found\"}";
-            std::string res = "HTTP/1.1 404 Not Found\r\n"
-                              "Content-Type: application/json; charset=UTF-8\r\n"
-                              "Access-Control-Allow-Origin: *\r\n"
-                              "Content-Length: " + std::to_string(json.length()) + "\r\n"
-                              "Connection: close\r\n\r\n" + json;
-            send(clientFd, res.c_str(), res.length(), 0);
-            return;
-        }
-    } else if (method == "GET" && path == "/api/search") {
-        if (!AuthManager::instance().isLinked()) {
-            std::string res = "HTTP/1.1 200 OK\r\n"
-                              "Content-Type: application/json; charset=UTF-8\r\n"
-                              "Cache-Control: no-cache, no-store, must-revalidate\r\n"
-                              "Access-Control-Allow-Origin: *\r\n"
-                              "Content-Length: 2\r\n"
-                              "Connection: close\r\n\r\n[]";
-            send(clientFd, res.c_str(), res.length(), 0);
-            return;
-        }
-        std::string q = extractQueryParam(queryString, "q");
-        auto games = DatabaseManager::instance().searchAllGames(q, 60);
-        std::string json = "[";
-        for (size_t i = 0; i < games.size(); ++i) {
-            const auto& g = games[i];
-            SystemRecord sys;
-            std::string sysCode = "GAME";
-            if (DatabaseManager::instance().getSystemById(g.systemId, sys)) {
-                sysCode = sys.code;
-            }
-            if (i > 0) json += ",";
-            json += "{\"id\":" + std::to_string(g.id) + ",";
-            json += "\"title\":\"" + escapeJson(g.title) + "\",";
-            json += "\"filename\":\"" + escapeJson(g.filename) + "\",";
-            json += "\"sys_code\":\"" + escapeJson(sysCode) + "\",";
-            json += "\"size_str\":\"" + FileSystemManager::instance().formatBytes(g.sizeBytes) + "\",";
-            json += "\"local_state\":" + std::to_string(static_cast<int>(g.localState)) + ",";
-            json += "\"has_cover\":" + std::string(g.coverPath.empty() ? "false" : "true") + "}";
-        }
-        json += "]";
-        std::string res = "HTTP/1.1 200 OK\r\n"
-                          "Content-Type: application/json; charset=UTF-8\r\n"
-                          "Cache-Control: no-cache, no-store, must-revalidate\r\n"
-                          "Access-Control-Allow-Origin: *\r\n"
-                          "Content-Length: " + std::to_string(json.length()) + "\r\n"
-                          "Connection: close\r\n\r\n" + json;
-        send(clientFd, res.c_str(), res.length(), 0);
-    } else if (method == "GET" && path == "/api/cover") {
-        std::string gameIdStr = extractQueryParam(queryString, "game_id");
-        int64_t gameId = 0;
-        try { if (!gameIdStr.empty()) gameId = std::stoll(gameIdStr); } catch(...) {}
-
-        GameRecord game;
-        bool found = (gameId > 0 && DatabaseManager::instance().getGameById(gameId, game) && !game.coverPath.empty());
-        if (found) {
-            std::ifstream file(game.coverPath, std::ios::binary);
-            if (file.is_open()) {
-                std::string content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-                file.close();
-                std::string mime = "image/png";
-                if (game.coverPath.rfind(".jpg") != std::string::npos || game.coverPath.rfind(".jpeg") != std::string::npos) {
-                    mime = "image/jpeg";
-                } else if (game.coverPath.rfind(".webp") != std::string::npos) {
-                    mime = "image/webp";
-                }
-                std::string header = "HTTP/1.1 200 OK\r\n"
-                                     "Content-Type: " + mime + "\r\n"
-                                     "Cache-Control: public, max-age=86400\r\n"
-                                     "Access-Control-Allow-Origin: *\r\n"
-                                     "Content-Length: " + std::to_string(content.size()) + "\r\n"
-                                     "Connection: close\r\n\r\n";
-                send(clientFd, header.c_str(), header.length(), 0);
-                send(clientFd, content.data(), content.size(), 0);
-                return;
-            }
-        }
-        std::string notFound = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
-        send(clientFd, notFound.c_str(), notFound.length(), 0);
-        return;
-    } else if (method == "GET" && path == "/api/download_status") {
-        auto prog = DownloadManager::instance().getProgress();
-        auto queue = DownloadManager::instance().getQueue();
-        bool isDownloading = DownloadManager::instance().isDownloading();
-
-        std::string stateStr = "IDLE";
-        if (prog.state == DownloadState::INITIALIZING) stateStr = "INITIALIZING";
-        else if (prog.state == DownloadState::DOWNLOADING) stateStr = "DOWNLOADING";
-        else if (prog.state == DownloadState::VERIFYING) stateStr = "VERIFYING";
-        else if (prog.state == DownloadState::COMPLETED) stateStr = "COMPLETED";
-        else if (prog.state == DownloadState::FAILED) stateStr = "FAILED";
-        else if (prog.state == DownloadState::CANCELLED) stateStr = "CANCELLED";
-
-        std::string json = "{";
-        json += "\"is_downloading\":" + std::string(isDownloading ? "true" : "false") + ",";
-        json += "\"active\":{";
-        json += "\"state\":\"" + stateStr + "\",";
-        json += "\"game_id\":" + std::to_string(prog.gameId) + ",";
-        json += "\"title\":\"" + escapeJson(prog.gameTitle) + "\",";
-        json += "\"system\":\"" + escapeJson(prog.systemCode) + "\",";
-        json += "\"filename\":\"" + escapeJson(prog.filename) + "\",";
-        json += "\"progress_pct\":" + std::to_string(prog.progressPct) + ",";
-        json += "\"speed_kbps\":" + std::to_string(prog.speedKBps) + ",";
-        json += "\"bytes_downloaded\":" + std::to_string(prog.bytesDownloaded) + ",";
-        json += "\"total_bytes\":" + std::to_string(prog.totalBytes) + ",";
-        json += "\"eta_seconds\":" + std::to_string(prog.etaSeconds) + ",";
-        json += "\"error\":\"" + escapeJson(prog.errorMessage) + "\"";
-        json += "},";
-        json += "\"queue_size\":" + std::to_string(queue.size()) + ",";
-        json += "\"queue\":[";
-        for (size_t i = 0; i < queue.size(); ++i) {
-            const auto& it = queue[i];
-            if (i > 0) json += ",";
-            json += "{\"game_id\":" + std::to_string(it.game.id) + ",";
-            json += "\"title\":\"" + escapeJson(it.game.title) + "\",";
-            json += "\"system\":\"" + escapeJson(it.sys.code) + "\",";
-            json += "\"size_str\":\"" + FileSystemManager::instance().formatBytes(it.game.sizeBytes) + "\"}";
-        }
-        json += "]}";
-
-        std::string res = "HTTP/1.1 200 OK\r\n"
-                          "Content-Type: application/json; charset=UTF-8\r\n"
-                          "Access-Control-Allow-Origin: *\r\n"
-                          "Content-Length: " + std::to_string(json.length()) + "\r\n"
-                          "Connection: close\r\n\r\n" + json;
-        send(clientFd, res.c_str(), res.length(), 0);
-    } else if (method == "POST" && path == "/api/download_game") {
-        std::string gameIdStr = extractPostParam(postBody, "game_id");
-        int64_t gameId = 0;
-        try { gameId = std::stoll(gameIdStr); } catch(...) {}
-
-        bool ok = false;
-        std::string msg = "Không tìm thấy game";
-        if (gameId > 0) {
-            GameRecord g;
-            if (DatabaseManager::instance().getGameById(gameId, g)) {
-                SystemRecord sys;
-                if (DatabaseManager::instance().getSystemById(g.systemId, sys)) {
-                    ok = DownloadManager::instance().addToQueue(g, sys);
-                    if (ok) {
-                        msg = "Đã thêm \"" + g.title + "\" vào hàng tải.";
-                        if (!DownloadManager::instance().isDownloading()) {
-                            DownloadManager::instance().processNextInQueue();
-                        }
-                    } else {
-                        msg = "Game đã có trong danh sách hoặc đã tải về thẻ.";
-                    }
-                }
-            }
-        }
-        std::string json = "{\"success\":" + std::string(ok ? "true" : "false") + ",\"message\":\"" + escapeJson(msg) + "\"}";
-        std::string res = "HTTP/1.1 200 OK\r\n"
-                          "Content-Type: application/json; charset=UTF-8\r\n"
-                          "Access-Control-Allow-Origin: *\r\n"
-                          "Content-Length: " + std::to_string(json.length()) + "\r\n"
-                          "Connection: close\r\n\r\n" + json;
-        send(clientFd, res.c_str(), res.length(), 0);
-    } else if (method == "POST" && path == "/api/cancel_download") {
-        DownloadManager::instance().cancelDownload();
-        std::string json = "{\"success\":true,\"message\":\"Đã hủy tải lượt hiện tại.\"}";
-        std::string res = "HTTP/1.1 200 OK\r\n"
-                          "Content-Type: application/json; charset=UTF-8\r\n"
-                          "Access-Control-Allow-Origin: *\r\n"
-                          "Content-Length: " + std::to_string(json.length()) + "\r\n"
-                          "Connection: close\r\n\r\n" + json;
-        send(clientFd, res.c_str(), res.length(), 0);
-    } else if (method == "POST" && path == "/api/remove_queue") {
-        std::string gameIdStr = extractPostParam(postBody, "game_id");
-        int64_t gameId = 0;
-        try { gameId = std::stoll(gameIdStr); } catch(...) {}
-        bool ok = DownloadManager::instance().removeFromQueue(gameId);
-        std::string json = "{\"success\":" + std::string(ok ? "true" : "false") + ",\"message\":\"" + (ok ? "Đã xóa khỏi hàng đợi." : "Không tìm thấy game trong hàng đợi.") + "\"}";
-        std::string res = "HTTP/1.1 200 OK\r\n"
-                          "Content-Type: application/json; charset=UTF-8\r\n"
-                          "Access-Control-Allow-Origin: *\r\n"
-                          "Content-Length: " + std::to_string(json.length()) + "\r\n"
-                          "Connection: close\r\n\r\n" + json;
-        send(clientFd, res.c_str(), res.length(), 0);
-    } else if (method == "POST" && path == "/api/clear_queue") {
-        DownloadManager::instance().clearQueue();
-        std::string json = "{\"success\":true,\"message\":\"Đã xóa toàn bộ hàng đợi.\"}";
-        std::string res = "HTTP/1.1 200 OK\r\n"
-                          "Content-Type: application/json; charset=UTF-8\r\n"
-                          "Access-Control-Allow-Origin: *\r\n"
-                          "Content-Length: " + std::to_string(json.length()) + "\r\n"
-                          "Connection: close\r\n\r\n" + json;
-        send(clientFd, res.c_str(), res.length(), 0);
-    } else if (method == "POST" && path == "/api/delete_rom") {
-        std::string gameIdStr = extractPostParam(postBody, "game_id");
-        int64_t gameId = 0;
-        try { gameId = std::stoll(gameIdStr); } catch(...) {}
-
-        bool ok = false;
-        std::string msg = "Lỗi khi xóa ROM";
-        if (gameId > 0) {
-            GameRecord g;
-            if (DatabaseManager::instance().getGameById(gameId, g)) {
-                ok = DatabaseManager::instance().markGameDeletedLocally(gameId);
-                if (ok) {
-                    msg = "Đã xóa ROM \"" + g.title + "\" khỏi thẻ nhớ.";
-                }
-            }
-        }
-        std::string json = "{\"success\":" + std::string(ok ? "true" : "false") + ",\"message\":\"" + escapeJson(msg) + "\"}";
-        std::string res = "HTTP/1.1 200 OK\r\n"
-                          "Content-Type: application/json; charset=UTF-8\r\n"
-                          "Access-Control-Allow-Origin: *\r\n"
-                          "Content-Length: " + std::to_string(json.length()) + "\r\n"
-                          "Connection: close\r\n\r\n" + json;
-        send(clientFd, res.c_str(), res.length(), 0);
-    } else if (method == "POST" && (path == "/api/scrape_cover" || path == "/api/scrape_game")) {
-        std::string gameIdStr = extractPostParam(postBody, "game_id");
-        int64_t gameId = 0;
-        try { gameId = std::stoll(gameIdStr); } catch(...) {}
-
-        bool ok = false;
-        std::string coverPath;
-        std::string releaseYear;
-        std::string genre;
-        std::string developer;
-        std::string desc;
-        std::string title;
-        std::string msg = "Không thể cào thông tin game";
-
-        if (gameId > 0) {
-            GameRecord g;
-            if (DatabaseManager::instance().getGameById(gameId, g)) {
-                SystemRecord sys;
-                if (DatabaseManager::instance().getSystemById(g.systemId, sys)) {
-                    auto scrapeRes = BoxartScraper::instance().scrapeGameInfo(g, sys);
-                    ok = scrapeRes.success;
-                    coverPath = scrapeRes.coverPath;
-                    releaseYear = scrapeRes.releaseYear;
-                    genre = scrapeRes.genre;
-                    developer = scrapeRes.developer;
-                    desc = scrapeRes.description;
-                    title = scrapeRes.title;
-                    if (ok) {
-                        msg = "Đã cập nhật ảnh bìa & thông tin cho \"" + (title.empty() ? g.title : title) + "\"!";
-                    } else {
-                        msg = "Không tìm thấy dữ liệu trên ScreenScraper.fr / Libretro.";
-                    }
-                }
-            }
-        }
-        std::string json = "{";
-        json += "\"success\":" + std::string(ok ? "true" : "false") + ",";
-        json += "\"cover_path\":\"" + escapeJson(coverPath) + "\",";
-        json += "\"title\":\"" + escapeJson(title) + "\",";
-        json += "\"release_year\":\"" + escapeJson(releaseYear) + "\",";
-        json += "\"genre\":\"" + escapeJson(genre) + "\",";
-        json += "\"developer\":\"" + escapeJson(developer) + "\",";
-        json += "\"description\":\"" + escapeJson(desc) + "\",";
-        json += "\"message\":\"" + escapeJson(msg) + "\"";
-        json += "}";
-        std::string res = "HTTP/1.1 200 OK\r\n"
-                          "Content-Type: application/json; charset=UTF-8\r\n"
-                          "Access-Control-Allow-Origin: *\r\n"
-                          "Content-Length: " + std::to_string(json.length()) + "\r\n"
-                          "Connection: close\r\n\r\n" + json;
-        send(clientFd, res.c_str(), res.length(), 0);
-    } else if (method == "POST" && path == "/api/auto_scrape_sd") {
-        bool force = (extractPostParam(postBody, "force") == "1");
-        bool started = BoxartScraper::instance().startAutoScrapeSdCard(force);
-        std::string msg = started ? "Đã bắt đầu tự động cào ảnh bìa và thông tin cho ROM trên thẻ SD." :
-                                    "Không có ROM nào trên thẻ cần cào hoặc tiến trình đang chạy.";
-        std::string json = "{\"success\":" + std::string(started ? "true" : "false") + ",\"message\":\"" + escapeJson(msg) + "\"}";
-        std::string res = "HTTP/1.1 200 OK\r\n"
-                          "Content-Type: application/json; charset=UTF-8\r\n"
-                          "Access-Control-Allow-Origin: *\r\n"
-                          "Content-Length: " + std::to_string(json.length()) + "\r\n"
-                          "Connection: close\r\n\r\n" + json;
-        send(clientFd, res.c_str(), res.length(), 0);
-    } else if (method == "GET" && path == "/api/auto_scrape_status") {
-        auto st = BoxartScraper::instance().getAutoScrapeStatus();
-        std::string json = "{";
-        json += "\"is_scraping\":" + std::string(st.isScraping ? "true" : "false") + ",";
-        json += "\"total\":" + std::to_string(st.totalGames) + ",";
-        json += "\"scraped\":" + std::to_string(st.scrapedCount) + ",";
-        json += "\"success\":" + std::to_string(st.successCount) + ",";
-        json += "\"progress_pct\":" + std::to_string(st.progressPct) + ",";
-        json += "\"current_game\":\"" + escapeJson(st.currentGame) + "\",";
-        json += "\"current_sys\":\"" + escapeJson(st.currentSystem) + "\",";
-        json += "\"message\":\"" + escapeJson(st.lastMessage) + "\"";
-        json += "}";
-        std::string res = "HTTP/1.1 200 OK\r\n"
-                          "Content-Type: application/json; charset=UTF-8\r\n"
-                          "Access-Control-Allow-Origin: *\r\n"
-                          "Content-Length: " + std::to_string(json.length()) + "\r\n"
-                          "Connection: close\r\n\r\n" + json;
-        send(clientFd, res.c_str(), res.length(), 0);
-    } else if (method == "POST" && path == "/api/cancel_auto_scrape") {
-        BoxartScraper::instance().cancelAutoScrape();
-        std::string json = "{\"success\":true,\"message\":\"Đã gửi yêu cầu hủy cào tự động.\"}";
-        std::string res = "HTTP/1.1 200 OK\r\n"
-                          "Content-Type: application/json; charset=UTF-8\r\n"
-                          "Access-Control-Allow-Origin: *\r\n"
-                          "Content-Length: " + std::to_string(json.length()) + "\r\n"
-                          "Connection: close\r\n\r\n" + json;
-        send(clientFd, res.c_str(), res.length(), 0);
-    } else if (method == "GET" && path == "/api/screenscraper_config") {
-        std::string user = DatabaseManager::instance().getSetting("screenscraper_user", "");
-        std::string devId = DatabaseManager::instance().getSetting("screenscraper_devid", "");
-        bool hasPass = !DatabaseManager::instance().getSetting("screenscraper_pass", "").empty();
-        std::string json = "{";
-        json += "\"user\":\"" + escapeJson(user) + "\",";
-        json += "\"dev_id\":\"" + escapeJson(devId) + "\",";
-        json += "\"has_pass\":" + std::string(hasPass ? "true" : "false");
-        json += "}";
-        std::string res = "HTTP/1.1 200 OK\r\n"
-                          "Content-Type: application/json; charset=UTF-8\r\n"
-                          "Access-Control-Allow-Origin: *\r\n"
-                          "Content-Length: " + std::to_string(json.length()) + "\r\n"
-                          "Connection: close\r\n\r\n" + json;
-        send(clientFd, res.c_str(), res.length(), 0);
-    } else if (method == "POST" && path == "/api/save_screenscraper_config") {
-        std::string user = extractPostParam(postBody, "user");
-        std::string pass = extractPostParam(postBody, "pass");
-        std::string devId = extractPostParam(postBody, "dev_id");
-        std::string devPass = extractPostParam(postBody, "dev_pass");
-
-        DatabaseManager::instance().setSetting("screenscraper_user", user);
-        if (!pass.empty()) {
-            DatabaseManager::instance().setSetting("screenscraper_pass", pass);
-        }
-        if (!devId.empty()) {
-            DatabaseManager::instance().setSetting("screenscraper_devid", devId);
-        }
-        if (!devPass.empty()) {
-            DatabaseManager::instance().setSetting("screenscraper_devpass", devPass);
-        }
-
-        std::string json = "{\"success\":true,\"message\":\"Đã lưu cấu hình ScreenScraper.fr thành công!\"}";
-        std::string res = "HTTP/1.1 200 OK\r\n"
-                          "Content-Type: application/json; charset=UTF-8\r\n"
-                          "Access-Control-Allow-Origin: *\r\n"
-                          "Content-Length: " + std::to_string(json.length()) + "\r\n"
-                          "Connection: close\r\n\r\n" + json;
-        send(clientFd, res.c_str(), res.length(), 0);
-    } else if (method == "POST" && path == "/api/test_screenscraper") {
-        std::string user = extractPostParam(postBody, "user");
-        std::string pass = extractPostParam(postBody, "pass");
-        std::string devId = extractPostParam(postBody, "dev_id");
-        std::string devPass = extractPostParam(postBody, "dev_pass");
-
-        if (pass.empty()) {
-            pass = DatabaseManager::instance().getSetting("screenscraper_pass", "");
-        }
-
-        std::string errMsg;
-        bool ok = BoxartScraper::instance().testScreenScraperAuth(user, pass, devId, devPass, errMsg);
-        std::string msg = ok ? "Kết nối ScreenScraper.fr thành công!" : errMsg;
-
-        std::string json = "{\"success\":" + std::string(ok ? "true" : "false") + ",\"message\":\"" + escapeJson(msg) + "\"}";
-        std::string res = "HTTP/1.1 200 OK\r\n"
-                          "Content-Type: application/json; charset=UTF-8\r\n"
-                          "Access-Control-Allow-Origin: *\r\n"
-                          "Content-Length: " + std::to_string(json.length()) + "\r\n"
-                          "Connection: close\r\n\r\n" + json;
-        send(clientFd, res.c_str(), res.length(), 0);
-    } else if (method == "POST" && path == "/api/search_scraper") {
-        std::string query = extractPostParam(postBody, "query");
-        std::string sysCode = extractPostParam(postBody, "system_code");
-        auto cands = BoxartScraper::instance().searchCandidates(query, sysCode);
-
-        std::string json = "{\"success\":true,\"candidates\":[";
-        for (size_t i = 0; i < cands.size(); ++i) {
-            if (i > 0) json += ",";
-            json += "{";
-            json += "\"title\":\"" + escapeJson(cands[i].title) + "\",";
-            json += "\"release_year\":\"" + escapeJson(cands[i].releaseYear) + "\",";
-            json += "\"developer\":\"" + escapeJson(cands[i].developer) + "\",";
-            json += "\"genre\":\"" + escapeJson(cands[i].genre) + "\",";
-            json += "\"description\":\"" + escapeJson(cands[i].description) + "\",";
-            json += "\"cover_url\":\"" + escapeJson(cands[i].coverUrl) + "\",";
-            json += "\"source\":\"" + escapeJson(cands[i].source) + "\"";
-            json += "}";
-        }
-        json += "]}";
-
-        std::string res = "HTTP/1.1 200 OK\r\n"
-                          "Content-Type: application/json; charset=UTF-8\r\n"
-                          "Access-Control-Allow-Origin: *\r\n"
-                          "Content-Length: " + std::to_string(json.length()) + "\r\n"
-                          "Connection: close\r\n\r\n" + json;
-        send(clientFd, res.c_str(), res.length(), 0);
-    } else if (method == "POST" && path == "/api/apply_candidate") {
-        std::string gameIdStr = extractPostParam(postBody, "game_id");
-        int64_t gameId = 0;
-        try { gameId = std::stoll(gameIdStr); } catch(...) {}
-
-        ScrapeCandidate cand;
-        cand.title = extractPostParam(postBody, "title");
-        cand.releaseYear = extractPostParam(postBody, "year");
-        cand.genre = extractPostParam(postBody, "genre");
-        cand.developer = extractPostParam(postBody, "developer");
-        cand.description = extractPostParam(postBody, "description");
-        cand.coverUrl = extractPostParam(postBody, "cover_url");
-
-        bool ok = false;
-        if (gameId > 0) {
-            ok = BoxartScraper::instance().applyCandidate(gameId, cand);
-        }
-
-        std::string json = "{\"success\":" + std::string(ok ? "true" : "false") +
-                           ",\"message\":\"" + (ok ? "Đã áp dụng ảnh bìa và thông tin game thành công!" : "Lỗi khi áp dụng thông tin game.") + "\"}";
-        std::string res = "HTTP/1.1 200 OK\r\n"
-                          "Content-Type: application/json; charset=UTF-8\r\n"
-                          "Access-Control-Allow-Origin: *\r\n"
-                          "Content-Length: " + std::to_string(json.length()) + "\r\n"
-                          "Connection: close\r\n\r\n" + json;
-        send(clientFd, res.c_str(), res.length(), 0);
-    } else if (method == "POST" && path == "/api/audit_roms") {
-        auto list = RomOrganizer::instance().auditMisplacedRoms();
-        std::string json = "{\"success\":true,\"count\":" + std::to_string(list.size()) + ",\"items\":[";
-        for (size_t i = 0; i < list.size(); ++i) {
-            if (i > 0) json += ",";
-            json += "{";
-            json += "\"filename\":\"" + escapeJson(list[i].filename) + "\",";
-            json += "\"original_path\":\"" + escapeJson(list[i].originalPath) + "\",";
-            json += "\"current_system\":\"" + escapeJson(list[i].currentSystemCode) + "\",";
-            json += "\"detected_system\":\"" + escapeJson(list[i].detectedSystemCode) + "\",";
-            json += "\"detected_name\":\"" + escapeJson(list[i].detectedSystemName) + "\",";
-            json += "\"target_path\":\"" + escapeJson(list[i].targetPath) + "\",";
-            json += "\"confidence\":\"" + escapeJson(list[i].confidence) + "\",";
-            json += "\"reason\":\"" + escapeJson(list[i].reason) + "\"";
-            json += "}";
-        }
-        json += "]}";
-        std::string res = "HTTP/1.1 200 OK\r\n"
-                          "Content-Type: application/json; charset=UTF-8\r\n"
-                          "Access-Control-Allow-Origin: *\r\n"
-                          "Content-Length: " + std::to_string(json.length()) + "\r\n"
-                          "Connection: close\r\n\r\n" + json;
-        send(clientFd, res.c_str(), res.length(), 0);
-    } else if (method == "POST" && path == "/api/fix_misplaced_roms") {
-        auto list = RomOrganizer::instance().fixMisplacedRoms();
-        // Re-index ROMs so library updates immediately
-        std::string romsDir = AppConfig::instance().getRomsDir();
-        std::thread([romsDir]() {
-            RomIndexer::instance().scanAllSystems(romsDir, nullptr);
-        }).detach();
-        std::string json = "{\"success\":true,\"count\":" + std::to_string(list.size()) + ",\"items\":[";
-        for (size_t i = 0; i < list.size(); ++i) {
-            if (i > 0) json += ",";
-            json += "{";
-            json += "\"filename\":\"" + escapeJson(list[i].filename) + "\",";
-            json += "\"current_system\":\"" + escapeJson(list[i].currentSystemCode) + "\",";
-            json += "\"detected_system\":\"" + escapeJson(list[i].detectedSystemCode) + "\",";
-            json += "\"detected_name\":\"" + escapeJson(list[i].detectedSystemName) + "\",";
-            json += "\"fixed\":" + std::string(list[i].fixed ? "true" : "false") + ",";
-            json += "\"status\":\"" + escapeJson(list[i].statusMessage) + "\"";
-            json += "}";
-        }
-        json += "]}";
-        std::string res = "HTTP/1.1 200 OK\r\n"
-                          "Content-Type: application/json; charset=UTF-8\r\n"
-                          "Access-Control-Allow-Origin: *\r\n"
-                          "Content-Length: " + std::to_string(json.length()) + "\r\n"
-                          "Connection: close\r\n\r\n" + json;
-        send(clientFd, res.c_str(), res.length(), 0);
-    } else if (method == "POST" && path == "/api/organize_inbox") {
-        auto list = RomOrganizer::instance().organizeDirectory(RomOrganizer::instance().getInboxDir());
-        std::string json = "{\"success\":true,\"count\":" + std::to_string(list.size()) + "}";
-        std::string res = "HTTP/1.1 200 OK\r\n"
-                          "Content-Type: application/json; charset=UTF-8\r\n"
-                          "Access-Control-Allow-Origin: *\r\n"
-                          "Content-Length: " + std::to_string(json.length()) + "\r\n"
-                          "Connection: close\r\n\r\n" + json;
-        send(clientFd, res.c_str(), res.length(), 0);
-    } else if (method == "POST" && path == "/api/upload_rom_auto") {
-        std::string fname = extractQueryParam(queryString, "filename");
-        if (fname.empty()) fname = "uploaded_rom.bin";
-
-        std::string inboxPath = RomOrganizer::instance().getInboxDir() + "/" + fname;
-        std::ofstream outFile(inboxPath, std::ios::binary);
-        if (outFile.is_open()) {
-            if (!postBody.empty()) {
-                outFile.write(postBody.data(), postBody.size());
-            }
-
-            size_t clPos = req.find("Content-Length: ");
-            if (clPos != std::string::npos) {
-                size_t clEnd = req.find("\r\n", clPos);
-                long totalCl = 0;
-                try {
-                    totalCl = std::stol(req.substr(clPos + 16, clEnd - (clPos + 16)));
-                } catch (...) {}
-
-                long bytesReadSoFar = static_cast<long>(postBody.size());
-                char chunk[32768];
-                while (bytesReadSoFar < totalCl) {
-                    long toRead = std::min<long>(sizeof(chunk), totalCl - bytesReadSoFar);
-                    int n = recv(clientFd, chunk, toRead, 0);
-                    if (n <= 0) break;
-                    outFile.write(chunk, n);
-                    bytesReadSoFar += n;
-                }
-            }
-            outFile.close();
-            sync();
-
-            RomDetectionResult det = RomDetector::instance().detectSystem(inboxPath);
-            std::string sysCode = det.detected ? det.systemCode : "GBA";
-            std::string sysName = det.detected ? det.systemName : "Game";
-
-            SystemRecord targetSys;
-            std::string finalDst;
-            std::string message;
-            if (DatabaseManager::instance().getSystemByCode(sysCode, targetSys)) {
-                std::string targetDir = AppConfig::instance().getRomsDir() + "/" + targetSys.romDir;
-                FileSystemManager::instance().createDirectoryRecursive(targetDir);
-                std::string targetFile = targetDir + "/" + fname;
-                RomOrganizer::instance().safeMoveFile(inboxPath, targetFile, finalDst);
-
-                GameRecord g;
-                g.systemId = targetSys.id;
-                g.filename = fname;
-                size_t dot = fname.rfind('.');
-                g.title = (dot != std::string::npos) ? fname.substr(0, dot) : fname;
-                g.localPath = finalDst;
-                g.localState = GameState::LOCAL;
-                struct stat st;
-                if (::stat(finalDst.c_str(), &st) == 0) g.sizeBytes = st.st_size;
-                DatabaseManager::instance().upsertGame(g);
-
-                message = "Đã nhận diện: " + sysName + " (" + sysCode + ")! Game đã được lưu vào /Roms/" + targetSys.romDir + "/";
-            } else {
-                message = "Đã lưu ROM vào Hộp tiếp nhận _INBOX.";
-            }
-
-            std::string json = "{\"success\":true,\"filename\":\"" + escapeJson(fname) +
-                               "\",\"system_code\":\"" + escapeJson(sysCode) +
-                               "\",\"system_name\":\"" + escapeJson(sysName) +
-                               "\",\"message\":\"" + escapeJson(message) + "\"}";
-            std::string res = "HTTP/1.1 200 OK\r\n"
-                              "Content-Type: application/json; charset=UTF-8\r\n"
-                              "Access-Control-Allow-Origin: *\r\n"
-                              "Content-Length: " + std::to_string(json.length()) + "\r\n"
-                              "Connection: close\r\n\r\n" + json;
-            send(clientFd, res.c_str(), res.length(), 0);
-        } else {
-            std::string json = "{\"success\":false,\"error\":\"Không thể ghi file vào thẻ nhớ.\"}";
-            std::string res = "HTTP/1.1 500 Internal Server Error\r\n"
-                              "Content-Type: application/json; charset=UTF-8\r\n"
-                              "Access-Control-Allow-Origin: *\r\n"
-                              "Content-Length: " + std::to_string(json.length()) + "\r\n"
-                              "Connection: close\r\n\r\n" + json;
-            send(clientFd, res.c_str(), res.length(), 0);
-        }
-    } else if (method == "GET" && path == "/api/storage_info") {
-        auto disk = FileSystemManager::instance().getDiskSpace(AppConfig::instance().getRomsDir());
-        bool isLinked = AuthManager::instance().isLinked();
-        bool canUpload = AuthManager::instance().canUpload();
-        bool isPublicOnly = AuthManager::instance().isPublicOnly();
-        int totalLocal = 0, totalCloud = 0;
-        if (isLinked) {
-            DatabaseManager::instance().getTotalGameCounts(totalLocal, totalCloud);
-        }
-        std::string lastSync = isLinked ? DriveSyncEngine::instance().getLastSyncTime() : "Chưa kết nối";
-        std::string driveUrl = isLinked ? DatabaseManager::instance().getSetting("drive_folder_url", "") : "";
-
-        uint64_t usedBytes = (disk.totalBytes > disk.availableBytes) ? (disk.totalBytes - disk.availableBytes) : 0;
-        double usedPct = 0.0;
-        if (disk.totalBytes > 0) {
-            usedPct = (static_cast<double>(usedBytes) / static_cast<double>(disk.totalBytes)) * 100.0;
-        }
-
-        std::string userEmail = isLinked ? AuthManager::instance().getUserEmail() : "";
-
-        std::string json = "{";
-        json += "\"is_linked\":" + std::string(isLinked ? "true" : "false") + ",";
-        json += "\"can_upload\":" + std::string(canUpload ? "true" : "false") + ",";
-        json += "\"is_public_only\":" + std::string(isPublicOnly ? "true" : "false") + ",";
-        json += "\"user_email\":\"" + escapeJson(userEmail) + "\",";
-        json += "\"total_bytes\":" + std::to_string(disk.totalBytes) + ",";
-        json += "\"avail_bytes\":" + std::to_string(disk.availableBytes) + ",";
-        json += "\"used_bytes\":" + std::to_string(usedBytes) + ",";
-        json += "\"total_str\":\"" + FileSystemManager::instance().formatBytes(disk.totalBytes) + "\",";
-        json += "\"avail_str\":\"" + FileSystemManager::instance().formatBytes(disk.availableBytes) + "\",";
-        json += "\"used_str\":\"" + FileSystemManager::instance().formatBytes(usedBytes) + "\",";
-        json += "\"used_pct\":" + std::to_string(usedPct) + ",";
-        json += "\"total_local\":" + std::to_string(totalLocal) + ",";
-        json += "\"total_cloud\":" + std::to_string(totalCloud) + ",";
-        json += "\"last_sync\":\"" + escapeJson(lastSync) + "\",";
-        json += "\"drive_url\":\"" + escapeJson(driveUrl) + "\"";
-        json += "}";
-
-        std::string res = "HTTP/1.1 200 OK\r\n"
-                          "Content-Type: application/json; charset=UTF-8\r\n"
-                          "Access-Control-Allow-Origin: *\r\n"
-                          "Content-Length: " + std::to_string(json.length()) + "\r\n"
-                          "Connection: close\r\n\r\n" + json;
-        send(clientFd, res.c_str(), res.length(), 0);
-    } else if (method == "POST" && path == "/api/trigger_sync") {
-        bool started = DriveSyncEngine::instance().startSync();
-        std::string json = "{\"success\":" + std::string(started ? "true" : "false") + "}";
-        std::string res = "HTTP/1.1 200 OK\r\n"
-                          "Content-Type: application/json; charset=UTF-8\r\n"
-                          "Access-Control-Allow-Origin: *\r\n"
-                          "Content-Length: " + std::to_string(json.length()) + "\r\n"
-                          "Connection: close\r\n\r\n" + json;
-        send(clientFd, res.c_str(), res.length(), 0);
-    } else if (method == "GET" && path == "/api/sync_status") {
-        auto prog = DriveSyncEngine::instance().getProgress();
-        bool isSyncing = DriveSyncEngine::instance().isSyncing();
-        std::string statusStr = "IDLE";
-        if (prog.status == SyncStatus::CONNECTING) statusStr = "CONNECTING";
-        else if (prog.status == SyncStatus::DISCOVERING_FOLDERS) statusStr = "DISCOVERING_FOLDERS";
-        else if (prog.status == SyncStatus::SYNCING_FILES) statusStr = "SYNCING_FILES";
-        else if (prog.status == SyncStatus::COMPLETED) statusStr = "COMPLETED";
-        else if (prog.status == SyncStatus::ERROR_OCCURRED) statusStr = "ERROR";
-
-        std::string json = "{";
-        json += "\"is_syncing\":" + std::string(isSyncing ? "true" : "false") + ",";
-        json += "\"status\":\"" + statusStr + "\",";
-        json += "\"current_platform\":\"" + escapeJson(prog.currentPlatform) + "\",";
-        json += "\"games_found\":" + std::to_string(prog.cloudGamesFound) + ",";
-        json += "\"games_indexed\":" + std::to_string(prog.newGamesIndexed) + ",";
-        json += "\"current_system_index\":" + std::to_string(prog.currentSystemIndex) + ",";
-        json += "\"total_systems\":" + std::to_string(prog.totalSystems) + ",";
-        json += "\"error\":\"" + escapeJson(prog.errorMessage) + "\"";
-        json += "}";
-
-        std::string res = "HTTP/1.1 200 OK\r\n"
-                          "Content-Type: application/json; charset=UTF-8\r\n"
-                          "Access-Control-Allow-Origin: *\r\n"
-                          "Content-Length: " + std::to_string(json.length()) + "\r\n"
-                          "Connection: close\r\n\r\n" + json;
-        send(clientFd, res.c_str(), res.length(), 0);
-    } else if (method == "POST" && (path == "/api/logout" || path == "/unlink")) {
-        AuthManager::instance().logout();
-        if (path == "/api/logout") {
-            std::string json = "{\"success\":true,\"message\":\"Đã đăng xuất khỏi Google Drive thành công!\"}";
-            std::string res = "HTTP/1.1 200 OK\r\n"
-                              "Content-Type: application/json; charset=UTF-8\r\n"
-                              "Access-Control-Allow-Origin: *\r\n"
-                              "Content-Length: " + std::to_string(json.length()) + "\r\n"
-                              "Connection: close\r\n\r\n" + json;
-            send(clientFd, res.c_str(), res.length(), 0);
-        } else {
-            std::string body = buildSuccessResponse("Đã hủy liên kết Google Drive thành công!");
-            std::string res = "HTTP/1.1 200 OK\r\n"
-                              "Content-Type: text/html; charset=UTF-8\r\n"
-                              "Content-Length: " + std::to_string(body.length()) + "\r\n"
-                              "Connection: close\r\n\r\n" + body;
-            send(clientFd, res.c_str(), res.length(), 0);
-        }
-    } else if (method == "POST" && path == "/connect") {
-        std::string driveUrl = extractPostParam(postBody, "drive_url");
-        std::string folderId = extractFolderId(driveUrl);
-        if (folderId.empty()) folderId = driveUrl;
-
-        Logger::info("User linked Google Drive folder via Web Portal: " + driveUrl + " (Extracted Folder ID: " + folderId + ")");
-        AuthManager::instance().linkPublicFolder(folderId, driveUrl);
-        DriveSyncEngine::instance().startSync();
-
-        std::string body = buildSuccessResponse("Đã lưu liên kết Google Drive vào máy TrimUI!");
-        std::string res = "HTTP/1.1 200 OK\r\n"
-                          "Content-Type: text/html; charset=UTF-8\r\n"
-                          "Content-Length: " + std::to_string(body.length()) + "\r\n"
-                          "Connection: close\r\n\r\n" + body;
-        send(clientFd, res.c_str(), res.length(), 0);
-    } else if (method == "POST" && path == "/api/set_personal_auth") {
-        std::string action = extractPostParam(postBody, "action");
-        if (action == "clear") {
-            AuthManager::instance().clearPersonalTokens();
-            std::string json = "{\"success\":true,\"message\":\"Đã hủy kích hoạt sao lưu Drive cá nhân thành công.\"}";
-            std::string res = "HTTP/1.1 200 OK\r\n"
-                              "Content-Type: application/json; charset=UTF-8\r\n"
-                              "Access-Control-Allow-Origin: *\r\n"
-                              "Content-Length: " + std::to_string(json.length()) + "\r\n"
-                              "Connection: close\r\n\r\n" + json;
-            send(clientFd, res.c_str(), res.length(), 0);
-            return;
-        }
-
-        std::string token = extractPostParam(postBody, "token");
-        std::string refreshToken = extractPostParam(postBody, "refresh_token");
-        std::string email = extractPostParam(postBody, "email");
-        if (token.empty() && refreshToken.empty()) {
-            std::string json = "{\"success\":false,\"error\":\"Vui lòng dán Access Token hoặc Refresh Token vào ô.\"}";
-            std::string res = "HTTP/1.1 400 Bad Request\r\n"
-                              "Content-Type: application/json; charset=UTF-8\r\n"
-                              "Access-Control-Allow-Origin: *\r\n"
-                              "Content-Length: " + std::to_string(json.length()) + "\r\n"
-                              "Connection: close\r\n\r\n" + json;
-            send(clientFd, res.c_str(), res.length(), 0);
-            return;
-        }
-        auto result = AuthManager::instance().setPersonalTokens(token, refreshToken, email);
-        if (result.success) {
-            std::string json = "{\"success\":true,\"message\":\"" + escapeJson(result.message) + "\",\"email\":\"" + escapeJson(result.userEmail) + "\"}";
-            std::string res = "HTTP/1.1 200 OK\r\n"
-                              "Content-Type: application/json; charset=UTF-8\r\n"
-                              "Access-Control-Allow-Origin: *\r\n"
-                              "Content-Length: " + std::to_string(json.length()) + "\r\n"
-                              "Connection: close\r\n\r\n" + json;
-            send(clientFd, res.c_str(), res.length(), 0);
-        } else {
-            std::string json = "{\"success\":false,\"error\":\"" + escapeJson(result.message) + "\"}";
-            std::string res = "HTTP/1.1 400 Bad Request\r\n"
-                              "Content-Type: application/json; charset=UTF-8\r\n"
-                              "Access-Control-Allow-Origin: *\r\n"
-                              "Content-Length: " + std::to_string(json.length()) + "\r\n"
-                              "Connection: close\r\n\r\n" + json;
-            send(clientFd, res.c_str(), res.length(), 0);
-        }
-    } else if (method == "POST" && path == "/api/upload_game") {
-        if (!AuthManager::instance().canUpload()) {
-            std::string json = "{\"success\":false,\"error\":\"Chưa kích hoạt quyền sao lưu! Vui lòng vào tab 'Đồng bộ & Thẻ nhớ' để nạp Google Token cá nhân trước.\"}";
-            std::string res = "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json; charset=UTF-8\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: " + std::to_string(json.length()) + "\r\nConnection: close\r\n\r\n" + json;
-            send(clientFd, res.c_str(), res.length(), 0);
-        } else {
-            std::string gameIdStr = extractPostParam(postBody, "game_id");
-            int64_t gameId = 0;
-            try { gameId = std::stoll(gameIdStr); } catch (...) {}
-            if (gameId > 0) {
-                UploadManager::instance().startUploadGames({gameId});
-                std::string json = "{\"success\":true,\"message\":\"Đang bắt đầu sao lưu game lên Google Drive cá nhân...\"}";
-                std::string res = "HTTP/1.1 200 OK\r\nContent-Type: application/json; charset=UTF-8\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: " + std::to_string(json.length()) + "\r\nConnection: close\r\n\r\n" + json;
-                send(clientFd, res.c_str(), res.length(), 0);
-            } else {
-                std::string json = "{\"success\":false,\"error\":\"ID game không hợp lệ.\"}";
-                std::string res = "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json; charset=UTF-8\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: " + std::to_string(json.length()) + "\r\nConnection: close\r\n\r\n" + json;
-                send(clientFd, res.c_str(), res.length(), 0);
-            }
-        }
-    } else if (method == "POST" && path == "/api/upload_all") {
-        if (!AuthManager::instance().canUpload()) {
-            std::string json = "{\"success\":false,\"error\":\"Chưa kích hoạt quyền sao lưu! Vui lòng vào tab 'Đồng bộ & Thẻ nhớ' để nạp Google Token cá nhân trước.\"}";
-            std::string res = "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json; charset=UTF-8\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: " + std::to_string(json.length()) + "\r\nConnection: close\r\n\r\n" + json;
-            send(clientFd, res.c_str(), res.length(), 0);
-        } else {
-            UploadManager::instance().startReverseSync();
-            std::string json = "{\"success\":true,\"message\":\"Đang bắt đầu sao lưu toàn bộ game trên thẻ nhớ lên Google Drive cá nhân...\"}";
-            std::string res = "HTTP/1.1 200 OK\r\nContent-Type: application/json; charset=UTF-8\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: " + std::to_string(json.length()) + "\r\nConnection: close\r\n\r\n" + json;
-            send(clientFd, res.c_str(), res.length(), 0);
-        }
-    } else if (method == "GET" && path == "/api/upload_status") {
-        auto prog = UploadManager::instance().getProgress();
-        bool isUp = UploadManager::instance().isUploading();
-        std::string stateStr = "IDLE";
-        if (prog.state == UploadState::PREPARING) stateStr = "PREPARING";
-        else if (prog.state == UploadState::UPLOADING) stateStr = "UPLOADING";
-        else if (prog.state == UploadState::COMPLETED) stateStr = "COMPLETED";
-        else if (prog.state == UploadState::FAILED) stateStr = "FAILED";
-        else if (prog.state == UploadState::CANCELLED) stateStr = "CANCELLED";
-
-        std::string json = "{";
-        json += "\"is_uploading\":" + std::string(isUp ? "true" : "false") + ",";
-        json += "\"state\":\"" + stateStr + "\",";
-        json += "\"game_title\":\"" + escapeJson(prog.gameTitle) + "\",";
-        json += "\"filename\":\"" + escapeJson(prog.filename) + "\",";
-        json += "\"system\":\"" + escapeJson(prog.systemCode) + "\",";
-        json += "\"progress_pct\":" + std::to_string(prog.progressPct) + ",";
-        json += "\"bytes_uploaded\":" + std::to_string(prog.bytesUploaded) + ",";
-        json += "\"total_bytes\":" + std::to_string(prog.totalBytes) + ",";
-        json += "\"speed_kbps\":" + std::to_string(prog.speedKBps) + ",";
-        json += "\"total_games\":" + std::to_string(prog.totalGames) + ",";
-        json += "\"current_index\":" + std::to_string(prog.currentIndex) + ",";
-        json += "\"games_uploaded\":" + std::to_string(prog.gamesUploaded) + ",";
-        json += "\"games_failed\":" + std::to_string(prog.gamesFailed) + ",";
-        json += "\"error\":\"" + escapeJson(prog.errorMessage) + "\"";
-        json += "}";
-
-        std::string res = "HTTP/1.1 200 OK\r\nContent-Type: application/json; charset=UTF-8\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: " + std::to_string(json.length()) + "\r\nConnection: close\r\n\r\n" + json;
-        send(clientFd, res.c_str(), res.length(), 0);
-    } else if (method == "POST" && path == "/api/cancel_upload") {
-        UploadManager::instance().cancel();
-        std::string json = "{\"success\":true,\"message\":\"Đã yêu cầu hủy sao lưu.\"}";
-        std::string res = "HTTP/1.1 200 OK\r\nContent-Type: application/json; charset=UTF-8\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: " + std::to_string(json.length()) + "\r\nConnection: close\r\n\r\n" + json;
-        send(clientFd, res.c_str(), res.length(), 0);
-    } else if (method == "GET" && path == "/ota_check") {
-        UpdateInfo info;
-        bool hasUpdate = UpdateManager::instance().checkForUpdatesSync(info);
-        std::string json = "{\"has_update\":" + std::string(hasUpdate ? "true" : "false") + ","
-                           "\"current_version\":\"" + UpdateManager::instance().getCurrentVersion() + "\","
-                           "\"remote_version\":\"" + info.remoteVersion + "\","
-                           "\"release_date\":\"" + info.releaseDate + "\","
-                           "\"changelog\":\"" + escapeJson(info.changelog) + "\"}";
-        std::string res = "HTTP/1.1 200 OK\r\n"
-                          "Content-Type: application/json; charset=UTF-8\r\n"
-                          "Access-Control-Allow-Origin: *\r\n"
-                          "Content-Length: " + std::to_string(json.length()) + "\r\n"
-                          "Connection: close\r\n\r\n" + json;
-        send(clientFd, res.c_str(), res.length(), 0);
-    } else if (method == "POST" && path == "/ota_start") {
-        auto info = UpdateManager::instance().getLatestInfo();
-        bool ok = UpdateManager::instance().startUpdate(info);
-        std::string json = "{\"started\":" + std::string(ok ? "true" : "false") + "}";
-        std::string res = "HTTP/1.1 200 OK\r\n"
-                          "Content-Type: application/json; charset=UTF-8\r\n"
-                          "Access-Control-Allow-Origin: *\r\n"
-                          "Content-Length: " + std::to_string(json.length()) + "\r\n"
-                          "Connection: close\r\n\r\n" + json;
-        send(clientFd, res.c_str(), res.length(), 0);
-    } else if (method == "GET" && path == "/ota_status") {
-        auto prog = UpdateManager::instance().getProgress();
-        std::string stateStr = "IDLE";
-        if (prog.state == UpdateState::CHECKING) stateStr = "CHECKING";
-        else if (prog.state == UpdateState::UPDATE_AVAILABLE) stateStr = "UPDATE_AVAILABLE";
-        else if (prog.state == UpdateState::UP_TO_DATE) stateStr = "UP_TO_DATE";
-        else if (prog.state == UpdateState::DOWNLOADING) stateStr = "DOWNLOADING";
-        else if (prog.state == UpdateState::VERIFYING) stateStr = "VERIFYING";
-        else if (prog.state == UpdateState::INSTALLING) stateStr = "INSTALLING";
-        else if (prog.state == UpdateState::DOWNLOADING_DEPS) stateStr = "DOWNLOADING_DEPS";
-        else if (prog.state == UpdateState::INSTALLING_DEPS) stateStr = "INSTALLING_DEPS";
-        else if (prog.state == UpdateState::COMPLETED) stateStr = "COMPLETED";
-        else if (prog.state == UpdateState::FAILED) stateStr = "FAILED";
-
-        std::string json = "{\"state\":\"" + stateStr + "\","
-                           "\"progress_pct\":" + std::to_string(prog.progressPct) + ","
-                           "\"bytes_downloaded\":" + std::to_string(prog.bytesDownloaded) + ","
-                           "\"total_bytes\":" + std::to_string(prog.totalBytes) + ","
-                           "\"speed_kbps\":" + std::to_string(prog.speedKBps) + ","
-                           "\"current_step\":\"" + escapeJson(prog.currentStep) + "\","
-                           "\"error\":\"" + escapeJson(prog.errorMessage) + "\"}";
-        std::string res = "HTTP/1.1 200 OK\r\n"
-                          "Content-Type: application/json; charset=UTF-8\r\n"
-                          "Access-Control-Allow-Origin: *\r\n"
-                          "Content-Length: " + std::to_string(json.length()) + "\r\n"
-                          "Connection: close\r\n\r\n" + json;
-        send(clientFd, res.c_str(), res.length(), 0);
-    } else if (method == "POST" && path == "/ota_restart") {
-        std::string res = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{\"status\":\"restarting\"}";
-        send(clientFd, res.c_str(), res.length(), 0);
-        std::this_thread::sleep_for(std::chrono::milliseconds(500));
-        Application::instance().requestRestart();
-    } else if (method == "GET" && path == "/api/iptv/sources") {
-        // Return structured IPTV sources with channel counts & metadata
-        auto sources = IPTVManager::instance().getSources();
-        size_t totalChannels = IPTVManager::instance().getChannels().size();
-        std::string json = "{\"success\":true,\"total_channels\":" + std::to_string(totalChannels) + ",\"sources\":[";
-        for (size_t i = 0; i < sources.size(); i++) {
-            if (i > 0) json += ",";
-            json += "{\"name\":\"" + escapeJson(sources[i].name) + "\","
-                 + "\"filename\":\"" + escapeJson(sources[i].filename) + "\","
-                 + "\"type\":\"" + escapeJson(sources[i].type) + "\","
-                 + "\"url\":\"" + escapeJson(sources[i].url) + "\","
-                 + "\"channels\":" + std::to_string(sources[i].channelCount) + ","
-                 + "\"size\":" + std::to_string(sources[i].fileSize) + "}";
-        }
-        json += "]}";
-        std::string res = "HTTP/1.1 200 OK\r\nContent-Type: application/json; charset=UTF-8\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: " + std::to_string(json.length()) + "\r\nConnection: close\r\n\r\n" + json;
-        send(clientFd, res.c_str(), res.length(), 0);
-    } else if (method == "GET" && path == "/api/iptv/list") {
-        // List IPTV playlists (compatibility endpoint)
-        auto sources = IPTVManager::instance().getSources();
-        std::string json = "{\"playlists\":[";
-        for (size_t i = 0; i < sources.size(); i++) {
-            if (i > 0) json += ",";
-            json += "\"" + escapeJson(sources[i].filename) + "\"";
-        }
-        json += "]}";
-        std::string res = "HTTP/1.1 200 OK\r\nContent-Type: application/json; charset=UTF-8\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: " + std::to_string(json.length()) + "\r\nConnection: close\r\n\r\n" + json;
-        send(clientFd, res.c_str(), res.length(), 0);
-    } else if (method == "POST" && path == "/api/iptv/upload") {
-        // Read full POST body according to Content-Length
-        size_t clPos = req.find("Content-Length: ");
-        if (clPos == std::string::npos) clPos = req.find("content-length: ");
-        long totalCl = 0;
-        if (clPos != std::string::npos) {
-            size_t clEnd = req.find("\r\n", clPos);
-            try {
-                totalCl = std::stol(req.substr(clPos + 16, clEnd - (clPos + 16)));
-            } catch (...) {}
-        }
-
-        std::string fullBody = postBody;
-        if (totalCl > 0 && static_cast<long>(fullBody.size()) < totalCl) {
-            char chunk[16384];
-            while (static_cast<long>(fullBody.size()) < totalCl) {
-                long toRead = std::min<long>(sizeof(chunk), totalCl - static_cast<long>(fullBody.size()));
-                int n = recv(clientFd, chunk, toRead, 0);
-                if (n <= 0) break;
-                fullBody.append(chunk, n);
-            }
-        }
-
-        // Parse multipart filename: filename="..."
-        std::string filename = "uploaded.m3u";
-        size_t fnPos = fullBody.find("filename=\"");
-        if (fnPos != std::string::npos) {
-            fnPos += 10;
-            size_t fnEnd = fullBody.find("\"", fnPos);
-            if (fnEnd != std::string::npos && fnEnd > fnPos) {
-                filename = fullBody.substr(fnPos, fnEnd - fnPos);
-                size_t slash = filename.find_last_of("/\\");
-                if (slash != std::string::npos) filename = filename.substr(slash + 1);
-            }
-        }
-        if (filename.empty() || filename == "." || filename == "..") {
-            filename = "playlist_" + std::to_string(std::time(nullptr)) + ".m3u";
-        }
-        if (filename.find(".m3u") == std::string::npos && filename.find(".m3u8") == std::string::npos) {
-            filename += ".m3u";
-        }
-
-        // Parse optional custom source name
-        std::string customName;
-        size_t nmPos = fullBody.find("name=\"name\"");
-        if (nmPos != std::string::npos) {
-            size_t dbl = fullBody.find("\r\n\r\n", nmPos);
-            if (dbl != std::string::npos) {
-                dbl += 4;
-                size_t endNm = fullBody.find("\r\n--", dbl);
-                if (endNm != std::string::npos) {
-                    customName = fullBody.substr(dbl, endNm - dbl);
-                }
-            }
-        }
-
-        // Extract content after multipart headers (double CRLF)
-        std::string fileContent;
-        size_t dataStart = fullBody.find("\r\n\r\n");
-        if (dataStart != std::string::npos && fullBody.find("Content-Disposition") != std::string::npos) {
-            dataStart += 4;
-            size_t dataEnd = fullBody.find("\r\n--", dataStart);
-            if (dataEnd != std::string::npos) {
-                fileContent = fullBody.substr(dataStart, dataEnd - dataStart);
-            } else {
-                fileContent = fullBody.substr(dataStart);
-            }
-        } else {
-            fileContent = fullBody;
-        }
-
-        if (!fileContent.empty()) {
-            std::string iptvDir = IPTVManager::instance().getIptvDir();
-            if (iptvDir.empty()) {
-                iptvDir = AppConfig::instance().getAppRoot() + "/iptv";
-            }
-            FileSystemManager::instance().createDirectoryRecursive(iptvDir);
-
-            std::string outPath = iptvDir + "/" + filename;
-            std::ofstream out(outPath, std::ios::binary);
-            if (out.is_open()) {
-                out.write(fileContent.data(), fileContent.size());
-                out.close();
-                sync();
-                Logger::info("IPTV: Playlist uploaded successfully to " + outPath + " (" + std::to_string(fileContent.size()) + " bytes)");
-                
-                IPTVManager::instance().addSourceFromFile(filename, customName);
-                size_t count = IPTVManager::instance().getChannels().size();
-                std::string json = "{\"success\":true,\"file\":\"" + escapeJson(filename) + "\",\"channels\":" + std::to_string(count) + "}";
-                std::string res = "HTTP/1.1 200 OK\r\nContent-Type: application/json; charset=UTF-8\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: " + std::to_string(json.length()) + "\r\nConnection: close\r\n\r\n" + json;
-                send(clientFd, res.c_str(), res.length(), 0);
-            } else {
-                Logger::error("IPTV: Cannot write uploaded file to " + outPath);
-                std::string json = "{\"success\":false,\"error\":\"Cannot write file: " + escapeJson(filename) + "\"}";
-                std::string res = "HTTP/1.1 500 OK\r\nContent-Type: application/json; charset=UTF-8\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: " + std::to_string(json.length()) + "\r\nConnection: close\r\n\r\n" + json;
-                send(clientFd, res.c_str(), res.length(), 0);
-            }
-        } else {
-            std::string json = "{\"success\":false,\"error\":\"No content\"}";
-            std::string res = "HTTP/1.1 400 OK\r\nContent-Type: application/json; charset=UTF-8\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: " + std::to_string(json.length()) + "\r\nConnection: close\r\n\r\n" + json;
-            send(clientFd, res.c_str(), res.length(), 0);
-        }
-    } else if ((method == "GET" && path.find("/api/iptv/add") == 0) || (method == "POST" && path == "/api/iptv/add")) {
-        // Download and add playlist from URL
-        std::string url;
-        std::string name;
-        if (method == "GET") {
-            url = extractQueryParam(queryString, "url");
-            name = extractQueryParam(queryString, "name");
-            if (url.empty()) url = extractQueryParam(fullPath, "url");
-            if (name.empty()) name = extractQueryParam(fullPath, "name");
-        } else {
-            url = extractPostParam(postBody, "url");
-            name = extractPostParam(postBody, "name");
-            if (url.empty()) {
-                size_t uPos = postBody.find("\"url\":\"");
-                if (uPos != std::string::npos) {
-                    uPos += 7;
-                    size_t uEnd = postBody.find("\"", uPos);
-                    if (uEnd != std::string::npos) url = postBody.substr(uPos, uEnd - uPos);
-                }
-                size_t nPos = postBody.find("\"name\":\"");
-                if (nPos != std::string::npos) {
-                    nPos += 8;
-                    size_t nEnd = postBody.find("\"", nPos);
-                    if (nEnd != std::string::npos) name = postBody.substr(nPos, nEnd - nPos);
-                }
-            }
-        }
-
-        if (!url.empty()) {
-            std::string error;
-            std::string filename;
-            size_t chanCount = 0;
-            if (IPTVManager::instance().addSourceFromUrl(url, name, error, filename, chanCount)) {
-                size_t total = IPTVManager::instance().getChannels().size();
-                std::string json = "{\"success\":true,\"file\":\"" + escapeJson(filename) + "\",\"channels\":" + std::to_string(chanCount) + ",\"total_channels\":" + std::to_string(total) + "}";
-                std::string res = "HTTP/1.1 200 OK\r\nContent-Type: application/json; charset=UTF-8\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: " + std::to_string(json.length()) + "\r\nConnection: close\r\n\r\n" + json;
-                send(clientFd, res.c_str(), res.length(), 0);
-            } else {
-                std::string json = "{\"success\":false,\"error\":\"" + escapeJson(error) + "\"}";
-                std::string res = "HTTP/1.1 400 OK\r\nContent-Type: application/json; charset=UTF-8\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: " + std::to_string(json.length()) + "\r\nConnection: close\r\n\r\n" + json;
-                send(clientFd, res.c_str(), res.length(), 0);
-            }
-        } else {
-            std::string json = "{\"success\":false,\"error\":\"Chưa cung cấp đường dẫn URL\"}";
-            std::string res = "HTTP/1.1 400 OK\r\nContent-Type: application/json; charset=UTF-8\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: " + std::to_string(json.length()) + "\r\nConnection: close\r\n\r\n" + json;
-            send(clientFd, res.c_str(), res.length(), 0);
-        }
-    } else if ((method == "GET" && (path == "/api/iptv/delete" || fullPath.find("/api/iptv/delete") == 0)) || (method == "POST" && path == "/api/iptv/delete")) {
-        // Delete IPTV source file
-        std::string file;
-        if (method == "GET") {
-            file = extractQueryParam(queryString, "file");
-            if (file.empty()) file = extractQueryParam(fullPath, "file");
-        } else {
-            file = extractPostParam(postBody, "file");
-            if (file.empty()) file = extractPostParam(postBody, "filename");
-            if (file.empty()) {
-                size_t fnPos = postBody.find("\"file\":\"");
-                if (fnPos != std::string::npos) {
-                    fnPos += 8;
-                    size_t fnEnd = postBody.find("\"", fnPos);
-                    if (fnEnd != std::string::npos) file = postBody.substr(fnPos, fnEnd - fnPos);
-                }
-            }
-        }
-
-        std::string error;
-        if (IPTVManager::instance().deleteSource(file, error)) {
-            size_t count = IPTVManager::instance().getChannels().size();
-            std::string json = "{\"success\":true,\"deleted\":\"" + escapeJson(file) + "\",\"channels\":" + std::to_string(count) + "}";
-            std::string res = "HTTP/1.1 200 OK\r\nContent-Type: application/json; charset=UTF-8\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: " + std::to_string(json.length()) + "\r\nConnection: close\r\n\r\n" + json;
-            send(clientFd, res.c_str(), res.length(), 0);
-        } else {
-            std::string json = "{\"success\":false,\"error\":\"" + escapeJson(error.empty() ? "Không thể xóa nguồn" : error) + "\"}";
-            std::string res = "HTTP/1.1 400 OK\r\nContent-Type: application/json; charset=UTF-8\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: " + std::to_string(json.length()) + "\r\nConnection: close\r\n\r\n" + json;
-            send(clientFd, res.c_str(), res.length(), 0);
-        }
+  if (method == "GET" && (path == "/" || path == "/index.html")) {
+    std::string body = buildHtmlResponse();
+    std::string res =
+        "HTTP/1.1 200 OK\r\n"
+        "Content-Type: text/html; charset=UTF-8\r\n"
+        "Cache-Control: no-cache, no-store, must-revalidate, max-age=0\r\n"
+        "Pragma: no-cache\r\n"
+        "Expires: 0\r\n"
+        "Content-Length: " +
+        std::to_string(body.length()) +
+        "\r\n"
+        "Connection: close\r\n\r\n" +
+        body;
+    send(clientFd, res.c_str(), res.length(), 0);
+  } else if (method == "GET" &&
+             (path == "/debug.log" || path == "/api/debug_log")) {
+    std::string logPath = AppConfig::instance().getDebugLogPath();
+    std::ifstream file(logPath, std::ios::binary);
+    std::string content;
+    if (file.is_open()) {
+      content.assign((std::istreambuf_iterator<char>(file)),
+                     std::istreambuf_iterator<char>());
+      file.close();
     } else {
-        std::string notFound = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
-        send(clientFd, notFound.c_str(), notFound.length(), 0);
+      content = "Chua co loi nao duoc ghi nhan trong debug.log.";
     }
+    std::string res =
+        "HTTP/1.1 200 OK\r\n"
+        "Content-Type: text/plain; charset=UTF-8\r\n"
+        "Content-Disposition: attachment; filename=\"debug.log\"\r\n"
+        "Cache-Control: no-cache, no-store\r\n"
+        "Access-Control-Allow-Origin: *\r\n"
+        "Content-Length: " +
+        std::to_string(content.length()) +
+        "\r\n"
+        "Connection: close\r\n\r\n" +
+        content;
+    send(clientFd, res.c_str(), res.length(), 0);
+    return;
+  } else if (method == "GET" && path == "/api/systems") {
+    if (!AuthManager::instance().isLinked()) {
+      std::string res = "HTTP/1.1 200 OK\r\n"
+                        "Content-Type: application/json; charset=UTF-8\r\n"
+                        "Cache-Control: no-cache, no-store, must-revalidate\r\n"
+                        "Access-Control-Allow-Origin: *\r\n"
+                        "Content-Length: 2\r\n"
+                        "Connection: close\r\n\r\n[]";
+      send(clientFd, res.c_str(), res.length(), 0);
+      return;
+    }
+    auto systems = DatabaseManager::instance().getSystems(true);
+    std::string json = "[";
+    for (size_t i = 0; i < systems.size(); ++i) {
+      const auto &s = systems[i];
+      if (i > 0)
+        json += ",";
+      json += "{\"id\":" + std::to_string(s.id) + ",";
+      json += "\"code\":\"" + escapeJson(s.code) + "\",";
+      json += "\"name\":\"" + escapeJson(s.name) + "\",";
+      json += "\"local_count\":" + std::to_string(s.localCount) + ",";
+      json += "\"cloud_count\":" + std::to_string(s.cloudCount) + "}";
+    }
+    json += "]";
+    std::string res = "HTTP/1.1 200 OK\r\n"
+                      "Content-Type: application/json; charset=UTF-8\r\n"
+                      "Cache-Control: no-cache, no-store, must-revalidate\r\n"
+                      "Access-Control-Allow-Origin: *\r\n"
+                      "Content-Length: " +
+                      std::to_string(json.length()) +
+                      "\r\n"
+                      "Connection: close\r\n\r\n" +
+                      json;
+    send(clientFd, res.c_str(), res.length(), 0);
+  } else if (method == "GET" && path == "/api/games") {
+    if (!AuthManager::instance().isLinked()) {
+      std::string json = "{\"total\":0,\"games\":[]}";
+      std::string res = "HTTP/1.1 200 OK\r\n"
+                        "Content-Type: application/json; charset=UTF-8\r\n"
+                        "Cache-Control: no-cache, no-store, must-revalidate\r\n"
+                        "Access-Control-Allow-Origin: *\r\n"
+                        "Content-Length: " +
+                        std::to_string(json.length()) +
+                        "\r\n"
+                        "Connection: close\r\n\r\n" +
+                        json;
+      send(clientFd, res.c_str(), res.length(), 0);
+      return;
+    }
+    std::string sysIdStr = extractQueryParam(queryString, "system_id");
+    std::string stateStr = extractQueryParam(queryString, "state");
+    std::string q = extractQueryParam(queryString, "q");
+    std::string limitStr = extractQueryParam(queryString, "limit");
+    std::string offsetStr = extractQueryParam(queryString, "offset");
+
+    int systemId = 0;
+    int stateFilter = -1;
+    int limit = 50;
+    int offset = 0;
+
+    try {
+      if (!sysIdStr.empty())
+        systemId = std::stoi(sysIdStr);
+    } catch (...) {
+    }
+    try {
+      if (!stateStr.empty())
+        stateFilter = std::stoi(stateStr);
+    } catch (...) {
+    }
+    try {
+      if (!limitStr.empty())
+        limit = std::stoi(limitStr);
+    } catch (...) {
+    }
+    try {
+      if (!offsetStr.empty())
+        offset = std::stoi(offsetStr);
+    } catch (...) {
+    }
+
+    int totalCount = 0;
+    auto games = DatabaseManager::instance().getGamesFiltered(
+        systemId, stateFilter, q, limit, offset, totalCount);
+
+    std::string json =
+        "{\"total\":" + std::to_string(totalCount) + ",\"games\":[";
+    for (size_t i = 0; i < games.size(); ++i) {
+      const auto &g = games[i];
+      bool inQueue = DownloadManager::instance().isInQueue(g.id);
+      if (i > 0)
+        json += ",";
+      json += "{\"id\":" + std::to_string(g.id) + ",";
+      json += "\"title\":\"" + escapeJson(g.title) + "\",";
+      json += "\"filename\":\"" + escapeJson(g.filename) + "\",";
+      json += "\"sys_code\":\"" +
+              escapeJson(g.systemCode.empty() ? "GAME" : g.systemCode) + "\",";
+      json += "\"size_str\":\"" +
+              FileSystemManager::instance().formatBytes(g.sizeBytes) + "\",";
+      json +=
+          "\"local_state\":" + std::to_string(static_cast<int>(g.localState)) +
+          ",";
+      json += "\"in_queue\":" + std::string(inQueue ? "true" : "false") + ",";
+      json += "\"has_cover\":" +
+              std::string(g.coverPath.empty() ? "false" : "true") + ",";
+      json += "\"release_year\":\"" + escapeJson(g.releaseYear) + "\",";
+      json += "\"genre\":\"" + escapeJson(g.genre) + "\",";
+      json += "\"developer\":\"" + escapeJson(g.developer) + "\",";
+      json += "\"description\":\"" + escapeJson(g.description) + "\"}";
+    }
+    json += "]}";
+
+    std::string res = "HTTP/1.1 200 OK\r\n"
+                      "Content-Type: application/json; charset=UTF-8\r\n"
+                      "Cache-Control: no-cache, no-store, must-revalidate\r\n"
+                      "Access-Control-Allow-Origin: *\r\n"
+                      "Content-Length: " +
+                      std::to_string(json.length()) +
+                      "\r\n"
+                      "Connection: close\r\n\r\n" +
+                      json;
+    send(clientFd, res.c_str(), res.length(), 0);
+  } else if (method == "GET" && path == "/api/game_detail") {
+    std::string gameIdStr = extractQueryParam(queryString, "game_id");
+    int64_t gameId = 0;
+    try {
+      gameId = std::stoll(gameIdStr);
+    } catch (...) {
+    }
+    GameRecord g;
+    if (gameId > 0 && DatabaseManager::instance().getGameById(gameId, g)) {
+      SystemRecord sys;
+      DatabaseManager::instance().getSystemById(g.systemId, sys);
+      bool inQueue = DownloadManager::instance().isInQueue(g.id);
+      std::string json = "{";
+      json += "\"id\":" + std::to_string(g.id) + ",";
+      json += "\"title\":\"" + escapeJson(g.title) + "\",";
+      json += "\"filename\":\"" + escapeJson(g.filename) + "\",";
+      json += "\"system_id\":" + std::to_string(g.systemId) + ",";
+      json += "\"sys_code\":\"" +
+              escapeJson(sys.code.empty() ? g.systemCode : sys.code) + "\",";
+      json += "\"sys_name\":\"" + escapeJson(sys.name) + "\",";
+      json += "\"size_str\":\"" +
+              FileSystemManager::instance().formatBytes(g.sizeBytes) + "\",";
+      json +=
+          "\"local_state\":" + std::to_string(static_cast<int>(g.localState)) +
+          ",";
+      json += "\"in_queue\":" + std::string(inQueue ? "true" : "false") + ",";
+      json += "\"has_cover\":" +
+              std::string(g.coverPath.empty() ? "false" : "true") + ",";
+      json += "\"release_year\":\"" + escapeJson(g.releaseYear) + "\",";
+      json += "\"genre\":\"" + escapeJson(g.genre) + "\",";
+      json += "\"developer\":\"" + escapeJson(g.developer) + "\",";
+      json += "\"description\":\"" + escapeJson(g.description) + "\"";
+      json += "}";
+      std::string res = "HTTP/1.1 200 OK\r\n"
+                        "Content-Type: application/json; charset=UTF-8\r\n"
+                        "Cache-Control: no-cache, no-store, must-revalidate\r\n"
+                        "Access-Control-Allow-Origin: *\r\n"
+                        "Content-Length: " +
+                        std::to_string(json.length()) +
+                        "\r\n"
+                        "Connection: close\r\n\r\n" +
+                        json;
+      send(clientFd, res.c_str(), res.length(), 0);
+      return;
+    } else {
+      std::string json = "{\"error\":\"Game not found\"}";
+      std::string res = "HTTP/1.1 404 Not Found\r\n"
+                        "Content-Type: application/json; charset=UTF-8\r\n"
+                        "Access-Control-Allow-Origin: *\r\n"
+                        "Content-Length: " +
+                        std::to_string(json.length()) +
+                        "\r\n"
+                        "Connection: close\r\n\r\n" +
+                        json;
+      send(clientFd, res.c_str(), res.length(), 0);
+      return;
+    }
+  } else if (method == "GET" && path == "/api/search") {
+    if (!AuthManager::instance().isLinked()) {
+      std::string res = "HTTP/1.1 200 OK\r\n"
+                        "Content-Type: application/json; charset=UTF-8\r\n"
+                        "Cache-Control: no-cache, no-store, must-revalidate\r\n"
+                        "Access-Control-Allow-Origin: *\r\n"
+                        "Content-Length: 2\r\n"
+                        "Connection: close\r\n\r\n[]";
+      send(clientFd, res.c_str(), res.length(), 0);
+      return;
+    }
+    std::string q = extractQueryParam(queryString, "q");
+    auto games = DatabaseManager::instance().searchAllGames(q, 60);
+    std::string json = "[";
+    for (size_t i = 0; i < games.size(); ++i) {
+      const auto &g = games[i];
+      SystemRecord sys;
+      std::string sysCode = "GAME";
+      if (DatabaseManager::instance().getSystemById(g.systemId, sys)) {
+        sysCode = sys.code;
+      }
+      if (i > 0)
+        json += ",";
+      json += "{\"id\":" + std::to_string(g.id) + ",";
+      json += "\"title\":\"" + escapeJson(g.title) + "\",";
+      json += "\"filename\":\"" + escapeJson(g.filename) + "\",";
+      json += "\"sys_code\":\"" + escapeJson(sysCode) + "\",";
+      json += "\"size_str\":\"" +
+              FileSystemManager::instance().formatBytes(g.sizeBytes) + "\",";
+      json +=
+          "\"local_state\":" + std::to_string(static_cast<int>(g.localState)) +
+          ",";
+      json += "\"has_cover\":" +
+              std::string(g.coverPath.empty() ? "false" : "true") + "}";
+    }
+    json += "]";
+    std::string res = "HTTP/1.1 200 OK\r\n"
+                      "Content-Type: application/json; charset=UTF-8\r\n"
+                      "Cache-Control: no-cache, no-store, must-revalidate\r\n"
+                      "Access-Control-Allow-Origin: *\r\n"
+                      "Content-Length: " +
+                      std::to_string(json.length()) +
+                      "\r\n"
+                      "Connection: close\r\n\r\n" +
+                      json;
+    send(clientFd, res.c_str(), res.length(), 0);
+  } else if (method == "GET" && path == "/api/cover") {
+    std::string gameIdStr = extractQueryParam(queryString, "game_id");
+    int64_t gameId = 0;
+    try {
+      if (!gameIdStr.empty())
+        gameId = std::stoll(gameIdStr);
+    } catch (...) {
+    }
+
+    GameRecord game;
+    bool found =
+        (gameId > 0 && DatabaseManager::instance().getGameById(gameId, game) &&
+         !game.coverPath.empty());
+    if (found) {
+      std::ifstream file(game.coverPath, std::ios::binary);
+      if (file.is_open()) {
+        std::string content((std::istreambuf_iterator<char>(file)),
+                            std::istreambuf_iterator<char>());
+        file.close();
+        std::string mime = "image/png";
+        if (game.coverPath.rfind(".jpg") != std::string::npos ||
+            game.coverPath.rfind(".jpeg") != std::string::npos) {
+          mime = "image/jpeg";
+        } else if (game.coverPath.rfind(".webp") != std::string::npos) {
+          mime = "image/webp";
+        }
+        std::string header = "HTTP/1.1 200 OK\r\n"
+                             "Content-Type: " +
+                             mime +
+                             "\r\n"
+                             "Cache-Control: public, max-age=86400\r\n"
+                             "Access-Control-Allow-Origin: *\r\n"
+                             "Content-Length: " +
+                             std::to_string(content.size()) +
+                             "\r\n"
+                             "Connection: close\r\n\r\n";
+        send(clientFd, header.c_str(), header.length(), 0);
+        send(clientFd, content.data(), content.size(), 0);
+        return;
+      }
+    }
+    std::string notFound = "HTTP/1.1 404 Not Found\r\nContent-Length: "
+                           "0\r\nConnection: close\r\n\r\n";
+    send(clientFd, notFound.c_str(), notFound.length(), 0);
+    return;
+  } else if (method == "GET" && path == "/api/download_status") {
+    auto prog = DownloadManager::instance().getProgress();
+    auto queue = DownloadManager::instance().getQueue();
+    bool isDownloading = DownloadManager::instance().isDownloading();
+
+    std::string stateStr = "IDLE";
+    if (prog.state == DownloadState::INITIALIZING)
+      stateStr = "INITIALIZING";
+    else if (prog.state == DownloadState::DOWNLOADING)
+      stateStr = "DOWNLOADING";
+    else if (prog.state == DownloadState::VERIFYING)
+      stateStr = "VERIFYING";
+    else if (prog.state == DownloadState::COMPLETED)
+      stateStr = "COMPLETED";
+    else if (prog.state == DownloadState::FAILED)
+      stateStr = "FAILED";
+    else if (prog.state == DownloadState::CANCELLED)
+      stateStr = "CANCELLED";
+
+    std::string json = "{";
+    json +=
+        "\"is_downloading\":" + std::string(isDownloading ? "true" : "false") +
+        ",";
+    json += "\"active\":{";
+    json += "\"state\":\"" + stateStr + "\",";
+    json += "\"game_id\":" + std::to_string(prog.gameId) + ",";
+    json += "\"title\":\"" + escapeJson(prog.gameTitle) + "\",";
+    json += "\"system\":\"" + escapeJson(prog.systemCode) + "\",";
+    json += "\"filename\":\"" + escapeJson(prog.filename) + "\",";
+    json += "\"progress_pct\":" + std::to_string(prog.progressPct) + ",";
+    json += "\"speed_kbps\":" + std::to_string(prog.speedKBps) + ",";
+    json +=
+        "\"bytes_downloaded\":" + std::to_string(prog.bytesDownloaded) + ",";
+    json += "\"total_bytes\":" + std::to_string(prog.totalBytes) + ",";
+    json += "\"eta_seconds\":" + std::to_string(prog.etaSeconds) + ",";
+    json += "\"error\":\"" + escapeJson(prog.errorMessage) + "\"";
+    json += "},";
+    json += "\"queue_size\":" + std::to_string(queue.size()) + ",";
+    json += "\"queue\":[";
+    for (size_t i = 0; i < queue.size(); ++i) {
+      const auto &it = queue[i];
+      if (i > 0)
+        json += ",";
+      json += "{\"game_id\":" + std::to_string(it.game.id) + ",";
+      json += "\"title\":\"" + escapeJson(it.game.title) + "\",";
+      json += "\"system\":\"" + escapeJson(it.sys.code) + "\",";
+      json += "\"size_str\":\"" +
+              FileSystemManager::instance().formatBytes(it.game.sizeBytes) +
+              "\"}";
+    }
+    json += "]}";
+
+    std::string res = "HTTP/1.1 200 OK\r\n"
+                      "Content-Type: application/json; charset=UTF-8\r\n"
+                      "Access-Control-Allow-Origin: *\r\n"
+                      "Content-Length: " +
+                      std::to_string(json.length()) +
+                      "\r\n"
+                      "Connection: close\r\n\r\n" +
+                      json;
+    send(clientFd, res.c_str(), res.length(), 0);
+  } else if (method == "POST" && path == "/api/download_game") {
+    std::string gameIdStr = extractPostParam(postBody, "game_id");
+    int64_t gameId = 0;
+    try {
+      gameId = std::stoll(gameIdStr);
+    } catch (...) {
+    }
+
+    bool ok = false;
+    std::string msg = "Không tìm thấy game";
+    if (gameId > 0) {
+      GameRecord g;
+      if (DatabaseManager::instance().getGameById(gameId, g)) {
+        SystemRecord sys;
+        if (DatabaseManager::instance().getSystemById(g.systemId, sys)) {
+          ok = DownloadManager::instance().addToQueue(g, sys);
+          if (ok) {
+            msg = "Đã thêm \"" + g.title + "\" vào hàng tải.";
+            if (!DownloadManager::instance().isDownloading()) {
+              DownloadManager::instance().processNextInQueue();
+            }
+          } else {
+            msg = "Game đã có trong danh sách hoặc đã tải về thẻ.";
+          }
+        }
+      }
+    }
+    std::string json = "{\"success\":" + std::string(ok ? "true" : "false") +
+                       ",\"message\":\"" + escapeJson(msg) + "\"}";
+    std::string res = "HTTP/1.1 200 OK\r\n"
+                      "Content-Type: application/json; charset=UTF-8\r\n"
+                      "Access-Control-Allow-Origin: *\r\n"
+                      "Content-Length: " +
+                      std::to_string(json.length()) +
+                      "\r\n"
+                      "Connection: close\r\n\r\n" +
+                      json;
+    send(clientFd, res.c_str(), res.length(), 0);
+  } else if (method == "POST" && path == "/api/cancel_download") {
+    DownloadManager::instance().cancelDownload();
+    std::string json =
+        "{\"success\":true,\"message\":\"Đã hủy tải lượt hiện tại.\"}";
+    std::string res = "HTTP/1.1 200 OK\r\n"
+                      "Content-Type: application/json; charset=UTF-8\r\n"
+                      "Access-Control-Allow-Origin: *\r\n"
+                      "Content-Length: " +
+                      std::to_string(json.length()) +
+                      "\r\n"
+                      "Connection: close\r\n\r\n" +
+                      json;
+    send(clientFd, res.c_str(), res.length(), 0);
+  } else if (method == "POST" && path == "/api/remove_queue") {
+    std::string gameIdStr = extractPostParam(postBody, "game_id");
+    int64_t gameId = 0;
+    try {
+      gameId = std::stoll(gameIdStr);
+    } catch (...) {
+    }
+    bool ok = DownloadManager::instance().removeFromQueue(gameId);
+    std::string json =
+        "{\"success\":" + std::string(ok ? "true" : "false") +
+        ",\"message\":\"" +
+        (ok ? "Đã xóa khỏi hàng đợi." : "Không tìm thấy game trong hàng đợi.") +
+        "\"}";
+    std::string res = "HTTP/1.1 200 OK\r\n"
+                      "Content-Type: application/json; charset=UTF-8\r\n"
+                      "Access-Control-Allow-Origin: *\r\n"
+                      "Content-Length: " +
+                      std::to_string(json.length()) +
+                      "\r\n"
+                      "Connection: close\r\n\r\n" +
+                      json;
+    send(clientFd, res.c_str(), res.length(), 0);
+  } else if (method == "POST" && path == "/api/clear_queue") {
+    DownloadManager::instance().clearQueue();
+    std::string json =
+        "{\"success\":true,\"message\":\"Đã xóa toàn bộ hàng đợi.\"}";
+    std::string res = "HTTP/1.1 200 OK\r\n"
+                      "Content-Type: application/json; charset=UTF-8\r\n"
+                      "Access-Control-Allow-Origin: *\r\n"
+                      "Content-Length: " +
+                      std::to_string(json.length()) +
+                      "\r\n"
+                      "Connection: close\r\n\r\n" +
+                      json;
+    send(clientFd, res.c_str(), res.length(), 0);
+  } else if (method == "POST" && path == "/api/delete_rom") {
+    std::string gameIdStr = extractPostParam(postBody, "game_id");
+    int64_t gameId = 0;
+    try {
+      gameId = std::stoll(gameIdStr);
+    } catch (...) {
+    }
+
+    bool ok = false;
+    std::string msg = "Lỗi khi xóa ROM";
+    if (gameId > 0) {
+      GameRecord g;
+      if (DatabaseManager::instance().getGameById(gameId, g)) {
+        ok = DatabaseManager::instance().markGameDeletedLocally(gameId);
+        if (ok) {
+          msg = "Đã xóa ROM \"" + g.title + "\" khỏi thẻ nhớ.";
+        }
+      }
+    }
+    std::string json = "{\"success\":" + std::string(ok ? "true" : "false") +
+                       ",\"message\":\"" + escapeJson(msg) + "\"}";
+    std::string res = "HTTP/1.1 200 OK\r\n"
+                      "Content-Type: application/json; charset=UTF-8\r\n"
+                      "Access-Control-Allow-Origin: *\r\n"
+                      "Content-Length: " +
+                      std::to_string(json.length()) +
+                      "\r\n"
+                      "Connection: close\r\n\r\n" +
+                      json;
+    send(clientFd, res.c_str(), res.length(), 0);
+  } else if (method == "POST" &&
+             (path == "/api/scrape_cover" || path == "/api/scrape_game")) {
+    std::string gameIdStr = extractPostParam(postBody, "game_id");
+    int64_t gameId = 0;
+    try {
+      gameId = std::stoll(gameIdStr);
+    } catch (...) {
+    }
+
+    bool ok = false;
+    std::string coverPath;
+    std::string releaseYear;
+    std::string genre;
+    std::string developer;
+    std::string desc;
+    std::string title;
+    std::string msg = "Không thể cào thông tin game";
+
+    if (gameId > 0) {
+      GameRecord g;
+      if (DatabaseManager::instance().getGameById(gameId, g)) {
+        SystemRecord sys;
+        if (DatabaseManager::instance().getSystemById(g.systemId, sys)) {
+          auto scrapeRes = BoxartScraper::instance().scrapeGameInfo(g, sys);
+          ok = scrapeRes.success;
+          coverPath = scrapeRes.coverPath;
+          releaseYear = scrapeRes.releaseYear;
+          genre = scrapeRes.genre;
+          developer = scrapeRes.developer;
+          desc = scrapeRes.description;
+          title = scrapeRes.title;
+          if (ok) {
+            msg = "Đã cập nhật ảnh bìa & thông tin cho \"" +
+                  (title.empty() ? g.title : title) + "\"!";
+          } else {
+            msg = "Không tìm thấy dữ liệu trên ScreenScraper.fr / Libretro.";
+          }
+        }
+      }
+    }
+    std::string json = "{";
+    json += "\"success\":" + std::string(ok ? "true" : "false") + ",";
+    json += "\"cover_path\":\"" + escapeJson(coverPath) + "\",";
+    json += "\"title\":\"" + escapeJson(title) + "\",";
+    json += "\"release_year\":\"" + escapeJson(releaseYear) + "\",";
+    json += "\"genre\":\"" + escapeJson(genre) + "\",";
+    json += "\"developer\":\"" + escapeJson(developer) + "\",";
+    json += "\"description\":\"" + escapeJson(desc) + "\",";
+    json += "\"message\":\"" + escapeJson(msg) + "\"";
+    json += "}";
+    std::string res = "HTTP/1.1 200 OK\r\n"
+                      "Content-Type: application/json; charset=UTF-8\r\n"
+                      "Access-Control-Allow-Origin: *\r\n"
+                      "Content-Length: " +
+                      std::to_string(json.length()) +
+                      "\r\n"
+                      "Connection: close\r\n\r\n" +
+                      json;
+    send(clientFd, res.c_str(), res.length(), 0);
+  } else if (method == "POST" && path == "/api/auto_scrape_sd") {
+    bool force = (extractPostParam(postBody, "force") == "1");
+    bool started = BoxartScraper::instance().startAutoScrapeSdCard(force);
+    std::string msg =
+        started
+            ? "Đã bắt đầu tự động cào ảnh bìa và thông tin cho ROM trên thẻ SD."
+            : "Không có ROM nào trên thẻ cần cào hoặc tiến trình đang chạy.";
+    std::string json =
+        "{\"success\":" + std::string(started ? "true" : "false") +
+        ",\"message\":\"" + escapeJson(msg) + "\"}";
+    std::string res = "HTTP/1.1 200 OK\r\n"
+                      "Content-Type: application/json; charset=UTF-8\r\n"
+                      "Access-Control-Allow-Origin: *\r\n"
+                      "Content-Length: " +
+                      std::to_string(json.length()) +
+                      "\r\n"
+                      "Connection: close\r\n\r\n" +
+                      json;
+    send(clientFd, res.c_str(), res.length(), 0);
+  } else if (method == "GET" && path == "/api/auto_scrape_status") {
+    auto st = BoxartScraper::instance().getAutoScrapeStatus();
+    std::string json = "{";
+    json += "\"is_scraping\":" + std::string(st.isScraping ? "true" : "false") +
+            ",";
+    json += "\"total\":" + std::to_string(st.totalGames) + ",";
+    json += "\"scraped\":" + std::to_string(st.scrapedCount) + ",";
+    json += "\"success\":" + std::to_string(st.successCount) + ",";
+    json += "\"progress_pct\":" + std::to_string(st.progressPct) + ",";
+    json += "\"current_game\":\"" + escapeJson(st.currentGame) + "\",";
+    json += "\"current_sys\":\"" + escapeJson(st.currentSystem) + "\",";
+    json += "\"message\":\"" + escapeJson(st.lastMessage) + "\"";
+    json += "}";
+    std::string res = "HTTP/1.1 200 OK\r\n"
+                      "Content-Type: application/json; charset=UTF-8\r\n"
+                      "Access-Control-Allow-Origin: *\r\n"
+                      "Content-Length: " +
+                      std::to_string(json.length()) +
+                      "\r\n"
+                      "Connection: close\r\n\r\n" +
+                      json;
+    send(clientFd, res.c_str(), res.length(), 0);
+  } else if (method == "POST" && path == "/api/cancel_auto_scrape") {
+    BoxartScraper::instance().cancelAutoScrape();
+    std::string json =
+        "{\"success\":true,\"message\":\"Đã gửi yêu cầu hủy cào tự động.\"}";
+    std::string res = "HTTP/1.1 200 OK\r\n"
+                      "Content-Type: application/json; charset=UTF-8\r\n"
+                      "Access-Control-Allow-Origin: *\r\n"
+                      "Content-Length: " +
+                      std::to_string(json.length()) +
+                      "\r\n"
+                      "Connection: close\r\n\r\n" +
+                      json;
+    send(clientFd, res.c_str(), res.length(), 0);
+  } else if (method == "GET" && path == "/api/screenscraper_config") {
+    std::string user =
+        DatabaseManager::instance().getSetting("screenscraper_user", "");
+    std::string devId =
+        DatabaseManager::instance().getSetting("screenscraper_devid", "");
+    bool hasPass = !DatabaseManager::instance()
+                        .getSetting("screenscraper_pass", "")
+                        .empty();
+    std::string json = "{";
+    json += "\"user\":\"" + escapeJson(user) + "\",";
+    json += "\"dev_id\":\"" + escapeJson(devId) + "\",";
+    json += "\"has_pass\":" + std::string(hasPass ? "true" : "false");
+    json += "}";
+    std::string res = "HTTP/1.1 200 OK\r\n"
+                      "Content-Type: application/json; charset=UTF-8\r\n"
+                      "Access-Control-Allow-Origin: *\r\n"
+                      "Content-Length: " +
+                      std::to_string(json.length()) +
+                      "\r\n"
+                      "Connection: close\r\n\r\n" +
+                      json;
+    send(clientFd, res.c_str(), res.length(), 0);
+  } else if (method == "POST" && path == "/api/save_screenscraper_config") {
+    std::string user = extractPostParam(postBody, "user");
+    std::string pass = extractPostParam(postBody, "pass");
+    std::string devId = extractPostParam(postBody, "dev_id");
+    std::string devPass = extractPostParam(postBody, "dev_pass");
+
+    DatabaseManager::instance().setSetting("screenscraper_user", user);
+    if (!pass.empty()) {
+      DatabaseManager::instance().setSetting("screenscraper_pass", pass);
+    }
+    if (!devId.empty()) {
+      DatabaseManager::instance().setSetting("screenscraper_devid", devId);
+    }
+    if (!devPass.empty()) {
+      DatabaseManager::instance().setSetting("screenscraper_devpass", devPass);
+    }
+
+    std::string json = "{\"success\":true,\"message\":\"Đã lưu cấu hình "
+                       "ScreenScraper.fr thành công!\"}";
+    std::string res = "HTTP/1.1 200 OK\r\n"
+                      "Content-Type: application/json; charset=UTF-8\r\n"
+                      "Access-Control-Allow-Origin: *\r\n"
+                      "Content-Length: " +
+                      std::to_string(json.length()) +
+                      "\r\n"
+                      "Connection: close\r\n\r\n" +
+                      json;
+    send(clientFd, res.c_str(), res.length(), 0);
+  } else if (method == "POST" && path == "/api/test_screenscraper") {
+    std::string user = extractPostParam(postBody, "user");
+    std::string pass = extractPostParam(postBody, "pass");
+    std::string devId = extractPostParam(postBody, "dev_id");
+    std::string devPass = extractPostParam(postBody, "dev_pass");
+
+    if (pass.empty()) {
+      pass = DatabaseManager::instance().getSetting("screenscraper_pass", "");
+    }
+
+    std::string errMsg;
+    bool ok = BoxartScraper::instance().testScreenScraperAuth(user, pass, devId,
+                                                              devPass, errMsg);
+    std::string msg = ok ? "Kết nối ScreenScraper.fr thành công!" : errMsg;
+
+    std::string json = "{\"success\":" + std::string(ok ? "true" : "false") +
+                       ",\"message\":\"" + escapeJson(msg) + "\"}";
+    std::string res = "HTTP/1.1 200 OK\r\n"
+                      "Content-Type: application/json; charset=UTF-8\r\n"
+                      "Access-Control-Allow-Origin: *\r\n"
+                      "Content-Length: " +
+                      std::to_string(json.length()) +
+                      "\r\n"
+                      "Connection: close\r\n\r\n" +
+                      json;
+    send(clientFd, res.c_str(), res.length(), 0);
+  } else if (method == "POST" && path == "/api/search_scraper") {
+    std::string query = extractPostParam(postBody, "query");
+    std::string sysCode = extractPostParam(postBody, "system_code");
+    auto cands = BoxartScraper::instance().searchCandidates(query, sysCode);
+
+    std::string json = "{\"success\":true,\"candidates\":[";
+    for (size_t i = 0; i < cands.size(); ++i) {
+      if (i > 0)
+        json += ",";
+      json += "{";
+      json += "\"title\":\"" + escapeJson(cands[i].title) + "\",";
+      json += "\"release_year\":\"" + escapeJson(cands[i].releaseYear) + "\",";
+      json += "\"developer\":\"" + escapeJson(cands[i].developer) + "\",";
+      json += "\"genre\":\"" + escapeJson(cands[i].genre) + "\",";
+      json += "\"description\":\"" + escapeJson(cands[i].description) + "\",";
+      json += "\"cover_url\":\"" + escapeJson(cands[i].coverUrl) + "\",";
+      json += "\"source\":\"" + escapeJson(cands[i].source) + "\"";
+      json += "}";
+    }
+    json += "]}";
+
+    std::string res = "HTTP/1.1 200 OK\r\n"
+                      "Content-Type: application/json; charset=UTF-8\r\n"
+                      "Access-Control-Allow-Origin: *\r\n"
+                      "Content-Length: " +
+                      std::to_string(json.length()) +
+                      "\r\n"
+                      "Connection: close\r\n\r\n" +
+                      json;
+    send(clientFd, res.c_str(), res.length(), 0);
+  } else if (method == "POST" && path == "/api/apply_candidate") {
+    std::string gameIdStr = extractPostParam(postBody, "game_id");
+    int64_t gameId = 0;
+    try {
+      gameId = std::stoll(gameIdStr);
+    } catch (...) {
+    }
+
+    ScrapeCandidate cand;
+    cand.title = extractPostParam(postBody, "title");
+    cand.releaseYear = extractPostParam(postBody, "year");
+    cand.genre = extractPostParam(postBody, "genre");
+    cand.developer = extractPostParam(postBody, "developer");
+    cand.description = extractPostParam(postBody, "description");
+    cand.coverUrl = extractPostParam(postBody, "cover_url");
+
+    bool ok = false;
+    if (gameId > 0) {
+      ok = BoxartScraper::instance().applyCandidate(gameId, cand);
+    }
+
+    std::string json = "{\"success\":" + std::string(ok ? "true" : "false") +
+                       ",\"message\":\"" +
+                       (ok ? "Đã áp dụng ảnh bìa và thông tin game thành công!"
+                           : "Lỗi khi áp dụng thông tin game.") +
+                       "\"}";
+    std::string res = "HTTP/1.1 200 OK\r\n"
+                      "Content-Type: application/json; charset=UTF-8\r\n"
+                      "Access-Control-Allow-Origin: *\r\n"
+                      "Content-Length: " +
+                      std::to_string(json.length()) +
+                      "\r\n"
+                      "Connection: close\r\n\r\n" +
+                      json;
+    send(clientFd, res.c_str(), res.length(), 0);
+  } else if (method == "POST" && path == "/api/audit_roms") {
+    auto list = RomOrganizer::instance().auditMisplacedRoms();
+    std::string json =
+        "{\"success\":true,\"count\":" + std::to_string(list.size()) +
+        ",\"items\":[";
+    for (size_t i = 0; i < list.size(); ++i) {
+      if (i > 0)
+        json += ",";
+      json += "{";
+      json += "\"filename\":\"" + escapeJson(list[i].filename) + "\",";
+      json += "\"original_path\":\"" + escapeJson(list[i].originalPath) + "\",";
+      json += "\"current_system\":\"" + escapeJson(list[i].currentSystemCode) +
+              "\",";
+      json += "\"detected_system\":\"" +
+              escapeJson(list[i].detectedSystemCode) + "\",";
+      json += "\"detected_name\":\"" + escapeJson(list[i].detectedSystemName) +
+              "\",";
+      json += "\"target_path\":\"" + escapeJson(list[i].targetPath) + "\",";
+      json += "\"confidence\":\"" + escapeJson(list[i].confidence) + "\",";
+      json += "\"reason\":\"" + escapeJson(list[i].reason) + "\"";
+      json += "}";
+    }
+    json += "]}";
+    std::string res = "HTTP/1.1 200 OK\r\n"
+                      "Content-Type: application/json; charset=UTF-8\r\n"
+                      "Access-Control-Allow-Origin: *\r\n"
+                      "Content-Length: " +
+                      std::to_string(json.length()) +
+                      "\r\n"
+                      "Connection: close\r\n\r\n" +
+                      json;
+    send(clientFd, res.c_str(), res.length(), 0);
+  } else if (method == "POST" && path == "/api/fix_misplaced_roms") {
+    auto list = RomOrganizer::instance().fixMisplacedRoms();
+    // Re-index ROMs so library updates immediately
+    std::string romsDir = AppConfig::instance().getRomsDir();
+    std::thread([romsDir]() {
+      RomIndexer::instance().scanAllSystems(romsDir, nullptr);
+    }).detach();
+    std::string json =
+        "{\"success\":true,\"count\":" + std::to_string(list.size()) +
+        ",\"items\":[";
+    for (size_t i = 0; i < list.size(); ++i) {
+      if (i > 0)
+        json += ",";
+      json += "{";
+      json += "\"filename\":\"" + escapeJson(list[i].filename) + "\",";
+      json += "\"current_system\":\"" + escapeJson(list[i].currentSystemCode) +
+              "\",";
+      json += "\"detected_system\":\"" +
+              escapeJson(list[i].detectedSystemCode) + "\",";
+      json += "\"detected_name\":\"" + escapeJson(list[i].detectedSystemName) +
+              "\",";
+      json +=
+          "\"fixed\":" + std::string(list[i].fixed ? "true" : "false") + ",";
+      json += "\"status\":\"" + escapeJson(list[i].statusMessage) + "\"";
+      json += "}";
+    }
+    json += "]}";
+    std::string res = "HTTP/1.1 200 OK\r\n"
+                      "Content-Type: application/json; charset=UTF-8\r\n"
+                      "Access-Control-Allow-Origin: *\r\n"
+                      "Content-Length: " +
+                      std::to_string(json.length()) +
+                      "\r\n"
+                      "Connection: close\r\n\r\n" +
+                      json;
+    send(clientFd, res.c_str(), res.length(), 0);
+  } else if (method == "POST" && path == "/api/organize_inbox") {
+    auto list = RomOrganizer::instance().organizeDirectory(
+        RomOrganizer::instance().getInboxDir());
+    std::string json =
+        "{\"success\":true,\"count\":" + std::to_string(list.size()) + "}";
+    std::string res = "HTTP/1.1 200 OK\r\n"
+                      "Content-Type: application/json; charset=UTF-8\r\n"
+                      "Access-Control-Allow-Origin: *\r\n"
+                      "Content-Length: " +
+                      std::to_string(json.length()) +
+                      "\r\n"
+                      "Connection: close\r\n\r\n" +
+                      json;
+    send(clientFd, res.c_str(), res.length(), 0);
+  } else if (method == "POST" && path == "/api/upload_rom_auto") {
+    std::string fname = extractQueryParam(queryString, "filename");
+    if (fname.empty())
+      fname = "uploaded_rom.bin";
+
+    std::string inboxPath =
+        RomOrganizer::instance().getInboxDir() + "/" + fname;
+    std::ofstream outFile(inboxPath, std::ios::binary);
+    if (outFile.is_open()) {
+      if (!postBody.empty()) {
+        outFile.write(postBody.data(), postBody.size());
+      }
+
+      size_t clPos = req.find("Content-Length: ");
+      if (clPos != std::string::npos) {
+        size_t clEnd = req.find("\r\n", clPos);
+        long totalCl = 0;
+        try {
+          totalCl = std::stol(req.substr(clPos + 16, clEnd - (clPos + 16)));
+        } catch (...) {
+        }
+
+        long bytesReadSoFar = static_cast<long>(postBody.size());
+        char chunk[32768];
+        while (bytesReadSoFar < totalCl) {
+          long toRead = std::min<long>(sizeof(chunk), totalCl - bytesReadSoFar);
+          int n = recv(clientFd, chunk, toRead, 0);
+          if (n <= 0)
+            break;
+          outFile.write(chunk, n);
+          bytesReadSoFar += n;
+        }
+      }
+      outFile.close();
+      sync();
+
+      RomDetectionResult det = RomDetector::instance().detectSystem(inboxPath);
+      std::string sysCode = det.detected ? det.systemCode : "GBA";
+      std::string sysName = det.detected ? det.systemName : "Game";
+
+      SystemRecord targetSys;
+      std::string finalDst;
+      std::string message;
+      if (DatabaseManager::instance().getSystemByCode(sysCode, targetSys)) {
+        std::string targetDir =
+            AppConfig::instance().getRomsDir() + "/" + targetSys.romDir;
+        FileSystemManager::instance().createDirectoryRecursive(targetDir);
+        std::string targetFile = targetDir + "/" + fname;
+        RomOrganizer::instance().safeMoveFile(inboxPath, targetFile, finalDst);
+
+        GameRecord g;
+        g.systemId = targetSys.id;
+        g.filename = fname;
+        size_t dot = fname.rfind('.');
+        g.title = (dot != std::string::npos) ? fname.substr(0, dot) : fname;
+        g.localPath = finalDst;
+        g.localState = GameState::LOCAL;
+        struct stat st;
+        if (::stat(finalDst.c_str(), &st) == 0)
+          g.sizeBytes = st.st_size;
+        DatabaseManager::instance().upsertGame(g);
+
+        message = "Đã nhận diện: " + sysName + " (" + sysCode +
+                  ")! Game đã được lưu vào /Roms/" + targetSys.romDir + "/";
+      } else {
+        message = "Đã lưu ROM vào Hộp tiếp nhận _INBOX.";
+      }
+
+      std::string json = "{\"success\":true,\"filename\":\"" +
+                         escapeJson(fname) + "\",\"system_code\":\"" +
+                         escapeJson(sysCode) + "\",\"system_name\":\"" +
+                         escapeJson(sysName) + "\",\"message\":\"" +
+                         escapeJson(message) + "\"}";
+      std::string res = "HTTP/1.1 200 OK\r\n"
+                        "Content-Type: application/json; charset=UTF-8\r\n"
+                        "Access-Control-Allow-Origin: *\r\n"
+                        "Content-Length: " +
+                        std::to_string(json.length()) +
+                        "\r\n"
+                        "Connection: close\r\n\r\n" +
+                        json;
+      send(clientFd, res.c_str(), res.length(), 0);
+    } else {
+      std::string json =
+          "{\"success\":false,\"error\":\"Không thể ghi file vào thẻ nhớ.\"}";
+      std::string res = "HTTP/1.1 500 Internal Server Error\r\n"
+                        "Content-Type: application/json; charset=UTF-8\r\n"
+                        "Access-Control-Allow-Origin: *\r\n"
+                        "Content-Length: " +
+                        std::to_string(json.length()) +
+                        "\r\n"
+                        "Connection: close\r\n\r\n" +
+                        json;
+      send(clientFd, res.c_str(), res.length(), 0);
+    }
+  } else if (method == "GET" && path == "/api/storage_info") {
+    auto disk = FileSystemManager::instance().getDiskSpace(
+        AppConfig::instance().getRomsDir());
+    bool isLinked = AuthManager::instance().isLinked();
+    bool canUpload = AuthManager::instance().canUpload();
+    bool isPublicOnly = AuthManager::instance().isPublicOnly();
+    int totalLocal = 0, totalCloud = 0;
+    if (isLinked) {
+      DatabaseManager::instance().getTotalGameCounts(totalLocal, totalCloud);
+    }
+    std::string lastSync = isLinked
+                               ? DriveSyncEngine::instance().getLastSyncTime()
+                               : "Chưa kết nối";
+    std::string driveUrl =
+        isLinked
+            ? DatabaseManager::instance().getSetting("drive_folder_url", "")
+            : "";
+
+    uint64_t usedBytes = (disk.totalBytes > disk.availableBytes)
+                             ? (disk.totalBytes - disk.availableBytes)
+                             : 0;
+    double usedPct = 0.0;
+    if (disk.totalBytes > 0) {
+      usedPct = (static_cast<double>(usedBytes) /
+                 static_cast<double>(disk.totalBytes)) *
+                100.0;
+    }
+
+    std::string userEmail =
+        isLinked ? AuthManager::instance().getUserEmail() : "";
+
+    std::string json = "{";
+    json += "\"is_linked\":" + std::string(isLinked ? "true" : "false") + ",";
+    json += "\"can_upload\":" + std::string(canUpload ? "true" : "false") + ",";
+    json +=
+        "\"is_public_only\":" + std::string(isPublicOnly ? "true" : "false") +
+        ",";
+    json += "\"user_email\":\"" + escapeJson(userEmail) + "\",";
+    json += "\"total_bytes\":" + std::to_string(disk.totalBytes) + ",";
+    json += "\"avail_bytes\":" + std::to_string(disk.availableBytes) + ",";
+    json += "\"used_bytes\":" + std::to_string(usedBytes) + ",";
+    json += "\"total_str\":\"" +
+            FileSystemManager::instance().formatBytes(disk.totalBytes) + "\",";
+    json += "\"avail_str\":\"" +
+            FileSystemManager::instance().formatBytes(disk.availableBytes) +
+            "\",";
+    json += "\"used_str\":\"" +
+            FileSystemManager::instance().formatBytes(usedBytes) + "\",";
+    json += "\"used_pct\":" + std::to_string(usedPct) + ",";
+    json += "\"total_local\":" + std::to_string(totalLocal) + ",";
+    json += "\"total_cloud\":" + std::to_string(totalCloud) + ",";
+    json += "\"last_sync\":\"" + escapeJson(lastSync) + "\",";
+    json += "\"drive_url\":\"" + escapeJson(driveUrl) + "\"";
+    json += "}";
+
+    std::string res = "HTTP/1.1 200 OK\r\n"
+                      "Content-Type: application/json; charset=UTF-8\r\n"
+                      "Access-Control-Allow-Origin: *\r\n"
+                      "Content-Length: " +
+                      std::to_string(json.length()) +
+                      "\r\n"
+                      "Connection: close\r\n\r\n" +
+                      json;
+    send(clientFd, res.c_str(), res.length(), 0);
+  } else if (method == "POST" && path == "/api/trigger_sync") {
+    bool started = DriveSyncEngine::instance().startSync();
+    std::string json =
+        "{\"success\":" + std::string(started ? "true" : "false") + "}";
+    std::string res = "HTTP/1.1 200 OK\r\n"
+                      "Content-Type: application/json; charset=UTF-8\r\n"
+                      "Access-Control-Allow-Origin: *\r\n"
+                      "Content-Length: " +
+                      std::to_string(json.length()) +
+                      "\r\n"
+                      "Connection: close\r\n\r\n" +
+                      json;
+    send(clientFd, res.c_str(), res.length(), 0);
+  } else if (method == "GET" && path == "/api/sync_status") {
+    auto prog = DriveSyncEngine::instance().getProgress();
+    bool isSyncing = DriveSyncEngine::instance().isSyncing();
+    std::string statusStr = "IDLE";
+    if (prog.status == SyncStatus::CONNECTING)
+      statusStr = "CONNECTING";
+    else if (prog.status == SyncStatus::DISCOVERING_FOLDERS)
+      statusStr = "DISCOVERING_FOLDERS";
+    else if (prog.status == SyncStatus::SYNCING_FILES)
+      statusStr = "SYNCING_FILES";
+    else if (prog.status == SyncStatus::COMPLETED)
+      statusStr = "COMPLETED";
+    else if (prog.status == SyncStatus::ERROR_OCCURRED)
+      statusStr = "ERROR";
+
+    std::string json = "{";
+    json += "\"is_syncing\":" + std::string(isSyncing ? "true" : "false") + ",";
+    json += "\"status\":\"" + statusStr + "\",";
+    json +=
+        "\"current_platform\":\"" + escapeJson(prog.currentPlatform) + "\",";
+    json += "\"games_found\":" + std::to_string(prog.cloudGamesFound) + ",";
+    json += "\"games_indexed\":" + std::to_string(prog.newGamesIndexed) + ",";
+    json +=
+        "\"current_system_index\":" + std::to_string(prog.currentSystemIndex) +
+        ",";
+    json += "\"total_systems\":" + std::to_string(prog.totalSystems) + ",";
+    json += "\"error\":\"" + escapeJson(prog.errorMessage) + "\"";
+    json += "}";
+
+    std::string res = "HTTP/1.1 200 OK\r\n"
+                      "Content-Type: application/json; charset=UTF-8\r\n"
+                      "Access-Control-Allow-Origin: *\r\n"
+                      "Content-Length: " +
+                      std::to_string(json.length()) +
+                      "\r\n"
+                      "Connection: close\r\n\r\n" +
+                      json;
+    send(clientFd, res.c_str(), res.length(), 0);
+  } else if (method == "POST" && (path == "/api/logout" || path == "/unlink")) {
+    AuthManager::instance().logout();
+    if (path == "/api/logout") {
+      std::string json = "{\"success\":true,\"message\":\"Đã đăng xuất khỏi "
+                         "Google Drive thành công!\"}";
+      std::string res = "HTTP/1.1 200 OK\r\n"
+                        "Content-Type: application/json; charset=UTF-8\r\n"
+                        "Access-Control-Allow-Origin: *\r\n"
+                        "Content-Length: " +
+                        std::to_string(json.length()) +
+                        "\r\n"
+                        "Connection: close\r\n\r\n" +
+                        json;
+      send(clientFd, res.c_str(), res.length(), 0);
+    } else {
+      std::string body =
+          buildSuccessResponse("Đã hủy liên kết Google Drive thành công!");
+      std::string res = "HTTP/1.1 200 OK\r\n"
+                        "Content-Type: text/html; charset=UTF-8\r\n"
+                        "Content-Length: " +
+                        std::to_string(body.length()) +
+                        "\r\n"
+                        "Connection: close\r\n\r\n" +
+                        body;
+      send(clientFd, res.c_str(), res.length(), 0);
+    }
+  } else if (method == "POST" && path == "/connect") {
+    std::string driveUrl = extractPostParam(postBody, "drive_url");
+    std::string folderId = extractFolderId(driveUrl);
+    if (folderId.empty())
+      folderId = driveUrl;
+
+    Logger::info("User linked Google Drive folder via Web Portal: " + driveUrl +
+                 " (Extracted Folder ID: " + folderId + ")");
+    AuthManager::instance().linkPublicFolder(folderId, driveUrl);
+    DriveSyncEngine::instance().startSync();
+
+    std::string body =
+        buildSuccessResponse("Đã lưu liên kết Google Drive vào máy TrimUI!");
+    std::string res = "HTTP/1.1 200 OK\r\n"
+                      "Content-Type: text/html; charset=UTF-8\r\n"
+                      "Content-Length: " +
+                      std::to_string(body.length()) +
+                      "\r\n"
+                      "Connection: close\r\n\r\n" +
+                      body;
+    send(clientFd, res.c_str(), res.length(), 0);
+  } else if (method == "POST" && path == "/api/set_personal_auth") {
+    std::string action = extractPostParam(postBody, "action");
+    if (action == "clear") {
+      AuthManager::instance().clearPersonalTokens();
+      std::string json = "{\"success\":true,\"message\":\"Đã hủy kích hoạt sao "
+                         "lưu Drive cá nhân thành công.\"}";
+      std::string res = "HTTP/1.1 200 OK\r\n"
+                        "Content-Type: application/json; charset=UTF-8\r\n"
+                        "Access-Control-Allow-Origin: *\r\n"
+                        "Content-Length: " +
+                        std::to_string(json.length()) +
+                        "\r\n"
+                        "Connection: close\r\n\r\n" +
+                        json;
+      send(clientFd, res.c_str(), res.length(), 0);
+      return;
+    }
+
+    std::string token = extractPostParam(postBody, "token");
+    std::string refreshToken = extractPostParam(postBody, "refresh_token");
+    std::string email = extractPostParam(postBody, "email");
+    if (token.empty() && refreshToken.empty()) {
+      std::string json = "{\"success\":false,\"error\":\"Vui lòng dán Access "
+                         "Token hoặc Refresh Token vào ô.\"}";
+      std::string res = "HTTP/1.1 400 Bad Request\r\n"
+                        "Content-Type: application/json; charset=UTF-8\r\n"
+                        "Access-Control-Allow-Origin: *\r\n"
+                        "Content-Length: " +
+                        std::to_string(json.length()) +
+                        "\r\n"
+                        "Connection: close\r\n\r\n" +
+                        json;
+      send(clientFd, res.c_str(), res.length(), 0);
+      return;
+    }
+    auto result =
+        AuthManager::instance().setPersonalTokens(token, refreshToken, email);
+    if (result.success) {
+      std::string json = "{\"success\":true,\"message\":\"" +
+                         escapeJson(result.message) + "\",\"email\":\"" +
+                         escapeJson(result.userEmail) + "\"}";
+      std::string res = "HTTP/1.1 200 OK\r\n"
+                        "Content-Type: application/json; charset=UTF-8\r\n"
+                        "Access-Control-Allow-Origin: *\r\n"
+                        "Content-Length: " +
+                        std::to_string(json.length()) +
+                        "\r\n"
+                        "Connection: close\r\n\r\n" +
+                        json;
+      send(clientFd, res.c_str(), res.length(), 0);
+    } else {
+      std::string json = "{\"success\":false,\"error\":\"" +
+                         escapeJson(result.message) + "\"}";
+      std::string res = "HTTP/1.1 400 Bad Request\r\n"
+                        "Content-Type: application/json; charset=UTF-8\r\n"
+                        "Access-Control-Allow-Origin: *\r\n"
+                        "Content-Length: " +
+                        std::to_string(json.length()) +
+                        "\r\n"
+                        "Connection: close\r\n\r\n" +
+                        json;
+      send(clientFd, res.c_str(), res.length(), 0);
+    }
+  } else if (method == "POST" && path == "/api/upload_game") {
+    if (!AuthManager::instance().canUpload()) {
+      std::string json = "{\"success\":false,\"error\":\"Chưa kích hoạt quyền "
+                         "sao lưu! Vui lòng vào tab 'Đồng bộ & Thẻ nhớ' để nạp "
+                         "Google Token cá nhân trước.\"}";
+      std::string res =
+          "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json; "
+          "charset=UTF-8\r\nAccess-Control-Allow-Origin: "
+          "*\r\nContent-Length: " +
+          std::to_string(json.length()) + "\r\nConnection: close\r\n\r\n" +
+          json;
+      send(clientFd, res.c_str(), res.length(), 0);
+    } else {
+      std::string gameIdStr = extractPostParam(postBody, "game_id");
+      int64_t gameId = 0;
+      try {
+        gameId = std::stoll(gameIdStr);
+      } catch (...) {
+      }
+      if (gameId > 0) {
+        UploadManager::instance().startUploadGames({gameId});
+        std::string json = "{\"success\":true,\"message\":\"Đang bắt đầu sao "
+                           "lưu game lên Google Drive cá nhân...\"}";
+        std::string res = "HTTP/1.1 200 OK\r\nContent-Type: application/json; "
+                          "charset=UTF-8\r\nAccess-Control-Allow-Origin: "
+                          "*\r\nContent-Length: " +
+                          std::to_string(json.length()) +
+                          "\r\nConnection: close\r\n\r\n" + json;
+        send(clientFd, res.c_str(), res.length(), 0);
+      } else {
+        std::string json =
+            "{\"success\":false,\"error\":\"ID game không hợp lệ.\"}";
+        std::string res =
+            "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json; "
+            "charset=UTF-8\r\nAccess-Control-Allow-Origin: "
+            "*\r\nContent-Length: " +
+            std::to_string(json.length()) + "\r\nConnection: close\r\n\r\n" +
+            json;
+        send(clientFd, res.c_str(), res.length(), 0);
+      }
+    }
+  } else if (method == "POST" && path == "/api/upload_all") {
+    if (!AuthManager::instance().canUpload()) {
+      std::string json = "{\"success\":false,\"error\":\"Chưa kích hoạt quyền "
+                         "sao lưu! Vui lòng vào tab 'Đồng bộ & Thẻ nhớ' để nạp "
+                         "Google Token cá nhân trước.\"}";
+      std::string res =
+          "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json; "
+          "charset=UTF-8\r\nAccess-Control-Allow-Origin: "
+          "*\r\nContent-Length: " +
+          std::to_string(json.length()) + "\r\nConnection: close\r\n\r\n" +
+          json;
+      send(clientFd, res.c_str(), res.length(), 0);
+    } else {
+      UploadManager::instance().startReverseSync();
+      std::string json =
+          "{\"success\":true,\"message\":\"Đang bắt đầu sao lưu toàn bộ game "
+          "trên thẻ nhớ lên Google Drive cá nhân...\"}";
+      std::string res = "HTTP/1.1 200 OK\r\nContent-Type: application/json; "
+                        "charset=UTF-8\r\nAccess-Control-Allow-Origin: "
+                        "*\r\nContent-Length: " +
+                        std::to_string(json.length()) +
+                        "\r\nConnection: close\r\n\r\n" + json;
+      send(clientFd, res.c_str(), res.length(), 0);
+    }
+  } else if (method == "GET" && path == "/api/upload_status") {
+    auto prog = UploadManager::instance().getProgress();
+    bool isUp = UploadManager::instance().isUploading();
+    std::string stateStr = "IDLE";
+    if (prog.state == UploadState::PREPARING)
+      stateStr = "PREPARING";
+    else if (prog.state == UploadState::UPLOADING)
+      stateStr = "UPLOADING";
+    else if (prog.state == UploadState::COMPLETED)
+      stateStr = "COMPLETED";
+    else if (prog.state == UploadState::FAILED)
+      stateStr = "FAILED";
+    else if (prog.state == UploadState::CANCELLED)
+      stateStr = "CANCELLED";
+
+    std::string json = "{";
+    json += "\"is_uploading\":" + std::string(isUp ? "true" : "false") + ",";
+    json += "\"state\":\"" + stateStr + "\",";
+    json += "\"game_title\":\"" + escapeJson(prog.gameTitle) + "\",";
+    json += "\"filename\":\"" + escapeJson(prog.filename) + "\",";
+    json += "\"system\":\"" + escapeJson(prog.systemCode) + "\",";
+    json += "\"progress_pct\":" + std::to_string(prog.progressPct) + ",";
+    json += "\"bytes_uploaded\":" + std::to_string(prog.bytesUploaded) + ",";
+    json += "\"total_bytes\":" + std::to_string(prog.totalBytes) + ",";
+    json += "\"speed_kbps\":" + std::to_string(prog.speedKBps) + ",";
+    json += "\"total_games\":" + std::to_string(prog.totalGames) + ",";
+    json += "\"current_index\":" + std::to_string(prog.currentIndex) + ",";
+    json += "\"games_uploaded\":" + std::to_string(prog.gamesUploaded) + ",";
+    json += "\"games_failed\":" + std::to_string(prog.gamesFailed) + ",";
+    json += "\"error\":\"" + escapeJson(prog.errorMessage) + "\"";
+    json += "}";
+
+    std::string res =
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json; "
+        "charset=UTF-8\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: " +
+        std::to_string(json.length()) + "\r\nConnection: close\r\n\r\n" + json;
+    send(clientFd, res.c_str(), res.length(), 0);
+  } else if (method == "POST" && path == "/api/cancel_upload") {
+    UploadManager::instance().cancel();
+    std::string json =
+        "{\"success\":true,\"message\":\"Đã yêu cầu hủy sao lưu.\"}";
+    std::string res =
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json; "
+        "charset=UTF-8\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: " +
+        std::to_string(json.length()) + "\r\nConnection: close\r\n\r\n" + json;
+    send(clientFd, res.c_str(), res.length(), 0);
+  } else if (method == "GET" && path == "/ota_check") {
+    UpdateInfo info;
+    bool hasUpdate = UpdateManager::instance().checkForUpdatesSync(info);
+    std::string json =
+        "{\"has_update\":" + std::string(hasUpdate ? "true" : "false") +
+        ","
+        "\"current_version\":\"" +
+        UpdateManager::instance().getCurrentVersion() +
+        "\","
+        "\"remote_version\":\"" +
+        info.remoteVersion +
+        "\","
+        "\"release_date\":\"" +
+        info.releaseDate +
+        "\","
+        "\"changelog\":\"" +
+        escapeJson(info.changelog) + "\"}";
+    std::string res = "HTTP/1.1 200 OK\r\n"
+                      "Content-Type: application/json; charset=UTF-8\r\n"
+                      "Access-Control-Allow-Origin: *\r\n"
+                      "Content-Length: " +
+                      std::to_string(json.length()) +
+                      "\r\n"
+                      "Connection: close\r\n\r\n" +
+                      json;
+    send(clientFd, res.c_str(), res.length(), 0);
+  } else if (method == "POST" && path == "/ota_start") {
+    auto info = UpdateManager::instance().getLatestInfo();
+    bool ok = UpdateManager::instance().startUpdate(info);
+    std::string json =
+        "{\"started\":" + std::string(ok ? "true" : "false") + "}";
+    std::string res = "HTTP/1.1 200 OK\r\n"
+                      "Content-Type: application/json; charset=UTF-8\r\n"
+                      "Access-Control-Allow-Origin: *\r\n"
+                      "Content-Length: " +
+                      std::to_string(json.length()) +
+                      "\r\n"
+                      "Connection: close\r\n\r\n" +
+                      json;
+    send(clientFd, res.c_str(), res.length(), 0);
+  } else if (method == "GET" && path == "/ota_status") {
+    auto prog = UpdateManager::instance().getProgress();
+    std::string stateStr = "IDLE";
+    if (prog.state == UpdateState::CHECKING)
+      stateStr = "CHECKING";
+    else if (prog.state == UpdateState::UPDATE_AVAILABLE)
+      stateStr = "UPDATE_AVAILABLE";
+    else if (prog.state == UpdateState::UP_TO_DATE)
+      stateStr = "UP_TO_DATE";
+    else if (prog.state == UpdateState::DOWNLOADING)
+      stateStr = "DOWNLOADING";
+    else if (prog.state == UpdateState::VERIFYING)
+      stateStr = "VERIFYING";
+    else if (prog.state == UpdateState::INSTALLING)
+      stateStr = "INSTALLING";
+    else if (prog.state == UpdateState::DOWNLOADING_DEPS)
+      stateStr = "DOWNLOADING_DEPS";
+    else if (prog.state == UpdateState::INSTALLING_DEPS)
+      stateStr = "INSTALLING_DEPS";
+    else if (prog.state == UpdateState::COMPLETED)
+      stateStr = "COMPLETED";
+    else if (prog.state == UpdateState::FAILED)
+      stateStr = "FAILED";
+
+    std::string json = "{\"state\":\"" + stateStr +
+                       "\","
+                       "\"progress_pct\":" +
+                       std::to_string(prog.progressPct) +
+                       ","
+                       "\"bytes_downloaded\":" +
+                       std::to_string(prog.bytesDownloaded) +
+                       ","
+                       "\"total_bytes\":" +
+                       std::to_string(prog.totalBytes) +
+                       ","
+                       "\"speed_kbps\":" +
+                       std::to_string(prog.speedKBps) +
+                       ","
+                       "\"current_step\":\"" +
+                       escapeJson(prog.currentStep) +
+                       "\","
+                       "\"error\":\"" +
+                       escapeJson(prog.errorMessage) + "\"}";
+    std::string res = "HTTP/1.1 200 OK\r\n"
+                      "Content-Type: application/json; charset=UTF-8\r\n"
+                      "Access-Control-Allow-Origin: *\r\n"
+                      "Content-Length: " +
+                      std::to_string(json.length()) +
+                      "\r\n"
+                      "Connection: close\r\n\r\n" +
+                      json;
+    send(clientFd, res.c_str(), res.length(), 0);
+  } else if (method == "POST" && path == "/ota_restart") {
+    std::string res = "HTTP/1.1 200 OK\r\nContent-Type: "
+                      "application/json\r\n\r\n{\"status\":\"restarting\"}";
+    send(clientFd, res.c_str(), res.length(), 0);
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    Application::instance().requestRestart();
+  } else if (method == "GET" && path == "/api/iptv/sources") {
+    // Return structured IPTV sources with channel counts & metadata
+    auto sources = IPTVManager::instance().getSources();
+    size_t totalChannels = IPTVManager::instance().getChannels().size();
+    std::string json = "{\"success\":true,\"total_channels\":" +
+                       std::to_string(totalChannels) + ",\"sources\":[";
+    for (size_t i = 0; i < sources.size(); i++) {
+      if (i > 0)
+        json += ",";
+      json += "{\"name\":\"" + escapeJson(sources[i].name) + "\"," +
+              "\"filename\":\"" + escapeJson(sources[i].filename) + "\"," +
+              "\"type\":\"" + escapeJson(sources[i].type) + "\"," +
+              "\"url\":\"" + escapeJson(sources[i].url) + "\"," +
+              "\"channels\":" + std::to_string(sources[i].channelCount) + "," +
+              "\"size\":" + std::to_string(sources[i].fileSize) + "}";
+    }
+    json += "]}";
+    std::string res =
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json; "
+        "charset=UTF-8\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: " +
+        std::to_string(json.length()) + "\r\nConnection: close\r\n\r\n" + json;
+    send(clientFd, res.c_str(), res.length(), 0);
+  } else if (method == "GET" && path == "/api/iptv/list") {
+    // List IPTV playlists (compatibility endpoint)
+    auto sources = IPTVManager::instance().getSources();
+    std::string json = "{\"playlists\":[";
+    for (size_t i = 0; i < sources.size(); i++) {
+      if (i > 0)
+        json += ",";
+      json += "\"" + escapeJson(sources[i].filename) + "\"";
+    }
+    json += "]}";
+    std::string res =
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json; "
+        "charset=UTF-8\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: " +
+        std::to_string(json.length()) + "\r\nConnection: close\r\n\r\n" + json;
+    send(clientFd, res.c_str(), res.length(), 0);
+  } else if (method == "POST" && path == "/api/iptv/upload") {
+    // Read full POST body according to Content-Length
+    size_t clPos = req.find("Content-Length: ");
+    if (clPos == std::string::npos)
+      clPos = req.find("content-length: ");
+    long totalCl = 0;
+    if (clPos != std::string::npos) {
+      size_t clEnd = req.find("\r\n", clPos);
+      try {
+        totalCl = std::stol(req.substr(clPos + 16, clEnd - (clPos + 16)));
+      } catch (...) {
+      }
+    }
+
+    std::string fullBody = postBody;
+    if (totalCl > 0 && static_cast<long>(fullBody.size()) < totalCl) {
+      char chunk[16384];
+      while (static_cast<long>(fullBody.size()) < totalCl) {
+        long toRead = std::min<long>(
+            sizeof(chunk), totalCl - static_cast<long>(fullBody.size()));
+        int n = recv(clientFd, chunk, toRead, 0);
+        if (n <= 0)
+          break;
+        fullBody.append(chunk, n);
+      }
+    }
+
+    // Parse multipart filename: filename="..."
+    std::string filename = "uploaded.m3u";
+    size_t fnPos = fullBody.find("filename=\"");
+    if (fnPos != std::string::npos) {
+      fnPos += 10;
+      size_t fnEnd = fullBody.find("\"", fnPos);
+      if (fnEnd != std::string::npos && fnEnd > fnPos) {
+        filename = fullBody.substr(fnPos, fnEnd - fnPos);
+        size_t slash = filename.find_last_of("/\\");
+        if (slash != std::string::npos)
+          filename = filename.substr(slash + 1);
+      }
+    }
+    if (filename.empty() || filename == "." || filename == "..") {
+      filename = "playlist_" + std::to_string(std::time(nullptr)) + ".m3u";
+    }
+    if (filename.find(".m3u") == std::string::npos &&
+        filename.find(".m3u8") == std::string::npos) {
+      filename += ".m3u";
+    }
+
+    // Parse optional custom source name
+    std::string customName;
+    size_t nmPos = fullBody.find("name=\"name\"");
+    if (nmPos != std::string::npos) {
+      size_t dbl = fullBody.find("\r\n\r\n", nmPos);
+      if (dbl != std::string::npos) {
+        dbl += 4;
+        size_t endNm = fullBody.find("\r\n--", dbl);
+        if (endNm != std::string::npos) {
+          customName = fullBody.substr(dbl, endNm - dbl);
+        }
+      }
+    }
+
+    // Extract content after multipart headers (double CRLF)
+    std::string fileContent;
+    size_t dataStart = fullBody.find("\r\n\r\n");
+    if (dataStart != std::string::npos &&
+        fullBody.find("Content-Disposition") != std::string::npos) {
+      dataStart += 4;
+      size_t dataEnd = fullBody.find("\r\n--", dataStart);
+      if (dataEnd != std::string::npos) {
+        fileContent = fullBody.substr(dataStart, dataEnd - dataStart);
+      } else {
+        fileContent = fullBody.substr(dataStart);
+      }
+    } else {
+      fileContent = fullBody;
+    }
+
+    if (!fileContent.empty()) {
+      std::string iptvDir = IPTVManager::instance().getIptvDir();
+      if (iptvDir.empty()) {
+        iptvDir = AppConfig::instance().getAppRoot() + "/iptv";
+      }
+      FileSystemManager::instance().createDirectoryRecursive(iptvDir);
+
+      std::string outPath = iptvDir + "/" + filename;
+      std::ofstream out(outPath, std::ios::binary);
+      if (out.is_open()) {
+        out.write(fileContent.data(), fileContent.size());
+        out.close();
+        sync();
+        Logger::info("IPTV: Playlist uploaded successfully to " + outPath +
+                     " (" + std::to_string(fileContent.size()) + " bytes)");
+
+        IPTVManager::instance().addSourceFromFile(filename, customName);
+        size_t count = IPTVManager::instance().getChannels().size();
+        std::string json = "{\"success\":true,\"file\":\"" +
+                           escapeJson(filename) +
+                           "\",\"channels\":" + std::to_string(count) + "}";
+        std::string res = "HTTP/1.1 200 OK\r\nContent-Type: application/json; "
+                          "charset=UTF-8\r\nAccess-Control-Allow-Origin: "
+                          "*\r\nContent-Length: " +
+                          std::to_string(json.length()) +
+                          "\r\nConnection: close\r\n\r\n" + json;
+        send(clientFd, res.c_str(), res.length(), 0);
+      } else {
+        Logger::error("IPTV: Cannot write uploaded file to " + outPath);
+        std::string json =
+            "{\"success\":false,\"error\":\"Cannot write file: " +
+            escapeJson(filename) + "\"}";
+        std::string res = "HTTP/1.1 500 OK\r\nContent-Type: application/json; "
+                          "charset=UTF-8\r\nAccess-Control-Allow-Origin: "
+                          "*\r\nContent-Length: " +
+                          std::to_string(json.length()) +
+                          "\r\nConnection: close\r\n\r\n" + json;
+        send(clientFd, res.c_str(), res.length(), 0);
+      }
+    } else {
+      std::string json = "{\"success\":false,\"error\":\"No content\"}";
+      std::string res = "HTTP/1.1 400 OK\r\nContent-Type: application/json; "
+                        "charset=UTF-8\r\nAccess-Control-Allow-Origin: "
+                        "*\r\nContent-Length: " +
+                        std::to_string(json.length()) +
+                        "\r\nConnection: close\r\n\r\n" + json;
+      send(clientFd, res.c_str(), res.length(), 0);
+    }
+  } else if ((method == "GET" && path.find("/api/iptv/add") == 0) ||
+             (method == "POST" && path == "/api/iptv/add")) {
+    // Download and add playlist from URL
+    std::string url;
+    std::string name;
+    if (method == "GET") {
+      url = extractQueryParam(queryString, "url");
+      name = extractQueryParam(queryString, "name");
+      if (url.empty())
+        url = extractQueryParam(fullPath, "url");
+      if (name.empty())
+        name = extractQueryParam(fullPath, "name");
+    } else {
+      url = extractPostParam(postBody, "url");
+      name = extractPostParam(postBody, "name");
+      if (url.empty()) {
+        size_t uPos = postBody.find("\"url\":\"");
+        if (uPos != std::string::npos) {
+          uPos += 7;
+          size_t uEnd = postBody.find("\"", uPos);
+          if (uEnd != std::string::npos)
+            url = postBody.substr(uPos, uEnd - uPos);
+        }
+        size_t nPos = postBody.find("\"name\":\"");
+        if (nPos != std::string::npos) {
+          nPos += 8;
+          size_t nEnd = postBody.find("\"", nPos);
+          if (nEnd != std::string::npos)
+            name = postBody.substr(nPos, nEnd - nPos);
+        }
+      }
+    }
+
+    if (!url.empty()) {
+      std::string error;
+      std::string filename;
+      size_t chanCount = 0;
+      if (IPTVManager::instance().addSourceFromUrl(url, name, error, filename,
+                                                   chanCount)) {
+        size_t total = IPTVManager::instance().getChannels().size();
+        std::string json = "{\"success\":true,\"file\":\"" +
+                           escapeJson(filename) +
+                           "\",\"channels\":" + std::to_string(chanCount) +
+                           ",\"total_channels\":" + std::to_string(total) + "}";
+        std::string res = "HTTP/1.1 200 OK\r\nContent-Type: application/json; "
+                          "charset=UTF-8\r\nAccess-Control-Allow-Origin: "
+                          "*\r\nContent-Length: " +
+                          std::to_string(json.length()) +
+                          "\r\nConnection: close\r\n\r\n" + json;
+        send(clientFd, res.c_str(), res.length(), 0);
+      } else {
+        std::string json =
+            "{\"success\":false,\"error\":\"" + escapeJson(error) + "\"}";
+        std::string res = "HTTP/1.1 400 OK\r\nContent-Type: application/json; "
+                          "charset=UTF-8\r\nAccess-Control-Allow-Origin: "
+                          "*\r\nContent-Length: " +
+                          std::to_string(json.length()) +
+                          "\r\nConnection: close\r\n\r\n" + json;
+        send(clientFd, res.c_str(), res.length(), 0);
+      }
+    } else {
+      std::string json =
+          "{\"success\":false,\"error\":\"Chưa cung cấp đường dẫn URL\"}";
+      std::string res = "HTTP/1.1 400 OK\r\nContent-Type: application/json; "
+                        "charset=UTF-8\r\nAccess-Control-Allow-Origin: "
+                        "*\r\nContent-Length: " +
+                        std::to_string(json.length()) +
+                        "\r\nConnection: close\r\n\r\n" + json;
+      send(clientFd, res.c_str(), res.length(), 0);
+    }
+  } else if ((method == "GET" && (path == "/api/iptv/delete" ||
+                                  fullPath.find("/api/iptv/delete") == 0)) ||
+             (method == "POST" && path == "/api/iptv/delete")) {
+    // Delete IPTV source file
+    std::string file;
+    if (method == "GET") {
+      file = extractQueryParam(queryString, "file");
+      if (file.empty())
+        file = extractQueryParam(fullPath, "file");
+    } else {
+      file = extractPostParam(postBody, "file");
+      if (file.empty())
+        file = extractPostParam(postBody, "filename");
+      if (file.empty()) {
+        size_t fnPos = postBody.find("\"file\":\"");
+        if (fnPos != std::string::npos) {
+          fnPos += 8;
+          size_t fnEnd = postBody.find("\"", fnPos);
+          if (fnEnd != std::string::npos)
+            file = postBody.substr(fnPos, fnEnd - fnPos);
+        }
+      }
+    }
+
+    std::string error;
+    if (IPTVManager::instance().deleteSource(file, error)) {
+      size_t count = IPTVManager::instance().getChannels().size();
+      std::string json = "{\"success\":true,\"deleted\":\"" + escapeJson(file) +
+                         "\",\"channels\":" + std::to_string(count) + "}";
+      std::string res = "HTTP/1.1 200 OK\r\nContent-Type: application/json; "
+                        "charset=UTF-8\r\nAccess-Control-Allow-Origin: "
+                        "*\r\nContent-Length: " +
+                        std::to_string(json.length()) +
+                        "\r\nConnection: close\r\n\r\n" + json;
+      send(clientFd, res.c_str(), res.length(), 0);
+    } else {
+      std::string json =
+          "{\"success\":false,\"error\":\"" +
+          escapeJson(error.empty() ? "Không thể xóa nguồn" : error) + "\"}";
+      std::string res = "HTTP/1.1 400 OK\r\nContent-Type: application/json; "
+                        "charset=UTF-8\r\nAccess-Control-Allow-Origin: "
+                        "*\r\nContent-Length: " +
+                        std::to_string(json.length()) +
+                        "\r\nConnection: close\r\n\r\n" + json;
+      send(clientFd, res.c_str(), res.length(), 0);
+    }
+  } else {
+    std::string notFound = "HTTP/1.1 404 Not Found\r\nContent-Length: "
+                           "0\r\nConnection: close\r\n\r\n";
+    send(clientFd, notFound.c_str(), notFound.length(), 0);
+  }
 }
 
 } // namespace RomCloud

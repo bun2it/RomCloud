@@ -1,5 +1,4 @@
 #include "IPTVManager.h"
-#include "TikTokManager.h"
 #include "../media/MpvPlayer.h"
 #include "../logging/Logger.h"
 #include "../network/HttpClient.h"
@@ -1104,40 +1103,7 @@ static std::string sanitizeAssText(const std::string& input) {
     return output;
 }
 
-bool IPTVManager::sendMpvIpcOverSocket(const std::string& jsonCmd) {
-    if (m_iptvIpcSocket < 0) {
-        if (access("/tmp/mpv_iptv.sock", F_OK) != 0) {
-            Logger::warn("[IPTV] IPC socket not found");
-            return false;
-        }
-        int sock = socket(AF_UNIX, SOCK_STREAM, 0);
-        if (sock < 0) return false;
-        struct sockaddr_un addr;
-        memset(&addr, 0, sizeof(addr));
-        addr.sun_family = AF_UNIX;
-        strncpy(addr.sun_path, "/tmp/mpv_iptv.sock", sizeof(addr.sun_path) - 1);
-        if (connect(sock, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
-            close(sock);
-            return false;
-        }
-        m_iptvIpcSocket = sock;
-    }
-
-    std::string cmd = jsonCmd + "\n";
-    ssize_t sent = send(m_iptvIpcSocket, cmd.c_str(), cmd.length(), MSG_NOSIGNAL);
-    if (sent != (ssize_t)cmd.length()) {
-        Logger::warn("[IPTV] IPC send failed, resetting socket");
-        close(m_iptvIpcSocket);
-        m_iptvIpcSocket = -1;
-        return false;
-    }
-
-    // Drain any pending responses from mpv so the socket never clogs
-    char drainBuf[1024];
-    while (recv(m_iptvIpcSocket, drainBuf, sizeof(drainBuf), MSG_DONTWAIT) > 0) {}
-
-    return true;
-}
+// (removed) sendMpvIpcOverSocket — uy thac MpvPlayer::sendCmd.
 
 static std::string buildChannelListAss(
     const std::vector<IPTVChannel>& channels,
@@ -1264,6 +1230,14 @@ static std::string buildChannelListAss(
 // SDL UI continues to render channel list in the bottom ~360px region.
 // ─────────────────────────────────────────────
 
+bool IPTVManager::isMpvPlaying() const {
+    return MpvPlayer::instance().isPlaying();
+}
+
+bool IPTVManager::isIPTVPlaying() const {
+    return MpvPlayer::instance().isPlaying();
+}
+
 bool IPTVManager::sendMpvIpcCommand(const std::string& jsonCmd, std::string* response, const std::string& sockPath) {
     // P1-3: dung chung MpvPlayer (giu tuong thich sock cu).
     std::string target = sockPath;
@@ -1375,23 +1349,15 @@ bool IPTVManager::switchIPTVChannelByIndex(size_t idx) {
             " took=" + std::to_string(SDL_GetTicks() - t0) + "ms");
     if (url.empty()) return false;
     uint32_t tk = SDL_GetTicks();
-    iptvDbg("SWITCH kill old pid=" + std::to_string(m_mpvPid));
-    killMpvPidBlocking(m_mpvPid);
-    m_mpvPid = -1;
+    iptvDbg("SWITCH kill old pid=" + std::to_string(MpvPlayer::instance().pid()));
+    killMpvPidBlocking(MpvPlayer::instance().pid());
     iptvDbg("SWITCH killed took=" + std::to_string(SDL_GetTicks() - tk) + "ms");
     uint32_t ts = SDL_GetTicks();
     pid_t npid = spawnMpvForUrl(url);
     if (npid <= 0) { iptvDbg("SWITCH spawn FAIL"); return false; }
-    m_mpvPid = npid;
-    int wst = 0;
-    for (int i = 0; i < 25; ++i) {
-        if (waitpid(m_mpvPid, &wst, WNOHANG) != 0) {
-            m_mpvPid = -1;
-            iptvDbg("SWITCH new died early");
-            return false;
-        }
-        if (access("/tmp/mpv_iptv.sock", F_OK) == 0) { SDL_Delay(150); break; }
-        SDL_Delay(100);
+    if (MpvPlayer::instance().pollExited()) {
+        iptvDbg("SWITCH new died early");
+        return false;
     }
     iptvDbg("SWITCH spawned pid=" + std::to_string(npid) +
             " took=" + std::to_string(SDL_GetTicks() - ts) + "ms");
@@ -1431,7 +1397,7 @@ void IPTVManager::showIPTVChannelOSD(
     int durationMs)
 {
     (void)durationMs; // list hien lien tuc, khong tu an
-    if (m_mpvPid <= 0) return;
+    if (!MpvPlayer::instance().isPlaying()) return;
     if (channels.empty()) return;
     if (selectedIndex < 0) selectedIndex = 0;
     if (selectedIndex >= (int)channels.size()) selectedIndex = (int)channels.size() - 1;
@@ -1635,7 +1601,6 @@ bool IPTVManager::playChannel(const IPTVChannel& channel, size_t initialIndex, c
     }
     pid_t pid = MpvPlayer::instance().pid();
     // P1-3: MpvPlayer da fork + doi sock; control loop ben duoi giu nguyen.
-    m_mpvPid = pid;
         m_isPlaying = true;
         m_currentChannel = channel.name;
         uint32_t playStartTime = SDL_GetTicks();
@@ -1648,25 +1613,15 @@ bool IPTVManager::playChannel(const IPTVChannel& channel, size_t initialIndex, c
         SDL_PumpEvents();
         SDL_FlushEvents(SDL_FIRSTEVENT, SDL_LASTEVENT);
 
-        // Wait for IPC socket
-        int status = 0;
-        for (int i = 0; i < 20; ++i) {
-            pid_t res = waitpid(m_mpvPid, &status, WNOHANG);
-            if (res != 0) break;
-            if (access("/tmp/mpv_iptv.sock", F_OK) == 0) {
-                SDL_Delay(100);
-                break;
-            }
-            SDL_Delay(100);
-        }
+        // Wait for IPC socket (MpvPlayer::play da doi sock; chi check chet som).
+        MpvPlayer::instance().waitForSocket(2000);
 
         // Blocking control loop
         // List hien ngay tu khi bat kenh: video dinh mep tren, list 3 dong o dai den duoi
         channelListVisible = true;
         showIPTVChannelOSD(m_iptvChannelList, (int)m_iptvSelectedIndex, "", 0);
-        while (m_isPlaying && m_mpvPid > 0) {
-            pid_t res = waitpid(m_mpvPid, &status, WNOHANG);
-            if (res != 0) break;
+        while (m_isPlaying && MpvPlayer::instance().isPlaying()) {
+            if (MpvPlayer::instance().pollExited()) break;
 
             if (m_overlayExpireTime > 0 && SDL_GetTicks() >= m_overlayExpireTime) {
                 sendMpvIpcCommand("{\"command\":[\"overlay-remove\",0]}", nullptr, "/tmp/mpv_iptv.sock");
@@ -1810,7 +1765,6 @@ bool IPTVManager::playChannel(const IPTVChannel& channel, size_t initialIndex, c
         unlink("/tmp/mpv_iptv.sock");
         m_isPlaying = false;
         m_currentChannel = "";
-        m_mpvPid = -1;
         m_iptvChannelList.clear();
 
         SDL_PumpEvents();
@@ -1821,7 +1775,7 @@ bool IPTVManager::playChannel(const IPTVChannel& channel, size_t initialIndex, c
 }
 
 bool IPTVManager::switchYouTubeQuality(const std::string& videoId, const std::string& targetQuality) {
-    if (!m_isPlaying || m_mpvPid <= 0) return false;
+    if (!m_isPlaying || !MpvPlayer::instance().isPlaying()) return false;
 
     // Show initial OSD
     sendMpvIpcCommand("{\"command\":[\"show-text\",\"Đang đổi sang " + targetQuality + "p...\",5000]}");
@@ -1907,7 +1861,6 @@ bool IPTVManager::playYouTubeVideo(const std::string& videoId, const std::string
     Logger::info("YouTube player started");
     // P1-3: khoi fork truc tiep; control loop ben duoi giu nguyen.
     pid_t pid = MpvPlayer::instance().pid();
-    m_mpvPid = pid;
         m_isPlaying = true;
         m_currentChannel = "YouTube";
         uint32_t playStartTime = SDL_GetTicks();
@@ -1919,10 +1872,8 @@ bool IPTVManager::playYouTubeVideo(const std::string& videoId, const std::string
         SDL_PumpEvents();
         SDL_FlushEvents(SDL_FIRSTEVENT, SDL_LASTEVENT);
 
-        int status = 0;
-        while (m_isPlaying && m_mpvPid > 0) {
-            pid_t res = waitpid(m_mpvPid, &status, WNOHANG);
-            if (res != 0) break;
+        while (m_isPlaying && MpvPlayer::instance().isPlaying()) {
+            if (MpvPlayer::instance().pollExited()) break;
 
             if (m_overlayExpireTime > 0 && SDL_GetTicks() >= m_overlayExpireTime) {
                 sendMpvIpcCommand("{\"command\":[\"overlay-remove\",0]}");
@@ -1996,7 +1947,6 @@ bool IPTVManager::playYouTubeVideo(const std::string& videoId, const std::string
         unlink("/tmp/mpv_youtube.sock");
         m_isPlaying = false;
         m_currentChannel = "";
-        m_mpvPid = -1;
 
         SDL_PumpEvents();
         SDL_FlushEvents(SDL_FIRSTEVENT, SDL_LASTEVENT);
@@ -2009,17 +1959,10 @@ bool IPTVManager::stop() {
     // P1-3: quit ca sock cu (tuong thich), MpvPlayer reap PID hien tai.
     sendMpvIpcCommand("{\"command\":[\"quit\"]}", nullptr, "/tmp/mpv_iptv.sock");
     sendMpvIpcCommand("{\"command\":[\"quit\"]}", nullptr, "/tmp/mpv_youtube.sock");
-    sendMpvIpcCommand("{\"command\":[\"quit\"]}", nullptr, "/tmp/mpv_tiktok.sock");
     MpvPlayer::instance().stop();
-    m_mpvPid = -1;
 
-    if (m_iptvIpcSocket >= 0) {
-        close(m_iptvIpcSocket);
-        m_iptvIpcSocket = -1;
-    }
     unlink("/tmp/mpv_iptv.sock");
     unlink("/tmp/mpv_youtube.sock");
-    unlink("/tmp/mpv_tiktok.sock");
     unlink("/tmp/stay_awake");
     m_isPlaying = false;
     m_currentChannel = "";
@@ -2078,147 +2021,6 @@ void IPTVManager::createDefaultPlaylist(const std::string& filepath) {
 
     file.close();
     Logger::info("Created default playlist: " + filepath);
-}
-
-bool IPTVManager::playTikTokFeed(const std::vector<TikTokVideo>& feed, size_t initialIndex, const std::string& tagName) {
-    stop();
-
-    if (feed.empty()) {
-        Logger::error("[TikTok] Feed is empty");
-        return false;
-    }
-
-    ensureMediaPlayerAvailable();
-
-    std::string appRoot = AppConfig::instance().getAppRoot();
-    if (appRoot.empty()) appRoot = "/mnt/SDCARD/Apps/RomCloud";
-
-    size_t currentIndex = (initialIndex < feed.size()) ? initialIndex : 0;
-    std::string playUrl = feed[currentIndex].playUrl;
-    Logger::info("[TikTok] Playing video " + std::to_string(currentIndex + 1) + "/" + std::to_string(feed.size()) + ": " + playUrl);
-
-    // P1-3: fork qua MpvPlayer, sock tiktok rieng.
-    if (!MpvPlayer::instance().play(playUrl, {
-            "--video-align-y=0", "--demuxer-max-bytes=16M",
-            "--demuxer-readahead-secs=5", "--audio-buffer=0.5",
-            "--sub-font-provider=none", "--osd-font-provider=none",
-            "--osd-level=1", "--osd-bar=no" },
-            "/tmp/mpv_tiktok.sock", appRoot + "/tiktok_mpv.log")) {
-        Logger::error("[TikTok] No mpv binary");
-        return false;
-    }
-    // P1-3: control loop ben duoi giu nguyen (MpvPlayer da fork + doi sock).
-    pid_t pid = MpvPlayer::instance().pid();
-        m_mpvPid = pid;
-        m_isPlaying = true;
-        m_currentChannel = "TikTok";
-
-        // Wait for mpv IPC socket
-        int status = 0;
-        for (int i = 0; i < 25; ++i) {
-            pid_t res = waitpid(m_mpvPid, &status, WNOHANG);
-            if (res != 0) break;
-            if (access("/tmp/mpv_tiktok.sock", F_OK) == 0) {
-                SDL_Delay(60);
-                break;
-            }
-            SDL_Delay(100);
-        }
-
-        auto showVideoOsd = [&](size_t idx, bool isNext) {
-            if (idx >= feed.size()) return;
-            const auto& item = feed[idx];
-            std::string prefix = isNext ? "[▼ " : "[▲ ";
-            std::string osdText = prefix + std::to_string(idx + 1) + "/" + std::to_string(feed.size()) + "] @" +
-                                  sanitizeAssText(item.author) + "\\n" + sanitizeAssText(item.title);
-            std::string cmd = "{\"command\":[\"show-text\",\"" + osdText + "\",3500]}";
-            sendMpvIpcCommand(cmd, nullptr, "/tmp/mpv_tiktok.sock");
-        };
-
-        // Show initial OSD
-        if (m_mpvPid > 0 && access("/tmp/mpv_tiktok.sock", F_OK) == 0) {
-            std::string tagDisplay = tagName.empty() ? "TikTok" : ("#" + tagName);
-            std::string initialText = tagDisplay + " [" + std::to_string(currentIndex + 1) + "/" + std::to_string(feed.size()) + "] @" +
-                                      sanitizeAssText(feed[currentIndex].author) + "\\n" + sanitizeAssText(feed[currentIndex].title);
-            std::string cmd = "{\"command\":[\"show-text\",\"" + initialText + "\",4000]}";
-            sendMpvIpcCommand(cmd, nullptr, "/tmp/mpv_tiktok.sock");
-        }
-
-        uint32_t lastEofCheck = SDL_GetTicks();
-
-        while (m_isPlaying && m_mpvPid > 0) {
-            pid_t res = waitpid(m_mpvPid, &status, WNOHANG);
-            if (res != 0) {
-                break;
-            }
-
-            InputManager::instance().update();
-
-            if (InputManager::instance().isButtonJustPressed(Button::B) ||
-                InputManager::instance().isButtonJustPressed(Button::MENU) ||
-                InputManager::instance().isButtonJustPressed(Button::SELECT)) {
-                Logger::info("[TikTok] User pressed B/Menu, stopping player");
-                sendMpvIpcCommand("{\"command\":[\"quit\"]}", nullptr, "/tmp/mpv_tiktok.sock");
-                break;
-            }
-
-            // Next video: DOWN or R1
-            if (InputManager::instance().isButtonJustPressed(Button::DOWN) ||
-                InputManager::instance().isButtonJustPressed(Button::R1) ||
-                InputManager::instance().isButtonJustPressed(Button::RIGHT)) {
-                currentIndex = (currentIndex + 1) % feed.size();
-                Logger::info("[TikTok] Next video (" + std::to_string(currentIndex + 1) + "/" + std::to_string(feed.size()) + "): " + feed[currentIndex].title);
-                std::string loadCmd = "{\"command\":[\"loadfile\",\"" + feed[currentIndex].playUrl + "\",\"replace\"]}";
-                sendMpvIpcCommand(loadCmd, nullptr, "/tmp/mpv_tiktok.sock");
-                showVideoOsd(currentIndex, true);
-            }
-            // Prev video: UP or L1
-            else if (InputManager::instance().isButtonJustPressed(Button::UP) ||
-                     InputManager::instance().isButtonJustPressed(Button::L1) ||
-                     InputManager::instance().isButtonJustPressed(Button::LEFT)) {
-                currentIndex = (currentIndex > 0) ? (currentIndex - 1) : (feed.size() - 1);
-                Logger::info("[TikTok] Prev video (" + std::to_string(currentIndex + 1) + "/" + std::to_string(feed.size()) + "): " + feed[currentIndex].title);
-                std::string loadCmd = "{\"command\":[\"loadfile\",\"" + feed[currentIndex].playUrl + "\",\"replace\"]}";
-                sendMpvIpcCommand(loadCmd, nullptr, "/tmp/mpv_tiktok.sock");
-                showVideoOsd(currentIndex, false);
-            }
-            // Pause / Resume: A
-            else if (InputManager::instance().isButtonJustPressed(Button::A)) {
-                sendMpvIpcCommand("{\"command\":[\"cycle\",\"pause\"]}", nullptr, "/tmp/mpv_tiktok.sock");
-            }
-
-            // Auto-advance check: every 600ms check eof-reached
-            uint32_t now = SDL_GetTicks();
-            if (now - lastEofCheck > 600) {
-                lastEofCheck = now;
-                std::string resp;
-                if (sendMpvIpcCommand("{\"command\":[\"get_property\",\"eof-reached\"]}", &resp, "/tmp/mpv_tiktok.sock")) {
-                    if (resp.find("\"data\":true") != std::string::npos) {
-                        currentIndex = (currentIndex + 1) % feed.size();
-                        Logger::info("[TikTok] Auto-advance to video (" + std::to_string(currentIndex + 1) + "/" + std::to_string(feed.size()) + ")");
-                        std::string loadCmd = "{\"command\":[\"loadfile\",\"" + feed[currentIndex].playUrl + "\",\"replace\"]}";
-                        sendMpvIpcCommand(loadCmd, nullptr, "/tmp/mpv_tiktok.sock");
-                        showVideoOsd(currentIndex, true);
-                    }
-                }
-            }
-
-            SDL_Delay(30);
-        }
-
-        unlink("/tmp/stay_awake");
-        unlink("/tmp/mpv_tiktok.sock");
-
-        m_mpvPid = -1;
-        m_isPlaying = false;
-        m_currentChannel = "";
-        Logger::info("[TikTok] Player closed, returning to UI");
-
-        SDL_PumpEvents();
-        SDL_FlushEvents(SDL_FIRSTEVENT, SDL_LASTEVENT);
-        InputManager::instance().reset();
-
-        return true;
 }
 
 } // namespace RomCloud

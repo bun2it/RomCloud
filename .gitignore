@@ -8,3 +8,7 @@ build/
 scratch/
 dist/
 *.zip
+bin/*.exe
+pc_data/
+.claude/
+.romcloud/

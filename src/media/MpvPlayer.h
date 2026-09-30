@@ -1,6 +1,6 @@
 #pragma once
-// P1-3: MpvPlayer — fork mpv + IPC dung chung cho IPTV/YouTube/TikTok.
-// IPTVManager/TikTok chi cung cap URL + mapping nut; khong fork truc tiep.
+// P1-3: MpvPlayer — fork mpv + IPC dung chung cho IPTV/YouTube.
+// IPTVManager chi cung cap URL + mapping nut; khong fork truc tiep.
 #include <string>
 #include <vector>
 #include <sys/types.h>
