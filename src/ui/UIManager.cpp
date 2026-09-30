@@ -8,14 +8,17 @@
 #include "../auth/AuthManager.h"
 #include "../sync/DriveSyncEngine.h"
 #include "../download/DownloadManager.h"
+#include "../database/DatabaseManager.h"
 #include "../database/RomIndexer.h"
 #include "../ota/UpdateManager.h"
 #include "../app/Application.h"
 #include "../backup/BackupManager.h"
 #include "../sync/UploadManager.h"
 #include "../iptv/IPTVManager.h"
+#include "../localsend/LocalSendManager.h"
 #include "BoxartScraper.h"
 #include "UiStrings.h"
+#include "UiTheme.h"
 #include "TelexHelper.h"
 #include "../network/JsonHelper.h"
 #include "../network/HttpClient.h"
@@ -27,6 +30,7 @@
 #include <cstdio>
 #include <cmath>
 #include <cstring>
+#include <cctype>
 #include <unistd.h>
 #include <sys/stat.h>
 
@@ -42,6 +46,8 @@ void UIManager::initGridMenu() {
         {"games", "THƯ VIỆN GAME", "GAMES.png", "Danh sách ROM"},
         {"iptv", "XEM TV", "TV.png", "Kênh TV online"},
         {"youtube", "YOUTUBE", "YOUTUBE.png", "YouTube"},
+        {"tiktok", "TIKTOK", "TIKTOK.png", "TikTok"},
+        {"localsend", "LOCAL SEND", "LOCALSEND.png", "Chia sẻ P2P trong LAN"},
         {"sync", "ĐỒNG BỘ", "SYNC.png", "Đồng bộ Google Drive"},
         {"upload", "TẢI LÊN", "UPLOAD.png", "Upload lên Drive"},
         {"ota", "CẬP NHẬT", "OTA.png", "Cập nhật OTA"},
@@ -64,22 +70,27 @@ bool UIManager::init(SDL_Window* window, SDL_Renderer* renderer) {
     }
 
     std::string fontPath = AppConfig::instance().getFontPath();
+    // Ưu tiên NotoSans-Regular của app (full TV), font hệ thống fallback sau.
     const char* fallbackFonts[] = {
+        "/mnt/SDCARD/Apps/RomCloud/assets/fonts/NotoSans-Regular.ttf",
+        "assets/fonts/NotoSans-Regular.ttf",
+        "/rom/usr/trimui/res/full.ttf",
+        "/usr/trimui/res/full.ttf",
+        "/usr/trimui/res/regular.ttf",
+        "/mnt/SDCARD/Themes/TRIMUI YaHei/msyh.ttf",
+        "/mnt/SDCARD/Apps/RomCloud/assets/fonts/NotoSansTC.ttf",
         fontPath.c_str(),
         "/mnt/SDCARD/Apps/RomCloud/assets/fonts/font.ttf",
-        "/usr/trimui/res/full.ttf",
-        "assets/fonts/font.ttf",
-        "/usr/trimui/res/regular.ttf",
-        "/mnt/SDCARD/Themes/TRIMUI YaHei/msyh.ttf"
+        "assets/fonts/font.ttf"
     };
 
     for (const char* path : fallbackFonts) {
-        if (!m_fontTitle) m_fontTitle = TTF_OpenFont(path, 38);
-        if (!m_fontLarge) m_fontLarge = TTF_OpenFont(path, 32);
-        if (!m_fontMedium) m_fontMedium = TTF_OpenFont(path, 25);
-        if (!m_fontSmall) m_fontSmall = TTF_OpenFont(path, 20);
+        if (!m_fontTitle) m_fontTitle = TTF_OpenFont(path, 42);
+        if (!m_fontLarge) m_fontLarge = TTF_OpenFont(path, 36);
+        if (!m_fontMedium) m_fontMedium = TTF_OpenFont(path, 30);
+        if (!m_fontSmall) m_fontSmall = TTF_OpenFont(path, 24);
         if (m_fontTitle && m_fontLarge && m_fontMedium && m_fontSmall) {
-            Logger::info(std::string("Loaded TTF font from: ") + path + " (Sizes: 38, 32, 25, 20)");
+            Logger::info(std::string("Loaded TTF font from: ") + path + " (Sizes: 42, 36, 30, 24)");
             break;
         }
     }
@@ -96,6 +107,25 @@ bool UIManager::init(SDL_Window* window, SDL_Renderer* renderer) {
         if (hasUpdate) {
             showToast(std::string(UiStrings::TOAST_NEW_OTA_PREFIX) + info.remoteVersion + "!", {34, 197, 94, 255}, 6000);
         }
+    });
+
+    // LocalSend: wire callback từ background thread (HTTP) sang UI state.
+    // Modal overlay toàn màn hình — switch sang LOCALSEND_INCOMING bất kể
+    // user đang ở state nào (Game List, IPTV, Settings...).
+    LocalSendManager::instance().setOnUserPrompt([this](const LsUploadRequest& req) {
+        m_localSendCurrentPrompt = req;
+        m_localSendPendingSessionId = req.sessionId;
+        // Reset folder picker về mặc định: Downloads
+        m_localSendFolderCurrentPath = "/mnt/SDCARD/Downloads";
+        m_localSendFolderLoaded = false;
+        m_localSendFolderSelected = 0;
+        m_localSendFolderFocus = 1;  // mặc định focus nút Chốt ở panel phải
+        m_localSendIncomingMode = 0;  // bắt đầu ở screen picker
+        m_localSendIncomingSavePath = "";
+        // Tự tạo Downloads nếu chưa có
+        FileSystemManager::instance().createDirectoryRecursive(
+            "/mnt/SDCARD/Downloads");
+        setState(UIState::LOCALSEND_INCOMING);
     });
 
     return true;
@@ -137,6 +167,14 @@ void UIManager::setState(UIState state) {
     InputManager::instance().reset();
     if (state == UIState::SYSTEM_SELECT) {
         refreshSystems();
+    } else if (state == UIState::YOUTUBE_SEARCH) {
+        loadYouTubeHistory();
+        m_ytFocusInTags = false;
+        m_ytSelectedTagIndex = 0;
+    } else if (state == UIState::TIKTOK_SEARCH) {
+        initTikTokTags();
+        m_ttFocusInTags = false;
+        m_ttSelectedTagIndex = 0;
     }
 }
 
@@ -274,6 +312,59 @@ void UIManager::update() {
         }
     }
 
+    // Check if TikTok search finished
+    if (m_ttSearchFinished.exchange(false)) {
+        m_ttIsSearching = false;
+        if (!m_ttSearchResults.empty()) {
+            std::vector<TikTokVideo> feed;
+            for (const auto& item : m_ttSearchResults) {
+                size_t p1 = item.find('|');
+                size_t p2 = (p1 != std::string::npos) ? item.find('|', p1 + 1) : std::string::npos;
+                size_t p3 = (p2 != std::string::npos) ? item.find('|', p2 + 1) : std::string::npos;
+                if (p1 != std::string::npos && p2 != std::string::npos && p3 != std::string::npos) {
+                    TikTokVideo v;
+                    v.id = item.substr(0, p1);
+                    v.title = item.substr(p1 + 1, p2 - p1 - 1);
+                    v.author = item.substr(p2 + 1, p3 - p2 - 1);
+                    v.playUrl = item.substr(p3 + 1);
+                    if (!v.playUrl.empty()) feed.push_back(v);
+                }
+            }
+
+            if (!feed.empty()) {
+                IPTVManager::instance().playTikTokFeed(feed, 0, m_ttLastSearchQuery);
+                setState(UIState::TIKTOK_SEARCH);
+            } else {
+                showToast("Không tìm thấy link phát TikTok", {239, 68, 68, 255}, 3000);
+            }
+        } else {
+            if (m_currentState == UIState::TIKTOK_SEARCH) {
+                std::string msg = m_ttErrorMessage.empty() ? "Không tìm thấy video nào" : m_ttErrorMessage;
+                showToast(msg, {245, 158, 11, 255}, 3500);
+            }
+        }
+    }
+
+    // Check if TikTok single video stream resolution finished
+    if (m_ttVideoReady.exchange(false)) {
+        m_ttIsLoadingVideo = false;
+        if (!m_ttPendingStreamUrl.empty()) {
+            TikTokVideo v;
+            v.id = m_ttPendingVideoId;
+            v.title = m_ttPendingTitle;
+            v.author = "TikTok";
+            v.playUrl = m_ttPendingStreamUrl;
+            m_ttPendingStreamUrl.clear();
+            m_ttPendingVideoId.clear();
+            m_ttPendingTitle.clear();
+            std::vector<TikTokVideo> singleFeed = { v };
+            IPTVManager::instance().playTikTokFeed(singleFeed, 0, "Video");
+            setState(UIState::TIKTOK_SEARCH);
+        } else {
+            showToast("Không thể kết nối luồng phát video", {239, 68, 68, 255}, 3000);
+        }
+    }
+
     static AuthState lastAuthState = AuthManager::instance().getState();
     AuthState curAuthState = AuthManager::instance().getState();
     if (curAuthState == AuthState::LINKED && lastAuthState != AuthState::LINKED) {
@@ -309,12 +400,20 @@ void UIManager::update() {
                 if (selectedId == "games") {
                     setState(UIState::SYSTEM_SELECT);
                 } else if (selectedId == "iptv") {
-                    if (IPTVManager::instance().getChannels().empty()) {
+                    if (IPTVManager::instance().playlistCount() == 0) {
                         IPTVManager::instance().loadPlaylists();
                     }
-                    m_selectedIPTVChannelIndex = 0;
-                    m_iptvScrollOffset = 0;
-                    setState(UIState::IPTV_LIST);
+                    m_selectedPlaylistIndex = 0;
+                    m_playlistScrollOffset  = 0;
+                    // Neu co nhieu hon 1 playlist -> hien man hinh chon playlist
+                    // Neu chi co 1 (hoac 0) -> vao thang danh sach kenh
+                    if (IPTVManager::instance().playlistCount() > 1) {
+                        setState(UIState::IPTV_PLAYLIST_SELECT);
+                    } else {
+                        m_selectedIPTVChannelIndex = 0;
+                        m_iptvScrollOffset = 0;
+                        setState(UIState::IPTV_LIST);
+                    }
                 } else if (selectedId == "youtube") {
                     m_ytSearchQuery.clear();
                     m_ytSearchResults.clear();
@@ -330,6 +429,30 @@ void UIManager::update() {
                     m_ytVideoReady = false;
                     m_ytPendingStreamUrl.clear();
                     setState(UIState::YOUTUBE_SEARCH);
+                } else if (selectedId == "tiktok") {
+                    m_ttSearchQuery.clear();
+                    m_ttSearchResults.clear();
+                    m_ttSearchSelectedIndex = 0;
+                    m_ttSearchScrollOffset = 0;
+                    m_ttKbRow = 0;
+                    m_ttKbCol = 0;
+                    m_ttKbShift = false;
+                    m_ttTelexMode = true;
+                    m_ttErrorMessage.clear();
+                    m_ttIsSearching = false;
+                    m_ttSearchFinished = false;
+                    m_ttIsLoadingVideo = false;
+                    m_ttVideoReady = false;
+                    m_ttPendingStreamUrl.clear();
+                    m_ttPendingVideoId.clear();
+                    m_ttPendingTitle.clear();
+                    setState(UIState::TIKTOK_SEARCH);
+                } else if (selectedId == "localsend") {
+                    LocalSendManager::instance().start();
+                    LocalSendManager::instance().refreshDiscovery();
+                    m_localSendSelectedDevice = 0;
+                    m_localSendFolderSelected = 0;
+                    setState(UIState::LOCALSEND_HOME);
                 } else if (selectedId == "sync") {
                     triggerManualSync();
                 } else if (selectedId == "upload") {
@@ -988,97 +1111,278 @@ void UIManager::update() {
             break;
         }
 
-        case UIState::IPTV_LIST: {
-            std::vector<IPTVChannel> channels;
-            if (m_iptvShowFavoritesOnly) {
-                channels = IPTVManager::instance().getFavoriteChannels();
-            } else {
-                channels = IPTVManager::instance().getChannels();
-            }
-            int channelCount = static_cast<int>(channels.size());
+        case UIState::IPTV_PLAYLIST_SELECT: {
+            const auto& playlists = IPTVManager::instance().getPlaylists();
+            int plCount = static_cast<int>(playlists.size());
             int visibleItems = 10;
 
             if (input.isButtonJustPressed(Button::UP)) {
-                if (channelCount > 0) {
-                    m_selectedIPTVChannelIndex = std::max(0, m_selectedIPTVChannelIndex - 1);
-                    if (m_selectedIPTVChannelIndex < m_iptvScrollOffset) {
-                        m_iptvScrollOffset = m_selectedIPTVChannelIndex;
+                if (plCount > 0) {
+                    m_selectedPlaylistIndex = std::max(0, m_selectedPlaylistIndex - 1);
+                    if (m_selectedPlaylistIndex < m_playlistScrollOffset)
+                        m_playlistScrollOffset = m_selectedPlaylistIndex;
+                }
+            } else if (input.isButtonJustPressed(Button::DOWN)) {
+                if (plCount > 0) {
+                    m_selectedPlaylistIndex = std::min(plCount - 1, m_selectedPlaylistIndex + 1);
+                    if (m_selectedPlaylistIndex >= m_playlistScrollOffset + visibleItems)
+                        m_playlistScrollOffset = m_selectedPlaylistIndex - visibleItems + 1;
+                }
+            } else if (input.isButtonJustPressed(Button::A)) {
+                if (plCount > 0 && m_selectedPlaylistIndex < plCount) {
+                    const Playlist* pl = IPTVManager::instance().getPlaylist(
+                        static_cast<size_t>(m_selectedPlaylistIndex));
+                    if (pl) {
+                        showToast("Đang mở: " + pl->name + " (" +
+                                  std::to_string(pl->channelCount()) + " kênh)...",
+                                  {0, 180, 216, 255}, 1500);
                     }
+                    m_activePlaylistIndex = m_selectedPlaylistIndex;
+                    m_iptvSelectedGroup.clear();
+                    m_selectedIPTVChannelIndex = 0;
+                    m_iptvScrollOffset = 0;
+                    setState(UIState::IPTV_LIST);
+                }
+            } else if (input.isButtonJustPressed(Button::Y)) {
+                // Manual refresh playlist co URL nguon
+                if (plCount > 0 && m_selectedPlaylistIndex < plCount) {
+                    const Playlist* pl = IPTVManager::instance().getPlaylist(
+                        static_cast<size_t>(m_selectedPlaylistIndex));
+                    if (pl) {
+                        const auto& sources = IPTVManager::instance().getSources();
+                        bool hasUrl = false;
+                        for (const auto& s : sources)
+                            if (s.filename == pl->sourceFile && s.type == "url") { hasUrl = true; break; }
+
+                        if (hasUrl) {
+                            showToast("Đang cập nhật playlist: " + pl->name + "...",
+                                      {250, 204, 21, 255}, 3000);
+                            render();
+                            std::string err;
+                            if (IPTVManager::instance().refreshPlaylistFromUrl(pl->sourceFile, err)) {
+                                std::string ts = IPTVManager::instance().getLastRefreshedStr(pl->sourceFile);
+                                showToast("Cập nhật thành công! (" + ts + ")", {34, 197, 94, 255}, 3000);
+                            } else {
+                                showToast("Cập nhật thất bại: " + err, {239, 68, 68, 255}, 4000);
+                            }
+                        } else {
+                            showToast("Playlist này không có URL nguồn (chỉ có thể refresh playlist được thêm qua URL)",
+                                      {148, 163, 184, 255}, 3000);
+                        }
+                    }
+                }
+            } else if (input.isButtonJustPressed(Button::X)) {
+                // Thay doi interval refresh: 6h -> 12h -> 24h -> 72h -> 0(tat) -> 6h
+                if (plCount > 0 && m_selectedPlaylistIndex < plCount) {
+                    const Playlist* pl = IPTVManager::instance().getPlaylist(
+                        static_cast<size_t>(m_selectedPlaylistIndex));
+                    if (pl) {
+                        const auto& sources = IPTVManager::instance().getSources();
+                        for (const auto& s : sources) {
+                            if (s.filename == pl->sourceFile && s.type == "url") {
+                                int cur = s.refreshIntervalHours;
+                                int next = (cur == 0) ? 6 : (cur == 6) ? 12 : (cur == 12) ? 24 : (cur == 24) ? 72 : 0;
+                                IPTVManager::instance().setRefreshInterval(pl->sourceFile, next);
+                                std::string msg = (next == 0)
+                                    ? "Đã tắt tự động refresh"
+                                    : "Tự động refresh mỗi " + std::to_string(next) + " giờ";
+                                showToast(msg, {0, 180, 216, 255}, 2000);
+                                break;
+                            }
+                        }
+                    }
+                }
+            } else if (input.isButtonJustPressed(Button::B)) {
+                setState(UIState::MENU);
+            }
+            break;
+        }
+
+
+
+        case UIState::IPTV_LIST: {
+            // ------- Build filtered channel list -------
+            std::vector<IPTVChannel> allChannels;
+            if (m_iptvShowFavoritesOnly) {
+                allChannels = IPTVManager::instance().getFavoriteChannels();
+            } else if (m_activePlaylistIndex >= 0) {
+                const Playlist* pl = IPTVManager::instance().getPlaylist(
+                    static_cast<size_t>(m_activePlaylistIndex));
+                if (pl) {
+                    for (const auto& item : pl->channels)
+                        allChannels.push_back(IPTVChannel::fromItem(item, pl->name, pl->sourceFile));
+                }
+            } else {
+                allChannels = IPTVManager::instance().getChannels();
+            }
+
+            // Build group list
+            std::vector<std::string> groups;
+            groups.push_back("");
+            {
+                std::unordered_set<std::string> seen;
+                for (const auto& ch : allChannels) {
+                    if (!ch.group.empty() && seen.find(ch.group) == seen.end()) {
+                        seen.insert(ch.group);
+                        groups.push_back(ch.group);
+                    }
+                }
+                std::sort(groups.begin() + 1, groups.end());
+            }
+
+            // Apply group filter
+            std::vector<IPTVChannel> channels;
+            if (m_iptvSelectedGroup.empty()) {
+                channels = allChannels;
+            } else {
+                for (const auto& ch : allChannels)
+                    if (ch.group == m_iptvSelectedGroup) channels.push_back(ch);
+            }
+
+            int channelCount = static_cast<int>(channels.size());
+            int visibleItems = 8;
+
+            // ==============================================================
+            // SDL browser binh thuong (mpv blocking loop xu ly playback)
+            // ==============================================================
+            if (input.isButtonJustPressed(Button::UP)) {
+                if (channelCount > 0) {
+                    if (m_selectedIPTVChannelIndex > 0) {
+                        m_selectedIPTVChannelIndex -= 1;
+                    } else {
+                        // Loop: tu dau -> cuoi danh sach
+                        m_selectedIPTVChannelIndex = channelCount - 1;
+                        m_iptvScrollOffset = std::max(0, channelCount - visibleItems);
+                    }
+                    if (m_selectedIPTVChannelIndex < m_iptvScrollOffset)
+                        m_iptvScrollOffset = m_selectedIPTVChannelIndex;
                 }
             } else if (input.isButtonJustPressed(Button::DOWN)) {
                 if (channelCount > 0) {
-                    m_selectedIPTVChannelIndex = std::min(channelCount - 1, m_selectedIPTVChannelIndex + 1);
-                    if (m_selectedIPTVChannelIndex >= m_iptvScrollOffset + visibleItems) {
+                    if (m_selectedIPTVChannelIndex + 1 < channelCount) {
+                        m_selectedIPTVChannelIndex += 1;
+                    } else {
+                        // Loop: tu cuoi -> dau danh sach
+                        m_selectedIPTVChannelIndex = 0;
+                        m_iptvScrollOffset = 0;
+                    }
+                    if (m_selectedIPTVChannelIndex >= m_iptvScrollOffset + visibleItems)
                         m_iptvScrollOffset = m_selectedIPTVChannelIndex - visibleItems + 1;
+                }
+            } else if (input.isButtonJustPressed(Button::LEFT)) {
+                auto it = std::find(groups.begin(), groups.end(), m_iptvSelectedGroup);
+                if (it != groups.end() && it != groups.begin()) {
+                    --it;
+                    m_iptvSelectedGroup = *it;
+                    m_selectedIPTVChannelIndex = 0;
+                    m_iptvScrollOffset = 0;
+                    // Auto-scroll group bar to keep selected visible
+                    int gx = 8 - m_iptvGroupBarOffset;
+                    for (int gi = 0; gi < static_cast<int>(groups.size()); gi++) {
+                        std::string label = groups[gi].empty() ? "Tất cả" : groups[gi];
+                        label = truncateToWidth(label, m_fontSmall, UiTheme::PILL_MAX_W - UiTheme::PILL_PAD_X * 2);
+                        int gW = pillWidth(label, m_fontSmall);
+                        if (gi == std::distance(groups.begin(), it)) break;
+                        gx += gW + UiTheme::PILL_GAP;
+                    }
+                    if (gx < 10) m_iptvGroupBarOffset = std::max(0, m_iptvGroupBarOffset + gx - 10);
+                }
+            } else if (input.isButtonJustPressed(Button::RIGHT)) {
+                auto it = std::find(groups.begin(), groups.end(), m_iptvSelectedGroup);
+                if (it != groups.end()) {
+                    ++it;
+                    if (it != groups.end()) {
+                        m_iptvSelectedGroup = *it;
+                        m_selectedIPTVChannelIndex = 0;
+                        m_iptvScrollOffset = 0;
+                        // Auto-scroll group bar to keep selected visible
+                        int gx = 8 - m_iptvGroupBarOffset;
+                        for (int gi = 0; gi < static_cast<int>(groups.size()); gi++) {
+                            std::string label = groups[gi].empty() ? "Tất cả" : groups[gi];
+                            label = truncateToWidth(label, m_fontSmall, UiTheme::PILL_MAX_W - UiTheme::PILL_PAD_X * 2);
+                            int gW = pillWidth(label, m_fontSmall);
+                            if (gi == std::distance(groups.begin(), it)) break;
+                            gx += gW + UiTheme::PILL_GAP;
+                        }
+                        if (gx + 150 > 1010) m_iptvGroupBarOffset += (gx + 150) - 1010;
                     }
                 }
             } else if (input.isButtonJustPressed(Button::L1)) {
                 if (channelCount > 0) {
-                    m_selectedIPTVChannelIndex = std::max(0, m_selectedIPTVChannelIndex - visibleItems);
-                    m_iptvScrollOffset = std::max(0, m_iptvScrollOffset - visibleItems);
-                    if (m_selectedIPTVChannelIndex < m_iptvScrollOffset) {
-                        m_iptvScrollOffset = m_selectedIPTVChannelIndex;
+                    int step = std::max(1, visibleItems);
+                    int lastPageStart = std::max(0, channelCount - step);
+                    if (m_selectedIPTVChannelIndex > 0) {
+                        m_selectedIPTVChannelIndex = std::max(0, m_selectedIPTVChannelIndex - step);
+                    } else {
+                        // Loop: tu trang dau -> trang cuoi
+                        m_selectedIPTVChannelIndex = lastPageStart;
                     }
+                    m_iptvScrollOffset = std::max(0, m_selectedIPTVChannelIndex - (step - 1));
+                    if (m_iptvScrollOffset > lastPageStart)
+                        m_iptvScrollOffset = lastPageStart;
+                    if (m_selectedIPTVChannelIndex < m_iptvScrollOffset)
+                        m_iptvScrollOffset = m_selectedIPTVChannelIndex;
                 }
             } else if (input.isButtonJustPressed(Button::R1)) {
                 if (channelCount > 0) {
-                    m_selectedIPTVChannelIndex = std::min(channelCount - 1, m_selectedIPTVChannelIndex + visibleItems);
-                    if (m_selectedIPTVChannelIndex >= m_iptvScrollOffset + visibleItems) {
-                        m_iptvScrollOffset = std::min(std::max(0, channelCount - visibleItems), m_iptvScrollOffset + visibleItems);
+                    int step = std::max(1, visibleItems);
+                    int lastPageStart = std::max(0, channelCount - step);
+                    int target = m_selectedIPTVChannelIndex + step;
+                    if (target < channelCount) {
+                        m_selectedIPTVChannelIndex = target;
+                    } else {
+                        // Loop: tu trang cuoi -> trang dau
+                        m_selectedIPTVChannelIndex = 0;
+                        m_iptvScrollOffset = 0;
                     }
+                    if (m_selectedIPTVChannelIndex >= m_iptvScrollOffset + visibleItems)
+                        m_iptvScrollOffset = std::min(lastPageStart,
+                                                     m_selectedIPTVChannelIndex - visibleItems + 1);
                 }
             } else if (input.isButtonJustPressed(Button::A)) {
                 if (channelCount > 0 && m_selectedIPTVChannelIndex >= 0 && m_selectedIPTVChannelIndex < channelCount) {
                     showToast("Đang kết nối: " + channels[m_selectedIPTVChannelIndex].name + "...", {0, 180, 216, 255}, 3000);
                     render();
-                    if (!IPTVManager::instance().playChannel(channels[m_selectedIPTVChannelIndex])) {
+                    if (!IPTVManager::instance().playChannel(channels[m_selectedIPTVChannelIndex], m_selectedIPTVChannelIndex, channels)) {
                         showToast("Không thể phát video (Lỗi kết nối hoặc player)", {239, 68, 68, 255}, 4000);
                     }
                 }
             } else if (input.isButtonJustPressed(Button::B)) {
-                if (m_iptvShowFavoritesOnly) {
+                IPTVManager::instance().stop();
+                if (!m_iptvSelectedGroup.empty()) {
+                    m_iptvSelectedGroup.clear();
+                    m_selectedIPTVChannelIndex = 0;
+                    m_iptvScrollOffset = 0;
+                } else if (m_iptvShowFavoritesOnly) {
                     m_iptvShowFavoritesOnly = false;
                     m_selectedIPTVChannelIndex = 0;
                     m_iptvScrollOffset = 0;
                     showToast("Đang hiển thị tất cả kênh", {0, 180, 216, 255}, 1500);
+                } else if (IPTVManager::instance().playlistCount() > 1) {
+                    m_selectedPlaylistIndex = std::max(0, m_activePlaylistIndex);
+                    setState(UIState::IPTV_PLAYLIST_SELECT);
                 } else {
-                    IPTVManager::instance().stop();
                     setState(UIState::MENU);
                 }
             } else if (input.isButtonJustPressed(Button::X)) {
-                // Toggle favorite on selected channel
                 if (channelCount > 0 && m_selectedIPTVChannelIndex >= 0 && m_selectedIPTVChannelIndex < channelCount) {
                     std::string chanName = channels[m_selectedIPTVChannelIndex].name;
                     bool wasFav = IPTVManager::instance().isFavorite(chanName);
                     IPTVManager::instance().toggleFavorite(chanName);
-                    if (!wasFav) {
-                        showToast("★ Đã thêm vào yêu thích: " + chanName, {250, 204, 21, 255}, 2000);
-                    } else {
-                        showToast("☆ Đã xóa khỏi yêu thích: " + chanName, {148, 163, 184, 255}, 2000);
-                        if (m_iptvShowFavoritesOnly) {
-                            channels = IPTVManager::instance().getFavoriteChannels();
-                            channelCount = static_cast<int>(channels.size());
-                            if (m_selectedIPTVChannelIndex >= channelCount) {
-                                m_selectedIPTVChannelIndex = std::max(0, channelCount - 1);
-                            }
-                            if (m_selectedIPTVChannelIndex < m_iptvScrollOffset) {
-                                m_iptvScrollOffset = m_selectedIPTVChannelIndex;
-                            }
-                        }
-                    }
+                    showToast(wasFav ? "☆ Đã xóa khỏi yêu thích: " + chanName
+                                     : "★ Đã thêm vào yêu thích: " + chanName,
+                              wasFav ? SDL_Color{148, 163, 184, 255} : SDL_Color{250, 204, 21, 255}, 2000);
                 }
             } else if (input.isButtonJustPressed(Button::Y)) {
-                // Toggle Favorites filter mode
                 m_iptvShowFavoritesOnly = !m_iptvShowFavoritesOnly;
+                m_iptvSelectedGroup.clear();
                 m_selectedIPTVChannelIndex = 0;
                 m_iptvScrollOffset = 0;
                 showToast(m_iptvShowFavoritesOnly ? "★ Đang lọc: Kênh Yêu Thích" : "Đang lọc: Tất cả kênh", {0, 180, 216, 255}, 2000);
             } else if (input.isButtonJustPressed(Button::SELECT) || input.isButtonJustPressed(Button::START)) {
-                // Open IPTV QWERTY Search
                 m_iptvSearchQuery.clear();
                 m_iptvSearchResults.clear();
-                m_iptvKbRow = 0;
-                m_iptvKbCol = 0;
+                m_iptvKbRow = 0; m_iptvKbCol = 0;
                 m_iptvKbInResults = false;
                 m_iptvSearchSelectedIndex = 0;
                 m_iptvSearchScrollOffset = 0;
@@ -1086,6 +1390,8 @@ void UIManager::update() {
             }
             break;
         }
+
+
 
         case UIState::IPTV_SEARCH: {
             static const char* qwertyRows[] = {
@@ -1206,9 +1512,10 @@ void UIManager::update() {
                         const auto& selChan = m_iptvSearchResults[m_iptvSearchSelectedIndex];
                         showToast("Đang kết nối: " + selChan.name + "...", {0, 180, 216, 255}, 3000);
                         render();
-                        if (!IPTVManager::instance().playChannel(selChan)) {
+                        if (!IPTVManager::instance().playChannel(selChan, m_iptvSearchSelectedIndex, m_iptvSearchResults)) {
                             showToast("Không thể phát video (Lỗi kết nối hoặc player)", {239, 68, 68, 255}, 4000);
                         }
+                        m_iptvSearchSelectedIndex = IPTVManager::instance().getLastPlayingIndex();
                     }
                 } else if (input.isButtonJustPressed(Button::X)) {
                     if (resultCount > 0 && m_iptvSearchSelectedIndex >= 0 && m_iptvSearchSelectedIndex < resultCount) {
@@ -1247,8 +1554,47 @@ void UIManager::update() {
                 "ZXCVBNM()/"
             };
 
+            if (m_ytFocusInTags) {
+                int tagCount = std::min(8, static_cast<int>(m_ytSearchHistory.size()));
+                if (input.isButtonJustPressed(Button::UP)) {
+                    if (m_ytSelectedTagIndex >= 4) {
+                        m_ytSelectedTagIndex -= 4;
+                    }
+                } else if (input.isButtonJustPressed(Button::DOWN)) {
+                    if (m_ytSelectedTagIndex + 4 < tagCount) {
+                        m_ytSelectedTagIndex += 4;
+                    } else {
+                        m_ytFocusInTags = false;
+                        m_ytKbRow = 0;
+                        m_ytKbCol = (m_ytSelectedTagIndex % 4) * 2 + 1;
+                    }
+                } else if (input.isButtonJustPressed(Button::LEFT)) {
+                    if (m_ytSelectedTagIndex > 0) m_ytSelectedTagIndex--;
+                    else m_ytSelectedTagIndex = tagCount - 1;
+                } else if (input.isButtonJustPressed(Button::RIGHT)) {
+                    if (m_ytSelectedTagIndex + 1 < tagCount) m_ytSelectedTagIndex++;
+                    else m_ytSelectedTagIndex = 0;
+                } else if (input.isButtonJustPressed(Button::A) || input.isButtonJustPressed(Button::START)) {
+                    if (m_ytSelectedTagIndex >= 0 && m_ytSelectedTagIndex < tagCount) {
+                        m_ytSearchQuery = m_ytSearchHistory[m_ytSelectedTagIndex];
+                        triggerYouTubeSearch();
+                    }
+                } else if (input.isButtonJustPressed(Button::B)) {
+                    m_ytFocusInTags = false;
+                } else if (input.isButtonJustPressed(Button::SELECT)) {
+                    setState(UIState::MENU);
+                }
+                break;
+            }
+
             if (input.isButtonJustPressed(Button::UP)) {
-                if (m_ytKbRow > 0) m_ytKbRow--;
+                if (m_ytKbRow > 0) {
+                    m_ytKbRow--;
+                } else if (!m_ytSearchHistory.empty()) {
+                    m_ytFocusInTags = true;
+                    int tagCount = std::min(8, static_cast<int>(m_ytSearchHistory.size()));
+                    m_ytSelectedTagIndex = std::min(tagCount - 1, m_ytKbCol / 2);
+                }
             } else if (input.isButtonJustPressed(Button::DOWN)) {
                 if (m_ytKbRow < 4) m_ytKbRow++;
             } else if (input.isButtonJustPressed(Button::LEFT)) {
@@ -1463,8 +1809,530 @@ void UIManager::update() {
             break;
         }
 
+        case UIState::TIKTOK_SEARCH: {
+            if (m_ttIsSearching) {
+                break;
+            }
+
+            static const char* lowerRows[] = {
+                "1234567890",
+                "qwertyuiop",
+                "asdfghjkl-",
+                "zxcvbnm()/"
+            };
+            static const char* upperRows[] = {
+                "1234567890",
+                "QWERTYUIOP",
+                "ASDFGHJKL-",
+                "ZXCVBNM()/"
+            };
+
+            if (m_ttFocusInTags) {
+                int tagCount = static_cast<int>(m_ttTrendingTags.size());
+                if (input.isButtonJustPressed(Button::UP)) {
+                    if (m_ttSelectedTagIndex >= 4) {
+                        m_ttSelectedTagIndex -= 4;
+                    }
+                } else if (input.isButtonJustPressed(Button::DOWN)) {
+                    if (m_ttSelectedTagIndex + 4 < tagCount) {
+                        m_ttSelectedTagIndex += 4;
+                    } else {
+                        m_ttFocusInTags = false;
+                        m_ttKbRow = 0;
+                        m_ttKbCol = (m_ttSelectedTagIndex % 4) * 2 + 1;
+                    }
+                } else if (input.isButtonJustPressed(Button::LEFT)) {
+                    if (m_ttSelectedTagIndex > 0) m_ttSelectedTagIndex--;
+                    else m_ttSelectedTagIndex = tagCount - 1;
+                } else if (input.isButtonJustPressed(Button::RIGHT)) {
+                    if (m_ttSelectedTagIndex + 1 < tagCount) m_ttSelectedTagIndex++;
+                    else m_ttSelectedTagIndex = 0;
+                } else if (input.isButtonJustPressed(Button::A) || input.isButtonJustPressed(Button::START)) {
+                    if (m_ttSelectedTagIndex >= 0 && m_ttSelectedTagIndex < tagCount) {
+                        m_ttSearchQuery = m_ttTrendingTags[m_ttSelectedTagIndex];
+                        triggerTikTokSearch();
+                    }
+                } else if (input.isButtonJustPressed(Button::B)) {
+                    m_ttFocusInTags = false;
+                } else if (input.isButtonJustPressed(Button::SELECT)) {
+                    setState(UIState::MENU);
+                }
+                break;
+            }
+
+            if (input.isButtonJustPressed(Button::UP)) {
+                if (m_ttKbRow > 0) {
+                    m_ttKbRow--;
+                } else if (!m_ttTrendingTags.empty()) {
+                    m_ttFocusInTags = true;
+                    int tagCount = static_cast<int>(m_ttTrendingTags.size());
+                    m_ttSelectedTagIndex = std::min(tagCount - 1, m_ttKbCol / 2);
+                }
+            } else if (input.isButtonJustPressed(Button::DOWN)) {
+                if (m_ttKbRow < 4) m_ttKbRow++;
+            } else if (input.isButtonJustPressed(Button::LEFT)) {
+                if (m_ttKbRow == 4) {
+                    int actionIdx = m_ttKbCol / 2;
+                    if (actionIdx > 0) actionIdx--;
+                    else actionIdx = 4;
+                    m_ttKbCol = actionIdx * 2;
+                } else {
+                    if (m_ttKbCol > 0) m_ttKbCol--;
+                    else m_ttKbCol = 9;
+                }
+            } else if (input.isButtonJustPressed(Button::RIGHT)) {
+                if (m_ttKbRow == 4) {
+                    int actionIdx = m_ttKbCol / 2;
+                    if (actionIdx < 4) actionIdx++;
+                    else actionIdx = 0;
+                    m_ttKbCol = actionIdx * 2;
+                } else {
+                    if (m_ttKbCol < 9) m_ttKbCol++;
+                    else m_ttKbCol = 0;
+                }
+            } else if (input.isButtonJustPressed(Button::A)) {
+                if (m_ttKbRow < 4) {
+                    char ch = m_ttKbShift ? upperRows[m_ttKbRow][m_ttKbCol] : lowerRows[m_ttKbRow][m_ttKbCol];
+                    if (m_ttSearchQuery.length() < 60) {
+                        if (m_ttTelexMode) {
+                            m_ttSearchQuery = TelexHelper::processTelex(m_ttSearchQuery, ch);
+                        } else {
+                            m_ttSearchQuery += ch;
+                        }
+                    }
+                } else {
+                    int actionIdx = m_ttKbCol / 2;
+                    if (actionIdx == 0) {
+                        m_ttKbShift = !m_ttKbShift;
+                    } else if (actionIdx == 1) {
+                        m_ttTelexMode = !m_ttTelexMode;
+                        showToast(m_ttTelexMode ? "Chế độ: TELEX" : "Chế độ: TIẾNG ANH (US)", {0, 200, 83, 255}, 1200);
+                    } else if (actionIdx == 2) {
+                        if (m_ttSearchQuery.length() < 60) m_ttSearchQuery += ' ';
+                    } else if (actionIdx == 3) {
+                        TelexHelper::popUtf8(m_ttSearchQuery);
+                    } else if (actionIdx == 4) {
+                        if (!m_ttSearchQuery.empty()) {
+                            triggerTikTokSearch();
+                        }
+                    }
+                }
+            } else if (input.isButtonJustPressed(Button::L1)) {
+                m_ttKbShift = !m_ttKbShift;
+            } else if (input.isButtonJustPressed(Button::R1)) {
+                m_ttTelexMode = !m_ttTelexMode;
+                showToast(m_ttTelexMode ? "Chế độ: TELEX" : "Chế độ: TIẾNG ANH (US)", {0, 200, 83, 255}, 1200);
+            } else if (input.isButtonJustPressed(Button::X)) {
+                if (m_ttSearchQuery.length() < 60) m_ttSearchQuery += ' ';
+            } else if (input.isButtonJustPressed(Button::Y)) {
+                TelexHelper::popUtf8(m_ttSearchQuery);
+            } else if (input.isButtonJustPressed(Button::START)) {
+                if (!m_ttSearchQuery.empty()) {
+                    triggerTikTokSearch();
+                } else {
+                    triggerTikTokTrending();
+                }
+            } else if (input.isButtonJustPressed(Button::B)) {
+                if (!m_ttSearchQuery.empty()) {
+                    TelexHelper::popUtf8(m_ttSearchQuery);
+                } else {
+                    setState(UIState::MENU);
+                }
+            } else if (input.isButtonJustPressed(Button::SELECT)) {
+                setState(UIState::MENU);
+            }
+            break;
+        }
+
+        case UIState::TIKTOK_RESULTS: {
+            if (m_ttIsLoadingVideo) {
+                break;
+            }
+
+            int resultCount = static_cast<int>(m_ttSearchResults.size());
+            if (resultCount == 0) {
+                setState(UIState::TIKTOK_SEARCH);
+                break;
+            }
+
+            const int gridCols = 3;
+
+            if (input.isButtonJustPressed(Button::LEFT)) {
+                if (m_ttSearchSelectedIndex % gridCols > 0) {
+                    m_ttSearchSelectedIndex--;
+                }
+            } else if (input.isButtonJustPressed(Button::RIGHT)) {
+                if (m_ttSearchSelectedIndex % gridCols < gridCols - 1 &&
+                    m_ttSearchSelectedIndex + 1 < resultCount) {
+                    m_ttSearchSelectedIndex++;
+                }
+            } else if (input.isButtonJustPressed(Button::UP)) {
+                if (m_ttSearchSelectedIndex >= gridCols) {
+                    m_ttSearchSelectedIndex -= gridCols;
+                }
+            } else if (input.isButtonJustPressed(Button::DOWN)) {
+                if (m_ttSearchSelectedIndex + gridCols < resultCount) {
+                    m_ttSearchSelectedIndex += gridCols;
+                } else if (m_ttSearchSelectedIndex + 1 < resultCount && (m_ttSearchSelectedIndex % gridCols == 0)) {
+                    m_ttSearchSelectedIndex = resultCount - 1;
+                }
+            } else if (input.isButtonJustPressed(Button::X)) {
+                setState(UIState::TIKTOK_SEARCH);
+            } else if (input.isButtonJustPressed(Button::A)) {
+                if (m_ttSearchSelectedIndex >= 0 && m_ttSearchSelectedIndex < resultCount) {
+                    std::string selected = m_ttSearchResults[m_ttSearchSelectedIndex];
+                    std::string videoId = selected.substr(0, selected.find('|'));
+                    std::string title;
+                    size_t p1 = selected.find('|');
+                    if (p1 != std::string::npos) {
+                        size_t p2 = selected.find('|', p1 + 1);
+                        if (p2 != std::string::npos) {
+                            title = selected.substr(p1 + 1, p2 - p1 - 1);
+                        }
+                    }
+                    playTikTokVideo(videoId, title);
+                }
+            } else if (input.isButtonJustPressed(Button::B)) {
+                setState(UIState::TIKTOK_SEARCH);
+            } else if (input.isButtonJustPressed(Button::SELECT)) {
+                setState(UIState::MENU);
+            }
+            break;
+        }
+
+        // ===========================================================
+        // LocalSend P2P states
+        // ===========================================================
+        case UIState::LOCALSEND_HOME: {
+            auto devices = LocalSendManager::instance().knownDevices();
+            int devCount = (int)devices.size();
+
+            if (input.isButtonJustPressed(Button::B)) {
+                LocalSendManager::instance().stop();
+                setState(UIState::MENU);
+                break;
+            } else if (input.isButtonJustPressed(Button::Y)) {
+                // Refresh: dọn list cũ + quét burst ngay (thấy máy trong ~1s)
+                LocalSendManager::instance().refreshDiscovery();
+                m_localSendSelectedDevice = 0;
+                showToast("Đang quét thiết bị...", {100, 116, 139, 255}, 1500);
+            } else if (input.isButtonJustPressed(Button::X)) {
+                if (m_localSendMode == 0) {
+                    // Apps tab tạm ẩn: X chỉ refresh ROMs
+                    m_lsPickerTab = 0;
+                    m_lsRomListLoaded = false;
+                    m_lsRomSelected = 0; m_lsRomScrollOffset = 0;
+                    showToast("Đã refresh ROMs", {100, 116, 139, 255}, 1000);
+                } else {
+                    m_localSendFolderSelected = 0;
+                    setState(UIState::LOCALSEND_FOLDER);
+                }
+            } else if (input.isButtonJustPressed(Button::LEFT) || input.isButtonJustPressed(Button::RIGHT)) {
+                // L/R: chọn thiết bị trong SEND (Up/Down đã dùng để toggle Send/Receive)
+                if (m_localSendMode == 0 && devCount > 0) {
+                    int dir = input.isButtonJustPressed(Button::RIGHT) ? 1 : -1;
+                    m_localSendSelectedDevice = (m_localSendSelectedDevice + dir + devCount) % devCount;
+                }
+            } else if (input.isButtonJustPressed(Button::UP) || input.isButtonJustPressed(Button::DOWN)) {
+                // DPad Up/Down: toggle Send/Receive
+                m_localSendMode = (m_localSendMode == 0) ? 1 : 0;
+            } else if (input.isButtonJustPressed(Button::A) && m_localSendMode == 0 && devCount > 0) {
+                // Vào SEND: rescan /Roms mỗi lần (flag false → render quét lại)
+                m_lsPickerTab = 0;
+                m_lsRomListLoaded = false;
+                m_lsRomSelected = 0; m_lsRomScrollOffset = 0;
+                setState(UIState::LOCALSEND_GAME_PICKER);
+            }
+            break;
+        }
+
+        case UIState::LOCALSEND_INCOMING: {
+            // m_localSendIncomingMode: 0=picker 2 cột, 1=confirm cuối
+            if (m_localSendIncomingMode == 0) {
+                // ===== Screen 1: Folder picker 2 cột =====
+                // Up/Down = chọn folder, L/R = chuyển focus, A = chọn folder → confirm
+                auto& entries = m_localSendFolderEntries;
+                if (input.isButtonJustPressed(Button::B)) {
+                    if (m_localSendFolderFocus == 1) {
+                        m_localSendFolderFocus = 0;
+                    } else {
+                        LocalSendManager::instance().rejectUpload(m_localSendPendingSessionId);
+                        showToast("Đã từ chối", {239, 68, 68, 255}, 1500);
+                        setState(UIState::LOCALSEND_HOME);
+                    }
+                } else if (input.isButtonJustPressed(Button::LEFT) ||
+                           input.isButtonJustPressed(Button::RIGHT)) {
+                    m_localSendFolderFocus = (m_localSendFolderFocus == 0) ? 1 : 0;
+                } else if (input.isButtonJustPressed(Button::UP)) {
+                    if (m_localSendFolderFocus == 0) {
+                        int n = (int)entries.size();
+                        if (n > 0) m_localSendFolderSelected =
+                            (m_localSendFolderSelected - 1 + n) % n;
+                    }
+                } else if (input.isButtonJustPressed(Button::DOWN)) {
+                    if (m_localSendFolderFocus == 0) {
+                        int n = (int)entries.size();
+                        if (n > 0) m_localSendFolderSelected =
+                            (m_localSendFolderSelected + 1) % n;
+                    }
+                } else if (input.isButtonJustPressed(Button::A)) {
+                    if (m_localSendFolderFocus == 1) {
+                        // Chốt folder hiện tại → chuyển sang screen confirm
+                        m_localSendIncomingSavePath = m_localSendFolderCurrentPath;
+                        m_localSendIncomingMode = 1;
+                    } else {
+                        // Vào folder con
+                        if (m_localSendFolderSelected >= 0 &&
+                            m_localSendFolderSelected < (int)entries.size()) {
+                            m_localSendFolderCurrentPath = entries[m_localSendFolderSelected];
+                            m_localSendFolderSelected = 0;
+                            m_localSendFolderLoaded = false;
+                        }
+                    }
+                }
+            } else {
+                // ===== Screen 2: Confirm cuối =====
+                if (input.isButtonJustPressed(Button::B)) {
+                    m_localSendIncomingMode = 0;
+                } else if (input.isButtonJustPressed(Button::Y)) {
+                    // Quay lại folder picker
+                    m_localSendFolderCurrentPath = "/mnt/SDCARD/Downloads";
+                    m_localSendFolderLoaded = false;
+                    m_localSendFolderSelected = 0;
+                    m_localSendFolderFocus = 0;
+                    m_localSendIncomingMode = 0;
+                } else if (input.isButtonJustPressed(Button::A)) {
+                    // Chốt save path
+                    std::string rel = m_localSendIncomingSavePath;
+                    const std::string root = "/mnt/SDCARD";
+                    if (rel.compare(0, root.size(), root) == 0)
+                        rel = rel.substr(root.size());
+                    if (!rel.empty() && rel.back() != '/') rel += '/';
+                    if (rel == "/") rel = "";
+                    LocalSendManager::instance().setPendingTargetFolder(
+                        m_localSendPendingSessionId, rel);
+                    uint64_t need = m_localSendCurrentPrompt.file.size;
+                    if (need > 0) {
+                        uint64_t freeB = LsUtil::sdFreeBytes("/mnt/SDCARD");
+                        if (freeB < need) {
+                            showToast("Thẻ đầy: cần " + LsUtil::humanSize(need) +
+                                      ", trống " + LsUtil::humanSize(freeB),
+                                      {239, 68, 68, 255}, 3000);
+                            m_localSendIncomingMode = 0;
+                            break;
+                        }
+                    }
+                    LocalSendManager::instance().approveUpload(m_localSendPendingSessionId);
+                    showToast("Đã chấp nhận: " + m_localSendCurrentPrompt.file.fileName,
+                              {34, 197, 94, 255}, 2000);
+                    setState(UIState::LOCALSEND_PROGRESS);
+                }
+            }
+            break;
+        }
+
+        case UIState::LOCALSEND_FOLDER: {
+            // File Explorer full-screen tone xanh IPTV.
+            // Ban phim rename/new-folder uu tien xu ly truoc.
+            if (m_lsFolderRenaming) {
+                handleLsFolderKeyboardInput();
+                break;
+            }
+            // Up/Down = di chuyen, A = vao folder, B = lui,
+            // X = chon folder lam dich, Y = thu muc moi (ban phim),
+            // START = doi ten folder dang chon, SELECT = tai lai.
+            auto& entries = m_localSendFolderEntries;
+            if (input.isButtonJustPressed(Button::B)) {
+                if (m_localSendFolderFocus == 1) {
+                    m_localSendFolderFocus = 0;
+                } else if (m_localSendFolderCurrentPath == "/mnt/SDCARD") {
+                    setState(UIState::LOCALSEND_HOME);
+                } else {
+                    auto pos = m_localSendFolderCurrentPath.find_last_of('/');
+                    if (pos != std::string::npos && pos > 0) {
+                        m_localSendFolderCurrentPath = m_localSendFolderCurrentPath.substr(0, pos);
+                    }
+                    if (m_localSendFolderCurrentPath.empty()) m_localSendFolderCurrentPath = "/mnt/SDCARD";
+                    m_localSendFolderLoaded = false;
+                }
+            } else if (input.isButtonJustPressed(Button::LEFT) ||
+                       input.isButtonJustPressed(Button::RIGHT)) {
+                m_localSendFolderFocus = (m_localSendFolderFocus == 0) ? 1 : 0;
+            } else if (input.isButtonJustPressed(Button::UP)) {
+                if (m_localSendFolderFocus == 0) {
+                    int n = (int)entries.size();
+                    if (n > 0) m_localSendFolderSelected =
+                        (m_localSendFolderSelected - 1 + n) % n;
+                }
+            } else if (input.isButtonJustPressed(Button::DOWN)) {
+                if (m_localSendFolderFocus == 0) {
+                    int n = (int)entries.size();
+                    if (n > 0) m_localSendFolderSelected =
+                        (m_localSendFolderSelected + 1) % n;
+                }
+            } else if (input.isButtonJustPressed(Button::A)) {
+                // Mở folder đang chọn (vào trong)
+                if (m_localSendFolderSelected >= 0 &&
+                    m_localSendFolderSelected < (int)entries.size()) {
+                    m_localSendFolderCurrentPath = entries[m_localSendFolderSelected];
+                    m_localSendFolderSelected = 0;
+                    m_localSendFolderLoaded = false;
+                }
+            } else if (input.isButtonJustPressed(Button::X)) {
+                // Chọn folder hiện tại làm target cho LocalSend
+                std::string rel = m_localSendFolderCurrentPath;
+                const std::string root = "/mnt/SDCARD";
+                if (rel.compare(0, root.size(), root) == 0)
+                    rel = rel.substr(root.size());
+                if (!rel.empty() && rel.back() != '/') rel += '/';
+                if (rel == "/") rel = "";
+                LocalSendManager::instance().setTargetFolder(rel);
+                showToast("Đã chọn thư mục: " + (rel.empty()
+                                               ? std::string("(Tự động)")
+                                               : rel),
+                          {34, 197, 94, 255}, 2000);
+                setState(UIState::LOCALSEND_HOME);
+            } else if (input.isButtonJustPressed(Button::Y)) {
+                // Thu muc moi: mo ban phim QWERTY de dat ten (mac dinh NewFolder...)
+                startLsFolderRename(false);
+            } else if (input.isButtonJustPressed(Button::START)) {
+                // Doi ten folder dang chon
+                startLsFolderRename(true);
+            } else if (input.isButtonJustPressed(Button::SELECT)) {
+                m_localSendFolderLoaded = false;
+                showToast("Đang tải lại...", {100, 116, 139, 255}, 800);
+            }
+            break;
+        }
+
+        case UIState::LOCALSEND_SEND: {
+            // Legacy: chuyển thẳng sang Game Picker (LOCALSEND_SEND giờ chỉ là
+            // bước chọn device → mở game picker).
+            m_lsRomSelected = 0;
+            m_lsRomScrollOffset = 0;
+            setState(UIState::LOCALSEND_GAME_PICKER);
+            break;
+        }
+
+        case UIState::LOCALSEND_GAME_PICKER: {
+            // Tạm ẩn Apps tab: chỉ quét /Roms, rescan mỗi lần vào.
+            m_lsPickerTab = 0;
+            int n = (int)m_lsRomList.size();
+            if (input.isButtonJustPressed(Button::B)) {
+                setState(UIState::LOCALSEND_HOME);
+            } else if (input.isButtonJustPressed(Button::Y)) {
+                m_lsRomListLoaded = false;
+                showToast("Đã refresh", {100, 116, 139, 255}, 1000);
+            } else if (input.isButtonJustPressed(Button::A) && n > 0) {
+                auto devices = LocalSendManager::instance().knownDevices();
+                if (devices.empty() ||
+                    m_localSendSelectedDevice < 0 ||
+                    m_localSendSelectedDevice >= (int)devices.size()) {
+                    showToast("Chưa chọn thiết bị đích", {239, 68, 68, 255}, 1500);
+                    break;
+                }
+                const auto& dev = devices[m_localSendSelectedDevice];
+
+                // ROMS: gửi với relative path chính xác để receiver tái tạo
+                // đúng cấu trúc thư mục (vd Roms/GBA/sub/...).
+                if (m_lsRomSelected<0||m_lsRomSelected>=(int)m_lsRomList.size()) break;
+                const auto& e0 = m_lsRomList[m_lsRomSelected];
+                if (!FileSystemManager::instance().fileExists(e0.path)) {
+                    showToast("File không tồn tại", {239, 68, 68, 255}, 2000);
+                    break;
+                }
+                LsFileMeta meta;
+                meta.fileName = e0.name;
+                // Tính relativePath chính xác từ /mnt/SDCARD/ (giữ subfolder).
+                {
+                    const std::string prefix = "/mnt/SDCARD/";
+                    if (e0.path.compare(0, prefix.size(), prefix) == 0) {
+                        std::string sub = e0.path.substr(prefix.size());
+                        auto slash = sub.find_last_of('/');
+                        meta.relativePath = (slash == std::string::npos)
+                            ? "" : sub.substr(0, slash + 1);
+                    } else {
+                        meta.relativePath = "Roms/" + e0.systemDir + "/";
+                    }
+                }
+                meta.gameTitle = e0.name;
+                std::string sid = LocalSendManager::instance().sendFileMetaAsync(
+                    meta, e0.path, dev);
+                if (sid.empty()) {
+                    showToast("Gửi thất bại (mạng?)", {239, 68, 68, 255}, 2000);
+                } else {
+                    m_localSendProgressSel = 0;
+                    m_localSendProgressScroll = 0;
+                    showToast("Đang gửi: " + e0.name,
+                              {34, 197, 94, 255}, 2000);
+                    setState(UIState::LOCALSEND_PROGRESS);
+                }
+            } else if (input.isButtonJustPressed(Button::UP) && n > 0) {
+                m_lsRomSelected = (m_lsRomSelected - 1 + n) % n;
+            } else if (input.isButtonJustPressed(Button::DOWN) && n > 0) {
+                m_lsRomSelected = (m_lsRomSelected + 1) % n;
+            } else if (input.isButtonJustPressed(Button::L1) && n > 0) {
+                m_lsRomSelected = (m_lsRomSelected - 10 + n) % n;
+            } else if (input.isButtonJustPressed(Button::R1) && n > 0) {
+                m_lsRomSelected = (m_lsRomSelected + 10) % n;
+            }
+            break;
+        }
+
+        case UIState::LOCALSEND_PROGRESS: {
+            auto sends = LocalSendManager::instance().sendProgresses();
+            auto recvs = LocalSendManager::instance().receiveProgresses();
+            int total = (int)sends.size() + (int)recvs.size();
+            if (input.isButtonJustPressed(Button::B) ||
+                input.isButtonJustPressed(Button::A)) {
+                setState(UIState::LOCALSEND_HOME);
+                break;
+            }
+            if (input.isButtonJustPressed(Button::UP) && total > 0) {
+                m_localSendProgressSel = (m_localSendProgressSel - 1 + total) % total;
+            } else if (input.isButtonJustPressed(Button::DOWN) && total > 0) {
+                m_localSendProgressSel = (m_localSendProgressSel + 1) % total;
+            }
+            // Tu dong ve Home sau 3s khi tat ca xong (send DONE/FAILED + recv DONE/FAILED/REJECTED).
+            bool allDone = total > 0;
+            for (auto& s : sends) {
+                if (s.state != LsSendProgress::DONE && s.state != LsSendProgress::FAILED) { allDone = false; break; }
+            }
+            if (allDone) {
+                for (auto& r : recvs) {
+                    if (r.state != LsUploadRequest::DONE && r.state != LsUploadRequest::FAILED &&
+                        r.state != LsUploadRequest::REJECTED) { allDone = false; break; }
+                }
+            }
+            uint32_t now = SDL_GetTicks();
+            if (allDone) {
+                if (m_localSendProgressDoneMs == 0) m_localSendProgressDoneMs = now;
+                if (now - m_localSendProgressDoneMs > 3000) {
+                    m_localSendProgressDoneMs = 0;
+                    setState(UIState::LOCALSEND_HOME);
+                }
+            } else {
+                m_localSendProgressDoneMs = 0;
+            }
+            break;
+        }
+
         default: break;
     }
+}
+
+std::string UIManager::suggestNewFolderName(const std::string& parentPath) {
+    // Đề xuất tên folder mới không trùng: NewFolder, NewFolder_2, NewFolder_3, ...
+    auto exists = [&](const std::string& p) {
+        return FileSystemManager::instance().directoryExists(p);
+    };
+    std::string base = parentPath + "/NewFolder";
+    if (!exists(base)) return "NewFolder";
+    for (int i = 2; i < 1000; ++i) {
+        std::string cand = base + "_" + std::to_string(i);
+        if (!exists(cand)) return cand.substr(parentPath.size() + 1);
+    }
+    return "NewFolder";
 }
 
 void UIManager::clearTextCache() {
@@ -1653,9 +2521,44 @@ void UIManager::drawRoundedBorder(int x, int y, int w, int h, int radius, SDL_Co
 }
 
 void UIManager::drawBadge(int x, int y, int w, int h, const std::string& text, SDL_Color bg, SDL_Color fg) {
-    int rad = std::min(8, h / 2);
+    int rad = h / 2; // Chuan A: pill full-round mem mai
     drawRoundedRect(x, y, w, h, rad, bg, true);
-    drawText(text, x + w / 2, y + (h - 16) / 2, fg, m_fontSmall, true);
+    // Neu text bat dau bang "[NUT]" -> ve icon + label can giua trong badge
+    // (thay the kieu chu "[A] OK" cu bang icon that trong assets/button_icons)
+    std::string btn, label = text;
+    if (!text.empty() && text[0] == '[') {
+        size_t end = text.find(']');
+        if (end != std::string::npos && end >= 2 && end <= 9) {
+            btn = text.substr(1, end - 1);
+            label = text.substr(end + 1);
+            while (!label.empty() && label[0] == ' ') label.erase(0, 1);
+            // Chuan hoa ten nut
+            std::string up = btn;
+            for (char &c : up) c = (char)toupper((unsigned char)c);
+            if (up == "OK") btn = "A";
+            else if (up == "D-PAD" || up == "D-PAD]") btn = "DPAD";
+            else btn = up;
+        }
+    }
+    if (!btn.empty() && btn != "LEN" && m_fontSmall) {
+        int iconSize = h - 10;
+        if (iconSize < 16) iconSize = 16;
+        if (iconSize > 32) iconSize = 32;
+        int lw = textWidth(label, m_fontSmall);
+        int gap = lw > 0 ? 6 : 0;
+        int totalW = iconSize + gap + lw;
+        int sx = x + (w - totalW) / 2;
+        int centerY = y + h / 2;
+        drawButtonIcon(btn, sx, centerY - iconSize / 2, iconSize);
+        if (lw > 0) {
+            int th = TTF_FontHeight(m_fontSmall);
+            drawText(label, sx + iconSize + gap, centerY - th / 2, fg, m_fontSmall);
+        }
+        return;
+    }
+    // Can giua doc dung chieu cao that cua font (truoc day cung 16px -> lech)
+    int th = m_fontSmall ? TTF_FontHeight(m_fontSmall) : 16;
+    drawText(text, x + w / 2, y + (h - th) / 2, fg, m_fontSmall, true);
 }
 
 void UIManager::drawIcon(const std::string& iconName, int x, int y, int w, int h) {
@@ -1706,62 +2609,440 @@ void UIManager::drawIcon(const std::string& iconName, int x, int y, int w, int h
     SDL_RenderCopy(m_renderer, texture, nullptr, &dst);
 }
 
-// Draw gamepad button icon (A, B, X, Y, L1, R1, etc.)
-void UIManager::drawButtonIcon(const std::string& button, int x, int y, int size) {
-    SDL_Color bgColor = {60, 60, 60, 255};
-    SDL_Color textColor = {255, 255, 255, 255};
-    std::string label = button;
-
-    // Set colors based on button type (Xbox-style)
-    if (button == "A") {
-        bgColor = {16, 150, 60, 255};    // Green
-        label = "A";
-    } else if (button == "B") {
-        bgColor = {200, 30, 30, 255};   // Red
-        label = "B";
-    } else if (button == "X") {
-        bgColor = {30, 90, 200, 255};  // Blue
-        label = "X";
-    } else if (button == "Y") {
-        bgColor = {200, 180, 20, 255};  // Yellow
-        label = "Y";
-    } else if (button == "L1") {
-        bgColor = {100, 100, 100, 255};
-        label = "L1";
-    } else if (button == "R1") {
-        bgColor = {100, 100, 100, 255};
-        label = "R1";
-    } else if (button == "L2") {
-        bgColor = {80, 80, 80, 255};
-        label = "L2";
-    } else if (button == "R2") {
-        bgColor = {80, 80, 80, 255};
-        label = "R2";
-    } else if (button == "SELECT" || button == "BACK") {
-        bgColor = {80, 80, 80, 255};
-        label = "SEL";
-    } else if (button == "START" || button == "MENU") {
-        bgColor = {80, 80, 80, 255};
-        label = "STA";
-    } else if (button == "HOME") {
-        bgColor = {100, 100, 100, 255};
-        label = "HOME";
+void UIManager::drawPlayerIcon(const std::string& iconName, int x, int y, int w, int h) {
+    SDL_Texture* texture = nullptr;
+    std::string key = "player/" + iconName;
+    auto it = m_systemIconCache.find(key);
+    if (it != m_systemIconCache.end()) {
+        texture = it->second;
+    } else {
+        std::string iconPath = AppConfig::instance().getAssetsDir() + "/player_icons/" + iconName + ".png";
+        SDL_Surface* surface = IMG_Load(iconPath.c_str());
+        if (surface) {
+            texture = SDL_CreateTextureFromSurface(m_renderer, surface);
+            SDL_FreeSurface(surface);
+            m_systemIconCache[key] = texture;
+        }
     }
 
-    // Draw rounded rectangle for button
-    int rad = size / 4;
-    drawRoundedRect(x, y, size, size, rad, bgColor, true);
+    if (!texture) {
+        // Fallback: text cu neu thieu file (Send=">", Receive="((")
+        const char* fb = (iconName == "send") ? ">" : "((";
+        drawText(fb, x, y, {255,255,255,255}, m_fontLarge, false);
+        return;
+    }
 
-    // Draw button label (letter)
-    int fontSize = size * 3 / 5;
-    TTF_Font* font = m_fontSmall;
-    if (fontSize > 20) font = m_fontMedium;
+    int sx = PlatformInfo::instance().scaleX(x);
+    int sy = PlatformInfo::instance().scaleY(y);
+    int sw = PlatformInfo::instance().scaleW(w);
+    int sh = PlatformInfo::instance().scaleH(h);
 
-    int textW = label.length() * fontSize * 2 / 3;
-    int textX = x + (size - textW) / 2;
-    int textY = y + (size - fontSize) / 2;
-    drawText(label, textX, textY, textColor, font);
+    int texW = 0, texH = 0;
+    SDL_QueryTexture(texture, nullptr, nullptr, &texW, &texH);
+    int drawW = sw, drawH = sh;
+    if (texW > 0 && texH > 0) {
+        float aspect = static_cast<float>(texW) / static_cast<float>(texH);
+        if (aspect >= 1.0f) {
+            drawW = std::min(sw, static_cast<int>(sh * aspect));
+            drawH = static_cast<int>(drawW / aspect);
+        } else {
+            drawH = std::min(sh, static_cast<int>(sw / aspect));
+            drawW = static_cast<int>(drawH * aspect);
+        }
+    }
+    int dstX = sx + (sw - drawW) / 2;
+    int dstY = sy + (sh - drawH) / 2;
+    SDL_Rect dst = {dstX, dstY, drawW, drawH};
+    // Nhuộm trắng để icon hòa với theme sidebar (texture trắng trong suốt)
+    SDL_SetTextureColorMod(texture, 255, 255, 255);
+    SDL_RenderCopy(m_renderer, texture, nullptr, &dst);
 }
+
+void UIManager::drawButtonIcon(const std::string& button, int x, int y, int size) {
+    static const std::unordered_map<std::string, std::string> iconMap = {
+        {"A", "a.png"},
+        {"B", "b.png"},
+        {"X", "x.png"},
+        {"Y", "y.png"},
+        {"L1", "l1.png"},
+        {"R1", "r1.png"},
+        {"L2", "l2.png"},
+        {"R2", "r2.png"},
+        {"START", "start_icon.png"},
+        {"SELECT", "view.png"},
+        {"MENU", "options.png"},
+        {"HOME", "options.png"},
+        {"VIEW", "view.png"},
+        {"BACK", "back_icon.png"},
+        {"DPAD", "dpad.png"},
+        {"UP", "up.png"},
+        {"DOWN", "down.png"},
+        {"LEFT", "left.png"},
+        {"RIGHT", "right.png"},
+    };
+
+    auto it = iconMap.find(button);
+    std::string iconFile = (it != iconMap.end()) ? it->second : "";
+
+    SDL_Texture* tex = nullptr;
+    if (!iconFile.empty()) {
+        if (m_buttonIconCache.find(iconFile) != m_buttonIconCache.end()) {
+            tex = m_buttonIconCache[iconFile];
+        } else {
+            std::string iconsDir = AppConfig::instance().getAssetsDir() + "/button_icons";
+            std::string iconPath = iconsDir + "/" + iconFile;
+            SDL_Surface* surf = IMG_Load(iconPath.c_str());
+            if (surf) {
+                tex = SDL_CreateTextureFromSurface(m_renderer, surf);
+                SDL_FreeSurface(surf);
+                m_buttonIconCache[iconFile] = tex;
+            }
+        }
+    }
+
+    if (tex) {
+        int iw = 0, ih = 0;
+        SDL_QueryTexture(tex, nullptr, nullptr, &iw, &ih);
+        float scale = (float)size / std::max(iw, ih);
+        int dw = (int)(iw * scale);
+        int dh = (int)(ih * scale);
+        int dx = x + (size - dw) / 2;
+        int dy = y + (size - dh) / 2;
+        SDL_Rect dst = {dx, dy, dw, dh};
+        SDL_RenderCopy(m_renderer, tex, nullptr, &dst);
+    } else {
+        // Fallback: colored rounded square
+        SDL_Color bgColor = {60, 60, 60, 255};
+        if (button == "A") bgColor = {16, 150, 60, 255};
+        else if (button == "B") bgColor = {200, 30, 30, 255};
+        else if (button == "X") bgColor = {30, 90, 200, 255};
+        else if (button == "Y") bgColor = {200, 180, 20, 255};
+
+        int rad = size / 4;
+        drawRoundedRect(x, y, size, size, rad, bgColor, true);
+        drawText(button, x + 4, y + 4, {255,255,255,255}, m_fontSmall);
+    }
+}
+
+int UIManager::textHeight(TTF_Font *font) {
+    if (!font) return 0;
+    return TTF_FontHeight(font);
+}
+
+int UIManager::textWidth(const std::string &text, TTF_Font *font) {
+    if (!font || text.empty()) return 0;
+    int w = 0, h = 0;
+    if (TTF_SizeUTF8(font, text.c_str(), &w, &h) != 0) return 0;
+    return w;
+}
+
+// Cat chu theo pixel, lui tung ky tu UTF-8 (khong cat giua dau tieng Viet)
+std::string UIManager::truncateToWidth(const std::string &text, TTF_Font *font, int maxPx) {
+    if (!font || text.empty() || maxPx <= 0) return text;
+    if (textWidth(text, font) <= maxPx) return text;
+    int ellipsisW = textWidth("...", font);
+    int avail = maxPx - ellipsisW;
+    if (avail <= 0) return "...";
+    // Lui tung ky tu UTF-8 tu cuoi
+    size_t end = text.size();
+    while (end > 0) {
+        size_t prev = end - 1;
+        while (prev > 0 && (static_cast<unsigned char>(text[prev]) & 0xC0) == 0x80) prev--;
+        std::string cand = text.substr(0, prev) + "...";
+        if (textWidth(cand, font) <= maxPx) return cand;
+        end = prev;
+    }
+    return "...";
+}
+
+int UIManager::pillWidth(const std::string &text, TTF_Font *font) {
+    TTF_Font *f = font ? font : m_fontSmall;
+    int tw = textWidth(text, f);
+    int w = tw + UiTheme::PILL_PAD_X * 2;
+    if (w < UiTheme::PILL_MIN_W) w = UiTheme::PILL_MIN_W;
+    if (w > UiTheme::PILL_MAX_W) w = UiTheme::PILL_MAX_W;
+    return w;
+}
+
+// Pill chuan A: full-round h/2, active = FOCUS_BG + glow, inactive = PILL_BG + border
+void UIManager::drawPill(int x, int y, int w, int h, const std::string &text, bool active, TTF_Font *font) {
+    TTF_Font *f = font ? font : m_fontSmall;
+    int rad = h / 2;
+    SDL_Color bg = active ? UiTheme::PILL_BG_ACTIVE : UiTheme::PILL_BG;
+    drawRoundedRect(x, y, w, h, rad, bg, true);
+    if (active) drawRoundedBorder(x, y, w, h, rad, UiTheme::FOCUS_GLOW, 1);
+    else drawRoundedBorder(x, y, w, h, rad, UiTheme::PILL_BORDER, 1);
+    if (!f) return;
+    SDL_Color fg = active ? UiTheme::TEXT_MAIN : UiTheme::PILL_TEXT_DIM;
+    std::string disp = truncateToWidth(text, f, w - UiTheme::PILL_PAD_X * 2);
+    int th = TTF_FontHeight(f);
+    drawText(disp, x + w / 2, y + (h - th) / 2, fg, f, true);
+}
+
+void UIManager::drawButton(int x, int y, int w, int h, const std::string &label, bool focused, bool danger) {
+    if (w < UiTheme::BTN_MIN_W) w = UiTheme::BTN_MIN_W;
+    SDL_Color bg;
+    if (danger && focused) bg = UiTheme::ACCENT_RED;
+    else if (focused) bg = UiTheme::FOCUS_BG;
+    else bg = UiTheme::PILL_BG;
+    drawRoundedRect(x, y, w, h, UiTheme::RADIUS_BTN, bg, true);
+    if (focused) drawRoundedBorder(x, y, w, h, UiTheme::RADIUS_BTN, UiTheme::FOCUS_GLOW, 2);
+    else drawRoundedBorder(x, y, w, h, UiTheme::RADIUS_BTN, UiTheme::PILL_BORDER, 1);
+    if (!m_fontSmall) return;
+    std::string disp = truncateToWidth(label, m_fontSmall, w - 24);
+    int th = TTF_FontHeight(m_fontSmall);
+    drawText(disp, x + w / 2, y + (h - th) / 2, UiTheme::TEXT_MAIN, m_fontSmall, true);
+}
+
+void UIManager::drawRow(int x, int y, int w, int h, bool focused, bool dim) {
+    if (focused) {
+        drawRoundedRect(x - 2, y - 2, w + 4, h + 4, UiTheme::RADIUS_ROW + 2, UiTheme::FOCUS_GLOW, false);
+        drawRoundedRect(x, y, w, h, UiTheme::RADIUS_ROW, UiTheme::FOCUS_BG, true);
+    } else {
+        SDL_Color bg = dim ? UiTheme::CARD_BG : UiTheme::CARD_SOLID;
+        drawRoundedRect(x, y, w, h, UiTheme::RADIUS_ROW, bg, true);
+        drawRoundedBorder(x, y, w, h, UiTheme::RADIUS_ROW, UiTheme::CARD_BORDER, 1);
+    }
+}
+
+int UIManager::textYCentered(int y, int h, TTF_Font *font) {
+    int th = font ? TTF_FontHeight(font) : 16;
+    return y + (h - th) / 2;
+}
+
+void UIManager::drawRowMainSub(int x, int y, int h, const std::string &main, TTF_Font *fMain,
+                               const std::string &sub, TTF_Font *fSub, int maxW, int gap) {
+    int thM = fMain ? TTF_FontHeight(fMain) : 0;
+    int thS = (!sub.empty() && fSub) ? TTF_FontHeight(fSub) : 0;
+    int blockH = thM + (thS > 0 ? gap + thS : 0);
+    int ty = y + (h - blockH) / 2;
+    std::string m = main;
+    std::string s = sub;
+    if (maxW > 0) {
+        if (fMain) m = truncateToWidth(main, fMain, maxW);
+        if (!sub.empty() && fSub) s = truncateToWidth(sub, fSub, maxW);
+    }
+    if (fMain) drawText(m, x, ty, UiTheme::TEXT_MAIN, fMain);
+    if (thS > 0) drawText(s, x, ty + thM + gap, UiTheme::TEXT_SUB, fSub);
+}
+
+void UIManager::drawTextRight(const std::string &text, int rightX, int y, SDL_Color color, TTF_Font *font) {
+    if (!font || text.empty()) return;
+    drawText(text, rightX - textWidth(text, font), y, color, font);
+}
+
+int UIManager::drawFooterHint(const std::string &button, const std::string &label, int x,
+                              int barY, int barH, SDL_Color color, TTF_Font *font,
+                              int iconSize, int gap) {
+    // Can giua doc icon + text trong footer bar (barY..barY+barH)
+    int centerY = barY + barH / 2;
+    int iconY = centerY - iconSize / 2;
+    drawButtonIcon(button, x, iconY, iconSize);
+    int lx = x + iconSize + gap;
+    int th = textHeight(font);
+    int ty = centerY - th / 2;
+    drawText(label, lx, ty, color, font);
+    return lx + textWidth(label, font);
+}
+
+void UIManager::drawFooterHintsCentered(
+    const std::vector<std::pair<std::string,std::string>> &hints,
+    int barY, int barH, SDL_Color color, TTF_Font *font,
+    int iconSize, int gap, int hintGap) {
+    if (hints.empty() || !font) return;
+    int totalW = 0;
+    for (size_t i = 0; i < hints.size(); ++i) {
+        totalW += iconSize + gap + textWidth(hints[i].second, font);
+        if (i + 1 < hints.size()) totalW += hintGap;
+    }
+    int x = (1024 - totalW) / 2;
+    if (x < 8) x = 8;
+    for (size_t i = 0; i < hints.size(); ++i) {
+        x = drawFooterHint(hints[i].first, hints[i].second, x, barY, barH, color, font, iconSize, gap);
+        if (i + 1 < hints.size()) x += hintGap;
+    }
+}
+
+void UIManager::drawBadgeDual(int x, int y, int w, int h,
+                     const std::string &btn1, const std::string &label1,
+                     const std::string &btn2, const std::string &label2,
+                     SDL_Color bg, SDL_Color fg) {
+    int rad = h / 2; // Chuan A: pill full-round
+    drawRoundedRect(x, y, w, h, rad, bg, true);
+    if (!m_fontSmall) return;
+    int iconSize = h - 12;
+    if (iconSize < 16) iconSize = 16;
+    if (iconSize > 32) iconSize = 32;
+    int gap = 6;
+    int sepW = textWidth("  •  ", m_fontSmall);
+    int totalW = iconSize + gap + textWidth(label1, m_fontSmall) + sepW +
+                 iconSize + gap + textWidth(label2, m_fontSmall);
+    int sx = x + (w - totalW) / 2;
+    int centerY = y + h / 2;
+    int th = TTF_FontHeight(m_fontSmall);
+    drawButtonIcon(btn1, sx, centerY - iconSize / 2, iconSize);
+    sx += iconSize + gap;
+    if (!label1.empty()) {
+        drawText(label1, sx, centerY - th / 2, fg, m_fontSmall);
+        sx += textWidth(label1, m_fontSmall);
+    }
+    drawText("  •  ", sx, centerY - th / 2, fg, m_fontSmall);
+    sx += sepW;
+    drawButtonIcon(btn2, sx, centerY - iconSize / 2, iconSize);
+    sx += iconSize + gap;
+    if (!label2.empty())
+        drawText(label2, sx, centerY - th / 2, fg, m_fontSmall);
+}
+
+static std::string normalizeBtn(const std::string &b) {
+    std::string up = b;
+    for (char &c : up) c = (char)toupper((unsigned char)c);
+    if (up == "OK") return "A";
+    if (up == "D-PAD") return "DPAD";
+    if (up == "L") return "L1";
+    if (up == "R") return "R1";
+    return up;
+}
+
+void UIManager::drawInlineHintsCentered(const std::string &text, int centerX, int y,
+                               SDL_Color color, TTF_Font *font, int iconSize, int gap) {
+    if (!font || text.empty()) return;
+    struct Seg { bool isBtn; std::string s; };
+    std::vector<Seg> segs;
+    size_t i = 0, n = text.size();
+    std::string cur;
+    auto flushCur = [&]() { if (!cur.empty()) { segs.push_back({false, cur}); cur.clear(); } };
+    while (i < n) {
+        if (text[i] == '[') {
+            size_t end = text.find(']', i + 1);
+            if (end != std::string::npos && end - i >= 2 && end - i <= 10) {
+                std::string inside = text.substr(i + 1, end - i - 1);
+                bool ok = !inside.empty();
+                for (char c : inside) {
+                    char u = (char)toupper((unsigned char)c);
+                    if (!((u >= 'A' && u <= 'Z') || (u >= '0' && u <= '9') || c == '-' || c == '/')) { ok = false; break; }
+                }
+                if (ok) {
+                    flushCur();
+                    segs.push_back({true, normalizeBtn(inside)});
+                    i = end + 1;
+                    // an 1 space ke sau ] de icon sat chu hon
+                    if (i < n && text[i] == ' ') i++;
+                    continue;
+                }
+            }
+        }
+        cur += text[i++];
+    }
+    flushCur();
+    int th = textHeight(font);
+    int totalW = 0;
+    for (auto &s : segs) {
+        if (s.isBtn) totalW += iconSize + gap;
+        else totalW += textWidth(s.s, font);
+    }
+    int x = centerX - totalW / 2;
+    for (auto &s : segs) {
+        if (s.isBtn) {
+            drawButtonIcon(s.s, x, y + (th - iconSize) / 2, iconSize);
+            x += iconSize + gap;
+        } else {
+            drawText(s.s, x, y, color, font);
+            x += textWidth(s.s, font);
+        }
+    }
+}
+// ---- UiTheme helpers: 10-Foot Leanback tokens, khong doi logic nghiep vu ----
+void UIManager::drawAppBackground() {
+    drawRect(0, 0, UiTheme::APP_W, UiTheme::APP_H, UiTheme::BG_APP, true);
+}
+void UIManager::drawCard(int x, int y, int w, int h) {
+    drawRoundedRect(x, y, w, h, UiTheme::RADIUS_CARD, UiTheme::CARD_BG, true);
+    drawRoundedBorder(x, y, w, h, UiTheme::RADIUS_CARD, UiTheme::CARD_BORDER, 1);
+}
+void UIManager::drawFocusRow(int x, int y, int w, int h) {
+    // glow ngoai + nen focus de nhin ro tu xa
+    drawRoundedRect(x - 2, y - 2, w + 4, h + 4, UiTheme::RADIUS_ROW + 2, UiTheme::FOCUS_GLOW, false);
+    drawRoundedRect(x, y, w, h, UiTheme::RADIUS_ROW, UiTheme::FOCUS_BG, true);
+}
+void UIManager::drawAppHeader(const std::string &title, const std::string &sub) {
+    if (!m_fontLarge) return;
+    drawText(title, 32, 22, UiTheme::TEXT_MAIN, m_fontLarge);
+    if (!sub.empty() && m_fontSmall)
+        drawText(sub, 34, 22 + TTF_FontHeight(m_fontLarge) + 2, UiTheme::TEXT_DIM, m_fontSmall);
+}
+void UIManager::drawPadIcon(UiTheme::PadBtn btn, int x, int y, int size) {
+    using PB = UiTheme::PadBtn;
+    if (btn == PB::L1R1) {
+        int half = size / 2 - 1;
+        drawButtonIcon("L1", x, y + (size - half) / 2, half);
+        drawButtonIcon("R1", x + half + 2, y + (size - half) / 2, half);
+        return;
+    }
+    if (btn == PB::UPDOWN) {
+        int half = size / 2 - 1;
+        drawButtonIcon("UP", x, y + (size - half) / 2, half);
+        drawButtonIcon("DOWN", x + half + 2, y + (size - half) / 2, half);
+        return;
+    }
+    const char *s = "A";
+    switch (btn) {
+        case PB::A: s = "A"; break;
+        case PB::B: s = "B"; break;
+        case PB::X: s = "X"; break;
+        case PB::Y: s = "Y"; break;
+        case PB::START: s = "START"; break;
+        case PB::SELECT: s = "SELECT"; break;
+        case PB::DPAD: s = "DPAD"; break;
+        case PB::L1: s = "L1"; break;
+        case PB::R1: s = "R1"; break;
+        case PB::AB: s = "A"; break;
+        default: s = "A"; break;
+    }
+    drawButtonIcon(s, x, y, size);
+    if (btn == PB::AB) drawButtonIcon("B", x + size / 2, y, size / 2);
+}
+void UIManager::drawAppFooter(const std::vector<UiTheme::FooterHint> &hints) {
+    using PB = UiTheme::PadBtn;
+    if (!m_fontSmall || hints.empty()) return;
+    // nen footer + duong ke tren
+    drawRect(0, UiTheme::FOOTER_Y, UiTheme::APP_W, UiTheme::FOOTER_H, UiTheme::FOOTER_BG, true);
+    drawRect(0, UiTheme::FOOTER_Y, UiTheme::APP_W, 1, UiTheme::FOOTER_LINE, true);
+    auto btnToStr = [](PB b) -> std::string {
+        switch (b) {
+            case PB::A: return "A"; case PB::B: return "B";
+            case PB::X: return "X"; case PB::Y: return "Y";
+            case PB::START: return "START"; case PB::SELECT: return "SELECT";
+            case PB::DPAD: return "DPAD"; case PB::L1: return "L1";
+            case PB::R1: return "R1"; case PB::UPDOWN: return "UP";
+            case PB::L1R1: return "L1"; case PB::AB: return "A";
+            default: return "A";
+        }
+    };
+    std::vector<std::pair<std::string,std::string>> legacy;
+    legacy.reserve(hints.size());
+    for (auto &h : hints) legacy.emplace_back(btnToStr(h.btn), std::string(h.label ? h.label : ""));
+    // anti-overflow: thu hintGap khi tong rong > 1008
+    int iconSize = UiTheme::FOOTER_ICON, gap = UiTheme::FOOTER_GAP, hintGap = UiTheme::FOOTER_HINT_GAP;
+    int totalW = 0;
+    for (size_t i = 0; i < legacy.size(); ++i) {
+        totalW += iconSize + gap + textWidth(legacy[i].second, m_fontSmall);
+        if (i + 1 < legacy.size()) totalW += hintGap;
+    }
+    if (totalW > 1008) hintGap = 20;
+    totalW = 0;
+    for (size_t i = 0; i < legacy.size(); ++i) {
+        totalW += iconSize + gap + textWidth(legacy[i].second, m_fontSmall);
+        if (i + 1 < legacy.size()) totalW += hintGap;
+    }
+    if (totalW > 1008 && iconSize > 22) iconSize = 22;
+    drawFooterHintsCentered(legacy, UiTheme::FOOTER_Y, UiTheme::FOOTER_H,
+                            UiTheme::TEXT_DIM, m_fontSmall, iconSize, gap, hintGap);
+}
+void UIManager::beginModalDim() {
+    drawRect(0, 0, UiTheme::APP_W, UiTheme::APP_H, UiTheme::DIM_OVERLAY, true);
+}
+
 
 void UIManager::drawGridIcon(const std::string &iconFile, int x, int y, int w, int h) {
     SDL_Texture* texture = nullptr;
@@ -1780,7 +3061,7 @@ void UIManager::drawGridIcon(const std::string &iconFile, int x, int y, int w, i
     }
 
     if (!texture) {
-        drawRoundedRect(x + 10, y + 10, w - 20, h - 20, 8, {60, 70, 85, 255}, true);
+        drawRoundedRect(x + 10, y + 10, w - 20, h - 20, UiTheme::RADIUS_CARD, {60, 70, 85, 255}, true);
         return;
     }
 
@@ -1841,8 +3122,8 @@ void UIManager::renderSearchState() {
     int panelY = 74;
 
     // Query bar with rounded corners
-    drawRoundedRect(panelX, panelY, panelW, 52, 10, {22, 32, 46, 255}, true);
-    drawRoundedBorder(panelX, panelY, panelW, 52, 10, {0, 180, 216, 255}, 2);
+    drawRoundedRect(panelX, panelY, panelW, 52, UiTheme::RADIUS_ROW, {22, 32, 46, 255}, true);
+    drawRoundedBorder(panelX, panelY, panelW, 52, UiTheme::RADIUS_ROW, {0, 180, 216, 255}, 2);
     std::string displayQuery = m_searchQuery.empty() ? UiStrings::SEARCH_PROMPT_INPUT : m_searchQuery + "_";
     SDL_Color qColor = m_searchQuery.empty() ? SDL_Color{80, 95, 115, 255} : SDL_Color{255, 255, 255, 255};
     drawText(displayQuery, panelX + 16, panelY + 14, qColor, m_fontMedium);
@@ -1869,8 +3150,8 @@ void UIManager::renderSearchState() {
 
             SDL_Color bg = isSel ? SDL_Color{0, 180, 216, 255} : SDL_Color{28, 38, 55, 255};
             SDL_Color fg = isSel ? SDL_Color{0, 0, 0, 255} : SDL_Color{220, 230, 240, 255};
-            drawRoundedRect(cx, cy, cellW, cellH, 6, bg, true);
-            drawRoundedBorder(cx, cy, cellW, cellH, 6, isSel ? SDL_Color{255, 255, 255, 255} : SDL_Color{45, 60, 80, 255}, 1);
+            drawRoundedRect(cx, cy, cellW, cellH, UiTheme::RADIUS_ROW, bg, true);
+            drawRoundedBorder(cx, cy, cellW, cellH, UiTheme::RADIUS_ROW, isSel ? SDL_Color{255, 255, 255, 255} : SDL_Color{45, 60, 80, 255}, 1);
             drawText(label, cx + cellW / 2, cy + cellH / 2 - 10, fg, m_fontSmall, true);
         }
     }
@@ -1904,9 +3185,9 @@ void UIManager::renderSearchState() {
 
             int itemY = listStartY + i * itemH;
             SDL_Color rowBg = isSel ? SDL_Color{2, 55, 82, 255} : SDL_Color{20, 28, 42, 255};
-            drawRoundedRect(rPanelX, itemY, rPanelW, itemH - 4, 8, rowBg, true);
+            drawRoundedRect(rPanelX, itemY, rPanelW, itemH - 4, UiTheme::RADIUS_CARD, rowBg, true);
             if (isSel) {
-                drawRoundedBorder(rPanelX, itemY, rPanelW, itemH - 4, 8, {0, 180, 216, 255}, 2);
+                drawRoundedBorder(rPanelX, itemY, rPanelW, itemH - 4, UiTheme::RADIUS_CARD, {0, 180, 216, 255}, 2);
             }
 
             // State badge (pill)
@@ -1947,8 +3228,14 @@ void UIManager::renderFooter() {
         return;
     }
 
-    drawRect(0, 715, 1024, 53, {18, 22, 30, 255}, true);
-    drawRect(0, 715, 1024, 1, {40, 48, 62, 255}, true);
+    const int barY = UiTheme::FOOTER_Y, barH = UiTheme::FOOTER_H, iconSize = UiTheme::FOOTER_ICON, gap = UiTheme::FOOTER_GAP;
+    drawRect(0, barY, UiTheme::APP_W, barH, UiTheme::FOOTER_BG, true);
+    drawRect(0, barY, UiTheme::APP_W, 1, UiTheme::FOOTER_LINE, true);
+
+    SDL_Color fg = {210, 220, 230, 255};
+    SDL_Color red = {239, 68, 68, 255};
+    SDL_Color cyan = {0, 180, 216, 255};
+    int x = 20;
 
     if (m_currentState == UIState::GAME_LIST) {
         bool isLocal = false;
@@ -1957,80 +3244,68 @@ void UIManager::renderFooter() {
         }
 
         if (isLocal) {
-            drawText("X", 30, 726, {239, 68, 68, 255}, m_fontMedium);
-            drawText(UiStrings::BTN_DELETE_ROM_SD, 52, 730, {239, 68, 68, 255}, m_fontSmall);
+            x = drawFooterHint("X", UiStrings::BTN_DELETE_ROM_SD, x, barY, barH, red, m_fontSmall, iconSize, gap) + 30;
         } else {
-            drawText("A", 30, 726, {34, 197, 94, 255}, m_fontMedium);
-            drawText(UiStrings::FOOTER_ADD_QUEUE, 52, 730, {210, 220, 230, 255}, m_fontSmall);
+            x = drawFooterHint("A", UiStrings::FOOTER_ADD_QUEUE, x, barY, barH, fg, m_fontSmall, iconSize, gap) + 30;
         }
 
-        drawText("B", 185, 726, {239, 68, 68, 255}, m_fontMedium);
-        drawText(UiStrings::FOOTER_BACK, 207, 730, {210, 220, 230, 255}, m_fontSmall);
+        x = drawFooterHint("B", UiStrings::FOOTER_BACK, x, barY, barH, fg, m_fontSmall, iconSize, gap) + 30;
 
         if (!isLocal) {
-            drawText("X", 295, 726, {245, 158, 11, 255}, m_fontMedium);
-            drawText(UiStrings::FOOTER_DELETE, 317, 730, {210, 220, 230, 255}, m_fontSmall);
+            x = drawFooterHint("X", UiStrings::FOOTER_DELETE, x, barY, barH, fg, m_fontSmall, iconSize, gap) + 30;
         }
 
-        drawText("Y", 440, 726, {234, 179, 8, 255}, m_fontMedium);
-        drawText(UiStrings::BTN_JUMP_ALPHA, 462, 730, {210, 220, 230, 255}, m_fontSmall);
-
-        drawText("START", 593, 726, {0, 180, 216, 255}, m_fontMedium);
-        drawText(UiStrings::BTN_SEARCH, 648, 730, {0, 180, 216, 255}, m_fontSmall);
-
-        drawText("SELECT", 728, 726, {168, 85, 247, 255}, m_fontMedium);
-        drawText(UiStrings::FOOTER_FILTER, 800, 730, {210, 220, 230, 255}, m_fontSmall);
+        x = drawFooterHint("Y", UiStrings::BTN_JUMP_ALPHA, x, barY, barH, fg, m_fontSmall, iconSize, gap) + 30;
+        x = drawFooterHint("START", UiStrings::BTN_SEARCH, x, barY, barH, cyan, m_fontSmall, iconSize, gap) + 30;
+        x = drawFooterHint("SELECT", UiStrings::FOOTER_FILTER, x, barY, barH, fg, m_fontSmall, iconSize, gap) + 30;
     } else if (m_currentState == UIState::SEARCH) {
         if (!m_kbInResults) {
-            drawText("A", 30, 726, {34, 197, 94, 255}, m_fontMedium);
-            drawText(UiStrings::BTN_SELECT_CHAR, 52, 730, {210, 220, 230, 255}, m_fontSmall);
-
-            drawText("X", 170, 726, {245, 158, 11, 255}, m_fontMedium);
-            drawText(UiStrings::BTN_CLEAR_ALL, 192, 730, {210, 220, 230, 255}, m_fontSmall);
+            x = drawFooterHint("A", UiStrings::BTN_SELECT_CHAR, x, barY, barH, fg, m_fontSmall, iconSize, gap) + 30;
+            x = drawFooterHint("X", UiStrings::BTN_CLEAR_ALL, x, barY, barH, fg, m_fontSmall, iconSize, gap) + 30;
         } else {
-            drawText("A", 30, 726, {34, 197, 94, 255}, m_fontMedium);
-            drawText(UiStrings::BTN_DOWNLOAD, 52, 730, {210, 220, 230, 255}, m_fontSmall);
-
-            drawText("X", 130, 726, {239, 68, 68, 255}, m_fontMedium);
-            drawText(UiStrings::BTN_DELETE_ROM, 152, 730, {239, 68, 68, 255}, m_fontSmall);
+            x = drawFooterHint("A", UiStrings::BTN_DOWNLOAD, x, barY, barH, fg, m_fontSmall, iconSize, gap) + 30;
+            x = drawFooterHint("X", UiStrings::BTN_DELETE_ROM, x, barY, barH, red, m_fontSmall, iconSize, gap) + 30;
         }
 
-        drawText("B", 280, 726, {239, 68, 68, 255}, m_fontMedium);
-        drawText(UiStrings::BTN_BACK, 302, 730, {210, 220, 230, 255}, m_fontSmall);
+        x = drawFooterHint("B", UiStrings::BTN_BACK, x, barY, barH, fg, m_fontSmall, iconSize, gap) + 30;
     } else if (m_currentState == UIState::CONFIRM_DELETE) {
-        drawText("A", 30, 726, {239, 68, 68, 255}, m_fontMedium);
-        drawText(UiStrings::BTN_CONFIRM_DELETE_SD, 52, 730, {239, 68, 68, 255}, m_fontSmall);
-
-        drawText("B / X", 240, 726, {150, 160, 175, 255}, m_fontMedium);
-        drawText(UiStrings::BTN_CANCEL_ACTION, 295, 730, {210, 220, 230, 255}, m_fontSmall);
+        x = drawFooterHint("A", UiStrings::BTN_CONFIRM_DELETE_SD, x, barY, barH, red, m_fontSmall, iconSize, gap) + 30;
+        // B + X cung la huy: ve 2 icon lien nhau roi den label
+        {
+            int centerY = barY + barH / 2;
+            drawButtonIcon("B", x, centerY - iconSize / 2, iconSize);
+            x += iconSize + 4;
+            drawButtonIcon("X", x, centerY - iconSize / 2, iconSize);
+            x += iconSize + gap;
+            int th = textHeight(m_fontSmall);
+            drawText(UiStrings::BTN_CANCEL_ACTION, x, centerY - th / 2, fg, m_fontSmall);
+            x += textWidth(UiStrings::BTN_CANCEL_ACTION, m_fontSmall) + 30;
+        }
     } else if (m_currentState == UIState::SYSTEM_SELECT) {
-        drawText("A", 30, 726, {34, 197, 94, 255}, m_fontMedium);
-        drawText(UiStrings::FOOTER_ENTER_SYSTEM, 55, 730, {210, 220, 230, 255}, m_fontSmall);
-
-        drawText("B", 195, 726, {239, 68, 68, 255}, m_fontMedium);
-        drawText(UiStrings::FOOTER_MAIN_MENU, 220, 730, {210, 220, 230, 255}, m_fontSmall);
-
-        drawText("Y", 360, 726, {234, 179, 8, 255}, m_fontMedium);
-        drawText(UiStrings::FOOTER_SYNC_DRIVE, 385, 730, {210, 220, 230, 255}, m_fontSmall);
-
-        drawText("L1/R1", 645, 726, {0, 180, 216, 255}, m_fontMedium);
-        drawText(UiStrings::FOOTER_CHANGE_PAGE, 710, 730, {210, 220, 230, 255}, m_fontSmall);
+        x = drawFooterHint("A", UiStrings::FOOTER_ENTER_SYSTEM, x, barY, barH, fg, m_fontSmall, iconSize, gap) + 30;
+        x = drawFooterHint("B", UiStrings::FOOTER_MAIN_MENU, x, barY, barH, fg, m_fontSmall, iconSize, gap) + 30;
+        x = drawFooterHint("Y", UiStrings::FOOTER_SYNC_DRIVE, x, barY, barH, fg, m_fontSmall, iconSize, gap) + 30;
+        // L1 + R1 cung la chuyen trang
+        {
+            int centerY = barY + barH / 2;
+            drawButtonIcon("L1", x, centerY - iconSize / 2, iconSize);
+            x += iconSize + 4;
+            drawButtonIcon("R1", x, centerY - iconSize / 2, iconSize);
+            x += iconSize + gap;
+            int th = textHeight(m_fontSmall);
+            drawText(UiStrings::FOOTER_CHANGE_PAGE, x, centerY - th / 2, fg, m_fontSmall);
+            x += textWidth(UiStrings::FOOTER_CHANGE_PAGE, m_fontSmall) + 30;
+        }
     } else if (m_currentState == UIState::OTA_UPDATE) {
-        drawText("A", 30, 726, {34, 197, 94, 255}, m_fontMedium);
-        drawText(UiStrings::FOOTER_CONFIRM, 55, 730, {210, 220, 230, 255}, m_fontSmall);
-
-        drawText("B", 170, 726, {239, 68, 68, 255}, m_fontMedium);
-        drawText(UiStrings::FOOTER_CANCEL, 195, 730, {210, 220, 230, 255}, m_fontSmall);
+        x = drawFooterHint("A", UiStrings::FOOTER_CONFIRM, x, barY, barH, fg, m_fontSmall, iconSize, gap) + 30;
+        x = drawFooterHint("B", UiStrings::FOOTER_CANCEL, x, barY, barH, fg, m_fontSmall, iconSize, gap) + 30;
     } else {
-        drawText("A", 30, 726, {34, 197, 94, 255}, m_fontMedium);
-        drawText(UiStrings::FOOTER_SELECT, 55, 730, {210, 220, 230, 255}, m_fontSmall);
-
-        drawText("B", 140, 726, {239, 68, 68, 255}, m_fontMedium);
-        drawText(UiStrings::FOOTER_BACK, 165, 730, {210, 220, 230, 255}, m_fontSmall);
+        x = drawFooterHint("A", UiStrings::FOOTER_SELECT, x, barY, barH, fg, m_fontSmall, iconSize, gap) + 30;
+        x = drawFooterHint("B", UiStrings::FOOTER_BACK, x, barY, barH, fg, m_fontSmall, iconSize, gap) + 30;
     }
 
     std::string verText = "v" + std::string(APP_VERSION) + " Native";
-    drawText(verText, 880, 730, {110, 120, 135, 255}, m_fontSmall);
+    drawTextRight(verText, 1012, barY + (barH - textHeight(m_fontSmall)) / 2, UiTheme::TEXT_FAINT, m_fontSmall);
 }
 
 void UIManager::renderToast() {
@@ -2043,7 +3318,8 @@ void UIManager::renderToast() {
 
         drawRoundedRect(toastX, toastY, toastW, toastH, 24, {20, 24, 32, 245}, true);
         drawRoundedBorder(toastX, toastY, toastW, toastH, 24, m_toastColor, 2);
-        drawText(m_toastMessage, 512, toastY + 14, {255, 255, 255, 255}, m_fontSmall, true);
+        // Toast co the chua token [NUT] -> ve icon that can giua
+        drawInlineHintsCentered(m_toastMessage, 512, toastY + 14, {255, 255, 255, 255}, m_fontSmall, 24);
     }
 }
 
@@ -2097,13 +3373,13 @@ void UIManager::renderMenuState() {
 
         // Card background
         SDL_Color bg = isSel ? SDL_Color{26, 52, 88, 255} : SDL_Color{20, 26, 36, 230};
-        drawRoundedRect(x, y, w, h, 16, bg, true);
+        drawRoundedRect(x, y, w, h, UiTheme::RADIUS_MODAL, bg, true);
 
         if (isSel) {
             // Glowing cyan border on selected card
-            drawRoundedBorder(x, y, w, h, 16, {0, 180, 216, 255}, 3);
+            drawRoundedBorder(x, y, w, h, UiTheme::RADIUS_MODAL, {0, 180, 216, 255}, 3);
         } else {
-            drawRoundedBorder(x, y, w, h, 16, {38, 48, 64, 255}, 1);
+            drawRoundedBorder(x, y, w, h, UiTheme::RADIUS_MODAL, {38, 48, 64, 255}, 1);
         }
 
         // Icon inside card (enlarged logo size)
@@ -2119,7 +3395,7 @@ void UIManager::renderMenuState() {
 
         // OTA badge
         if (hasUpdate && m_gridMenuItems[i].id == "ota") {
-            drawRoundedRect(x + w - 54, y + 10, 44, 22, 6, {239, 68, 68, 255}, true);
+            drawRoundedRect(x + w - 54, y + 10, 44, 22, UiTheme::RADIUS_ROW, {239, 68, 68, 255}, true);
             drawText("NEW", x + w - 32, y + 13, {255, 255, 255, 255}, m_fontSmall, true);
         }
     }
@@ -2150,12 +3426,12 @@ void UIManager::renderMenuState() {
     // Footer hint
     drawRect(0, 715, 1024, 53, {18, 22, 30, 255}, true);
     drawRect(0, 715, 1024, 1, {40, 48, 62, 255}, true);
-    drawText("[A] Chọn    [D-Pad] Chuyển mục    [START] Cài đặt    [SELECT] Đồng bộ", 512, 730, {150, 165, 185, 255}, m_fontSmall, true);
+    drawAppFooter({{UiTheme::PadBtn::DPAD, "Chuyển"}, {UiTheme::PadBtn::START, "Cài đặt"}});
 }
 
 void UIManager::renderSystemSelectState() {
     // ─── Borderless Full-Width Sub-Header ───
-    drawRect(0, 64, 1024, 48, {16, 20, 28, 255}, true);
+    drawRect(0, 64, 1024, 48, UiTheme::CARD_SOLID, true);
     drawRect(0, 111, 1024, 1, {38, 48, 64, 255}, true);
 
     int totalLocal = 0, totalCloud = 0;
@@ -2182,57 +3458,58 @@ void UIManager::renderSystemSelectState() {
         bool selected = (i == m_selectedSystemIndex);
         int y = rowY + (i - startIdx) * (rowH + 10);
 
-        SDL_Color bg = selected ? SDL_Color{30, 58, 95, 255} : SDL_Color{22, 28, 38, 255};
-        drawRoundedRect(rx, y, rowW, rowH, 10, bg, true);
+        SDL_Color bg = selected ? UiTheme::FOCUS_BG : UiTheme::ROW_BG;
+        drawRoundedRect(rx, y, rowW, rowH, UiTheme::RADIUS_ROW, bg, true);
 
         if (selected) {
-            drawRoundedBorder(rx, y, rowW, rowH, 10, {0, 180, 216, 255}, 2);
+            drawRoundedBorder(rx, y, rowW, rowH, UiTheme::RADIUS_ROW, UiTheme::ACCENT_CYAN, 2);
             // Left neon accent
-            drawRoundedRect(rx + 6, y + 12, 5, rowH - 24, 2, {0, 180, 216, 255}, true);
+            drawRoundedRect(rx + 6, y + 12, 5, rowH - 24, 2, UiTheme::ACCENT_CYAN, true);
         }
 
         // System icon
         int iconSize = 64;
         drawIcon(sys.code, rx + 16, y + (rowH - iconSize) / 2, iconSize, iconSize);
 
-        drawText(sys.name, rx + 96, y + 18, {255, 255, 255, 255}, m_fontLarge);
+        std::string sysName = truncateToWidth(sys.name, m_fontLarge, rowW - 320);
+        std::string subtext = truncateToWidth(std::string("/Roms/") + sys.romDir + "  •  " + sys.extList,
+                                              m_fontSmall, rowW - 320);
+        drawRowMainSub(rx + 96, y, rowH, sysName, m_fontLarge, subtext, m_fontSmall);
 
         std::string localBadge = std::to_string(sys.localCount) + " local";
         std::string cloudBadge = std::to_string(sys.cloudCount) + " cloud";
 
-        drawBadge(rx + rowW - 200, y + 24, 90, 40, localBadge, {22, 101, 52, 255}, {255, 255, 255, 255});
-        drawBadge(rx + rowW - 100, y + 24, 90, 40, cloudBadge, {30, 58, 138, 255}, {255, 255, 255, 255});
-
-        std::string subtext = std::string("/Roms/") + sys.romDir + "  •  " + sys.extList;
-        drawText(subtext, rx + 110, y + 54, {140, 155, 175, 255}, m_fontSmall);
+        drawBadge(rx + rowW - 200, y + (rowH - 40) / 2, 90, 40, localBadge, {22, 101, 52, 255}, UiTheme::TEXT_MAIN);
+        drawBadge(rx + rowW - 100, y + (rowH - 40) / 2, 90, 40, cloudBadge, {30, 58, 138, 255}, UiTheme::TEXT_MAIN);
     }
 }
 
 void UIManager::renderGameListState() {
-    int listX = 0;
+    // Layout A 65/35: list 666px + detail 300px (gap + divider)
     int listY = 64;
-    int listW = 590;
     int listH = 651;
+    int listW = UiTheme::LIST_W;
+    int listX = 16;
 
-    int detailX = 592;
+    int detailX = UiTheme::DETAIL_X;
     int detailY = 64;
-    int detailW = 432;
+    int detailW = UiTheme::DETAIL_W;
     int detailH = 651;
 
     // Subtle 1px vertical divider between panes
-    drawRect(591, 64, 1, 651, {38, 48, 64, 255}, true);
+    drawRect(listX + listW + 8, 64, 1, 651, {38, 48, 64, 255}, true);
 
     // 1. Render Left Games List
     int totalGames = static_cast<int>(m_cachedGames.size());
     int pageSize = 6;
     int rowH = 92;
-    int rowW = 560;
-    int rowX = 16;
+    int rowW = listW - 30;
+    int rowX = listX;
     int listStartY = listY + 12;
 
     if (totalGames == 0) {
         drawText(UiStrings::GAME_LIST_EMPTY, listX + listW / 2, listY + 280, {140, 150, 165, 255}, m_fontLarge, true);
-        drawText(UiStrings::GAME_FILTER_HINT, listX + listW / 2, listY + 325, {0, 180, 216, 255}, m_fontSmall, true);
+        drawInlineHintsCentered(UiStrings::GAME_FILTER_HINT, listX + listW / 2, listY + 325, {0, 180, 216, 255}, m_fontSmall, 24);
     } else {
         for (int i = 0; i < pageSize && (m_gameScrollOffset + i) < totalGames; ++i) {
             int gameIdx = m_gameScrollOffset + i;
@@ -2240,26 +3517,22 @@ void UIManager::renderGameListState() {
             bool selected = (gameIdx == m_selectedGameIndex);
             int y = listStartY + i * (rowH + 12);
 
-            SDL_Color bg = selected ? SDL_Color{30, 58, 95, 255} : SDL_Color{22, 28, 38, 255};
-            drawRoundedRect(rowX, y, rowW, rowH, 10, bg, true);
-
-            if (selected) {
-                drawRoundedBorder(rowX, y, rowW, rowH, 10, {0, 180, 216, 255}, 2);
-                // Left neon accent
-                drawRoundedRect(rowX + 5, y + 12, 5, rowH - 24, 2, {0, 180, 216, 255}, true);
-            }
+            SDL_Color bg = selected ? UiTheme::FOCUS_BG : UiTheme::ROW_BG;
+            if (selected) drawFocusRow(rowX, y, rowW, rowH);
+            else drawRoundedRect(rowX, y, rowW, rowH, UiTheme::RADIUS_ROW, bg, true);
 
             // State Pill Badge
             bool isThisDownloading = DownloadManager::instance().isDownloading() &&
                                      DownloadManager::instance().getProgress().gameId == game.id;
             auto dlp = DownloadManager::instance().getProgress();
+            int badgeY = y + (rowH - 38) / 2;
 
             if (game.localState == GameState::LOCAL) {
-                drawBadge(rowX + 18, y + 27, 86, 38, UiStrings::BADGE_DOWNLOADED, {22, 101, 52, 255}, {255, 255, 255, 255});
+                drawBadge(rowX + 18, badgeY, 86, 38, UiStrings::BADGE_DOWNLOADED, {22, 101, 52, 255}, UiTheme::TEXT_MAIN);
             } else if (isThisDownloading) {
                 char pctBuf[16];
                 std::snprintf(pctBuf, sizeof(pctBuf), "%.0f%%", dlp.progressPct);
-                drawBadge(rowX + 18, y + 27, 86, 38, std::string(pctBuf), {2, 132, 199, 255}, {255, 255, 255, 255});
+                drawBadge(rowX + 18, badgeY, 86, 38, std::string(pctBuf), {2, 132, 199, 255}, UiTheme::TEXT_MAIN);
             } else if (DownloadManager::instance().isInQueue(game.id)) {
                 auto q = DownloadManager::instance().getQueue();
                 int pos = 1;
@@ -2267,22 +3540,19 @@ void UIManager::renderGameListState() {
                     if (qi.game.id == game.id) break;
                     pos++;
                 }
-                drawBadge(rowX + 18, y + 27, 86, 38, "#" + std::to_string(pos), {107, 33, 168, 255}, {255, 255, 255, 255});
+                drawBadge(rowX + 18, badgeY, 86, 38, "#" + std::to_string(pos), {107, 33, 168, 255}, UiTheme::TEXT_MAIN);
             } else if (game.localState == GameState::CLOUD) {
-                drawBadge(rowX + 18, y + 27, 86, 38, "CLOUD", {30, 58, 138, 255}, {255, 255, 255, 255});
+                drawBadge(rowX + 18, badgeY, 86, 38, "CLOUD", {30, 58, 138, 255}, UiTheme::TEXT_MAIN);
             } else {
-                drawBadge(rowX + 18, y + 27, 86, 38, UiStrings::BTN_SYNC, {217, 119, 6, 255}, {255, 255, 255, 255});
+                drawBadge(rowX + 18, badgeY, 86, 38, UiStrings::BTN_SYNC, {217, 119, 6, 255}, UiTheme::TEXT_MAIN);
             }
 
             // Title allowed up to 34 chars
-            std::string title = game.title;
-            if (title.length() > 34) {
-                title = title.substr(0, 31) + "...";
-            }
-            SDL_Color titleCol = isThisDownloading ? SDL_Color{0, 180, 216, 255} : (selected ? SDL_Color{255, 255, 255, 255} : SDL_Color{210, 220, 230, 255});
+            std::string title = truncateToWidth(game.title, m_fontLarge, rowW - 240);
+            SDL_Color titleCol = isThisDownloading ? UiTheme::ACCENT_CYAN : (selected ? UiTheme::TEXT_MAIN : UiTheme::TEXT_DIM);
 
             if (isThisDownloading) {
-                drawText(title, rowX + 118, y + 14, titleCol, m_fontLarge);
+                drawText(title, rowX + 118, textYCentered(y, 56, m_fontLarge), titleCol, m_fontLarge);
 
                 char pctBuf[16];
                 std::snprintf(pctBuf, sizeof(pctBuf), "%.1f%%", dlp.progressPct);
@@ -2299,14 +3569,16 @@ void UIManager::renderGameListState() {
                 float pct = std::max(0.0, std::min(100.0, dlp.progressPct));
                 drawRoundedRect(pBarX, pBarY, (int)(pBarW * (pct / 100.0)), pBarH, 3, {34, 197, 94, 255}, true);
             } else {
-                drawText(title, rowX + 118, y + 18, titleCol, m_fontLarge);
-
                 std::string sizeStr = FileSystemManager::instance().formatBytes(game.sizeBytes);
-                std::string sub = game.filename + "  (" + sizeStr + ")";
-                if (sub.length() > 38) {
-                    sub = sub.substr(0, 35) + "... (" + sizeStr + ")";
-                }
-                drawText(sub, rowX + 118, y + 52, {140, 155, 175, 255}, m_fontSmall);
+                std::string sub = truncateToWidth(game.filename + "  (" + sizeStr + ")",
+                                                  m_fontSmall, rowW - 240);
+                // Cum main/sub can giua doc trong row 92px (fix lech tam)
+                int thM = m_fontLarge ? TTF_FontHeight(m_fontLarge) : 24;
+                int thS = m_fontSmall ? TTF_FontHeight(m_fontSmall) : 16;
+                int blockH = thM + 4 + thS;
+                int ty = y + (rowH - blockH) / 2;
+                drawText(title, rowX + 118, ty, titleCol, m_fontLarge);
+                drawText(sub, rowX + 118, ty + thM + 4, UiTheme::TEXT_SUB, m_fontSmall);
             }
 
             // Multi-select checkbox
@@ -2372,8 +3644,8 @@ void UIManager::renderGameListState() {
     int coverBoxY = detailY + 14;
 
     // Rounded backdrop for cover art container
-    drawRoundedRect(coverBoxX - 4, coverBoxY - 4, coverBoxW + 8, coverBoxH + 8, 12, {16, 20, 28, 255}, true);
-    drawRoundedBorder(coverBoxX - 4, coverBoxY - 4, coverBoxW + 8, coverBoxH + 8, 12, {38, 48, 64, 255}, 1);
+    drawRoundedRect(coverBoxX - 4, coverBoxY - 4, coverBoxW + 8, coverBoxH + 8, UiTheme::RADIUS_MODAL, {16, 20, 28, 255}, true);
+    drawRoundedBorder(coverBoxX - 4, coverBoxY - 4, coverBoxW + 8, coverBoxH + 8, UiTheme::RADIUS_MODAL, {38, 48, 64, 255}, 1);
 
     CoverManager::instance().renderCoverBox(coverBoxX, coverBoxY, coverBoxW, coverBoxH, selGame, &m_activeSystem, m_fontMedium);
 
@@ -2457,8 +3729,8 @@ void UIManager::renderGameListState() {
         (!selGame || DownloadManager::instance().getProgress().gameId != selGame->id)) {
         auto activeProg = DownloadManager::instance().getProgress();
         int bY = detailY + detailH - 74;
-        drawRoundedRect(detailX + 24, bY, detailW - 48, 62, 10, {18, 28, 44, 255}, true);
-        drawRoundedBorder(detailX + 24, bY, detailW - 48, 62, 10, {0, 180, 216, 255}, 1);
+        drawRoundedRect(detailX + 24, bY, detailW - 48, 62, UiTheme::RADIUS_ROW, {18, 28, 44, 255}, true);
+        drawRoundedBorder(detailX + 24, bY, detailW - 48, 62, UiTheme::RADIUS_ROW, {0, 180, 216, 255}, 1);
 
         char pBuf[16];
         std::snprintf(pBuf, sizeof(pBuf), "%.0f%%", activeProg.progressPct);
@@ -2477,7 +3749,7 @@ void UIManager::renderGameListState() {
 
 void UIManager::renderConfirmDeleteDialog() {
     // Dim background overlay
-    drawRect(0, 0, 1024, 768, {0, 0, 0, 190}, true);
+    beginModalDim();
 
     int dlgW = 640;
     int dlgH = 340;
@@ -2485,7 +3757,7 @@ void UIManager::renderConfirmDeleteDialog() {
     int dlgY = (768 - dlgH) / 2;
 
     // Borderless dialog - just rounded background
-    drawRoundedRect(dlgX, dlgY, dlgW, dlgH, 16, {24, 28, 38, 255}, true);
+    drawRoundedRect(dlgX, dlgY, dlgW, dlgH, UiTheme::RADIUS_MODAL, {24, 28, 38, 255}, true);
 
     // Simple title with background color bar (no border)
     drawRect(dlgX, dlgY, dlgW, 48, {185, 28, 28, 255}, true);
@@ -2514,7 +3786,7 @@ void UIManager::renderConfirmDeleteDialog() {
 
 void UIManager::renderConfirmBatchDeleteDialog() {
     // Dim background overlay
-    drawRect(0, 0, 1024, 768, {0, 0, 0, 190}, true);
+    beginModalDim();
 
     int dlgW = 680;
     int dlgH = 400;
@@ -2522,7 +3794,7 @@ void UIManager::renderConfirmBatchDeleteDialog() {
     int dlgY = (768 - dlgH) / 2;
 
     // Borderless dialog - just rounded background
-    drawRoundedRect(dlgX, dlgY, dlgW, dlgH, 16, {24, 28, 38, 255}, true);
+    drawRoundedRect(dlgX, dlgY, dlgW, dlgH, UiTheme::RADIUS_MODAL, {24, 28, 38, 255}, true);
 
     // Simple title bar (no border)
     drawRect(dlgX, dlgY, dlgW, 48, {185, 28, 28, 255}, true);
@@ -2581,10 +3853,10 @@ void UIManager::renderDisclaimerState() {
     int cardH = 615;
 
     // Main card background only
-    drawRoundedRect(cardX, cardY, cardW, cardH, 16, {22, 27, 36, 255}, true);
+    drawRoundedRect(cardX, cardY, cardW, cardH, UiTheme::RADIUS_MODAL, {22, 27, 36, 255}, true);
 
     // Amber warning header bar
-    drawRoundedRect(cardX, cardY, cardW, 58, 16, {50, 32, 12, 255}, true);
+    drawRoundedRect(cardX, cardY, cardW, 58, UiTheme::RADIUS_ROW, {50, 32, 12, 255}, true);
     drawText(UiStrings::DISCLAIMER_TITLE, 512, cardY + 18, {245, 158, 11, 255}, m_fontLarge, true);
 
     // Inner panel - subtle inset without border
@@ -2592,7 +3864,7 @@ void UIManager::renderDisclaimerState() {
     int innerY = cardY + 76;
     int innerW = cardW - 60;
     int innerH = 435;
-    drawRoundedRect(innerX, innerY, innerW, innerH, 8, {16, 20, 28, 255}, true);
+    drawRoundedRect(innerX, innerY, innerW, innerH, UiTheme::RADIUS_CARD, {16, 20, 28, 255}, true);
 
     int textX = innerX + 28;
     int textY = innerY + 22;
@@ -2636,7 +3908,7 @@ void UIManager::renderDisclaimerState() {
 
 void UIManager::renderSettingsState() {
     // ─── Borderless Full-Width Sub-Header ───
-    drawRect(0, 64, 1024, 48, {16, 20, 28, 255}, true);
+    drawRect(0, 64, 1024, 48, UiTheme::CARD_SOLID, true);
     drawRect(0, 111, 1024, 1, {38, 48, 64, 255}, true);
     drawText(UiStrings::HEADER_SETTINGS, 36, 78, {0, 180, 216, 255}, m_fontLarge);
 
@@ -2726,10 +3998,10 @@ void UIManager::renderSettingsState() {
             bg = SDL_Color{16, 20, 28, 255};
         }
 
-        drawRoundedRect(cardX, y, cardW, rowH, 8, bg, true);
+        drawRoundedRect(cardX, y, cardW, rowH, UiTheme::RADIUS_CARD, bg, true);
 
         if (selected) {
-            drawRoundedBorder(cardX, y, cardW, rowH, 8, {0, 180, 216, 255}, 2);
+            drawRoundedBorder(cardX, y, cardW, rowH, UiTheme::RADIUS_CARD, {0, 180, 216, 255}, 2);
             // Left neon accent indicator
             drawRoundedRect(cardX + 4, y + 10, 5, rowH - 20, 2, {0, 180, 216, 255}, true);
         }
@@ -2762,8 +4034,7 @@ void UIManager::renderSettingsState() {
         drawRoundedRect(scrollBarX, thumbY, 6, thumbH, 3, {0, 180, 216, 255}, true);
     }
 
-    drawText(UiStrings::BTN_BACK_MAIN_MENU_HINT, 512, 730, {130, 140, 155, 255}, m_fontSmall, true);
-    drawText("▲▼ Di chuyển   [A] Chọn / Thực hiện", 740, 730, {100, 110, 125, 255}, m_fontSmall);
+    drawAppFooter({{UiTheme::PadBtn::A, "Chọn"}});
 }
 
 void UIManager::renderCloudLoginState() {
@@ -2845,7 +4116,7 @@ void UIManager::renderSyncOverlay() {
     if (!DriveSyncEngine::instance().isSyncing()) return;
 
     // Semi-transparent dim background
-    drawRect(0, 0, 1024, 768, {0, 0, 0, 210}, true);
+    beginModalDim();
 
     int boxW = 700;
     int boxH = 380;
@@ -2900,7 +4171,7 @@ void UIManager::renderDownloadOverlay() {
     if (!DownloadManager::instance().isDownloading()) return;
 
     // Semi-transparent dim background
-    drawRect(0, 0, 1024, 768, {0, 0, 0, 210}, true);
+    beginModalDim();
 
     int boxW = 720;
     int boxH = 390;
@@ -2963,7 +4234,7 @@ void UIManager::renderDownloadOverlay() {
 
 void UIManager::renderDiagnosticsState() {
     // ─── Borderless Full-Width Sub-Header ───
-    drawRect(0, 64, 1024, 48, {16, 20, 28, 255}, true);
+    drawRect(0, 64, 1024, 48, UiTheme::CARD_SOLID, true);
     drawRect(0, 111, 1024, 1, {38, 48, 64, 255}, true);
     drawText(UiStrings::HEADER_DIAG, 36, 78, {0, 180, 216, 255}, m_fontLarge);
 
@@ -3004,7 +4275,7 @@ void UIManager::renderDiagnosticsState() {
         if (y < 60 || y > 720) continue;
 
         if (i % 2 == 1) {
-            drawRoundedRect(cardX, y - 4, cardW, rowH, 8, {22, 28, 38, 255}, true);
+            drawRoundedRect(cardX, y - 4, cardW, rowH, UiTheme::RADIUS_CARD, {22, 28, 38, 255}, true);
         }
         drawText(rows[i].label, cardX + 24, y, {150, 165, 180, 255}, m_fontSmall);
         drawText(rows[i].value, cardX + 280, y, rows[i].valColor, m_fontSmall);
@@ -3018,17 +4289,16 @@ void UIManager::renderDiagnosticsState() {
         int thumbH = scrollBarH * visibleRows / rows.size();
         int thumbY = scrollBarY + (m_diagnosticsScrollOffset * (scrollBarH - thumbH) / maxScroll);
 
-        drawRoundedRect(scrollBarX, scrollBarY, 8, scrollBarH, 4, {35, 42, 54, 255}, true);
-        drawRoundedRect(scrollBarX, thumbY, 8, thumbH, 4, {0, 180, 216, 255}, true);
+        drawRoundedRect(scrollBarX, scrollBarY, 6, scrollBarH, 4, {35, 42, 54, 255}, true);
+        drawRoundedRect(scrollBarX, thumbY, 6, thumbH, 4, {0, 180, 216, 255}, true);
     }
 
-    drawText(UiStrings::BTN_BACK_MAIN_MENU_HINT, 512, 730, {130, 140, 155, 255}, m_fontSmall, true);
-    drawText("▲▼ Cuộn lên/xuống", 880, 730, {100, 110, 125, 255}, m_fontSmall);
+    drawAppFooter({{UiTheme::PadBtn::B, "Lùi"}, {UiTheme::PadBtn::DPAD, "Cuộn"}});
 }
 
 void UIManager::renderReverseSyncState() {
     // ─── Borderless Full-Width Sub-Header ───
-    drawRect(0, 64, 1024, 48, {16, 20, 28, 255}, true);
+    drawRect(0, 64, 1024, 48, UiTheme::CARD_SOLID, true);
     drawRect(0, 111, 1024, 1, {38, 48, 64, 255}, true);
     drawText(UiStrings::REVERSE_SYNC_TITLE, 36, 78, {168, 85, 247, 255}, m_fontLarge);
 
@@ -3039,8 +4309,8 @@ void UIManager::renderReverseSyncState() {
     int cardY = 126;
     int cardH = 480;
 
-    drawRoundedRect(cardX, cardY, cardW, cardH, 16, {22, 28, 38, 255}, true);
-    drawRoundedBorder(cardX, cardY, cardW, cardH, 16, {168, 85, 247, 255}, 2);
+    drawRoundedRect(cardX, cardY, cardW, cardH, UiTheme::RADIUS_MODAL, {22, 28, 38, 255}, true);
+    drawRoundedBorder(cardX, cardY, cardW, cardH, UiTheme::RADIUS_MODAL, {168, 85, 247, 255}, 2);
 
     int contentY = cardY + 30;
 
@@ -3070,9 +4340,9 @@ void UIManager::renderReverseSyncState() {
             int barH = 20;
             int barX = cardX + (cardW - barW) / 2;
             int barY = contentY + 120;
-            drawRoundedRect(barX, barY, barW, barH, 10, {35, 45, 60, 255}, true);
+            drawRoundedRect(barX, barY, barW, barH, UiTheme::RADIUS_ROW, {35, 45, 60, 255}, true);
             float pct = std::max(0.0f, std::min(100.0f, (float)prog.progressPct));
-            drawRoundedRect(barX, barY, (int)(barW * (pct / 100.0)), barH, 10, {168, 85, 247, 255}, true);
+            drawRoundedRect(barX, barY, (int)(barW * (pct / 100.0)), barH, UiTheme::RADIUS_ROW, {168, 85, 247, 255}, true);
 
             // Stats & speed
             std::string speedStr = "";
@@ -3136,7 +4406,7 @@ void UIManager::renderReverseSyncState() {
     if (prog.state == UploadState::UPLOADING || prog.state == UploadState::PREPARING) {
         drawBadge(cardX + (cardW - 180) / 2, cardY + cardH - 70, 180, 46, UiStrings::REVERSE_SYNC_CANCEL_BTN, {55, 65, 81, 255}, {255, 255, 255, 255});
     } else {
-        drawBadge(cardX + (cardW - 180) / 2, cardY + cardH - 70, 180, 46, "[A] / [B] Quay lại", {55, 65, 81, 255}, {255, 255, 255, 255});
+        drawBadgeDual(cardX + (cardW - 180) / 2, cardY + cardH - 70, 180, 46, "A", "/", "B", "Quay lại", {55, 65, 81, 255}, {255, 255, 255, 255});
     }
 }
 
@@ -3153,8 +4423,8 @@ void UIManager::renderUploadOverlay() {
     int bannerX = (1024 - bannerW) / 2;
     int bannerY = 720;
 
-    drawRoundedRect(bannerX, bannerY, bannerW, bannerH, 8, {30, 20, 45, 255}, true);
-    drawRoundedBorder(bannerX, bannerY, bannerW, bannerH, 8, {168, 85, 247, 255}, 1);
+    drawRoundedRect(bannerX, bannerY, bannerW, bannerH, UiTheme::RADIUS_CARD, {30, 20, 45, 255}, true);
+    drawRoundedBorder(bannerX, bannerY, bannerW, bannerH, UiTheme::RADIUS_CARD, {168, 85, 247, 255}, 1);
 
     char pctBuf[16];
     std::snprintf(pctBuf, sizeof(pctBuf), "%.0f%%", prog.progressPct);
@@ -3165,7 +4435,7 @@ void UIManager::renderUploadOverlay() {
 
 void UIManager::renderOTAUpdateState() {
     // ─── Borderless Full-Width Sub-Header ───
-    drawRect(0, 64, 1024, 48, {16, 20, 28, 255}, true);
+    drawRect(0, 64, 1024, 48, UiTheme::CARD_SOLID, true);
     drawRect(0, 111, 1024, 1, {38, 48, 64, 255}, true);
     drawText(UiStrings::HEADER_OTA, 36, 78, {0, 180, 216, 255}, m_fontLarge);
 
@@ -3183,8 +4453,8 @@ void UIManager::renderOTAUpdateState() {
 
     int contentBoxY = 190;
     int contentBoxH = 360;
-    drawRoundedRect(cardX, contentBoxY, cardW, contentBoxH, 14, {18, 24, 34, 255}, true);
-    drawRoundedBorder(cardX, contentBoxY, cardW, contentBoxH, 14, {38, 48, 64, 255}, 1);
+    drawRoundedRect(cardX, contentBoxY, cardW, contentBoxH, UiTheme::RADIUS_MODAL, {18, 24, 34, 255}, true);
+    drawRoundedBorder(cardX, contentBoxY, cardW, contentBoxH, UiTheme::RADIUS_MODAL, {38, 48, 64, 255}, 1);
 
     switch (prog.state) {
         case UpdateState::IDLE:
@@ -3198,7 +4468,7 @@ void UIManager::renderOTAUpdateState() {
             drawText(UiStrings::OTA_MSG_UP_TO_DATE, 512, contentBoxY + 120, {34, 197, 94, 255}, m_fontLarge, true);
             drawText(UiStrings::OTA_NO_NEW_UPDATE, 512, contentBoxY + 165, {170, 180, 195, 255}, m_fontSmall, true);
 
-            drawBadge(362, contentBoxY + 235, 300, 48, UiStrings::OTA_BTNS_CHECK_BACK, {35, 45, 60, 255}, {255, 255, 255, 255});
+            drawBadgeDual(362, contentBoxY + 235, 300, 48, "A", "Kiểm tra", "B", "Quay lại", {35, 45, 60, 255}, {255, 255, 255, 255});
             break;
         }
         case UpdateState::UPDATE_AVAILABLE: {
@@ -3235,9 +4505,9 @@ void UIManager::renderOTAUpdateState() {
             int barH = 22;
             int barX = 512 - barW / 2;
             int barY = contentBoxY + 115;
-            drawRoundedRect(barX, barY, barW, barH, 10, {35, 42, 54, 255}, true);
+            drawRoundedRect(barX, barY, barW, barH, UiTheme::RADIUS_ROW, {35, 42, 54, 255}, true);
             float pct = std::max(0.0, std::min(100.0, prog.progressPct));
-            drawRoundedRect(barX, barY, (int)(barW * (pct / 100.0)), barH, 10, {34, 197, 94, 255}, true);
+            drawRoundedRect(barX, barY, (int)(barW * (pct / 100.0)), barH, UiTheme::RADIUS_ROW, {34, 197, 94, 255}, true);
 
             char pctBuf[32];
             std::snprintf(pctBuf, sizeof(pctBuf), "%.1f%%", pct);
@@ -3282,105 +4552,305 @@ void UIManager::renderOTAUpdateState() {
             std::string err = prog.errorMessage.empty() ? UiStrings::OTA_ERR_NETWORK : prog.errorMessage;
             drawText(err, 512, contentBoxY + 150, {245, 158, 11, 255}, m_fontSmall, true);
 
-            drawBadge(362, contentBoxY + 245, 300, 48, UiStrings::OTA_BTNS_RETRY_BACK, {35, 45, 60, 255}, {255, 255, 255, 255});
+            drawBadgeDual(362, contentBoxY + 245, 300, 48, "A", "Thử lại", "B", "Quay lại", {35, 45, 60, 255}, {255, 255, 255, 255});
             break;
         }
     }
 
-    drawText(UiStrings::BTN_BACK_MAIN_MENU_HINT, 512, 650, {130, 140, 155, 255}, m_fontSmall, true);
+    drawAppFooter({{UiTheme::PadBtn::B, "Lùi"}});
 }
 
-void UIManager::renderIPTVState() {
+// ---------------------------------------------------------------------------
+// renderIPTVPlaylistSelectState
+// Man hinh chon playlist khi co nhieu file .m3u
+// ---------------------------------------------------------------------------
+void UIManager::renderIPTVPlaylistSelectState() {
     // Header
     drawRect(0, 0, 1024, 64, {18, 22, 30, 255}, true);
     drawRect(0, 63, 1024, 1, {40, 48, 62, 255}, true);
+    drawText("XEM TV - CHỌN PLAYLIST", 24, 18, {0, 180, 216, 255}, m_fontLarge);
 
-    std::string title = m_iptvShowFavoritesOnly ? "XEM TV - KÊNH YÊU THÍCH ★" : UiStrings::IPTV_TITLE;
-    drawText(title, 24, 18, {0, 180, 216, 255}, m_fontLarge);
+    const auto& playlists = IPTVManager::instance().getPlaylists();
+    int plCount = static_cast<int>(playlists.size());
 
-    std::vector<IPTVChannel> channels;
-    if (m_iptvShowFavoritesOnly) {
-        channels = IPTVManager::instance().getFavoriteChannels();
-    } else {
-        channels = IPTVManager::instance().getChannels();
-    }
-    int channelCount = static_cast<int>(channels.size());
-
-    // Channel count
-    std::string countText = std::to_string(channelCount) + (m_iptvShowFavoritesOnly ? " kênh yêu thích" : " kênh");
+    std::string countText = std::to_string(plCount) + " playlist";
     drawText(countText, 1024 - 24, 18, {130, 145, 165, 255}, m_fontSmall, true);
 
-    // Channel list (full height, 10 items per page)
-    int listY = 74;
-    int itemH = 56;
-    int visibleItems = 10;
+    int listY      = 80;
+    int itemH      = 60;
+    int visItems   = 10;
+    int itemW      = 992;
+    int itemX      = 16;
 
-    if (channels.empty()) {
-        if (m_iptvShowFavoritesOnly) {
-            drawText("Chưa có kênh yêu thích nào.", 512, 340, {150, 160, 175, 255}, m_fontMedium, true);
-            drawText("Bấm [X] trên danh sách kênh để đánh dấu yêu thích ★", 512, 385, {100, 110, 125, 255}, m_fontSmall, true);
-        } else {
-            drawText(UiStrings::IPTV_NO_CHANNELS, 512, 340, {150, 160, 175, 255}, m_fontMedium, true);
-            drawText("Vui lòng tải playlist (.m3u) qua Web Server (Cổng 8080)", 512, 385, {100, 110, 125, 255}, m_fontSmall, true);
-        }
+    if (playlists.empty()) {
+        drawText("Chưa có playlist nào.", 512, 340, {150, 160, 175, 255}, m_fontMedium, true);
+        drawText("Tải file .m3u qua Web Server (Cổng 8080)", 512, 385, {100, 110, 125, 255}, m_fontSmall, true);
     } else {
-        for (int i = m_iptvScrollOffset; i < channelCount && i < m_iptvScrollOffset + visibleItems; i++) {
-            int y = listY + (i - m_iptvScrollOffset) * (itemH + 6);
-            bool isSelected = (i == m_selectedIPTVChannelIndex);
+        for (int i = m_playlistScrollOffset;
+             i < plCount && i < m_playlistScrollOffset + visItems; i++)
+        {
+            const Playlist& pl = playlists[static_cast<size_t>(i)];
+            int y = listY + (i - m_playlistScrollOffset) * (itemH + 4);
+            bool selected = (i == m_selectedPlaylistIndex);
 
-            SDL_Color bg = isSelected ? SDL_Color{30, 58, 95, 255} : SDL_Color{22, 28, 38, 255};
-            drawRoundedRect(16, y, 992, itemH, 8, bg, true);
+            SDL_Color bg = selected ? UiTheme::FOCUS_BG : UiTheme::ROW_BG;
+            drawRoundedRect(itemX, y, itemW, itemH, UiTheme::RADIUS_CARD, bg, true);
+            if (selected)
+                drawRoundedBorder(itemX, y, itemW, itemH, UiTheme::RADIUS_CARD, UiTheme::ACCENT_CYAN, 2);
 
-            if (isSelected) {
-                drawRoundedBorder(16, y, 992, itemH, 8, {0, 180, 216, 255}, 2);
-            }
-
-            // Channel number
-            char numBuf[16];
+            // Index badge
+            char numBuf[8];
             snprintf(numBuf, sizeof(numBuf), "%02d", i + 1);
-            drawText(numBuf, 35, y + 16, {0, 180, 216, 255}, m_fontMedium);
+            drawText(numBuf, itemX + 18, textYCentered(y, itemH, m_fontMedium), UiTheme::ACCENT_CYAN, m_fontMedium);
 
-            // Channel name
-            std::string chanName = channels[i].name;
-            if (chanName.length() > 28) {
-                chanName = chanName.substr(0, 26) + "..";
+            // Playlist name + source can giua doc (fix +10/+36 cung)
+            std::string plName = truncateToWidth(pl.name, m_fontMedium, itemW - 260);
+            std::string sfText = truncateToWidth(pl.sourceFile, m_fontSmall, itemW - 260);
+            drawRowMainSub(itemX + 68, y, itemH, plName, m_fontMedium, sfText, m_fontSmall);
+
+            // Channel count badge on right
+            std::string cntText = std::to_string(pl.channelCount()) + " kênh";
+            drawBadge(itemX + itemW - 140, y + (itemH - 28) / 2, 120, 28, cntText, {28, 42, 62, 255}, {147, 197, 253, 255});
+            drawRoundedBorder(itemX + itemW - 140, y + (itemH - 28) / 2, 120, 28, UiTheme::RADIUS_ROW, {59, 130, 246, 120}, 1);
+
+            // Last-refresh time (chi hien voi URL playlist)
+            const auto& srcs = IPTVManager::instance().getSources();
+            for (const auto& s : srcs) {
+                if (s.filename == pl.sourceFile && s.type == "url") {
+                    std::string tsText = "Refresh: " + s.lastRefreshedStr();
+                    if (s.refreshIntervalHours > 0)
+                        tsText += " | moi " + std::to_string(s.refreshIntervalHours) + "h";
+                    else
+                        tsText += " | auto: tat";
+                    drawText(tsText, itemX + itemW - 400, y + 38, {100, 120, 145, 255}, m_fontSmall);
+                    break;
+                }
             }
-            drawText(chanName, 85, y + 15, {255, 255, 255, 255}, m_fontMedium);
 
-            // Playing indicator
-            if (IPTVManager::instance().isPlaying() && IPTVManager::instance().getCurrentChannelName() == channels[i].name) {
-                drawText("● ĐANG PHÁT", 475, y + 18, {34, 197, 94, 255}, m_fontSmall);
-            }
+        }
 
-            // Favorite star badge
-            if (channels[i].isFavorite) {
-                drawBadge(605, y + 15, 34, 26, "★", {202, 138, 4, 255}, {255, 255, 255, 255});
-            }
-
-            // Channel group tag
-            if (!channels[i].group.empty()) {
-                std::string grp = channels[i].group;
-                if (grp.length() > 14) grp = grp.substr(0, 12) + "..";
-                drawText(grp, 650, y + 18, {130, 140, 155, 255}, m_fontSmall);
-            }
-
-            // Source name column on the far right
-            std::string srcText = channels[i].source.empty() ? "Mặc định" : channels[i].source;
-            if (srcText.length() > 18) srcText = srcText.substr(0, 16) + "..";
-            drawBadge(815, y + 14, 180, 28, srcText, {28, 42, 62, 255}, {147, 197, 253, 255});
-            drawRoundedBorder(815, y + 14, 180, 28, 6, {59, 130, 246, 120}, 1);
+        // Scrollbar indicator
+        if (plCount > visItems) {
+            int sbH = 640;
+            int sbX = 1010;
+            int sbY = listY;
+            drawRect(sbX, sbY, 4, sbH, {35, 45, 60, 255}, true);
+            int thumbH = std::max(30, sbH * visItems / plCount);
+            int thumbY = sbY + (sbH - thumbH) * m_playlistScrollOffset / std::max(1, plCount - visItems);
+            drawRect(sbX, thumbY, 4, thumbH, {0, 180, 216, 200}, true);
         }
     }
 
     // Footer
     drawRect(0, 715, 1024, 53, {18, 22, 30, 255}, true);
     drawRect(0, 715, 1024, 1, {40, 48, 62, 255}, true);
-
-    std::string footerText = m_iptvShowFavoritesOnly
-        ? "[A] Phát trực tiếp   [B] Tất cả kênh   [X] Bỏ thích ★   [L1/R1] Sang trang   [SELECT] Tìm kiếm"
-        : "[A] Phát trực tiếp   [B] Menu   [X] Thích ★   [Y] Lọc ★   [L1/R1] Sang trang   [SELECT] Tìm kiếm";
-    drawText(footerText, 512, 730, {210, 220, 230, 255}, m_fontSmall, true);
+    drawAppFooter({{UiTheme::PadBtn::Y, "Tải lại"}, {UiTheme::PadBtn::X, "Đổi"}, {UiTheme::PadBtn::B, "Menu"}});
 }
+
+void UIManager::renderIPTVState() {
+    // Khi mpv dang phat: SDL khong render gi het.
+    // mpv so huu toan bo framebuffer. Channel list hien qua mpv OSD (showIPTVChannelOSD).
+    // Khong co conflict framebuffer, khong co flicker.
+    if (IPTVManager::instance().isIPTVPlaying()) return;
+
+    // Layout: toan man hinh khi chua phat (isIPTVPlaying() == true da return o tren roi)
+    const int SCREEN_H = 768;
+    const int UI_TOP = 0;
+    const int UI_H = SCREEN_H;
+
+    // Nen toan man hinh
+    drawRect(0, UI_TOP, 1024, UI_H, {14, 18, 26, 255}, true);
+
+    // Header
+    int headerBottom = UI_TOP;
+    drawRect(0, 0, 1024, 64, {18, 22, 30, 255}, true);
+    drawRect(0, 63, 1024, 1, {40, 48, 62, 255}, true);
+    std::string title = m_iptvShowFavoritesOnly ? "XEM TV - KENH YEU THICH ★" : UiStrings::IPTV_TITLE;
+    drawText(title, 24, 18, {0, 180, 216, 255}, m_fontLarge);
+    headerBottom = 64;
+
+    // -----------------------------------------------------------------------
+    // Build filtered channel list (dong bo voi input handler)
+    // -----------------------------------------------------------------------
+    std::vector<IPTVChannel> allChannels;
+    if (m_iptvShowFavoritesOnly) {
+        allChannels = IPTVManager::instance().getFavoriteChannels();
+    } else if (m_activePlaylistIndex >= 0) {
+        const Playlist* pl = IPTVManager::instance().getPlaylist(
+            static_cast<size_t>(m_activePlaylistIndex));
+        if (pl) {
+            for (const auto& item : pl->channels)
+                allChannels.push_back(IPTVChannel::fromItem(item, pl->name, pl->sourceFile));
+        }
+    } else {
+        allChannels = IPTVManager::instance().getChannels();
+    }
+
+    // Build group list
+    std::vector<std::string> groups;
+    groups.push_back(""); // Tất cả
+    {
+        std::unordered_set<std::string> seen;
+        for (const auto& ch : allChannels) {
+            if (!ch.group.empty() && seen.find(ch.group) == seen.end()) {
+                seen.insert(ch.group);
+                groups.push_back(ch.group);
+            }
+        }
+        std::sort(groups.begin() + 1, groups.end());
+    }
+
+    // Apply group filter
+    std::vector<IPTVChannel> channels;
+    if (m_iptvSelectedGroup.empty()) {
+        channels = allChannels;
+    } else {
+        for (const auto& ch : allChannels)
+            if (ch.group == m_iptvSelectedGroup) channels.push_back(ch);
+    }
+    int channelCount = static_cast<int>(channels.size());
+
+    // -----------------------------------------------------------------------
+    // Group filter bar (nam ngay duoi header)
+    // -----------------------------------------------------------------------
+    const int GROUP_BAR_Y = headerBottom;
+    const int GROUP_BAR_H = UiTheme::GROUP_BAR_H;
+    drawRect(0, GROUP_BAR_Y, 1024, GROUP_BAR_H, {20, 26, 38, 255}, true);
+    drawRect(0, GROUP_BAR_Y + GROUP_BAR_H - 1, 1024, 1, {40, 48, 62, 255}, true);
+
+    {
+        // Chuan A: pill full-round, do rong theo pixel (TTF_SizeUTF8), chua 150px phai cho count
+        const int COUNT_RESERVE = 150;
+        const int VIEW_RIGHT = 1024 - COUNT_RESERVE;
+        int gx = 8 - m_iptvGroupBarOffset;
+        const int gH   = UiTheme::PILL_H;
+        const int gY   = GROUP_BAR_Y + (GROUP_BAR_H - gH) / 2;
+
+        // Scroll ngang dua tren m_iptvGroupBarOffset
+        for (int gi = 0; gi < static_cast<int>(groups.size()); gi++) {
+            const std::string& g = groups[gi];
+            std::string label = g.empty() ? "Tất cả" : g;
+            label = truncateToWidth(label, m_fontSmall, UiTheme::PILL_MAX_W - UiTheme::PILL_PAD_X * 2);
+
+            int gW = pillWidth(label, m_fontSmall);
+
+            // Skip if before viewport
+            if (gx + gW < 0) {
+                gx += gW + UiTheme::PILL_GAP;
+                continue;
+            }
+            // Stop if after viewport (tru vung count phai)
+            if (gx > VIEW_RIGHT) break;
+
+            bool isActiveG = (g == m_iptvSelectedGroup);
+
+            drawPill(gx, gY, gW, gH, label, isActiveG, m_fontSmall);
+
+            gx += gW + UiTheme::PILL_GAP;
+        }
+
+        // Count badge ben phai
+        if (true) {
+            std::string countText = std::to_string(channelCount) +
+                (m_iptvShowFavoritesOnly ? " kênh yêu thích" : " kênh");
+            int th = m_fontSmall ? TTF_FontHeight(m_fontSmall) : 16;
+            drawTextRight(countText, 1000, GROUP_BAR_Y + (GROUP_BAR_H - th) / 2, UiTheme::TEXT_SUB, m_fontSmall);
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Channel list
+    // -----------------------------------------------------------------------
+    const int LIST_TOP     = GROUP_BAR_Y + GROUP_BAR_H + 2;
+    const int FOOTER_H     = UiTheme::FOOTER_H;
+    const int LIST_BOTTOM  = UiTheme::FOOTER_Y;
+    const int LIST_H       = LIST_BOTTOM - LIST_TOP;
+    const int itemH        = 50; // compact khi dang phat
+    const int itemGap      = 4;
+    const int visibleItems = std::max(3, LIST_H / (itemH + itemGap));
+
+    if (channels.empty()) {
+        int midY = LIST_TOP + LIST_H / 2;
+        if (m_iptvShowFavoritesOnly) {
+            drawText("Chưa có kênh yêu thích nào.", 512, midY - 16, {150, 160, 175, 255}, m_fontMedium, true);
+            drawInlineHintsCentered("Bấm [X] trên danh sách kênh để đánh dấu yêu thích", 512, midY + 14, {100, 110, 125, 255}, m_fontSmall, 24);
+        } else if (!m_iptvSelectedGroup.empty()) {
+            drawText("Không có kênh trong nhóm \"" + m_iptvSelectedGroup + "\"", 512, midY, {150, 160, 175, 255}, m_fontMedium, true);
+        } else {
+            drawText(UiStrings::IPTV_NO_CHANNELS, 512, midY - 16, {150, 160, 175, 255}, m_fontMedium, true);
+            drawText("Vui lòng tải playlist (.m3u) qua Web Server (Cổng 8080)", 512, midY + 14, {100, 110, 125, 255}, m_fontSmall, true);
+        }
+    } else {
+        for (int i = m_iptvScrollOffset;
+             i < channelCount && i < m_iptvScrollOffset + visibleItems; i++) {
+            int y = LIST_TOP + (i - m_iptvScrollOffset) * (itemH + itemGap);
+            bool isSelected = (i == m_selectedIPTVChannelIndex);
+
+            SDL_Color bg = isSelected ? UiTheme::FOCUS_BG : UiTheme::ROW_BG_IPTV;
+            drawRoundedRect(8, y, 1008, itemH, UiTheme::RADIUS_ROW, bg, true);
+            if (isSelected) drawRoundedBorder(8, y, 1008, itemH, UiTheme::RADIUS_ROW, UiTheme::ACCENT_CYAN, 2);
+
+            // So kenh + ten kenh can giua doc rieng theo font (fix Small/Medium chung Y)
+            int numY = textYCentered(y, itemH, m_fontSmall);
+            int nameY = textYCentered(y, itemH, m_fontMedium);
+
+            // Channel number
+            char numBuf[8];
+            snprintf(numBuf, sizeof(numBuf), "%02d", i + 1);
+            drawText(numBuf, 22, numY, UiTheme::ACCENT_CYAN, m_fontSmall);
+
+            // Channel name (cat theo pixel, khong cat giua tieng Viet)
+            std::string chanName = truncateToWidth(channels[i].name, m_fontMedium, 480);
+            drawText(chanName, 58, nameY, UiTheme::TEXT_MAIN, m_fontMedium);
+
+            // Playing indicator
+            if (false &&
+                IPTVManager::instance().getCurrentChannelName() == channels[i].name) {
+                drawText("● DANG PHAT", 420, textYCentered(y, itemH, m_fontSmall), UiTheme::ACCENT_GREEN, m_fontSmall);
+            }
+
+            if (true) {
+                int badgeCY = y + (itemH - 24) / 2;
+                // Favorite star
+                if (channels[i].isFavorite)
+                    drawBadge(590, y + (itemH - 22) / 2, 28, 22, "★", UiTheme::ACCENT_GOLD, UiTheme::TEXT_MAIN);
+                // Group tag
+                if (!channels[i].group.empty() && m_iptvSelectedGroup.empty()) {
+                    std::string grp = truncateToWidth(channels[i].group, m_fontSmall, 160);
+                    drawText(grp, 632, textYCentered(y, itemH, m_fontSmall), UiTheme::TEXT_SUB, m_fontSmall);
+                }
+                // Source badge
+                std::string srcText = truncateToWidth(channels[i].source.empty() ? "Mac dinh" : channels[i].source,
+                                                      m_fontSmall, 150);
+                drawBadge(820, badgeCY, 170, 24, srcText, {28, 42, 62, 255}, {147, 197, 253, 255});
+                drawRoundedBorder(820, badgeCY, 170, 24, 5, {59, 130, 246, 120}, 1);
+            }
+        }
+
+        // Scrollbar
+        if (channelCount > visibleItems) {
+            int sbH = LIST_H - 4;
+            int sbX = 1014;
+            drawRect(sbX, LIST_TOP + 2, 4, sbH, {35, 45, 60, 255}, true);
+            int thumbH = std::max(20, sbH * visibleItems / channelCount);
+            int thumbY = LIST_TOP + 2 + (sbH - thumbH) * m_iptvScrollOffset /
+                         std::max(1, channelCount - visibleItems);
+            drawRect(sbX, thumbY, 4, thumbH, {0, 180, 216, 200}, true);
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Footer (ve qua drawAppFooter — tu ve nen + chong tran)
+    // -----------------------------------------------------------------------
+    if (false) {
+        drawAppFooter({{UiTheme::PadBtn::B, "Dừng"}, {UiTheme::PadBtn::DPAD, "Nhóm"}, {UiTheme::PadBtn::L1, "Trang"}});
+    } else if (m_iptvShowFavoritesOnly) {
+        drawAppFooter({{UiTheme::PadBtn::B, "Lùi"}, {UiTheme::PadBtn::X, "Thích"}, {UiTheme::PadBtn::DPAD, "Nhóm"}});
+    } else {
+        drawAppFooter({{UiTheme::PadBtn::B, "Lùi"}, {UiTheme::PadBtn::X, "Thích"}, {UiTheme::PadBtn::Y, "Lọc"}, {UiTheme::PadBtn::DPAD, "Nhóm"}});
+    }
+}
+
 
 void UIManager::renderIPTVSearchState() {
     static const char* qwertyRows[] = {
@@ -3407,8 +4877,8 @@ void UIManager::renderIPTVSearchState() {
     int panelY = 74;
 
     // Search Query Box
-    drawRoundedRect(panelX, panelY, panelW, 52, 10, {22, 32, 46, 255}, true);
-    drawRoundedBorder(panelX, panelY, panelW, 52, 10, {0, 180, 216, 255}, 2);
+    drawRoundedRect(panelX, panelY, panelW, 52, UiTheme::RADIUS_ROW, {22, 32, 46, 255}, true);
+    drawRoundedBorder(panelX, panelY, panelW, 52, UiTheme::RADIUS_ROW, {0, 180, 216, 255}, 2);
     std::string displayQuery = m_iptvSearchQuery.empty() ? "Nhập tên kênh (VTV, HBO...)" : m_iptvSearchQuery + "_";
     SDL_Color qColor = m_iptvSearchQuery.empty() ? SDL_Color{80, 95, 115, 255} : SDL_Color{255, 255, 255, 255};
     drawText(displayQuery, panelX + 16, panelY + 14, qColor, m_fontMedium);
@@ -3435,8 +4905,8 @@ void UIManager::renderIPTVSearchState() {
 
             SDL_Color bg = isSel ? SDL_Color{0, 180, 216, 255} : SDL_Color{28, 38, 55, 255};
             SDL_Color fg = isSel ? SDL_Color{0, 0, 0, 255} : SDL_Color{220, 230, 240, 255};
-            drawRoundedRect(cx, cy, cellW, cellH, 6, bg, true);
-            drawRoundedBorder(cx, cy, cellW, cellH, 6, isSel ? SDL_Color{255, 255, 255, 255} : SDL_Color{45, 60, 80, 255}, 1);
+            drawRoundedRect(cx, cy, cellW, cellH, UiTheme::RADIUS_ROW, bg, true);
+            drawRoundedBorder(cx, cy, cellW, cellH, UiTheme::RADIUS_ROW, isSel ? SDL_Color{255, 255, 255, 255} : SDL_Color{45, 60, 80, 255}, 1);
             drawText(label, cx + cellW / 2, cy + cellH / 2 - 10, fg, m_fontSmall, true);
         }
     }
@@ -3466,55 +4936,58 @@ void UIManager::renderIPTVSearchState() {
 
             int itemY = listStartY + i * (itemH + 6);
             SDL_Color rowBg = isSel ? SDL_Color{30, 58, 95, 255} : SDL_Color{22, 28, 38, 255};
-            drawRoundedRect(rPanelX, itemY, rPanelW, itemH, 8, rowBg, true);
+            drawRoundedRect(rPanelX, itemY, rPanelW, itemH, UiTheme::RADIUS_CARD, rowBg, true);
             if (isSel) {
-                drawRoundedBorder(rPanelX, itemY, rPanelW, itemH, 8, {0, 180, 216, 255}, 2);
+                drawRoundedBorder(rPanelX, itemY, rPanelW, itemH, UiTheme::RADIUS_CARD, {0, 180, 216, 255}, 2);
             }
 
             // Channel number
             char numBuf[16];
             snprintf(numBuf, sizeof(numBuf), "%02d", idx + 1);
-            drawText(numBuf, rPanelX + 16, itemY + 16, {0, 180, 216, 255}, m_fontMedium);
+            drawText(numBuf, rPanelX + 16, textYCentered(itemY, itemH, m_fontMedium), UiTheme::ACCENT_CYAN, m_fontMedium);
 
-            // Channel name
-            std::string chanName = chan.name;
-            if (chanName.length() > 16) {
-                chanName = chanName.substr(0, 14) + "..";
-            }
-            drawText(chanName, rPanelX + 55, itemY + 15, {255, 255, 255, 255}, m_fontMedium);
+            // Channel name (cat theo pixel, giu tieng Viet)
+            std::string chanName = truncateToWidth(chan.name, m_fontMedium, rPanelW - 330);
+            drawText(chanName, rPanelX + 55, textYCentered(itemY, itemH, m_fontMedium), UiTheme::TEXT_MAIN, m_fontMedium);
 
             // Favorite star badge
             if (chan.isFavorite) {
-                drawBadge(rPanelX + rPanelW - 225, itemY + 15, 28, 26, "★", {202, 138, 4, 255}, {255, 255, 255, 255});
+                drawBadge(rPanelX + rPanelW - 225, itemY + (itemH - 26) / 2, 28, 26, "★", UiTheme::ACCENT_GOLD, UiTheme::TEXT_MAIN);
             }
 
             // Group tag
             if (!chan.group.empty()) {
-                std::string grp = chan.group;
-                if (grp.length() > 10) grp = grp.substr(0, 8) + "..";
-                drawText(grp, rPanelX + rPanelW - 190, itemY + 18, {130, 140, 155, 255}, m_fontSmall);
+                std::string grp = truncateToWidth(chan.group, m_fontSmall, 90);
+                drawText(grp, rPanelX + rPanelW - 190, textYCentered(itemY, itemH, m_fontSmall), UiTheme::TEXT_SUB, m_fontSmall);
             }
 
             // Source tag column
-            std::string src = chan.source.empty() ? "Nguồn" : chan.source;
-            if (src.length() > 9) src = src.substr(0, 8) + "..";
-            drawBadge(rPanelX + rPanelW - 95, itemY + 14, 90, 28, src, {28, 42, 62, 255}, {147, 197, 253, 255});
-            drawRoundedBorder(rPanelX + rPanelW - 95, itemY + 14, 90, 28, 6, {59, 130, 246, 120}, 1);
+            std::string src = truncateToWidth(chan.source.empty() ? "Nguồn" : chan.source, m_fontSmall, 70);
+            drawBadge(rPanelX + rPanelW - 95, itemY + (itemH - 28) / 2, 90, 28, src, {28, 42, 62, 255}, {147, 197, 253, 255});
+            drawRoundedBorder(rPanelX + rPanelW - 95, itemY + (itemH - 28) / 2, 90, 28, UiTheme::RADIUS_ROW, {59, 130, 246, 120}, 1);
         }
     }
 
-    // Footer
+    // Footer (icons + labels, can giua)
     drawRect(0, 715, 1024, 53, {18, 22, 30, 255}, true);
     drawRect(0, 715, 1024, 1, {40, 48, 62, 255}, true);
 
-    std::string footerText = (!m_iptvKbInResults)
-        ? "[A] Nhập phím   [B] Trở về   [X] Xóa chữ   [OK / START] Xem kết quả"
-        : "[A] Phát kênh   [B] Bàn phím   [X] Thích ★   [L1/R1] Sang trang   [▲ ▼] Chọn kênh";
-    drawText(footerText, 512, 730, {210, 220, 230, 255}, m_fontSmall, true);
+    if (!m_iptvKbInResults) {
+        drawAppFooter({{UiTheme::PadBtn::B, "Lùi"}, {UiTheme::PadBtn::X, "Xóa"}});
+    } else {
+        drawAppFooter({{UiTheme::PadBtn::B, "Bàn phím"}, {UiTheme::PadBtn::X, "Thích"}, {UiTheme::PadBtn::L1, "Trang"}, {UiTheme::PadBtn::R1, "Trang"}});
+    }
 }
 
 void UIManager::render() {
-    SDL_SetRenderDrawColor(m_renderer, 13, 17, 23, 255);
+    // Khi IPTV dang phat: khong render SDL de tranh conflict framebuffer voi mpv.
+    // mpv so huu man hinh, channel list hien qua mpv OSD native (IPC show-text).
+    if (IPTVManager::instance().isIPTVPlaying() &&
+        m_currentState == UIState::IPTV_LIST) {
+        return;
+    }
+
+    SDL_SetRenderDrawColor(m_renderer, UiTheme::BG_APP.r, UiTheme::BG_APP.g, UiTheme::BG_APP.b, 255);
     SDL_RenderClear(m_renderer);
 
     renderHeader();
@@ -3532,10 +5005,19 @@ void UIManager::render() {
         case UIState::DIAGNOSTICS:      renderDiagnosticsState(); break;
         case UIState::OTA_UPDATE:       renderOTAUpdateState(); break;
         case UIState::REVERSE_SYNC:     renderReverseSyncState(); break;
+        case UIState::IPTV_PLAYLIST_SELECT: renderIPTVPlaylistSelectState(); break;
         case UIState::IPTV_LIST:        renderIPTVState(); break;
         case UIState::IPTV_SEARCH:      renderIPTVSearchState(); break;
         case UIState::YOUTUBE_SEARCH:   renderYouTubeSearchState(); break;
         case UIState::YOUTUBE_RESULTS:  renderYouTubeResultsState(); break;
+        case UIState::TIKTOK_SEARCH:   renderTikTokSearchState(); break;
+        case UIState::TIKTOK_RESULTS:  renderTikTokResultsState(); break;
+        case UIState::LOCALSEND_HOME:       renderLocalSendHome(); break;
+        case UIState::LOCALSEND_INCOMING:   renderLocalSendHome(); renderLocalSendIncomingDialog(); break;
+        case UIState::LOCALSEND_FOLDER:     renderLocalSendFolderPicker(); break;
+        case UIState::LOCALSEND_SEND:       renderLocalSendSendPicker(); break;
+        case UIState::LOCALSEND_GAME_PICKER: renderLocalSendHome(); renderLocalSendGamePicker(); break;
+        case UIState::LOCALSEND_PROGRESS:   renderLocalSendHome(); renderLocalSendProgress(); break;
         default: break;
     }
 
@@ -3738,6 +5220,65 @@ static std::vector<std::string> parseInnertubeSearchResponse(const std::string& 
     return results;
 }
 
+void UIManager::loadYouTubeHistory() {
+    if (!m_ytSearchHistory.empty()) return;
+    std::string appRoot = AppConfig::instance().getAppRoot();
+    if (appRoot.empty()) appRoot = "/mnt/SDCARD/Apps/RomCloud";
+    std::string histFile = appRoot + "/config/yt_history.txt";
+    std::ifstream file(histFile);
+    if (file.is_open()) {
+        std::string line;
+        while (std::getline(file, line)) {
+            while (!line.empty() && (line.back() == '\n' || line.back() == '\r')) line.pop_back();
+            if (!line.empty()) {
+                m_ytSearchHistory.push_back(line);
+                if (m_ytSearchHistory.size() >= 8) break;
+            }
+        }
+    }
+    if (m_ytSearchHistory.empty()) {
+        m_ytSearchHistory = {
+            "Nhac tre remix", "Karaoke bolero",
+            "Tin tức 24h", "Review phim",
+            "Hài sitcom", "Bóng đá highlights",
+            "Phim hoạt hình", "Công nghệ mới"
+        };
+    }
+}
+
+void UIManager::saveYouTubeHistory(const std::string& query) {
+    if (query.empty()) return;
+    auto it = std::remove(m_ytSearchHistory.begin(), m_ytSearchHistory.end(), query);
+    m_ytSearchHistory.erase(it, m_ytSearchHistory.end());
+    m_ytSearchHistory.insert(m_ytSearchHistory.begin(), query);
+    while (m_ytSearchHistory.size() > 8) {
+        m_ytSearchHistory.pop_back();
+    }
+    std::string appRoot = AppConfig::instance().getAppRoot();
+    if (appRoot.empty()) appRoot = "/mnt/SDCARD/Apps/RomCloud";
+    std::string configDir = appRoot + "/config";
+    mkdir(configDir.c_str(), 0755);
+    std::string histFile = configDir + "/yt_history.txt";
+    std::ofstream file(histFile);
+    if (file.is_open()) {
+        for (const auto& q : m_ytSearchHistory) {
+            file << q << "\n";
+        }
+    }
+}
+
+void UIManager::initTikTokTags() {
+    if (!m_ttTrendingTags.empty()) return;
+    m_ttTrendingTags = {
+        "#xuhuong", "#trending",
+        "#haihuoc", "#nhactre",
+        "#dance", "#review",
+        "#food", "#gocnhin",
+        "#vlog", "#gaming",
+        "#pets", "#travel"
+    };
+}
+
 std::vector<std::string> UIManager::runYouTubeSearch(const std::string& query, int page) {
     std::vector<std::string> results;
     if (query.empty()) return results;
@@ -3925,6 +5466,7 @@ void UIManager::triggerYouTubeSearch() {
     m_ytLastSearchQuery = m_ytSearchQuery;
     m_ytAllCachedResults.clear();
     clearThumbnailCache();
+    saveYouTubeHistory(m_ytSearchQuery);
 
     m_ytIsSearching = true;
     m_ytSearchFinished = false;
@@ -4084,59 +5626,103 @@ static std::string getCurrentTimeString() {
 }
 
 void UIManager::renderYouTubeSearchState() {
+    loadYouTubeHistory();
+
     // ─── TrimUI Stock OS Ambient Teal Theme ───
-    drawRect(0, 0, 1024, 768, {7, 24, 33, 255}, true);
+    drawAppBackground();
 
     // Header bar
-    drawRect(0, 0, 1024, 52, {10, 32, 44, 255}, true);
-    drawRect(0, 52, 1024, 1, {20, 54, 70, 255}, true);
+    drawRect(0, 0, 1024, 50, {10, 32, 44, 255}, true);
+    drawRect(0, 50, 1024, 1, {20, 54, 70, 255}, true);
 
     // Green chevron back arrow "<" badge
-    int backBadgeX = 44;
-    int backBadgeY = 12;
+    int backBadgeX = 46;
+    int backBadgeY = 11;
     int backBadgeW = 28;
     int backBadgeH = 28;
-    drawRoundedRect(backBadgeX, backBadgeY, backBadgeW, backBadgeH, 6, {0, 200, 83, 255}, true);
+    drawRoundedRect(backBadgeX, backBadgeY, backBadgeW, backBadgeH, UiTheme::RADIUS_ROW, {0, 200, 83, 255}, true);
     drawText("<", backBadgeX + backBadgeW / 2, backBadgeY + backBadgeH / 2 - 2, {255, 255, 255, 255}, m_fontSmall, true);
 
     // Search header title
-    drawText("Search", 82, 16, {245, 250, 255, 255}, m_fontMedium, false);
+    drawText("YouTube", 84, 15, {245, 250, 255, 255}, m_fontMedium, false);
 
-    // Current input mode badge (TELEX vs US)
-    std::string modeText = m_ytTelexMode ? "TELEX [R1]" : "US [R1]";
+    // Current input mode badge (TELEX vs US) positioned safely to the right
+    // Dat [R1] o dau de drawBadge parse thanh icon that
+    std::string modeText = m_ytTelexMode ? "[R1] TELEX" : "[R1] US";
     SDL_Color modeBg = m_ytTelexMode ? SDL_Color{0, 200, 83, 255} : SDL_Color{25, 60, 78, 255};
-    drawBadge(164, 12, 108, 28, modeText, modeBg, {255, 255, 255, 255});
+    drawBadge(220, 11, 108, 28, modeText, modeBg, {255, 255, 255, 255});
 
-    // Right-side indicators: Battery & Clock (matching TrimUI Stock OS status bar)
+    // Right-side indicators: Battery & Clock
     int bat = getBatteryLevel();
     std::string batStr = std::to_string(bat) + "%";
-    drawText(batStr, 910, 18, {190, 215, 228, 255}, m_fontSmall, false);
+    drawText(batStr, 910, 16, {190, 215, 228, 255}, m_fontSmall, false);
 
     // Battery icon
-    drawRoundedBorder(962, 19, 24, 13, 3, {190, 215, 228, 255}, 1);
-    drawRect(986, 22, 2, 7, {190, 215, 228, 255}, true);
+    drawRoundedBorder(962, 17, 24, 13, 3, {190, 215, 228, 255}, 1);
+    drawRect(986, 20, 2, 7, {190, 215, 228, 255}, true);
     int bFill = (20 * bat) / 100;
     if (bFill > 0) {
         SDL_Color bColor = (bat <= 20) ? SDL_Color{239, 68, 68, 255} : SDL_Color{0, 200, 83, 255};
-        drawRect(964, 21, bFill, 9, bColor, true);
+        drawRect(964, 19, bFill, 9, bColor, true);
     }
 
     std::string timeStr = getCurrentTimeString();
-    drawText(timeStr, 842, 18, {190, 215, 228, 255}, m_fontSmall, false);
+    drawText(timeStr, 842, 16, {190, 215, 228, 255}, m_fontSmall, false);
 
-    // ─── Input Field Box (Wide rounded rectangle) ───
+    // ─── Input Field Box (Slimmer, Y = 58 to 114) ───
     int inX = 46;
-    int inY = 62;
+    int inY = 58;
     int inW = 932;
-    int inH = 88;
-    drawRoundedRect(inX, inY, inW, inH, 8, {12, 38, 50, 230}, true);
-    drawRoundedBorder(inX, inY, inW, inH, 8, {26, 72, 92, 255}, 1);
+    int inH = 56;
+    drawRoundedRect(inX, inY, inW, inH, UiTheme::RADIUS_CARD, {12, 38, 50, 230}, true);
+    drawRoundedBorder(inX, inY, inW, inH, UiTheme::RADIUS_CARD, {26, 72, 92, 255}, 1);
 
-    std::string dispQ = m_ytSearchQuery.empty() ? "Nhập từ khóa tìm kiếm..." : (m_ytSearchQuery + " _");
+    std::string dispQ = m_ytSearchQuery.empty() ? "Nhập từ khóa tìm kiếm video..." : (m_ytSearchQuery + " _");
     SDL_Color qCol = m_ytSearchQuery.empty() ? SDL_Color{75, 115, 135, 255} : SDL_Color{255, 255, 255, 255};
-    drawText(dispQ, inX + 22, inY + 28, qCol, m_fontLarge, false);
+    drawText(dispQ, inX + 20, inY + (inH - textHeight(m_fontLarge)) / 2, qCol, m_fontLarge, false);
 
-    // ─── TrimUI Stock OS 5-Row Virtual Keyboard Grid ───
+    // ─── Upper Section: Search History Chips (Y = 124 to 445) ───
+    drawText("LỊCH SỬ TÌM KIẾM", 46, 124, {0, 180, 216, 255}, m_fontSmall, false);
+    if (m_ytFocusInTags) {
+        drawText("D-pad: Chọn từ khóa  |  [A]: Tìm ngay  |  [▼]: Xuống bàn phím", 500, 124, {0, 200, 83, 255}, m_fontSmall, false);
+    } else {
+        drawText("Bam [▲] tu hang phim tren cung de chon lich su", 610, 124, {120, 150, 170, 255}, m_fontSmall, false);
+    }
+
+    int tagCols = 4;
+    int tagW = 222;
+    int tagH = 46;
+    int tagGapX = 14;
+    int tagGapY = 14;
+    int tagStartX = 46;
+    int tagStartY = 152;
+
+    int historyCount = std::min(8, static_cast<int>(m_ytSearchHistory.size()));
+    for (int i = 0; i < historyCount; i++) {
+        int col = i % tagCols;
+        int row = i / tagCols;
+        int tx = tagStartX + col * (tagW + tagGapX);
+        int ty = tagStartY + row * (tagH + tagGapY);
+        bool isFocused = (m_ytFocusInTags && m_ytSelectedTagIndex == i);
+
+        std::string tagText = m_ytSearchHistory[i];
+        if (tagText.length() > 22) tagText = tagText.substr(0, 20) + "..";
+
+        if (isFocused) {
+            drawRoundedRect(tx, ty, tagW, tagH, UiTheme::RADIUS_CARD, {0, 180, 80, 240}, true);
+            drawRoundedBorder(tx, ty, tagW, tagH, UiTheme::RADIUS_CARD, {140, 255, 180, 255}, 2);
+            drawText(tagText, tx + tagW / 2, ty + (tagH - textHeight(m_fontMedium)) / 2, {255, 255, 255, 255}, m_fontMedium, true);
+        } else {
+            drawRoundedRect(tx, ty, tagW, tagH, UiTheme::RADIUS_CARD, {14, 32, 44, 210}, true);
+            drawRoundedBorder(tx, ty, tagW, tagH, UiTheme::RADIUS_CARD, {26, 62, 82, 255}, 1);
+            drawText(tagText, tx + tagW / 2, ty + (tagH - textHeight(m_fontSmall)) / 2, {200, 225, 238, 255}, m_fontSmall, true);
+        }
+    }
+
+    // Divider line above keyboard
+    drawRect(46, 444, 932, 1, {20, 48, 64, 180}, true);
+
+    // ─── Compact Virtual Keyboard (Pinned to bottom, Y = 456 to 708) ───
     static const char* lowerRows[] = {
         "1234567890",
         "qwertyuiop",
@@ -4151,78 +5737,88 @@ void UIManager::renderYouTubeSearchState() {
     };
 
     int kbStartX = 46;
-    int kbStartY = 162;
+    int kbStartY = 456;
     int cellW = 86;
-    int cellH = 92;
-    int gap = 8;
+    int cellH = 44; // Compact & well-proportioned
+    int gapX = 8;
+    int gapY = 6;
 
     for (int row = 0; row < 4; row++) {
         for (int col = 0; col < 10; col++) {
-            int cx = kbStartX + col * (cellW + gap);
-            int cy = kbStartY + row * (cellH + gap);
-            bool isSel = (m_ytKbRow == row && m_ytKbCol == col);
+            int cx = kbStartX + col * (cellW + gapX);
+            int cy = kbStartY + row * (cellH + gapY);
+            bool isSel = (!m_ytFocusInTags && m_ytKbRow == row && m_ytKbCol == col);
 
             char ch = m_ytKbShift ? upperRows[row][col] : lowerRows[row][col];
             std::string label(1, ch);
 
             if (isSel) {
-                // Focused: Vibrant TrimUI Emerald Green
-                drawRoundedRect(cx, cy, cellW, cellH, 6, {0, 200, 83, 255}, true);
-                drawRoundedBorder(cx, cy, cellW, cellH, 6, {130, 255, 180, 255}, 2);
-                drawText(label, cx + cellW / 2, cy + cellH / 2 - 2, {255, 255, 255, 255}, m_fontLarge, true);
+                drawRoundedRect(cx, cy, cellW, cellH, UiTheme::RADIUS_ROW, {0, 200, 83, 255}, true);
+                drawRoundedBorder(cx, cy, cellW, cellH, UiTheme::RADIUS_ROW, {140, 255, 190, 255}, 2);
+                drawText(label, cx + cellW / 2, cy + (cellH - textHeight(m_fontLarge)) / 2, {255, 255, 255, 255}, m_fontLarge, true);
             } else {
-                // Inactive: Dark translucent teal keycap
-                drawRoundedRect(cx, cy, cellW, cellH, 6, {14, 36, 47, 210}, true);
-                drawRoundedBorder(cx, cy, cellW, cellH, 6, {22, 58, 74, 255}, 1);
-                drawText(label, cx + cellW / 2, cy + cellH / 2 - 2, {210, 228, 238, 255}, m_fontLarge, true);
+                drawRoundedRect(cx, cy, cellW, cellH, UiTheme::RADIUS_ROW, {14, 32, 44, 210}, true);
+                drawRoundedBorder(cx, cy, cellW, cellH, UiTheme::RADIUS_ROW, {22, 54, 70, 255}, 1);
+                drawText(label, cx + cellW / 2, cy + (cellH - textHeight(m_fontLarge)) / 2, {210, 228, 238, 255}, m_fontLarge, true);
             }
         }
     }
 
-    // Row 4: 5 Action Keys (Width = 180 each, spanning 2 columns)
+    // Row 4: 5 Action Keys (Clean text without emojis)
     int actW = 180;
-    int row4Y = kbStartY + 4 * (cellH + gap);
+    int row4Y = kbStartY + 4 * (cellH + gapY);
 
     struct ActionKey {
+        std::string btn;
         std::string label;
-        std::string badge;
     };
     ActionKey actKeys[5] = {
-        {m_ytKbShift ? "⇧ (HOA)" : "⇧ (thường)", "L"},
-        {m_ytTelexMode ? "TELEX" : "abc", "R"},
-        {"␣ Cách", "X"},
-        {"⌫ Xóa", "Y"},
-        {"OK Tìm", "START"}
+        {"L1", m_ytKbShift ? "HOA" : "Thường"},
+        {"R1", m_ytTelexMode ? "TELEX" : "US"},
+        {"X", "Cách"},
+        {"Y", "Xóa"},
+        {"START", "Tìm"}
     };
 
     for (int i = 0; i < 5; i++) {
-        int cx = kbStartX + i * (actW + gap);
-        bool isSel = (m_ytKbRow == 4 && (m_ytKbCol / 2) == i);
+        int cx = kbStartX + i * (actW + gapX);
+        bool isSel = (!m_ytFocusInTags && m_ytKbRow == 4 && (m_ytKbCol / 2) == i);
 
+        // Ve icon nut + label can giua trong phim (thay text "[L]" cu)
+        int iconSz = 30, kgap = 8;
+        int lwTmp = textWidth(actKeys[i].label, m_fontMedium);
+        int totW = iconSz + kgap + lwTmp;
+        int kxc = cx + (actW - totW) / 2;
+        int kyc = row4Y + (cellH - 30) / 2;
+        int kth = textHeight(m_fontMedium);
         if (isSel) {
-            drawRoundedRect(cx, row4Y, actW, cellH, 6, {0, 200, 83, 255}, true);
-            drawRoundedBorder(cx, row4Y, actW, cellH, 6, {130, 255, 180, 255}, 2);
-            drawText(actKeys[i].label, cx + actW / 2 - 18, row4Y + cellH / 2 - 2, {255, 255, 255, 255}, m_fontMedium, true);
-            drawBadge(cx + actW - 46, row4Y + cellH / 2 - 13, 38, 26, actKeys[i].badge, {20, 100, 50, 255}, {255, 255, 255, 255});
+            drawRoundedRect(cx, row4Y, actW, cellH, UiTheme::RADIUS_ROW, {0, 200, 83, 255}, true);
+            drawRoundedBorder(cx, row4Y, actW, cellH, UiTheme::RADIUS_ROW, {140, 255, 190, 255}, 2);
+            drawButtonIcon(actKeys[i].btn, kxc, kyc, iconSz);
+            drawText(actKeys[i].label, kxc + iconSz + kgap, kyc + (30 - kth) / 2, {255, 255, 255, 255}, m_fontMedium);
         } else {
-            drawRoundedRect(cx, row4Y, actW, cellH, 6, {14, 36, 47, 210}, true);
-            drawRoundedBorder(cx, row4Y, actW, cellH, 6, {22, 58, 74, 255}, 1);
-            drawText(actKeys[i].label, cx + actW / 2 - 18, row4Y + cellH / 2 - 2, {210, 228, 238, 255}, m_fontMedium, true);
-            drawBadge(cx + actW - 46, row4Y + cellH / 2 - 13, 38, 26, actKeys[i].badge, {24, 60, 76, 255}, {180, 210, 225, 255});
+            drawRoundedRect(cx, row4Y, actW, cellH, UiTheme::RADIUS_ROW, {14, 32, 44, 210}, true);
+            drawRoundedBorder(cx, row4Y, actW, cellH, UiTheme::RADIUS_ROW, {22, 54, 70, 255}, 1);
+            drawButtonIcon(actKeys[i].btn, kxc, kyc, iconSz);
+            drawText(actKeys[i].label, kxc + iconSz + kgap, kyc + (30 - kth) / 2, {210, 228, 238, 255}, m_fontMedium);
         }
     }
 
-    // Bottom Bar (TrimUI Stock style: [A] OK badge on bottom left, hints on right)
-    drawRect(0, 715, 1024, 53, {9, 24, 32, 255}, true);
-    drawBadge(46, 727, 82, 30, "[A] OK", {0, 200, 83, 255}, {255, 255, 255, 255});
-    drawText("[X] Cách   [Y] Xóa   [L1] Viết hoa   [R1] Telex/US   [START] Tìm kiếm   [B] Trở về",
-        560, 732, {160, 185, 200, 255}, m_fontSmall, true);
+    // ─── Bottom Bar ───
+    drawRect(0, 716, 1024, 52, {9, 20, 28, 255}, true);
+    if (m_ytFocusInTags) {
+        drawBadge(46, 726, 120, 30, "[A] Tìm ngay", {0, 200, 83, 255}, {255, 255, 255, 255});
+        drawAppFooter({{UiTheme::PadBtn::A, "Tìm"}, {UiTheme::PadBtn::UPDOWN, "Bàn phím"}});
+    } else {
+        drawBadge(46, 726, 82, 30, "[A] OK", {0, 200, 83, 255}, {255, 255, 255, 255});
+        drawAppFooter({{UiTheme::PadBtn::X, "Cách"}, {UiTheme::PadBtn::Y, "Xóa"}, {UiTheme::PadBtn::L1, "Hoa"}, {UiTheme::PadBtn::R1, "Telex"}, {UiTheme::PadBtn::START, "Tìm"}});
+    }
 
     // Searching modal overlay
     if (m_ytIsSearching) {
-        drawRect(0, 0, 1024, 768, {0, 0, 0, 200}, true);
-        drawRoundedRect(280, 290, 464, 140, 10, SDL_Color{14, 38, 50, 255}, true);
-        drawRoundedBorder(280, 290, 464, 140, 10, {0, 200, 83, 255}, 2);
+        beginModalDim();
+        drawRoundedRect(280, 290, 464, 140, UiTheme::RADIUS_ROW, SDL_Color{14, 38, 50, 255}, true);
+        drawRoundedBorder(280, 290, 464, 140, UiTheme::RADIUS_ROW, {0, 200, 83, 255}, 2);
         drawText("ĐANG TÌM KIẾM...", 512, 325, {0, 200, 83, 255}, m_fontMedium, true);
         std::string qText = "\"" + m_ytSearchQuery + "\"";
         if (qText.length() > 36) qText = qText.substr(0, 33) + "...\"";
@@ -4249,7 +5845,7 @@ void UIManager::renderYouTubeResultsState() {
     }
 
     // Pure dark background matching Image 1
-    drawRect(0, 0, 1024, 768, {18, 18, 18, 255}, true);
+    drawAppBackground();
 
     // Top Bar: YouTube Logo + Search Query on top left
     int logoH = 45;
@@ -4333,11 +5929,11 @@ void UIManager::renderYouTubeResultsState() {
 
         // Card Background
         SDL_Color cardBg = isSelected ? SDL_Color{34, 34, 34, 255} : SDL_Color{24, 24, 24, 255};
-        drawRoundedRect(cx, cy, cardW, cardH, 8, cardBg, true);
+        drawRoundedRect(cx, cy, cardW, cardH, UiTheme::RADIUS_CARD, cardBg, true);
 
         // Selected Card Focus: Crisp White Border
         if (isSelected) {
-            drawRoundedBorder(cx, cy, cardW, cardH, 8, {255, 255, 255, 255}, 2);
+            drawRoundedBorder(cx, cy, cardW, cardH, UiTheme::RADIUS_CARD, {255, 255, 255, 255}, 2);
         }
 
         auto parts = split(m_ytSearchResults[idx], '|');
@@ -4382,10 +5978,10 @@ void UIManager::renderYouTubeResultsState() {
             int sth = PlatformInfo::instance().scaleH(thumbH);
             SDL_Rect dstRect = {stx, sty, stw, sth};
             SDL_RenderCopy(m_renderer, m_ytThumbnails[vid], nullptr, &dstRect);
-            drawRoundedBorder(thumbX, thumbY, thumbW, thumbH, 6, {45, 45, 45, 180}, 1);
+            drawRoundedBorder(thumbX, thumbY, thumbW, thumbH, UiTheme::RADIUS_ROW, {45, 45, 45, 180}, 1);
         } else {
-            drawRoundedRect(thumbX, thumbY, thumbW, thumbH, 6, SDL_Color{32, 32, 32, 255}, true);
-            drawText("YouTube", thumbX + thumbW / 2, thumbY + thumbH / 2 - 6,
+            drawRoundedRect(thumbX, thumbY, thumbW, thumbH, UiTheme::RADIUS_ROW, SDL_Color{32, 32, 32, 255}, true);
+            drawText("YouTube", thumbX + thumbW / 2, thumbY + (thumbH - textHeight(m_fontSmall)) / 2,
                 SDL_Color{229, 9, 20, 255}, m_fontSmall, true);
         }
 
@@ -4397,7 +5993,7 @@ void UIManager::renderYouTubeResultsState() {
             int pillX = thumbX + thumbW - pillW - 6;
             int pillY = thumbY + thumbH - pillH - 6;
             drawRoundedRect(pillX, pillY, pillW, pillH, 4, SDL_Color{0, 0, 0, 215}, true);
-            drawText(durStr, pillX + pillW / 2, pillY + 2, {255, 255, 255, 255}, m_fontSmall, true);
+            drawText(durStr, pillX + pillW / 2, pillY + (pillH - textHeight(m_fontSmall)) / 2, {255, 255, 255, 255}, m_fontSmall, true);
         }
 
         // Info area below thumbnail: infoX is EXACTLY thumbX (strict left-alignment)
@@ -4436,16 +6032,1363 @@ void UIManager::renderYouTubeResultsState() {
     snprintf(pageInfo, sizeof(pageInfo), "Page %d/%d (%d videos)", m_ytCurrentPage, maxPage, totalResults);
     drawText(pageInfo, 32, 730, {156, 163, 175, 255}, m_fontSmall, false);
 
-    drawText("[A] Play   [X] Search   [L1/R1] Page   [B] Exit",
-        992, 730, {210, 215, 225, 255}, m_fontSmall, true);
+    drawAppFooter({{UiTheme::PadBtn::X, "Tìm"}, {UiTheme::PadBtn::L1, "Trang"}, {UiTheme::PadBtn::R1, "Trang"}});
 
     // Resolving stream overlay (Borderless)
     if (m_ytIsLoadingVideo) {
-        drawRect(0, 0, 1024, 768, {0, 0, 0, 210}, true);
-        drawRoundedRect(272, 285, 480, 150, 12, SDL_Color{28, 28, 28, 255}, true);
+        beginModalDim();
+        drawRoundedRect(272, 285, 480, 150, UiTheme::RADIUS_MODAL, SDL_Color{28, 28, 28, 255}, true);
         drawText("ĐANG TẢI VIDEO...", 512, 325, {255, 255, 255, 255}, m_fontMedium, true);
         drawText("Đang kết nối luồng phát...", 512, 372, {180, 190, 205, 255}, m_fontSmall, true);
     }
+}
+
+// ─────────────────────────────────────────────
+// TikTok Search Logic
+// ─────────────────────────────────────────────
+
+std::vector<std::string> UIManager::runTikTokSearch(const std::string& query, int page) {
+    std::vector<std::string> results;
+    if (query.empty()) return results;
+
+    // 1. Direct high-speed API call via TikTokManager
+    auto feed = TikTokManager::instance().getFeedForTag(query);
+    if (!feed.empty()) {
+        for (const auto& item : feed) {
+            results.push_back(item.id + "|" + item.title + "|" + item.author + "|" + item.playUrl);
+        }
+        return results;
+    }
+
+    // 2. Fallback to shell script
+    std::string appRoot = AppConfig::instance().getAppRoot();
+    if (appRoot.empty()) appRoot = "/mnt/SDCARD/Apps/RomCloud";
+    std::string scriptPath = appRoot + "/scripts/tiktok_search.sh";
+
+    std::string escapedQuery;
+    for (char c : query) {
+        if (c == '"' || c == '\\') escapedQuery += '\\';
+        escapedQuery += c;
+    }
+
+    std::string cmd = "\"" + scriptPath + "\" search \"" + escapedQuery + "\" " +
+                      std::to_string(page) + " 20 2>/dev/null";
+    Logger::info("[TikTok] Searching via script: " + cmd);
+
+    FILE* pipe = popen(cmd.c_str(), "r");
+    if (!pipe) return results;
+
+    char buffer[2048];
+    while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
+        std::string line(buffer);
+        while (!line.empty() && (line.back() == '\n' || line.back() == '\r')) {
+            line.pop_back();
+        }
+        if (line.find("ERROR:") == 0 || line.find("WARNING:") == 0) continue;
+        if (std::count(line.begin(), line.end(), '|') >= 2) {
+            results.push_back(line);
+        }
+    }
+    pclose(pipe);
+    return results;
+}
+
+std::vector<std::string> UIManager::runTikTokTrending(int page) {
+    std::vector<std::string> results;
+
+    // 1. Direct high-speed API call via TikTokManager
+    auto feed = TikTokManager::instance().getFeedForTag("trend");
+    if (!feed.empty()) {
+        for (const auto& item : feed) {
+            results.push_back(item.id + "|" + item.title + "|" + item.author + "|" + item.playUrl);
+        }
+        return results;
+    }
+
+    // 2. Fallback to shell script
+    std::string appRoot = AppConfig::instance().getAppRoot();
+    if (appRoot.empty()) appRoot = "/mnt/SDCARD/Apps/RomCloud";
+    std::string scriptPath = appRoot + "/scripts/tiktok_search.sh";
+
+    std::string cmd = "\"" + scriptPath + "\" trending " +
+                      std::to_string(page) + " 20 2>/dev/null";
+    Logger::info("[TikTok] Fetching trending via script");
+
+    FILE* pipe = popen(cmd.c_str(), "r");
+    if (!pipe) return results;
+
+    char buffer[2048];
+    while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
+        std::string line(buffer);
+        while (!line.empty() && (line.back() == '\n' || line.back() == '\r')) {
+            line.pop_back();
+        }
+        if (line.find("ERROR:") == 0 || line.find("WARNING:") == 0) continue;
+        if (std::count(line.begin(), line.end(), '|') >= 2) {
+            results.push_back(line);
+        }
+    }
+    pclose(pipe);
+    return results;
+}
+
+std::string UIManager::resolveTikTokStreamUrl(const std::string& tiktokUrl) {
+    if (tiktokUrl.empty()) return "";
+    return TikTokManager::instance().resolveStreamUrl(tiktokUrl);
+}
+
+void UIManager::triggerTikTokSearch() {
+    if (m_ttIsSearching) return;
+
+    m_ttCurrentPage = 1;
+    m_ttLastSearchQuery = m_ttSearchQuery;
+
+    m_ttIsSearching = true;
+    m_ttSearchFinished = false;
+    m_ttErrorMessage.clear();
+    std::string query = m_ttSearchQuery;
+
+    std::thread([this, query]() {
+        auto results = runTikTokSearch(query, 1);
+        if (!results.empty()) {
+            m_ttSearchResults = results;
+        } else {
+            m_ttSearchResults.clear();
+            m_ttErrorMessage = "Không tìm thấy video nào";
+        }
+        m_ttSearchSelectedIndex = 0;
+        m_ttSearchScrollOffset = 0;
+        m_ttSearchFinished = true;
+    }).detach();
+}
+
+void UIManager::triggerTikTokTrending() {
+    if (m_ttIsSearching) return;
+
+    m_ttCurrentPage = 1;
+    m_ttLastSearchQuery = "Thịnh hành";
+
+    m_ttIsSearching = true;
+    m_ttSearchFinished = false;
+    m_ttErrorMessage.clear();
+
+    std::thread([this]() {
+        auto results = runTikTokTrending(1);
+        if (!results.empty()) {
+            m_ttSearchResults = results;
+        } else {
+            m_ttSearchResults.clear();
+            m_ttErrorMessage = "Không tìm thấy video nào";
+        }
+        m_ttSearchSelectedIndex = 0;
+        m_ttSearchScrollOffset = 0;
+        m_ttSearchFinished = true;
+    }).detach();
+}
+
+void UIManager::playTikTokVideo(const std::string& tiktokUrl, const std::string& title) {
+    if (tiktokUrl.empty() || m_ttIsLoadingVideo) return;
+
+    m_ttIsLoadingVideo = true;
+    m_ttVideoReady = false;
+    m_ttPendingStreamUrl.clear();
+    m_ttPendingVideoId = tiktokUrl;
+    m_ttPendingTitle = title;
+
+    std::thread([this, tiktokUrl]() {
+        std::string streamUrl = resolveTikTokStreamUrl(tiktokUrl);
+        if (!streamUrl.empty()) {
+            m_ttPendingStreamUrl = streamUrl;
+        }
+        m_ttVideoReady = true;
+    }).detach();
+}
+
+// ─────────────────────────────────────────────
+// TikTok Rendering
+// ─────────────────────────────────────────────
+
+void UIManager::renderTikTokSearchState() {
+    initTikTokTags();
+
+    // TikTok dark theme
+    drawAppBackground();
+
+    // Header bar
+    drawRect(0, 0, 1024, 50, {18, 18, 26, 255}, true);
+    drawRect(0, 50, 1024, 1, {35, 30, 45, 255}, true);
+
+    // Back badge
+    int backBadgeX = 46;
+    int backBadgeY = 11;
+    drawRoundedRect(backBadgeX, backBadgeY, 28, 28, UiTheme::RADIUS_ROW, {255, 0, 80, 255}, true);
+    drawText("<", backBadgeX + 14, backBadgeY + 14, {255, 255, 255, 255}, m_fontSmall, true);
+
+    // TikTok header title
+    drawText("TikTok", 84, 15, {245, 250, 255, 255}, m_fontMedium, false);
+
+    // Mode badge offset to 220 to avoid collision with title
+    std::string modeText = m_ttTelexMode ? "[R1] TELEX" : "[R1] US";
+    SDL_Color modeBg = m_ttTelexMode ? SDL_Color{255, 0, 80, 255} : SDL_Color{45, 45, 60, 255};
+    drawBadge(220, 11, 108, 28, modeText, modeBg, {255, 255, 255, 255});
+
+    // Battery & Clock
+    int bat = getBatteryLevel();
+    std::string batStr = std::to_string(bat) + "%";
+    drawText(batStr, 910, 16, {190, 215, 228, 255}, m_fontSmall, false);
+    drawRoundedBorder(962, 17, 24, 13, 3, {190, 215, 228, 255}, 1);
+    drawRect(986, 20, 2, 7, {190, 215, 228, 255}, true);
+    int bFill = (20 * bat) / 100;
+    if (bFill > 0) {
+        SDL_Color bColor = (bat <= 20) ? SDL_Color{239, 68, 68, 255} : SDL_Color{255, 0, 80, 255};
+        drawRect(964, 19, bFill, 9, bColor, true);
+    }
+    std::string timeStr = getCurrentTimeString();
+    drawText(timeStr, 842, 16, {190, 215, 228, 255}, m_fontSmall, false);
+
+    // ─── Input Field Box (Y = 58 to 114) ───
+    int inX = 46;
+    int inY = 58;
+    int inW = 932;
+    int inH = 56;
+    drawRoundedRect(inX, inY, inW, inH, UiTheme::RADIUS_CARD, {22, 20, 32, 230}, true);
+    drawRoundedBorder(inX, inY, inW, inH, UiTheme::RADIUS_CARD, {255, 0, 80, 180}, 1);
+
+    std::string dispQ = m_ttSearchQuery.empty() ? "Nhập từ khóa hoặc hashtag TikTok..." : (m_ttSearchQuery + " _");
+    SDL_Color qCol = m_ttSearchQuery.empty() ? SDL_Color{110, 100, 125, 255} : SDL_Color{255, 255, 255, 255};
+    drawText(dispQ, inX + 20, inY + (inH - textHeight(m_fontLarge)) / 2, qCol, m_fontLarge, false);
+
+    // ─── Upper Section: Trending Hashtag Grid (Y = 124 to 445) ───
+    drawText("CHỦ ĐỀ & HASHTAG THỊNH HÀNH", 46, 124, {255, 0, 80, 255}, m_fontSmall, false);
+    if (m_ttFocusInTags) {
+        drawText("D-pad: Chọn hashtag  |  [A]: Xem video  |  [Xuống]: Bàn phím", 520, 124, {255, 0, 80, 255}, m_fontSmall, false);
+    } else {
+        drawText("Bấm [Lên] từ hàng phím trên cùng để chọn hashtag", 630, 124, {140, 140, 160, 255}, m_fontSmall, false);
+    }
+
+    int tagCols = 4;
+    int tagW = 222;
+    int tagH = 44;
+    int tagGapX = 14;
+    int tagGapY = 10;
+    int tagStartX = 46;
+    int tagStartY = 152;
+
+    int tagCount = std::min(12, static_cast<int>(m_ttTrendingTags.size()));
+    for (int i = 0; i < tagCount; i++) {
+        int col = i % tagCols;
+        int row = i / tagCols;
+        int tx = tagStartX + col * (tagW + tagGapX);
+        int ty = tagStartY + row * (tagH + tagGapY);
+        bool isFocused = (m_ttFocusInTags && m_ttSelectedTagIndex == i);
+
+        std::string tagText = m_ttTrendingTags[i];
+
+        if (isFocused) {
+            drawRoundedRect(tx, ty, tagW, tagH, UiTheme::RADIUS_CARD, {255, 0, 80, 240}, true);
+            drawRoundedBorder(tx, ty, tagW, tagH, UiTheme::RADIUS_CARD, {255, 170, 200, 255}, 2);
+            drawText(tagText, tx + tagW / 2, ty + (tagH - textHeight(m_fontMedium)) / 2, {255, 255, 255, 255}, m_fontMedium, true);
+        } else {
+            drawRoundedRect(tx, ty, tagW, tagH, UiTheme::RADIUS_CARD, {26, 20, 32, 210}, true);
+            drawRoundedBorder(tx, ty, tagW, tagH, UiTheme::RADIUS_CARD, {60, 40, 65, 255}, 1);
+            drawText(tagText, tx + tagW / 2, ty + (tagH - textHeight(m_fontSmall)) / 2, {220, 210, 230, 255}, m_fontSmall, true);
+        }
+    }
+
+    // Divider line above keyboard
+    drawRect(46, 444, 932, 1, {40, 30, 50, 180}, true);
+
+    // ─── Compact Virtual Keyboard (Pinned to bottom, Y = 456 to 708) ───
+    static const char* lowerRows[] = {
+        "1234567890",
+        "qwertyuiop",
+        "asdfghjkl-",
+        "zxcvbnm()/"
+    };
+    static const char* upperRows[] = {
+        "1234567890",
+        "QWERTYUIOP",
+        "ASDFGHJKL-",
+        "ZXCVBNM()/"
+    };
+
+    int kbStartX = 46;
+    int kbStartY = 456;
+    int cellW = 86;
+    int cellH = 44; // Compact & well-proportioned
+    int gapX = 8;
+    int gapY = 6;
+
+    for (int row = 0; row < 4; row++) {
+        for (int col = 0; col < 10; col++) {
+            int cx = kbStartX + col * (cellW + gapX);
+            int cy = kbStartY + row * (cellH + gapY);
+            bool isSel = (!m_ttFocusInTags && m_ttKbRow == row && m_ttKbCol == col);
+
+            char ch = m_ttKbShift ? upperRows[row][col] : lowerRows[row][col];
+            std::string label(1, ch);
+
+            if (isSel) {
+                drawRoundedRect(cx, cy, cellW, cellH, UiTheme::RADIUS_ROW, {255, 0, 80, 255}, true);
+                drawRoundedBorder(cx, cy, cellW, cellH, UiTheme::RADIUS_ROW, {255, 140, 175, 255}, 2);
+                drawText(label, cx + cellW / 2, cy + (cellH - textHeight(m_fontLarge)) / 2, {255, 255, 255, 255}, m_fontLarge, true);
+            } else {
+                drawRoundedRect(cx, cy, cellW, cellH, UiTheme::RADIUS_ROW, {22, 20, 34, 210}, true);
+                drawRoundedBorder(cx, cy, cellW, cellH, UiTheme::RADIUS_ROW, {44, 38, 58, 255}, 1);
+                drawText(label, cx + cellW / 2, cy + (cellH - textHeight(m_fontLarge)) / 2, {215, 215, 235, 255}, m_fontLarge, true);
+            }
+        }
+    }
+
+    // Row 4: 5 Action Keys
+    int actW = 180;
+    int row4Y = kbStartY + 4 * (cellH + gapY);
+
+    struct ActionKey {
+        std::string btn;
+        std::string label;
+    };
+    ActionKey actKeys[5] = {
+        {"L1", m_ttKbShift ? "HOA" : "Thường"},
+        {"R1", m_ttTelexMode ? "TELEX" : "US"},
+        {"X", "Cách"},
+        {"Y", "Xóa"},
+        {"START", "Tìm"}
+    };
+
+    for (int i = 0; i < 5; i++) {
+        int cx = kbStartX + i * (actW + gapX);
+        bool isSel = (!m_ttFocusInTags && m_ttKbRow == 4 && (m_ttKbCol / 2) == i);
+
+        int iconSz = 30, kgap = 8;
+        int lwTmp = textWidth(actKeys[i].label, m_fontMedium);
+        int totW = iconSz + kgap + lwTmp;
+        int kxc = cx + (actW - totW) / 2;
+        int kyc = row4Y + (cellH - 30) / 2;
+        int kth = textHeight(m_fontMedium);
+        if (isSel) {
+            drawRoundedRect(cx, row4Y, actW, cellH, UiTheme::RADIUS_ROW, {255, 0, 80, 255}, true);
+            drawRoundedBorder(cx, row4Y, actW, cellH, UiTheme::RADIUS_ROW, {255, 140, 175, 255}, 2);
+            drawButtonIcon(actKeys[i].btn, kxc, kyc, iconSz);
+            drawText(actKeys[i].label, kxc + iconSz + kgap, kyc + (30 - kth) / 2, {255, 255, 255, 255}, m_fontMedium);
+        } else {
+            drawRoundedRect(cx, row4Y, actW, cellH, UiTheme::RADIUS_ROW, {22, 20, 34, 210}, true);
+            drawRoundedBorder(cx, row4Y, actW, cellH, UiTheme::RADIUS_ROW, {44, 38, 58, 255}, 1);
+            drawButtonIcon(actKeys[i].btn, kxc, kyc, iconSz);
+            drawText(actKeys[i].label, kxc + iconSz + kgap, kyc + (30 - kth) / 2, {215, 215, 235, 255}, m_fontMedium);
+        }
+    }
+
+    // ─── Bottom Bar ───
+    drawRect(0, 716, 1024, 52, {14, 14, 20, 255}, true);
+    if (m_ttFocusInTags) {
+        drawBadge(46, 726, 140, 30, "[A] Xem video", {255, 0, 80, 255}, {255, 255, 255, 255});
+        drawAppFooter({{UiTheme::PadBtn::A, "Phát"}, {UiTheme::PadBtn::UPDOWN, "Bàn phím"}});
+    } else {
+        drawBadge(46, 726, 82, 30, "[A] OK", {255, 0, 80, 255}, {255, 255, 255, 255});
+        drawAppFooter({{UiTheme::PadBtn::X, "Cách"}, {UiTheme::PadBtn::Y, "Xóa"}, {UiTheme::PadBtn::L1, "Hoa"}, {UiTheme::PadBtn::R1, "Telex"}, {UiTheme::PadBtn::START, "Tìm"}});
+    }
+
+    // Searching modal overlay
+    if (m_ttIsSearching) {
+        beginModalDim();
+        drawRoundedRect(280, 290, 464, 140, UiTheme::RADIUS_ROW, SDL_Color{25, 20, 35, 255}, true);
+        drawRoundedBorder(280, 290, 464, 140, UiTheme::RADIUS_ROW, {255, 0, 80, 255}, 2);
+        drawText("ĐANG TẢI TIKTOK...", 512, 325, {255, 0, 80, 255}, m_fontMedium, true);
+        std::string qText = m_ttSearchQuery.empty() ? "Video thịnh hành hôm nay" : ("\"" + m_ttSearchQuery + "\"");
+        if (qText.length() > 36) qText = qText.substr(0, 33) + "...\"";
+        drawText(qText, 512, 370, {240, 240, 240, 255}, m_fontSmall, true);
+    }
+}
+
+void UIManager::renderTikTokResultsState() {
+    // Dark background
+    drawAppBackground();
+
+    // Top Bar: TikTok logo + query
+    SDL_Texture* ttLogo = nullptr;
+    auto itLogo = m_gridIconCache.find("TIKTOK.png");
+    if (itLogo != m_gridIconCache.end()) {
+        ttLogo = itLogo->second;
+    } else {
+        std::string iconPath = AppConfig::instance().getAssetsDir() + "/apps_icons/TIKTOK.png";
+        SDL_Surface* surf = IMG_Load(iconPath.c_str());
+        if (surf) {
+            ttLogo = SDL_CreateTextureFromSurface(m_renderer, surf);
+            SDL_FreeSurface(surf);
+            if (ttLogo) m_gridIconCache["TIKTOK.png"] = ttLogo;
+        }
+    }
+
+    int logoH = 40;
+    int logoW = 40;
+    int textStartX = 28;
+    if (ttLogo) {
+        int texW = 0, texH = 0;
+        SDL_QueryTexture(ttLogo, nullptr, nullptr, &texW, &texH);
+        if (texH > 0) logoW = (texW * logoH) / texH;
+        int slx = PlatformInfo::instance().scaleX(26);
+        int sly = PlatformInfo::instance().scaleY(12);
+        int slw = PlatformInfo::instance().scaleW(logoW);
+        int slh = PlatformInfo::instance().scaleH(logoH);
+        SDL_Rect dst = {slx, sly, slw, slh};
+        SDL_RenderCopy(m_renderer, ttLogo, nullptr, &dst);
+        textStartX = 26 + logoW + 10;
+    }
+
+    std::string queryDisplay = m_ttLastSearchQuery.empty() ? "" : (": " + m_ttLastSearchQuery);
+    if (!queryDisplay.empty()) {
+        if (queryDisplay.length() > 38) queryDisplay = queryDisplay.substr(0, 35) + "...";
+        drawText(queryDisplay, textStartX, 22, {245, 245, 245, 255}, m_fontMedium, false);
+    }
+
+    // Battery & Clock
+    int bat = getBatteryLevel();
+    drawText(std::to_string(bat) + "%", 910, 20, {180, 185, 195, 255}, m_fontSmall, false);
+    drawRoundedBorder(962, 21, 24, 13, 3, {180, 185, 195, 255}, 1);
+    drawRect(986, 24, 2, 7, {180, 185, 195, 255}, true);
+    int bFill = (20 * bat) / 100;
+    if (bFill > 0) {
+        SDL_Color bColor = (bat <= 20) ? SDL_Color{239, 68, 68, 255} : SDL_Color{34, 197, 94, 255};
+        drawRect(964, 23, bFill, 9, bColor, true);
+    }
+    drawText(getCurrentTimeString(), 842, 20, {180, 185, 195, 255}, m_fontSmall, false);
+
+    // 3 cols × 2 rows grid — no thumbnails, text cards only
+    const int itemsPerPage = 6;
+    const int cols = 3;
+    int totalResults = static_cast<int>(m_ttSearchResults.size());
+    int pageStartIndex = (m_ttSearchSelectedIndex / itemsPerPage) * itemsPerPage;
+
+    int cardW = 316;
+    int cardH = 210;  // shorter than YouTube (no thumbnail)
+    int gapX = 12;
+    int gapY = 14;
+    int startX = 26;
+    int startY = 62;
+
+    for (int i = 0; i < itemsPerPage; i++) {
+        int idx = pageStartIndex + i;
+        if (idx >= totalResults) break;
+
+        int row = i / cols;
+        int col = i % cols;
+        int cx = startX + col * (cardW + gapX);
+        int cy = startY + row * (cardH + gapY);
+        bool isSelected = (idx == m_ttSearchSelectedIndex);
+
+        // Card Background
+        SDL_Color cardBg = isSelected ? SDL_Color{38, 38, 38, 255} : SDL_Color{24, 24, 24, 255};
+        drawRoundedRect(cx, cy, cardW, cardH, UiTheme::RADIUS_CARD, cardBg, true);
+
+        // Selected: TikTok pink border
+        if (isSelected) {
+            drawRoundedBorder(cx, cy, cardW, cardH, UiTheme::RADIUS_CARD, {255, 0, 80, 255}, 2);
+        }
+
+        auto parts = split(m_ttSearchResults[idx], '|');
+        std::string vid = !parts.empty() ? parts[0] : "";
+        std::string title = parts.size() >= 2 ? parts[1] : "";
+        std::string author = parts.size() >= 3 ? parts[2] : "";
+        std::string desc = parts.size() >= 4 ? parts[3] : "";
+
+        int pad = 12;
+        int infoX = cx + pad;
+        int infoY = cy + pad;
+
+        // Author (muted, top)
+        if (!author.empty()) {
+            std::string dispAuthor = "@" + author;
+            if (dispAuthor.length() > 22) dispAuthor = dispAuthor.substr(0, 20) + "..";
+            drawText(dispAuthor, infoX, infoY, {255, 0, 80, 200}, m_fontSmall, false);
+            infoY += 22;
+        }
+
+        // Title (bold, 2 lines)
+        auto lines = wrapUtf8TwoLines(title, 22);
+        SDL_Color titleCol = {255, 255, 255, 255};
+        drawText(lines.first, infoX, infoY, titleCol, m_fontSmall, false);
+        if (!lines.second.empty()) {
+            drawText(lines.second, infoX, infoY + 22, titleCol, m_fontSmall, false);
+            infoY += 48;
+        } else {
+            infoY += 28;
+        }
+
+        // Description excerpt (muted)
+        if (!desc.empty()) {
+            std::string dispDesc = desc;
+            if (dispDesc.length() > 40) dispDesc = dispDesc.substr(0, 38) + "..";
+            drawText(dispDesc, infoX, infoY, {120, 120, 140, 255}, m_fontSmall, false);
+        }
+    }
+
+    // Footer
+    drawRect(0, 715, 1024, 53, {18, 18, 18, 255}, true);
+    drawRect(0, 715, 1024, 1, {35, 35, 35, 255}, true);
+
+    char pageInfo[64];
+    int maxPage = std::max(1, (totalResults + itemsPerPage - 1) / itemsPerPage);
+    snprintf(pageInfo, sizeof(pageInfo), "Page %d/%d (%d videos)", m_ttCurrentPage, maxPage, totalResults);
+    drawText(pageInfo, 32, 730, {156, 163, 175, 255}, m_fontSmall, false);
+
+    drawAppFooter({{UiTheme::PadBtn::X, "Tìm"}});
+
+    // Loading overlay
+    if (m_ttIsLoadingVideo) {
+        beginModalDim();
+        drawRoundedRect(272, 285, 480, 150, UiTheme::RADIUS_MODAL, SDL_Color{28, 28, 28, 255}, true);
+        drawText("ĐANG TẢI VIDEO...", 512, 325, {255, 255, 255, 255}, m_fontMedium, true);
+        drawText("Đang kết nối luồng phát...", 512, 372, {180, 190, 205, 255}, m_fontSmall, true);
+    }
+}
+
+// =============================================================
+// LocalSend render functions
+// =============================================================
+void UIManager::renderLocalSendHome() {
+    // IP cua Brick nay (goc tren ben phai) de phan biet 2 may khi test.
+    {
+        std::string myIp = LocalSendManager::instance().ownIp();
+        if (myIp.empty() || myIp == "0.0.0.0") myIp = LsUtil::getOwnIp("wlan0");
+        if (!myIp.empty()) {
+            drawBadge(1024 - 220, 14, 196, 30, myIp,
+                      {30, 41, 59, 255}, {148, 163, 184, 255});
+        }
+    }
+    // ===== Layout goc LocalSend: sidebar trai + content phai =====
+    // Sidebar
+    int sbW = 284;
+    drawRect(0, 0, sbW, 768, {13, 17, 23, 255}, true);
+    drawText("LocalSend", sbW/2, 110, {255, 255, 255, 255}, m_fontTitle, true);
+    // m_localSendMode: 0=SEND, 1=RECEIVE — sidebar hien thi Receive tren, Send duoi
+    const char* sbLabels[2] = {"Receive", "Send"};
+    for (int i = 0; i < 2; ++i) {
+        int modeVal = (i == 0) ? 1 : 0;  // row0=Receive(1), row1=Send(0)
+        bool sel = (m_localSendMode == modeVal);
+        int ry = 215 + i*62;
+        if (sel) drawRoundedRect(14, ry, sbW-28, 52, 26, {55, 71, 79, 255}, true);
+        // Icon PNG: Send -> assets/player_icons/send.png, Receive -> receive.png
+        const char* iconFile = (i == 0) ? "receive" : "send";
+        drawPlayerIcon(iconFile, 40, ry+8, 36, 36);
+        drawText(sbLabels[i], 96, ry+10, {255,255,255,255}, m_fontMedium, false);
+    }
+    drawText("Settings", 96, 215+2*62+10, {180,180,180,255}, m_fontMedium, false);
+    // Content phai
+    int cx = sbW + 50;
+    int cw = 1024 - cx - 40;
+    if (m_localSendMode == 1) {
+        // ===== RECEIVE: hien thi trang thai lang nghe =====
+        drawText("Receive", cx, 120, {255,255,255,255}, m_fontLarge, false);
+        int stY = 180;
+        drawRoundedRect(cx, stY, cw, 130, UiTheme::RADIUS_MODAL, {55, 71, 79, 255}, true);
+        std::string myAlias = LocalSendManager::instance().alias();
+        drawText(myAlias.empty() ? "TrimUI" : myAlias, cx+30, stY+20, {255,255,255,255}, m_fontLarge, false);
+        std::string tgt = LocalSendManager::instance().currentTargetFolder();
+        drawText(tgt.empty() ? "Đang lắng nghe..." : tgt, cx+30, stY+64, {180,200,190,255}, m_fontSmall, false);
+        drawText("Mở LocalSend trên máy khác và gử file tới thiết bị này.", cx, stY+160, {150,150,150,255}, m_fontSmall, false);
+    } else {
+        // ===== SEND: Nearby devices (Selection đã bỏ — A vào thẳng picker ROM) =====
+        drawText("Nearby devices", cx, 118, {255,255,255,255}, m_fontLarge, false);
+        int ny = 118 + 48;
+        auto devices = LocalSendManager::instance().knownDevices();
+        int devCount = (int)devices.size();
+        if (devCount == 0) {
+            drawRoundedRect(cx, ny, cw, 96, UiTheme::RADIUS_MODAL, {55, 71, 79, 255}, true);
+            drawText("Đang tìm thiết bị...", cx+cw/2, ny+22, {200,200,200,255}, m_fontMedium, true);
+            drawText("Hãy mở LocalSend trên máy khác", cx+cw/2, ny+56, {150,150,150,255}, m_fontSmall, true);
+        } else {
+            for (int i = 0; i < devCount; ++i) {
+                int dy = ny + i*108;
+                if (dy + 96 > 640) break;
+                const auto& d = devices[i];
+                bool sel = (i == m_localSendSelectedDevice);
+                drawRoundedRect(cx, dy, cw, 96, UiTheme::RADIUS_MODAL, {55, 71, 79, 255}, true);
+                if (sel) drawRoundedBorder(cx, dy, cw, 96, UiTheme::RADIUS_MODAL, {0, 200, 150, 255}, 3);
+                // icon phone don gian
+                drawRoundedBorder(cx+22, dy+18, 34, 60, UiTheme::RADIUS_ROW, {255,255,255,255}, 3);
+                std::string nm = d.alias.empty() ? d.ip : d.alias;
+                if ((int)nm.size() > 26) nm = nm.substr(0, 24) + "..";
+                drawText(nm, cx+72, dy+16, {255,255,255,255}, m_fontLarge, false);
+                std::string sub = d.deviceModel.empty() ? (d.ip + ":" + std::to_string(d.port)) : d.deviceModel;
+                drawBadge(cx+72, dy+56, 86, 26, "HTTP", {120,130,135,255}, {40,50,55,255});
+                drawText(sub, cx+170, dy+58, {180,190,185,255}, m_fontSmall, false);
+            }
+        }
+        drawText("Troubleshoot", cx+cw/2, 648, {120, 200, 190, 255}, m_fontSmall, true);
+        drawText("Hãy chắc chắn máy đích cùng mạng Wi-Fi.", cx+cw/2, 680, {140,140,140,255}, m_fontSmall, true);
+    }
+    // Footer hint
+    if (m_localSendMode == 0) {
+        drawAppFooter({{UiTheme::PadBtn::L1R1, "Chọn"}, {UiTheme::PadBtn::A, "Chọn"}, {UiTheme::PadBtn::Y, "Tải lại"}});
+    } else {
+        drawAppFooter({{UiTheme::PadBtn::X, "Chọn đích"}, {UiTheme::PadBtn::Y, "Tải lại"}});
+    }
+}
+
+void UIManager::renderLocalSendIncomingDialog() {
+    beginModalDim();
+    int dlgX = 122, dlgY = 144, dlgW = 780, dlgH = 480;
+    drawRoundedRect(dlgX, dlgY, dlgW, dlgH, UiTheme::RADIUS_MODAL, SDL_Color{15, 23, 42, 245}, true);
+
+    drawText("CÓ FILE ĐẾN", dlgX + dlgW/2, dlgY + 36, {250, 204, 21, 255}, m_fontTitle, true);
+
+    drawText("Từ thiết bị:", dlgX + 40, dlgY + 110, {148, 163, 184, 255}, m_fontMedium, false);
+    drawText(m_localSendCurrentPrompt.fromAlias, dlgX + 40, dlgY + 142,
+             {255, 255, 255, 255}, m_fontLarge, false);
+    drawText("(" + m_localSendCurrentPrompt.fromIp + ")",
+             dlgX + dlgW - 40, dlgY + 142, {148, 163, 184, 255}, m_fontMedium, true);
+
+    // ---- Nếu sender gửi kèm game metadata (mở rộng RomCloud) → render cover + tên game
+    const auto& file = m_localSendCurrentPrompt.file;
+    if (file.gameId > 0) {
+        // Cover bên trái
+        int cvX = dlgX + 40, cvY = dlgY + 200, cvW = 180, cvH = 240;
+        // Build temp GameRecord để CoverManager resolve
+        GameRecord tmpG;
+        tmpG.id = file.gameId;
+        tmpG.systemId = file.systemId;
+        tmpG.title = file.gameTitle;
+        tmpG.filename = file.fileName;
+        tmpG.coverPath = file.coverPath;
+        // Resolve system info
+        SystemRecord sys;
+        if (!file.systemCode.empty() && DatabaseManager::instance().getSystemById(file.systemId, sys)) {
+            // OK
+        }
+        int texW=0, texH=0;
+        SDL_Texture* tex = CoverManager::instance().getCoverTexture(tmpG, sys, texW, texH);
+        if (tex) {
+            // Fit cover into cvW x cvH (preserve aspect ratio: cover = 4:3 thường)
+            SDL_Rect dst{cvX, cvY, cvW, cvH};
+            SDL_RenderCopy(m_renderer, tex, nullptr, &dst);
+        } else {
+            // Placeholder box với system code
+            drawRoundedRect(cvX, cvY, cvW, cvH, UiTheme::RADIUS_CARD, SDL_Color{30, 41, 59, 255}, true);
+            drawText(file.systemCode.empty() ? "?" : file.systemCode,
+                     cvX + cvW/2, cvY + cvH/2 - 12, {100, 116, 139, 255}, m_fontLarge, true);
+        }
+
+        // Game title lớn (bên phải cover)
+        int txtX = cvX + cvW + 30;
+        std::string dispTitle = file.gameTitle.empty() ? file.fileName : file.gameTitle;
+        drawText(dispTitle, txtX, cvY, {34, 197, 94, 255}, m_fontLarge, false);
+
+        // System
+        if (!file.systemName.empty() || !file.systemCode.empty()) {
+            std::string sysStr = "Hệ máy: " + (file.systemName.empty() ? file.systemCode : file.systemName);
+            if (!file.systemCode.empty()) sysStr += "  (" + file.systemCode + ")";
+            drawText(sysStr, txtX, cvY + 42, {250, 204, 21, 255}, m_fontMedium, false);
+        }
+
+        // Filename
+        drawText("File: " + file.fileName, txtX, cvY + 78, {148, 163, 184, 255}, m_fontSmall, false);
+
+        // Size + dung lượng trống (đỏ nếu thiếu chỗ)
+        std::string sizeStr = "Kích thước: " + LsUtil::humanSize(file.size);
+        uint64_t freeB0 = LsUtil::sdFreeBytes("/mnt/SDCARD");
+        sizeStr += " | Trống: " + LsUtil::humanSize(freeB0);
+        drawText(sizeStr, txtX, cvY + 102,
+                 (file.size > 0 && freeB0 < file.size)
+                     ? SDL_Color{239, 68, 68, 255} : SDL_Color{203, 213, 225, 255},
+                 m_fontMedium, false);
+
+        // Chọn chỗ lưu tay (Up/Down) — 0 = Auto
+        {
+            static const char* kLbl[] = {"Auto", "GBA", "NES", "SNES", "PS1",
+                                         "MD", "N64", "Inbox", "RetroArch", "system"};
+            int idx = m_localSendIncomingFolderIdx;
+            if (idx < 0 || idx > 9) idx = 0;
+            drawText(std::string("Lưu vào: < ") + kLbl[idx] + " >",
+                     dlgX + 40, dlgY + dlgH - 108,
+                     SDL_Color{250, 204, 21, 255}, m_fontMedium, false);
+        }
+
+        // Saved path
+        drawText("Sẽ lưu vào:", dlgX + 40, dlgY + dlgH - 60, {148, 163, 184, 255}, m_fontSmall, false);
+        drawText(m_localSendCurrentPrompt.savedPath, dlgX + 40, dlgY + dlgH - 36,
+                 {34, 197, 94, 255}, m_fontSmall, false);
+    } else {
+        // Fallback: raw file (không có game metadata)
+        drawText("File:", dlgX + 40, dlgY + 200, {148, 163, 184, 255}, m_fontMedium, false);
+        drawText(file.fileName, dlgX + 40, dlgY + 232,
+                 {34, 197, 94, 255}, m_fontLarge, false);
+        std::string sizeStr = "Kích thước: " + LsUtil::humanSize(file.size);
+        uint64_t freeB1 = LsUtil::sdFreeBytes("/mnt/SDCARD");
+        sizeStr += " | Trống: " + LsUtil::humanSize(freeB1);
+        drawText(sizeStr, dlgX + 40, dlgY + 280,
+                 (file.size > 0 && freeB1 < file.size)
+                     ? SDL_Color{239, 68, 68, 255} : SDL_Color{203, 213, 225, 255},
+                 m_fontMedium, false);
+
+        if (!file.relativePath.empty()) {
+            drawText("Đường dẫn: " + file.relativePath,
+                     dlgX + 40, dlgY + 310, {148, 163, 184, 255}, m_fontMedium, false);
+        }
+        {
+            static const char* kLbl[] = {"Auto", "GBA", "NES", "SNES", "PS1",
+                                         "MD", "N64", "Inbox", "RetroArch", "system"};
+            int idx = m_localSendIncomingFolderIdx;
+            if (idx < 0 || idx > 9) idx = 0;
+            drawText(std::string("Lưu vào: < ") + kLbl[idx] + " >  (Up/Down đổi)",
+                     dlgX + 40, dlgY + 338, SDL_Color{250, 204, 21, 255}, m_fontMedium, false);
+        }
+        drawText("Sẽ lưu vào:", dlgX + 40, dlgY + 368, {148, 163, 184, 255}, m_fontMedium, false);
+        drawText(m_localSendCurrentPrompt.savedPath, dlgX + 40, dlgY + 398,
+                 {34, 197, 94, 255}, m_fontMedium, false);
+    }
+
+    // Footer với icon nút A (đồng ý) và B (từ chối) — pattern giống IPTV
+    drawAppFooter({{UiTheme::PadBtn::A, "Chọn"}});
+}
+
+void UIManager::startLsFolderRename(bool existing) {
+    m_lsFolderRenameExisting = existing;
+    m_lsFolderRenameOriginal.clear();
+    if (existing) {
+        if (m_localSendFolderSelected < 0 ||
+            m_localSendFolderSelected >= (int)m_localSendFolderEntries.size()) {
+            showToast("Chưa chọn thư mục để đổi tên", {239, 68, 68, 255}, 1500);
+            return;
+        }
+        m_lsFolderRenameOriginal = m_localSendFolderEntries[m_localSendFolderSelected];
+        std::string nm = m_lsFolderRenameOriginal.substr(
+            m_lsFolderRenameOriginal.find_last_of('/') + 1);
+        m_lsFolderRenameText = nm;
+    } else {
+        m_lsFolderRenameText = suggestNewFolderName(m_localSendFolderCurrentPath);
+    }
+    m_lsFolderKbRow = 0;
+    m_lsFolderKbCol = 0;
+    m_lsFolderKbShift = false;
+    m_lsFolderRenaming = true;
+}
+
+void UIManager::cancelLsFolderRename() {
+    m_lsFolderRenaming = false;
+    m_lsFolderRenameText.clear();
+    m_lsFolderRenameOriginal.clear();
+}
+
+static std::string lsTrimName(const std::string& s) {
+    size_t a = 0;
+    while (a < s.size() && (s[a] == ' ' || s[a] == '\t')) ++a;
+    size_t b = s.size();
+    while (b > a && (s[b - 1] == ' ' || s[b - 1] == '\t')) --b;
+    return s.substr(a, b - a);
+}
+
+void UIManager::commitLsFolderRename() {
+    std::string name = lsTrimName(m_lsFolderRenameText);
+    if (name.empty() || name.find('/') != std::string::npos ||
+        name == "." || name == "..") {
+        showToast("Tên không hợp lệ", {239, 68, 68, 255}, 1500);
+        return;
+    }
+    if (m_lsFolderRenameExisting) {
+        std::string parent = m_lsFolderRenameOriginal.substr(
+            0, m_lsFolderRenameOriginal.find_last_of('/'));
+        std::string dst = parent + "/" + name;
+        if (dst == m_lsFolderRenameOriginal) { cancelLsFolderRename(); return; }
+        if (FileSystemManager::instance().directoryExists(dst) ||
+            FileSystemManager::instance().fileExists(dst)) {
+            showToast("Tên đã tồn tại", {239, 68, 68, 255}, 1500);
+            return;
+        }
+        if (std::rename(m_lsFolderRenameOriginal.c_str(), dst.c_str()) == 0) {
+            showToast("Đã đổi tên: " + name, {34, 197, 94, 255}, 1500);
+            m_localSendFolderLoaded = false;
+            m_lsFolderRenaming = false;
+        } else {
+            showToast("Lỗi: không đổi tên được", {239, 68, 68, 255}, 1500);
+        }
+    } else {
+        std::string newPath = m_localSendFolderCurrentPath + "/" + name;
+        if (FileSystemManager::instance().directoryExists(newPath)) {
+            showToast("Tên đã tồn tại", {239, 68, 68, 255}, 1500);
+            return;
+        }
+        if (FileSystemManager::instance().createDirectoryRecursive(newPath)) {
+            showToast("Đã tạo thư mục: " + name, {34, 197, 94, 255}, 1500);
+            m_localSendFolderLoaded = false;
+            m_lsFolderRenaming = false;
+        } else {
+            showToast("Lỗi: không tạo được thư mục", {239, 68, 68, 255}, 1500);
+        }
+    }
+}
+
+bool UIManager::handleLsFolderKeyboardInput() {
+    InputManager& input = InputManager::instance();
+    static const char* lowerRows[4] = {
+        "qwertyuiop", "asdfghjkl\'", "zxcvbnm,.?", "1234567890"
+    };
+    static const char* upperRows[4] = {
+        "QWERTYUIOP", "ASDFGHJKL\"", "ZXCVBNM;:/", "!@#$%^&*()"
+    };
+    const int colsPerRow[5] = {10, 10, 10, 10, 5};
+    auto clampCol = [&]() {
+        int mx = colsPerRow[m_lsFolderKbRow] - 1;
+        if (m_lsFolderKbCol > mx) m_lsFolderKbCol = mx;
+        if (m_lsFolderKbCol < 0) m_lsFolderKbCol = 0;
+    };
+    if (input.isButtonJustPressed(Button::B)) { cancelLsFolderRename(); return true; }
+    if (input.isButtonJustPressed(Button::UP)) {
+        if (m_lsFolderKbRow > 0) { m_lsFolderKbRow--; clampCol(); }
+        return true;
+    }
+    if (input.isButtonJustPressed(Button::DOWN)) {
+        if (m_lsFolderKbRow < 4) { m_lsFolderKbRow++; clampCol(); }
+        return true;
+    }
+    if (input.isButtonJustPressed(Button::LEFT)) {
+        int mx = colsPerRow[m_lsFolderKbRow];
+        m_lsFolderKbCol = (m_lsFolderKbCol - 1 + mx) % mx;
+        return true;
+    }
+    if (input.isButtonJustPressed(Button::RIGHT)) {
+        int mx = colsPerRow[m_lsFolderKbRow];
+        m_lsFolderKbCol = (m_lsFolderKbCol + 1) % mx;
+        return true;
+    }
+    if (input.isButtonJustPressed(Button::X)) {
+        if (!m_lsFolderRenameText.empty()) m_lsFolderRenameText.pop_back();
+        return true;
+    }
+    if (input.isButtonJustPressed(Button::Y)) {
+        m_lsFolderKbShift = !m_lsFolderKbShift;
+        return true;
+    }
+    if (input.isButtonJustPressed(Button::START)) { commitLsFolderRename(); return true; }
+    if (input.isButtonJustPressed(Button::A)) {
+        if (m_lsFolderKbRow < 4) {
+            char ch = m_lsFolderKbShift ? upperRows[m_lsFolderKbRow][m_lsFolderKbCol]
+                                         : lowerRows[m_lsFolderKbRow][m_lsFolderKbCol];
+            if (m_lsFolderRenameText.size() < 60) m_lsFolderRenameText += ch;
+        } else {
+            int a = m_lsFolderKbCol;
+            if (a == 0) m_lsFolderKbShift = !m_lsFolderKbShift;
+            else if (a == 1) { if (m_lsFolderRenameText.size() < 60) m_lsFolderRenameText += ' '; }
+            else if (a == 2) { if (!m_lsFolderRenameText.empty()) m_lsFolderRenameText.pop_back(); }
+            else if (a == 3) commitLsFolderRename();
+            else cancelLsFolderRename();
+        }
+        return true;
+    }
+    return true;
+}
+
+void UIManager::renderLsFolderKeyboard() {
+    // Overlay ban phim QWERTY tai dung layout YouTube, tone xanh IPTV
+    drawAppBackground();
+    drawRect(0, 0, 1024, 100, {15, 23, 42, 255}, true);
+    drawRect(0, 100, 1024, 1, {30, 41, 59, 255}, true);
+    drawGridIcon("FOLDER.png", 32, 22, 52, 52);
+    drawText(m_lsFolderRenameExisting ? "ĐỔI TÊN THƯ MỤC" : "THƯ MỤC MỚI",
+             96, 24, {255, 255, 255, 255}, m_fontLarge, false);
+    drawText(m_localSendFolderCurrentPath, 96, 66,
+             {148, 163, 184, 255}, m_fontSmall, false);
+    // O nhap ten
+    drawRect(48, 130, 928, 64, {15, 23, 42, 255}, true);
+    drawBorder(48, 130, 928, 64, {59, 130, 246, 255}, 2);
+    std::string shown = m_lsFolderRenameText.empty() ? "Nhập tên..." : m_lsFolderRenameText;
+    drawText(shown, 68, 146,
+             m_lsFolderRenameText.empty() ? SDL_Color{100, 116, 139, 255}
+                                           : SDL_Color{255, 255, 255, 255},
+             m_fontLarge, false);
+    static const char* lowerRows[4] = {
+        "qwertyuiop", "asdfghjkl\'", "zxcvbnm,.?", "1234567890"
+    };
+    static const char* upperRows[4] = {
+        "QWERTYUIOP", "ASDFGHJKL\"", "ZXCVBNM;:/", "!@#$%^&*()"
+    };
+    int kbStartX = 48, kbStartY = 220, gapX = 8, gapY = 10;
+    int cellW = (1024 - 96 - gapX * 9) / 10, cellH = 64;
+    for (int row = 0; row < 4; row++) {
+        for (int col = 0; col < 10; col++) {
+            int cx = kbStartX + col * (cellW + gapX);
+            int cy = kbStartY + row * (cellH + gapY);
+            bool isSel = (m_lsFolderKbRow == row && m_lsFolderKbCol == col);
+            char ch = m_lsFolderKbShift ? upperRows[row][col] : lowerRows[row][col];
+            drawRect(cx, cy, cellW, cellH, isSel ? SDL_Color{37, 99, 235, 255}
+                                                 : SDL_Color{15, 23, 42, 255}, true);
+            if (isSel) drawBorder(cx, cy, cellW, cellH, {147, 197, 253, 255}, 2);
+            else drawBorder(cx, cy, cellW, cellH, {30, 41, 59, 255}, 1);
+            char buf[2] = {ch, '\0'};
+            drawText(std::string(buf), cx + cellW / 2, cy + 14,
+                     isSel ? SDL_Color{255, 255, 255, 255} : SDL_Color{203, 213, 225, 255},
+                     m_fontLarge, true);
+        }
+    }
+    const char* actions[5] = {"Shift", "Space", "Xóa", "Xong", "Hủy"};
+    int actW = (1024 - 96 - gapX * 4) / 5;
+    int actY = kbStartY + 4 * (cellH + gapY);
+    for (int i = 0; i < 5; i++) {
+        int cx = kbStartX + i * (actW + gapX);
+        bool isSel = (m_lsFolderKbRow == 4 && m_lsFolderKbCol == i);
+        SDL_Color bg = isSel ? SDL_Color{37, 99, 235, 255} : SDL_Color{15, 23, 42, 255};
+        if (i == 3) bg = isSel ? SDL_Color{22, 163, 74, 255} : SDL_Color{20, 83, 45, 255};
+        if (i == 4) bg = isSel ? SDL_Color{220, 38, 38, 255} : SDL_Color{69, 10, 10, 255};
+        if (i == 0 && m_lsFolderKbShift) bg = SDL_Color{29, 78, 216, 255};
+        drawRect(cx, actY, actW, cellH, bg, true);
+        drawBorder(cx, actY, actW, cellH,
+                   isSel ? SDL_Color{147, 197, 253, 255} : SDL_Color{30, 41, 59, 255},
+                   isSel ? 2 : 1);
+        drawText(actions[i], cx + actW / 2, actY + 16,
+                 {255, 255, 255, 255}, m_fontMedium, true);
+    }
+    drawRect(0, 715, 1024, 53, {15, 23, 42, 255}, true);
+    drawRect(0, 715, 1024, 1, {30, 41, 59, 255}, true);
+    drawAppFooter({{UiTheme::PadBtn::X, "Xóa"}, {UiTheme::PadBtn::Y, "Hoa"}, {UiTheme::PadBtn::START, "Xong"}});
+}
+
+void UIManager::renderLocalSendFolderPicker() {
+    // Ban phim rename/new-folder uu tien render overlay
+    if (m_lsFolderRenaming) { renderLsFolderKeyboard(); return; }
+    // ===== File Explorer full-screen, tone xanh IPTV, khong border ngoai =====
+    drawAppBackground();
+
+    // Header bar kieu IPTV
+    drawRect(0, 0, 1024, 112, {15, 23, 42, 255}, true);
+    drawRect(0, 112, 1024, 1, {30, 41, 59, 255}, true);
+    drawGridIcon("FOLDER.png", 28, 24, 56, 56);
+    drawText("FILE EXPLORER", 96, 24, {255, 255, 255, 255}, m_fontLarge, false);
+    {
+        std::string p = m_localSendFolderCurrentPath;
+        const std::string root = "/mnt/SDCARD";
+        if (p.compare(0, root.size(), root) == 0) p = p.substr(root.size());
+        if (p.empty()) p = "/";
+        if ((int)p.size() > 48) p = ".." + p.substr(p.size() - 46);
+        drawText(p, 96, 68, {148, 163, 184, 255}, m_fontSmall, false);
+    }
+    {
+        uint64_t freeB = LsUtil::sdFreeBytes("/mnt/SDCARD");
+        drawText("Trống: " + LsUtil::humanSize(freeB), 996, 68,
+                 {34, 197, 94, 255}, m_fontSmall, false);
+    }
+
+    // Scan folder con neu can
+    if (!m_localSendFolderLoaded) {
+        m_localSendFolderLoaded = true;
+        m_localSendFolderEntries.clear();
+        if (FileSystemManager::instance().directoryExists(m_localSendFolderCurrentPath)) {
+            auto dirs = FileSystemManager::instance().listDirectory(
+                m_localSendFolderCurrentPath, true);
+            for (const auto& d : dirs) {
+                if (!d.name.empty() && d.name[0] == '.') continue;
+                m_localSendFolderEntries.push_back(d.path);
+            }
+        }
+        if (m_localSendFolderSelected >= (int)m_localSendFolderEntries.size())
+            m_localSendFolderSelected = 0;
+    }
+
+    // Cot trai: danh sach folder (flat, khong border)
+    int leftX = 24, leftY = 128, leftW = 624, leftH = 574;
+    drawRect(leftX, leftY, leftW, leftW > 0 ? leftH : leftH, {15, 23, 42, 255}, true);
+    int listX = leftX + 12, listY = leftY + 12;
+    int rowH = 56;
+    int visibleRows = (leftH - 24) / rowH;
+    int total = (int)m_localSendFolderEntries.size();
+
+    if (total == 0) {
+        drawText("(Thư mục trống)", leftX + leftW / 2,
+                 listY + leftH / 2 - 10, {100, 116, 139, 255}, m_fontMedium, true);
+    } else {
+        int scroll = 0;
+        if (m_localSendFolderSelected >= visibleRows)
+            scroll = m_localSendFolderSelected - visibleRows + 1;
+        for (int i = 0; i < total && i < visibleRows; ++i) {
+            int idx = i + scroll;
+            int y = listY + i * rowH;
+            bool sel = (m_localSendFolderFocus == 0 && idx == m_localSendFolderSelected);
+            if (sel) {
+                drawRect(listX, y, leftW - 24, rowH - 6, {30, 58, 138, 255}, true);
+                drawRect(listX, y, 4, rowH - 6, {59, 130, 246, 255}, true);
+            }
+            // Icon folder that (bo badge chu DIR)
+            drawGridIcon("FOLDER.png", listX + 10, y + 8, 36, 36);
+            const std::string& fp = m_localSendFolderEntries[idx];
+            std::string nm = fp.substr(fp.find_last_of('/') + 1);
+            if ((int)nm.size() > 26) nm = nm.substr(0, 25) + "..";
+            drawText(nm, listX + 56, y + 12,
+                     sel ? SDL_Color{255, 255, 255, 255}
+                         : SDL_Color{203, 213, 225, 255},
+                     m_fontMedium, false);
+        }
+    }
+
+    // Cot phai: thong tin + nut thao tac (flat, tone xanh)
+    int rightX = leftX + leftW + 16;
+    int rightW = 1024 - rightX - 24;
+    int rightY = leftY;
+    int rightH = leftH;
+    drawRect(rightX, rightY, rightW, rightH, {15, 23, 42, 255}, true);
+    std::string folderName = m_localSendFolderCurrentPath.substr(
+        m_localSendFolderCurrentPath.find_last_of('/') + 1);
+    if (folderName.empty()) folderName = "SDCARD";
+    if ((int)folderName.size() > 18) folderName = folderName.substr(0, 17) + "..";
+    drawText(folderName, rightX + 16, rightY + 16,
+             {255, 255, 255, 255}, m_fontLarge, false);
+    drawText("Directory", rightX + 16, rightY + 56,
+             {148, 163, 184, 255}, m_fontSmall, false);
+    drawText(std::to_string(total) + " thư mục con", rightX + 16, rightY + 84,
+             {148, 163, 184, 255}, m_fontSmall, false);
+    // Hop goi y thao tac
+    drawRect(rightX + 16, rightY + 124, rightW - 32, 120, {29, 78, 216, 255}, true);
+    drawText("Y: thư mục mới", rightX + rightW / 2, rightY + 138,
+             {255, 255, 255, 255}, m_fontSmall, true);
+    drawText("START: đổi tên", rightX + rightW / 2, rightY + 164,
+             {255, 255, 255, 255}, m_fontSmall, true);
+    drawText("X: chọn làm đích", rightX + rightW / 2, rightY + 190,
+             {219, 234, 254, 255}, m_fontSmall, true);
+    // Nut Xac nhan (focus phai)
+    {
+        bool focusBtn = (m_localSendFolderFocus == 1);
+        SDL_Color bg = focusBtn ? SDL_Color{22, 163, 74, 255} : SDL_Color{20, 83, 45, 255};
+        drawRect(rightX + 16, rightY + rightH - 76, rightW - 32, 56, bg, true);
+        if (focusBtn) drawBorder(rightX + 16, rightY + rightH - 76, rightW - 32, 56,
+                                 {134, 239, 172, 255}, 2);
+        drawInlineHintsCentered("[A] Chọn thư mục này", rightX + rightW / 2,
+                                rightY + rightH - 62, {255, 255, 255, 255},
+                                m_fontMedium, 26, 6);
+    }
+
+    // Footer: icon nut that + label, dong nhat UI
+    drawRect(0, 715, 1024, 53, {15, 23, 42, 255}, true);
+    drawRect(0, 715, 1024, 1, {30, 41, 59, 255}, true);
+    drawAppFooter({{UiTheme::PadBtn::B, "Lùi"}, {UiTheme::PadBtn::X, "Chọn đích"}, {UiTheme::PadBtn::Y, "Thư mục mới"}, {UiTheme::PadBtn::START, "Đổi tên"}});
+}
+void UIManager::renderLocalSendSendPicker() {
+    drawText("GỬI FILE ĐẾN THIẾT BỊ", 512, 50, {255, 255, 255, 255}, m_fontTitle, true);
+    drawText("Tính năng đang phát triển — CLI script sẵn:", 512, 102, {148, 163, 184, 255}, m_fontMedium, true);
+
+    int dlgX = 80, dlgY = 150, dlgW = 864, dlgH = 480;
+    drawRoundedRect(dlgX, dlgY, dlgW, dlgH, UiTheme::RADIUS_MODAL, SDL_Color{15, 23, 42, 220}, true);
+
+    auto devices = LocalSendManager::instance().knownDevices();
+    if (devices.empty()) {
+        drawText("Chưa tìm thấy thiết bị nào", dlgX + dlgW/2, dlgY + 100,
+                 {148, 163, 184, 255}, m_fontLarge, true);
+    } else {
+        for (size_t i = 0; i < devices.size(); ++i) {
+            int y = dlgY + 60 + (int)i * 60;
+            drawText(devices[i].alias + "  (" + devices[i].ip + ")",
+                     dlgX + 40, y, {203, 213, 225, 255}, m_fontMedium, false);
+        }
+    }
+
+    drawText("Hiện tại gửi file bằng CLI:", dlgX + 40, dlgY + 330, {250, 204, 21, 255}, m_fontMedium, false);
+    drawText("  bash /mnt/SDCARD/Apps/RomCloud/scripts/localsend_send.sh \\",
+             dlgX + 40, dlgY + 370, {148, 163, 184, 255}, m_fontSmall, false);
+    drawText("    <alias_or_ip> <file_path>",
+             dlgX + 40, dlgY + 402, {148, 163, 184, 255}, m_fontSmall, false);
+
+    drawAppFooter({{UiTheme::PadBtn::B, "Lùi"}});
+}
+
+void UIManager::renderLocalSendGamePicker() {
+    // SEND chỉ quét /Roms (Apps tab tạm ẩn). Rescan mỗi lần vào
+    // (m_lsRomListLoaded=false khi chuyển state) + quét đệ quy để giữ
+    // nguyên cấu trúc subfolder, gửi kèm relative path chính xác.
+    m_lsPickerTab = 0;
+    if (!m_lsRomListLoaded) {
+        m_lsRomListLoaded = true;
+        m_lsRomList.clear();
+        // Ép quét tươi thẻ SD (giống nút ĐỒNG BỘ) rồi mới đọc DB → số lượng khớp.
+        try {
+            if (!m_isIndexing.load()) {
+                RomIndexer::instance().scanAllSystems(AppConfig::instance().getRomsDir(), nullptr);
+                refreshSystems();
+            }
+        } catch (...) {}
+        // DÙNG CHUNG NGUỒN VỚI ĐỒNG BỘ/THƯ VIỆN: đọc DB (RomIndexer đã quét
+        // /mnt/SDCARD/Roms/<SYSTEM> và lưu localPath). Như vậy số lượng ROM
+        // ở màn SEND luôn khớp với số lượng đồng bộ thấy.
+        // Nếu DB chưa có (chưa scan lần nào) thì fallback quét filesystem đệ quy.
+        auto systems = DatabaseManager::instance().getSystems(false);
+        for (const auto& sys : systems) {
+            auto games = DatabaseManager::instance().getGamesBySystem(
+                sys.id, static_cast<int>(GameState::LOCAL));
+            for (const auto& g : games) {
+                if (g.localPath.empty()) continue;
+                if (!FileSystemManager::instance().fileExists(g.localPath)) continue;
+                LsRomEntry e;
+                e.path = g.localPath;
+                e.name = g.filename.empty() ? g.title : g.filename;
+                e.systemDir = sys.romDir.empty() ? sys.code : sys.romDir;
+                e.sizeBytes = g.sizeBytes;
+                m_lsRomList.push_back(e);
+            }
+        }
+        if (m_lsRomList.empty()) {
+            // Fallback: quét ĐỆ QUY /Roms để giữ nguyên cấu trúc subfolder.
+            std::string romsRoot = AppConfig::instance().getRomsDir();
+            std::vector<std::string> stack;
+            stack.push_back(romsRoot);
+            auto topNameOf = [&](const std::string& p) -> std::string {
+                std::string rel = (p.compare(0, romsRoot.size(), romsRoot) == 0)
+                    ? p.substr(romsRoot.size()) : p;
+                while (!rel.empty() && rel.front() == '/') rel.erase(rel.begin());
+                auto sl = rel.find('/');
+                std::string top = (sl == std::string::npos) ? rel : rel.substr(0, sl);
+                return top.empty() ? std::string("Roms") : top;
+            };
+            while (!stack.empty()) {
+                std::string cur = stack.back(); stack.pop_back();
+                auto entries = FileSystemManager::instance().listDirectory(cur, false);
+                for (const auto& f : entries) {
+                    if (!f.name.empty() && f.name[0] == '.') continue;
+                    if (f.isDirectory) { stack.push_back(f.path); continue; }
+                    LsRomEntry e; e.path = f.path; e.name = f.name;
+                    e.systemDir = topNameOf(cur); e.sizeBytes = f.sizeBytes;
+                    m_lsRomList.push_back(e);
+                }
+            }
+        }
+        std::sort(m_lsRomList.begin(), m_lsRomList.end(), [](const LsRomEntry& a, const LsRomEntry& b){
+            if (a.systemDir!=b.systemDir) return a.systemDir<b.systemDir; return a.name<b.name; });
+        Logger::info("LocalSend ROMS SD scan: "+std::to_string(m_lsRomList.size()));
+        m_lsRomSelected = 0;
+        m_lsRomScrollOffset = 0;
+    }
+
+    // (Apps picker đã tạm ẩn — không quét /Apps ở màn SEND.)
+
+    // ---- Title (Apps tab tạm ẩn: chỉ ROMs) ----
+    drawText("CHỌN ROM ĐỂ GỬI", 512, 50, {255, 255, 255, 255}, m_fontTitle, true);
+
+    auto devices = LocalSendManager::instance().knownDevices();
+    std::string sub = "Gửi tới: ";
+    if (!devices.empty() && m_localSendSelectedDevice >= 0 &&
+        m_localSendSelectedDevice < (int)devices.size()) {
+        sub += devices[m_localSendSelectedDevice].alias;
+    } else {
+        sub += "(chưa chọn thiết bị)";
+    }
+    drawText(sub, 512, 102, {148, 163, 184, 255}, m_fontMedium, true);
+
+    int dlgX = 60, dlgY = 150, dlgW = 904, dlgH = 544;
+    drawRoundedRect(dlgX, dlgY, dlgW, dlgH, UiTheme::RADIUS_MODAL, SDL_Color{15, 23, 42, 220}, true);
+
+    {
+        int n = (int)m_lsRomList.size();
+        if (n == 0) {
+            drawText("Chưa có game LOCAL nào trên thẻ nhớ.",
+                     dlgX + dlgW/2, dlgY + dlgH/2 - 20,
+                     {148, 163, 184, 255}, m_fontLarge, true);
+            drawText("Bấm Y để làm mới sau khi quét ROM",
+                     dlgX + dlgW/2, dlgY + dlgH/2 + 20,
+                     {100, 116, 139, 255}, m_fontSmall, true);
+        } else {
+            renderLsRomsList(dlgX, dlgY, dlgW, dlgH);
+        }
+    }
+
+    drawAppFooter({{UiTheme::PadBtn::A, "Trang"}, {UiTheme::PadBtn::Y, "Tải lại"}});
+}
+
+void UIManager::renderLsProgressRow(bool isSend, int idx, int x, int y, int w, bool sel) {
+    drawRoundedRect(x, y, w, 110, UiTheme::RADIUS_ROW,
+                    sel ? SDL_Color{16, 185, 129, 255} : SDL_Color{30, 41, 59, 255}, true);
+    SDL_Color titleC = sel ? SDL_Color{6, 40, 28, 255} : SDL_Color{241, 245, 249, 255};
+    SDL_Color metaC  = sel ? SDL_Color{6, 60, 40, 255}  : SDL_Color{148, 163, 184, 255};
+    int tx = x + 14;
+    std::string name, pathVal, peer, status;
+    uint64_t done = 0, tot = 0;
+    uint32_t bps = 0;
+    SDL_Color statusC = metaC;
+    if (isSend) {
+        auto v = LocalSendManager::instance().sendProgresses();
+        if (idx < 0 || idx >= (int)v.size()) return;
+        const auto& s = v[(size_t)idx];
+        name = s.fileName; pathVal = s.absPath;
+        peer = s.toAlias.empty() ? s.toIp : s.toAlias;
+        done = s.sentBytes; tot = s.totalBytes; bps = s.bytesPerSec;
+        if (s.state == LsSendProgress::UPLOADING) { status = "Đang gửi"; statusC = {96,165,250,255}; }
+        else if (s.state == LsSendProgress::DONE) { status = "HOÀN THÀNH"; statusC = {34,197,94,255}; }
+        else if (s.state == LsSendProgress::FAILED) { status = "LỖI"; statusC = {239,68,68,255}; }
+        else if (s.state == LsSendProgress::NEGOTIATING) { status = "Đang đàm phán"; statusC = {250,204,21,255}; }
+        else status = "Chờ gửi";
+        drawBadge(tx, y + 8, 70, 24, "GUI", {37, 99, 235, 255}, {255, 255, 255, 255});
+    } else {
+        auto v = LocalSendManager::instance().receiveProgresses();
+        if (idx < 0 || idx >= (int)v.size()) return;
+        const auto& r = v[(size_t)idx];
+        name = r.file.fileName; pathVal = r.savedPath;
+        peer = r.fromAlias.empty() ? r.fromIp : r.fromAlias;
+        done = r.receivedBytes; tot = r.file.size; bps = r.bytesPerSec;
+        if (r.state == LsUploadRequest::RECEIVING) { status = "Đang nhận"; statusC = {96,165,250,255}; }
+        else if (r.state == LsUploadRequest::DONE) { status = "HOÀN THÀNH"; statusC = {34,197,94,255}; }
+        else if (r.state == LsUploadRequest::FAILED || r.state == LsUploadRequest::REJECTED) { status = "LỖI/Từ chối"; statusC = {239,68,68,255}; }
+        else status = "Chờ duyệt";
+        drawBadge(tx, y + 8, 70, 24, "NHAN", {16, 185, 129, 255}, {6, 40, 28, 255});
+    }
+    std::string title = name.size() > 44 ? name.substr(0, 42) + ".." : name;
+    drawText(title, tx + 80, y + 8, titleC, m_fontSmall, false);
+    drawText(peer, x + w - 14, y + 10, metaC, m_fontSmall, true);
+    std::string pv = pathVal.size() > 72 ? std::string("...") + pathVal.substr(pathVal.size() - 69) : pathVal;
+    drawText((isSend ? "Nguồn: " : "Lưu: ") + pv, tx, y + 34, metaC, m_fontSmall, false);
+    double frac = tot == 0 ? 0 : (double)done / (double)tot;
+    if (frac > 1) frac = 1;
+    int barW = w - 28, fillW = (int)(barW * frac);
+    drawRoundedRect(tx, y + 58, barW, 14, 7, SDL_Color{15, 23, 42, 255}, true);
+    if (fillW > 0) drawRoundedRect(tx, y + 58, fillW, 14, 7, SDL_Color{59, 130, 246, 255}, true);
+    char info[160];
+    snprintf(info, sizeof(info), "%d%%  %s / %s  %s  %s",
+             (int)(frac * 100 + 0.5), LsUtil::humanSize(done).c_str(),
+             LsUtil::humanSize(tot).c_str(), LsUtil::humanSpeed(bps).c_str(), status.c_str());
+    drawText(info, tx, y + 76, statusC, m_fontSmall, false);
+}
+
+void UIManager::renderLocalSendProgress() {
+    auto sends = LocalSendManager::instance().sendProgresses();
+    auto recvs = LocalSendManager::instance().receiveProgresses();
+    int ns = (int)sends.size(), nr = (int)recvs.size();
+    int total = ns + nr;
+    drawText("TRUYỀN FILE", 512, 36, {255, 255, 255, 255}, m_fontTitle, true);
+    char sub[128]; snprintf(sub, sizeof(sub), "Gửi: %d  |  Nhận: %d", ns, nr);
+    drawText(sub, 512, 78, {148, 163, 184, 255}, m_fontMedium, true);
+    int dlgX = 60, dlgY = 112, dlgW = 904, dlgH = 556;
+    drawRoundedRect(dlgX, dlgY, dlgW, dlgH, UiTheme::RADIUS_MODAL, SDL_Color{15, 23, 42, 220}, true);
+    if (total <= 0) {
+        drawText("Chưa có tác vụ gửi/nhận.", dlgX + dlgW/2, dlgY + 200, {148,163,184,255}, m_fontLarge, true);
+        drawText("Chọn ROM + A để gửi, hoặc chờ máy khác gửi tới.", dlgX + dlgW/2, dlgY + 250, {100,116,139,255}, m_fontSmall, true);
+    } else {
+        if (m_localSendProgressSel >= total) m_localSendProgressSel = total - 1;
+        if (m_localSendProgressSel < 0) m_localSendProgressSel = 0;
+        const int rowH = 118, pad = 12;
+        int vis = std::max(1, (dlgH - pad*2) / rowH);
+        if (m_localSendProgressSel < m_localSendProgressScroll) m_localSendProgressScroll = m_localSendProgressSel;
+        if (m_localSendProgressSel >= m_localSendProgressScroll + vis) m_localSendProgressScroll = m_localSendProgressSel - vis + 1;
+        int y = dlgY + pad;
+        for (int i = m_localSendProgressScroll; i < total && y + 110 <= dlgY + dlgH - 4; ++i) {
+            bool isS = i < ns;
+            renderLsProgressRow(isS, isS ? i : i - ns, dlgX + pad, y, dlgW - pad*2, i == m_localSendProgressSel);
+            y += rowH;
+        }
+    }
+    bool allDone = total > 0;
+    for (auto& s : sends) if (s.state != LsSendProgress::DONE && s.state != LsSendProgress::FAILED) allDone = false;
+    if (allDone) for (auto& r : recvs) if (r.state != LsUploadRequest::DONE && r.state != LsUploadRequest::FAILED && r.state != LsUploadRequest::REJECTED) allDone = false;
+    if (allDone) drawText("Xong! A/B về Home (tự về sau 3s).", dlgX + dlgW/2, dlgY + dlgH - 20, {34,197,94,255}, m_fontSmall, true);
+    drawAppFooter({{UiTheme::PadBtn::UPDOWN, "Chọn"}, {UiTheme::PadBtn::AB, "Lùi"}});
+}
+
+// Helper: render ROMS list với track thực tế Y để tránh overlap khi có system separator.
+void UIManager::renderLsRomsList(int dlgX, int dlgY, int dlgW, int dlgH) {
+    int n = (int)m_lsRomList.size();
+    if (n == 0) return;
+    const int headerH = 22;
+    const int itemH = 60;
+    const int padding = 12;
+    const int pageSize = 5;
+    int availH = dlgH - 2 * padding;
+    auto drawnRowsFrom = [&](int startIdx) -> int {
+        int rows = 0;
+        std::string firstSys;
+        bool first = true;
+        for (int i = startIdx; i < n; ++i) {
+            const auto& e = m_lsRomList[i];
+            int need = itemH;
+            if (first || e.systemDir != firstSys) need += headerH;
+            if (rows * headerH + need > availH) break;
+            rows = (rows * headerH + need + headerH - 1) / headerH;
+            firstSys = e.systemDir; first = false;
+            if ((int)(i - startIdx + 1) >= pageSize + 2) break;
+        }
+        return rows;
+    };
+    if (m_lsRomSelected < m_lsRomScrollOffset) m_lsRomScrollOffset = m_lsRomSelected;
+    while (m_lsRomScrollOffset < n) {
+        int drawn = drawnRowsFrom(m_lsRomScrollOffset);
+        if (drawn == 0) { m_lsRomScrollOffset = std::min(n - 1, m_lsRomScrollOffset + 1); continue; }
+        if (m_lsRomSelected < m_lsRomScrollOffset + drawn) break;
+        m_lsRomScrollOffset++;
+    }
+    if (m_lsRomScrollOffset >= n) m_lsRomScrollOffset = std::max(0, n - 1);
+    int y = dlgY + padding;
+    std::string curSys;
+    bool firstRow = true;
+    int startIdx = m_lsRomScrollOffset;
+    for (int i = startIdx; i < n; ++i) {
+        const auto& e = m_lsRomList[i];
+        int need = itemH;
+        if (firstRow || e.systemDir != curSys) need += headerH;
+        if (y + need > dlgY + dlgH - 8) break;
+        if (firstRow || e.systemDir != curSys) {
+            curSys = e.systemDir;
+            drawText(curSys.empty() ? "ROMS" : curSys, dlgX + padding, y + 2, {16, 185, 129, 255}, m_fontSmall);
+            y += headerH;
+        }
+        firstRow = false;
+        bool sel = (i == m_lsRomSelected);
+        int itemX = dlgX + padding;
+        int itemW = dlgW - 2 * padding;
+        if (sel) drawRoundedRect(itemX, y, itemW, itemH, UiTheme::RADIUS_ROW, {16, 185, 129, 255}, true);
+        else drawRoundedRect(itemX, y, itemW, itemH, UiTheme::RADIUS_ROW, {30, 41, 59, 255}, true);
+        int tx = itemX + 14;
+        int ty = y + 5;
+        SDL_Color titleC = sel ? SDL_Color{6, 40, 28, 255} : SDL_Color{241, 245, 249, 255};
+        SDL_Color metaC = sel ? SDL_Color{6, 60, 40, 255} : SDL_Color{148, 163, 184, 255};
+        std::string title = e.name;
+        if ((int)title.size() > 42) title = title.substr(0, 40) + "..";
+        drawText(title, tx, ty, titleC, m_fontSmall);
+        std::string meta = curSys + "  |  " + FileSystemManager::instance().formatBytes(e.sizeBytes);
+        drawText(meta, tx, ty + 26, metaC, m_fontSmall);
+        y += itemH;
+    }
+    int totalPages = (n + pageSize - 1) / pageSize;
+    int curPage = (m_lsRomSelected / pageSize) + 1;
+    char pgbuf[64]; snprintf(pgbuf, sizeof(pgbuf), "%d / %d", curPage, totalPages);
+    drawText(pgbuf, dlgX + dlgW - 90, dlgY + dlgH - 26, {100, 116, 139, 255}, m_fontSmall);
+}
+
+void UIManager::renderLsAppsList(int dlgX, int dlgY, int dlgW, int dlgH) {
+    int n = (int)m_lsAppList.size();
+    if (n == 0) return;
+    const int itemH = 50;
+    const int padding = 4;
+    int visibleCount = std::max(1, (dlgH - padding * 2) / itemH);
+
+    if (m_lsAppSelected < m_lsAppScrollOffset) m_lsAppScrollOffset = m_lsAppSelected;
+    if (m_lsAppSelected >= m_lsAppScrollOffset + visibleCount)
+        m_lsAppScrollOffset = m_lsAppSelected - visibleCount + 1;
+    if (m_lsAppScrollOffset < 0) m_lsAppScrollOffset = 0;
+    if (m_lsAppScrollOffset > std::max(0, n - 1)) m_lsAppScrollOffset = std::max(0, n - 1);
+
+    int renderY = dlgY + padding;
+    for (int i = m_lsAppScrollOffset; i < n && i < m_lsAppScrollOffset + visibleCount; ++i) {
+        const auto& e = m_lsAppList[i];
+        if (renderY + itemH > dlgY + dlgH - padding) break;
+
+        bool sel = (i == m_lsAppSelected);
+        if (sel) {
+            drawRoundedRect(dlgX + 8, renderY, dlgW - 16, itemH - 4, UiTheme::RADIUS_ROW,
+                            SDL_Color{59, 130, 246, 90}, true);
+        }
+
+        std::string icon = e.isDirectory ? "[DIR]" : "[FILE]";
+        SDL_Color iconColor = e.isDirectory
+            ? SDL_Color{250, 204, 21, 255}
+            : SDL_Color{148, 163, 184, 255};
+        drawText(icon, dlgX + 20, renderY + 14, iconColor, m_fontSmall, false);
+
+        SDL_Color nameColor = sel ? SDL_Color{255, 255, 255, 255}
+                                  : SDL_Color{226, 232, 240, 255};
+        drawText(e.name, dlgX + 90, renderY + 4, nameColor, m_fontMedium, false);
+
+        std::string sub = e.isDirectory ? std::string("Bấm A để mở")
+                                        : LsUtil::humanSize(e.sizeBytes);
+        drawText(sub, dlgX + 90, renderY + 28,
+                 {148, 163, 184, 255}, m_fontSmall, false);
+
+        renderY += itemH;
+    }
+
+    drawText(std::to_string(m_lsAppSelected + 1) + "/" + std::to_string(n),
+             dlgX + dlgW - 20, dlgY - 22,
+             {148, 163, 184, 255}, m_fontSmall, true);
 }
 
 } // namespace RomCloud
