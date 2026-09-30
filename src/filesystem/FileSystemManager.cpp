@@ -5,6 +5,8 @@
 #include <sys/stat.h>
 #include <sys/statvfs.h>
 #include <unistd.h>
+#include <dirent.h>
+#include <algorithm>
 #include <sstream>
 #include <iomanip>
 
@@ -105,6 +107,61 @@ std::string FileSystemManager::formatBytes(uint64_t bytes) {
     std::stringstream ss;
     ss << std::fixed << std::setprecision(1) << size << " " << units[unitIndex];
     return ss.str();
+}
+
+std::vector<DirEntryInfo> FileSystemManager::listDirectory(const std::string& path, bool dirsOnly) {
+    std::vector<DirEntryInfo> out;
+    if (path.empty()) return out;
+
+    DIR* d = opendir(path.c_str());
+    if (!d) {
+        Logger::warn("listDirectory: cannot open " + path);
+        return out;
+    }
+
+    struct dirent* ent = nullptr;
+    while ((ent = readdir(d)) != nullptr) {
+        const char* name = ent->d_name;
+        // Skip . / ..
+        if (name[0] == '.' && (name[1] == '\0' || (name[1] == '.' && name[2] == '\0'))) continue;
+
+        std::string fullPath = path;
+        if (!fullPath.empty() && fullPath.back() != '/') fullPath += '/';
+        fullPath += name;
+
+        struct stat st;
+        bool isDir = false;
+        uint64_t sz = 0;
+        if (stat(fullPath.c_str(), &st) == 0) {
+            if ((st.st_mode & S_IFDIR) != 0) {
+                isDir = true;
+            } else if ((st.st_mode & S_IFREG) != 0) {
+                sz = static_cast<uint64_t>(st.st_size);
+            } else {
+                continue; // skip symlinks, devices, etc.
+            }
+        } else {
+            continue;
+        }
+
+        if (dirsOnly && !isDir) continue;
+
+        DirEntryInfo e;
+        e.name = name;
+        e.path = fullPath;
+        e.isDirectory = isDir;
+        e.sizeBytes = sz;
+        out.push_back(e);
+    }
+    closedir(d);
+
+    // Sort: directories first, then files, alphabetically within each group
+    std::sort(out.begin(), out.end(), [](const DirEntryInfo& a, const DirEntryInfo& b) {
+        if (a.isDirectory != b.isDirectory) return a.isDirectory;  // dirs first
+        return a.name < b.name;
+    });
+
+    return out;
 }
 
 bool FileSystemManager::initializeAppDirectories() {

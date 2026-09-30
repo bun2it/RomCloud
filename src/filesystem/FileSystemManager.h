@@ -11,6 +11,15 @@ struct DiskSpaceInfo {
     uint64_t availableBytes = 0;
 };
 
+struct DirEntryInfo {
+    std::string name;        // file/folder name (basename)
+    std::string path;        // full path
+    bool isDirectory = false;
+    uint64_t sizeBytes = 0;  // 0 for directories
+};
+
+// Returns sorted listing: directories first, then files (alpha).
+// If `dirsOnly` true → return only directories.
 class FileSystemManager {
 public:
     static FileSystemManager& instance();
@@ -22,6 +31,10 @@ public:
     DiskSpaceInfo getDiskSpace(const std::string& path);
     bool removeFile(const std::string& path);
     std::string formatBytes(uint64_t bytes);
+
+    // List thư mục. Trả về vector rỗng nếu dir không tồn tại hoặc lỗi.
+    // `dirsOnly` = true nếu chỉ cần sub-folders (vd cho LocalSend Apps tab).
+    std::vector<DirEntryInfo> listDirectory(const std::string& path, bool dirsOnly = false);
 
 private:
     FileSystemManager() = default;

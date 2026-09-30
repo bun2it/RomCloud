@@ -73,6 +73,9 @@ private:
     bool m_axisL2 = false;
     bool m_axisR2 = false;
 
+    // Edge latch: bắt phím nhấn-nhả nhanh kẹt giữa 2 vòng poll (IPTV loop delay 35ms + OSD nặng)
+    bool m_justPressed[static_cast<int>(Button::COUNT)] = {false};
+
     // Hold-to-repeat timing
     uint32_t m_pressStartTime[static_cast<int>(Button::COUNT)] = {0};
     uint32_t m_lastRepeatTime[static_cast<int>(Button::COUNT)] = {0};

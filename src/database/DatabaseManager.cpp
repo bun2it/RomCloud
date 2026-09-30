@@ -313,20 +313,29 @@ std::vector<GameRecord> DatabaseManager::getGamesBySystem(int systemId, int stat
     std::vector<GameRecord> list;
     if (!m_db) return list;
 
-    std::string sql = "SELECT id, cloud_file_id, system_id, filename, title, size_bytes, mime_type, drive_modified_time, checksum_sha256, local_path, local_state, cover_path, created_at, updated_at FROM games WHERE system_id = ?";
+    std::string sql = "SELECT id, cloud_file_id, system_id, filename, title, size_bytes, mime_type, drive_modified_time, checksum_sha256, local_path, local_state, cover_path, created_at, updated_at FROM games";
 
+    bool hasWhere = false;
+    if (systemId >= 0) {
+        sql += " WHERE system_id = ?";
+        hasWhere = true;
+    }
     if (stateFilter >= 0) {
-        sql += " AND local_state = " + std::to_string(stateFilter);
+        sql += hasWhere ? " AND local_state = " : " WHERE local_state = ";
+        sql += std::to_string(stateFilter);
+        hasWhere = true;
     }
     if (!searchQuery.empty()) {
-        sql += " AND (title LIKE ? OR filename LIKE ?)";
+        sql += hasWhere ? " AND (title LIKE ? OR filename LIKE ?)" : " WHERE (title LIKE ? OR filename LIKE ?)";
     }
-    sql += " ORDER BY title ASC;";
+    sql += " ORDER BY system_id ASC, title ASC;";
 
     sqlite3_stmt* stmt = nullptr;
     if (sqlite3_prepare_v2(m_db, sql.c_str(), -1, &stmt, nullptr) == SQLITE_OK) {
         int paramIdx = 1;
-        sqlite3_bind_int(stmt, paramIdx++, systemId);
+        if (systemId >= 0) {
+            sqlite3_bind_int(stmt, paramIdx++, systemId);
+        }
         if (!searchQuery.empty()) {
             std::string pattern = "%" + searchQuery + "%";
             sqlite3_bind_text(stmt, paramIdx++, pattern.c_str(), -1, SQLITE_TRANSIENT);

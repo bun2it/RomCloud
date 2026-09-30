@@ -23,6 +23,7 @@ mkdir -p "$STAGING_DIR/Apps/RomCloud/assets/fonts"
 mkdir -p "$STAGING_DIR/Apps/RomCloud/assets/icons"
 mkdir -p "$STAGING_DIR/Apps/RomCloud/assets/apps_icons"
 mkdir -p "$STAGING_DIR/Apps/RomCloud/assets/player_icons"
+mkdir -p "$STAGING_DIR/Apps/RomCloud/assets/button_icons"
 mkdir -p "$STAGING_DIR/Apps/RomCloud/config"
 mkdir -p "$STAGING_DIR/Apps/RomCloud/iptv"
 
@@ -49,12 +50,14 @@ if [ -d scripts ]; then
 fi
 
 cp assets/fonts/font.ttf "$STAGING_DIR/Apps/RomCloud/assets/fonts/"
+cp assets/fonts/NotoSans-Regular.ttf "$STAGING_DIR/Apps/RomCloud/assets/fonts/" 2>/dev/null || true
 cp assets/icons/*.png "$STAGING_DIR/Apps/RomCloud/assets/icons/"
 cp assets/apps_icons/*.png "$STAGING_DIR/Apps/RomCloud/assets/apps_icons/" 2>/dev/null || true
 cp -r assets/player_icons/* "$STAGING_DIR/Apps/RomCloud/assets/player_icons/" 2>/dev/null || true
+cp assets/button_icons/*.png "$STAGING_DIR/Apps/RomCloud/assets/button_icons/" 2>/dev/null || true
 cp config/settings.json "$STAGING_DIR/Apps/RomCloud/config/"
-if [ -f config/input.conf ]; then
-    cp config/input.conf "$STAGING_DIR/Apps/RomCloud/config/"
+if [ -d config ]; then
+    cp -f config/*.conf "$STAGING_DIR/Apps/RomCloud/config/" 2>/dev/null || true
 fi
 cp -f iptv/*.m3u iptv/*.m3u8 "$STAGING_DIR/Apps/RomCloud/iptv/" 2>/dev/null || true
 cp -f iptv/sources.txt "$STAGING_DIR/Apps/RomCloud/iptv/" 2>/dev/null || true

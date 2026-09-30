@@ -46,6 +46,7 @@ void InputManager::reset() {
     for (int i = 0; i < static_cast<int>(Button::COUNT); ++i) {
         m_currentStates[i] = false;
         m_previousStates[i] = false;
+        m_justPressed[i] = false;
         m_pressStartTime[i] = 0;
         m_lastRepeatTime[i] = 0;
     }
@@ -88,7 +89,9 @@ void InputManager::mapKeyboardKey(SDL_Keycode key, bool isDown) {
         default: break;
     }
     if (btn != Button::COUNT) {
-        m_currentStates[static_cast<int>(btn)] = isDown;
+        int bi = static_cast<int>(btn);
+        if (isDown && !m_currentStates[bi]) m_justPressed[bi] = true;
+        m_currentStates[bi] = isDown;
     }
 }
 
@@ -115,21 +118,28 @@ void InputManager::update() {
             case SDL_CONTROLLERBUTTONDOWN:
             case SDL_CONTROLLERBUTTONUP: {
                 bool down = (event.type == SDL_CONTROLLERBUTTONDOWN);
+                // Latch ngay khi thấy sự kiện DOWN: bấm-nhả nhanh trong cùng 1 vòng
+                // poll (DOWN+UP gộp lại -> current cuối vẫn false) vẫn không mất nút.
+                auto setBtn = [&](Button b, bool d) {
+                    int bi = static_cast<int>(b);
+                    if (d && !m_currentStates[bi]) m_justPressed[bi] = true;
+                    m_currentStates[bi] = d;
+                };
                 switch (event.cbutton.button) {
                     case SDL_CONTROLLER_BUTTON_DPAD_UP:    m_dpadUp = down; break;
                     case SDL_CONTROLLER_BUTTON_DPAD_DOWN:  m_dpadDown = down; break;
                     case SDL_CONTROLLER_BUTTON_DPAD_LEFT:  m_dpadLeft = down; break;
                     case SDL_CONTROLLER_BUTTON_DPAD_RIGHT: m_dpadRight = down; break;
                     // TrimUI physical Nintendo layout (Right=A, Bottom=B, Top=X, Left=Y)
-                    case SDL_CONTROLLER_BUTTON_A:          m_currentStates[static_cast<int>(Button::B)] = down; break; // Bottom is physical B
-                    case SDL_CONTROLLER_BUTTON_B:          m_currentStates[static_cast<int>(Button::A)] = down; break; // Right is physical A
-                    case SDL_CONTROLLER_BUTTON_X:          m_currentStates[static_cast<int>(Button::Y)] = down; break; // Left is physical Y
-                    case SDL_CONTROLLER_BUTTON_Y:          m_currentStates[static_cast<int>(Button::X)] = down; break; // Top is physical X
-                    case SDL_CONTROLLER_BUTTON_LEFTSHOULDER:  m_currentStates[static_cast<int>(Button::L1)] = down; break;
-                    case SDL_CONTROLLER_BUTTON_RIGHTSHOULDER: m_currentStates[static_cast<int>(Button::R1)] = down; break;
-                    case SDL_CONTROLLER_BUTTON_START:      m_currentStates[static_cast<int>(Button::START)] = down; break;
-                    case SDL_CONTROLLER_BUTTON_BACK:       m_currentStates[static_cast<int>(Button::SELECT)] = down; break;
-                    case SDL_CONTROLLER_BUTTON_GUIDE:      m_currentStates[static_cast<int>(Button::MENU)] = down; break;
+                    case SDL_CONTROLLER_BUTTON_A:          setBtn(Button::B, down); break; // Bottom is physical B
+                    case SDL_CONTROLLER_BUTTON_B:          setBtn(Button::A, down); break; // Right is physical A
+                    case SDL_CONTROLLER_BUTTON_X:          setBtn(Button::Y, down); break; // Left is physical Y
+                    case SDL_CONTROLLER_BUTTON_Y:          setBtn(Button::X, down); break; // Top is physical X
+                    case SDL_CONTROLLER_BUTTON_LEFTSHOULDER:  setBtn(Button::L1, down); break;
+                    case SDL_CONTROLLER_BUTTON_RIGHTSHOULDER: setBtn(Button::R1, down); break;
+                    case SDL_CONTROLLER_BUTTON_START:      setBtn(Button::START, down); break;
+                    case SDL_CONTROLLER_BUTTON_BACK:       setBtn(Button::SELECT, down); break;
+                    case SDL_CONTROLLER_BUTTON_GUIDE:      setBtn(Button::MENU, down); break;
                     default: break;
                 }
                 break;
@@ -176,16 +186,21 @@ void InputManager::update() {
             case SDL_JOYBUTTONUP: {
                 if (!m_controller) {
                     bool down = (event.type == SDL_JOYBUTTONDOWN);
+                    auto setBtn = [&](Button b, bool d) {
+                        int bi = static_cast<int>(b);
+                        if (d && !m_currentStates[bi]) m_justPressed[bi] = true;
+                        m_currentStates[bi] = d;
+                    };
                     switch (event.jbutton.button) {
-                        case 0: m_currentStates[static_cast<int>(Button::B)] = down; break; // Bottom B
-                        case 1: m_currentStates[static_cast<int>(Button::A)] = down; break; // Right A
-                        case 2: m_currentStates[static_cast<int>(Button::Y)] = down; break; // Left Y
-                        case 3: m_currentStates[static_cast<int>(Button::X)] = down; break; // Top X
-                        case 4: m_currentStates[static_cast<int>(Button::L1)] = down; break;
-                        case 5: m_currentStates[static_cast<int>(Button::R1)] = down; break;
-                        case 6: m_currentStates[static_cast<int>(Button::SELECT)] = down; break;
-                        case 7: m_currentStates[static_cast<int>(Button::START)] = down; break;
-                        case 8: m_currentStates[static_cast<int>(Button::MENU)] = down; break;
+                        case 0: setBtn(Button::B, down); break; // Bottom B
+                        case 1: setBtn(Button::A, down); break; // Right A
+                        case 2: setBtn(Button::Y, down); break; // Left Y
+                        case 3: setBtn(Button::X, down); break; // Top X
+                        case 4: setBtn(Button::L1, down); break;
+                        case 5: setBtn(Button::R1, down); break;
+                        case 6: setBtn(Button::SELECT, down); break;
+                        case 7: setBtn(Button::START, down); break;
+                        case 8: setBtn(Button::MENU, down); break;
                         default: break;
                     }
                 }
@@ -251,6 +266,7 @@ void InputManager::update() {
         if (m_currentStates[i] && !m_previousStates[i]) {
             m_pressStartTime[i] = now;
             m_lastRepeatTime[i] = now;
+            m_justPressed[i] = true; // latch lại: lần bấm nhanh không bị lọt giữa 2 vòng poll
         } else if (!m_currentStates[i]) {
             m_pressStartTime[i] = 0;
             m_lastRepeatTime[i] = 0;
@@ -267,6 +283,12 @@ bool InputManager::isButtonPressed(Button btn) const {
 bool InputManager::isButtonJustPressed(Button btn) const {
     int idx = static_cast<int>(btn);
     if (idx < 0 || idx >= static_cast<int>(Button::COUNT)) return false;
+
+    // Edge latch: trả true 1 lần duy nhất rồi tự xóa (không lọt phím nhấn nhanh)
+    if (m_justPressed[idx]) {
+        const_cast<InputManager*>(this)->m_justPressed[idx] = false;
+        return true;
+    }
 
     // First transition from released to pressed
     if (m_currentStates[idx] && !m_previousStates[idx]) {

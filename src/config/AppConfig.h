@@ -58,6 +58,11 @@ public:
     // mpv/ffmpeg path for IPTV
     std::string getMediaPlayerPath() const;
 
+    // LocalSend P2P config (alias + fingerprint persisted on /mnt/SDCARD)
+    std::string getLocalSendAlias() const;
+    void setLocalSendAlias(const std::string& alias);
+    std::string getOrCreateLocalSendFingerprint();
+
 private:
     AppConfig();
     std::string getBaseDir() const; // Different base per OS

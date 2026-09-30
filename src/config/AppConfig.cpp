@@ -5,6 +5,8 @@
 #include <fstream>
 #include <sstream>
 #include <cstring>
+#include <cstdlib>
+#include <ctime>
 
 namespace RomCloud {
 
@@ -167,12 +169,18 @@ std::string AppConfig::getFontPath() const {
         return fontPath;
     }
 
+    // Ưu tiên NotoSans-Regular của app (full TV 1ea0-1ef9, 197KB),
+    // sau đó tới font hệ thống TrimUI, font app cũ để cuối.
     const std::string fonts[] = {
-        getFontsDir() + "/font.ttf",
-        "/mnt/SDCARD/Apps/RomCloud/assets/fonts/font.ttf",
+        getFontsDir() + "/NotoSans-Regular.ttf",
+        "/mnt/SDCARD/Apps/RomCloud/assets/fonts/NotoSans-Regular.ttf",
+        "/rom/usr/trimui/res/full.ttf",
         "/usr/trimui/res/full.ttf",
         "/usr/trimui/res/regular.ttf",
         "/mnt/SDCARD/Themes/TRIMUI YaHei/msyh.ttf",
+        getFontsDir() + "/NotoSansTC.ttf",
+        getFontsDir() + "/font.ttf",
+        "/mnt/SDCARD/Apps/RomCloud/assets/fonts/font.ttf",
         "/system/media/fonts/TrimUI.ttf"
     };
 
@@ -286,6 +294,72 @@ void AppConfig::saveSettings() const {
     file << "  \"os_type\": \"" << osTypeStr << "\"\n";
     file << "}\n";
     file.close();
+}
+
+// ============================================================================
+// LocalSend P2P
+// ============================================================================
+// LocalSend-style random alias (giống app gốc: Adjective + Fruit),
+// sinh 1 lần rồi persist vào /mnt/SDCARD/.romcloud/localsend_alias.
+std::string AppConfig::getLocalSendAlias() const {
+    std::string path = m_sdRoot + "/.romcloud/localsend_alias";
+    std::ifstream in(path);
+    std::string alias;
+    if (std::getline(in, alias)) {
+        while (!alias.empty() && (alias.back() == '\n' || alias.back() == '\r' || alias.back() == ' '))
+            alias.pop_back();
+    }
+    if (!alias.empty()) return alias;
+    static const char* kAdj[] = {"Nice","Sweet","Neat","Brave","Calm","Eager","Gentle",
+        "Happy","Kind","Lively","Merry","Proud","Quick","Silly","Tidy","Witty","Zesty","Clever"};
+    static const char* kFruit[] = {"Orange","Apple","Banana","Mango","Peach","Grape",
+        "Lemon","Melon","Berry","Kiwi","Papaya","Cherry","Plum","Pear","Lychee","Coconut"};
+    unsigned seed = static_cast<unsigned>(time(nullptr) ^ getpid());
+    alias = std::string(kAdj[rand_r(&seed) % 18]) + " " +
+            std::string(kFruit[rand_r(&seed) % 16]);
+    const_cast<AppConfig*>(this)->setLocalSendAlias(alias);
+    return alias;
+}
+
+void AppConfig::setLocalSendAlias(const std::string& alias) {
+    std::string dir = m_sdRoot + "/.romcloud";
+    mkdir(dir.c_str(), 0755);
+    std::string path = dir + "/localsend_alias";
+    std::ofstream out(path);
+    out << alias;
+}
+
+std::string AppConfig::getOrCreateLocalSendFingerprint() {
+    std::string dir = m_sdRoot + "/.romcloud";
+    mkdir(dir.c_str(), 0755);
+    std::string path = dir + "/localsend_fp";
+
+    std::ifstream in(path);
+    std::string fp;
+    if (std::getline(in, fp)) {
+        while (!fp.empty() && (fp.back() == '\n' || fp.back() == '\r' || fp.back() == ' '))
+            fp.pop_back();
+        if (fp.size() == 32) return fp;
+    }
+
+    fp.clear();
+    static const char hex[] = "0123456789abcdef";
+    std::ifstream urand("/dev/urandom", std::ios::binary);
+    unsigned char buf[16];
+    if (urand.read(reinterpret_cast<char*>(buf), 16)) {
+        for (int i = 0; i < 16; ++i) {
+            fp += hex[(buf[i] >> 4) & 0xF];
+            fp += hex[buf[i] & 0xF];
+        }
+    } else {
+        srand(static_cast<unsigned>(time(nullptr) ^ getpid()));
+        for (int i = 0; i < 32; ++i) fp += hex[rand() & 0xF];
+    }
+
+    std::ofstream out(path);
+    out << fp;
+    Logger::info("LocalSend: generated new fingerprint");
+    return fp;
 }
 
 } // namespace RomCloud

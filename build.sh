@@ -39,6 +39,7 @@ $ZIG c++ \
     src/logging/Logger.cpp \
     src/logging/IssueLogger.cpp \
     src/iptv/IPTVManager.cpp \
+    src/iptv/TikTokManager.cpp \
     src/config/AppConfig.cpp \
     src/database/DatabaseManager.cpp \
     src/database/RomIndexer.cpp \
@@ -46,6 +47,7 @@ $ZIG c++ \
     src/backup/BackupManager.cpp \
     src/rom/RomDetector.cpp \
     src/rom/RomOrganizer.cpp \
+    src/localsend/LocalSendManager.cpp \
     -Lsysroot/lib \
     -lSDL2 \
     -lSDL2_image \

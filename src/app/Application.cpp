@@ -13,6 +13,7 @@
 #include "../ui/UIManager.h"
 #include "../platform/PlatformInfo.h"
 #include "../network/WebServer.h"
+#include "../localsend/LocalSendManager.h"
 
 #include <csignal>
 #include <unistd.h>
@@ -119,8 +120,8 @@ bool Application::init(int argc, char* argv[]) {
 
     // Ensure official app icon is synchronized to all launcher icons
     std::string appRoot = AppConfig::instance().getAppRoot();
-    std::string officialCandidate1 = appRoot + "/icon.png";
-    std::string officialCandidate2 = appRoot + "/assets/apps_icons/APP.png";
+    std::string officialCandidate1 = appRoot + "/assets/apps_icons/app_main.png";
+    std::string officialCandidate2 = appRoot + "/icon.png";
     std::string officialCandidate3 = "/mnt/SDCARD/Apps/RomCloud/icon.png";
 
     // Find the best valid high-res icon source (> 100KB)
@@ -241,6 +242,14 @@ bool Application::init(int argc, char* argv[]) {
     if (!UIManager::instance().init(m_window, m_renderer)) {
         Logger::error("UIManager initialization failed");
         return false;
+    }
+
+    // Auto-start LocalSendManager ở background (TCP listener + multicast announce).
+    // QUAN TRỌNG: phải chạy NGAY khi app launch, không chờ user vào LocalSend screen.
+    // Nếu service không listen, các peer (laptop / TrimUI khác) sẽ thấy TrimUI qua
+    // multicast discovery nhưng POST prepare-upload trả về "Connection refused".
+    if (!LocalSendManager::instance().start()) {
+        Logger::warn("LocalSendManager failed to start (continuing without LocalSend)");
     }
 
     m_running = true;

@@ -1,10 +1,12 @@
 #include "IPTVManager.h"
+#include "TikTokManager.h"
 #include "../logging/Logger.h"
 #include "../network/HttpClient.h"
 #include "../filesystem/FileSystemManager.h"
 #include "../config/AppConfig.h"
 #include "../input/InputManager.h"
 #include "../platform/PlatformInfo.h"
+#include <SDL2/SDL_ttf.h>
 #include <dirent.h>
 #include <unistd.h>
 #include <fcntl.h>
@@ -28,6 +30,35 @@
 #include <SDL2/SDL.h>
 
 namespace RomCloud {
+
+namespace {
+// Cat chuoi theo so ky tu UTF-8 (khong cat giua dau tieng Viet) cho OSD mpv
+static std::string truncateUtf8Chars(const std::string &s, size_t maxChars) {
+    size_t count = 0, i = 0;
+    size_t cutPos = 0;
+    while (i < s.size()) {
+        unsigned char c = static_cast<unsigned char>(s[i]);
+        size_t len = 1;
+        if ((c & 0x80) == 0) len = 1;
+        else if ((c & 0xE0) == 0xC0) len = 2;
+        else if ((c & 0xF0) == 0xE0) len = 3;
+        else if ((c & 0xF8) == 0xF0) len = 4;
+        if (count >= maxChars) { cutPos = i; break; }
+        count++;
+        i += len;
+        cutPos = i;
+        if (count == maxChars && i < s.size()) return s.substr(0, i) + "..";
+    }
+    if (count <= maxChars) return s;
+    return s.substr(0, cutPos) + "..";
+}
+// Font OSD/sub mpv: ưu tiên NotoSans-Regular (full TV), fallback font.ttf cũ.
+inline std::string resolveOsdFont(const std::string &appRoot) {
+    const std::string noto = appRoot + "/assets/fonts/NotoSans-Regular.ttf";
+    if (access(noto.c_str(), R_OK) == 0) return noto;
+    return appRoot + "/assets/fonts/font.ttf";
+}
+}
 
 IPTVManager& IPTVManager::instance() {
     static IPTVManager instance;
@@ -53,6 +84,12 @@ IPTVManager::IPTVManager() {
         createDefaultPlaylist(m_iptvDir + "/default.m3u");
         loadPlaylists(m_iptvDir);
     }
+
+    // Tu dong refresh cac playlist URL bi stale (khong block startup neu loi mang)
+    int refreshed = checkAndAutoRefresh();
+    if (refreshed > 0) {
+        Logger::info("IPTVManager: Auto-refreshed " + std::to_string(refreshed) + " URL playlist(s) on startup");
+    }
 }
 
 IPTVManager::~IPTVManager() {
@@ -72,6 +109,8 @@ bool IPTVManager::loadPlaylists(const std::string& directory) {
     std::string dirPath = directory.empty() ? m_iptvDir : directory;
     Logger::info("Loading IPTV playlists from: " + dirPath);
 
+    // Reset all state
+    m_playlists.clear();
     m_channels.clear();
     m_groups.clear();
     m_sources.clear();
@@ -84,39 +123,36 @@ bool IPTVManager::loadPlaylists(const std::string& directory) {
     }
 
     DIR* dir = opendir(dirPath.c_str());
-    if (!dir) {
-        return false;
-    }
+    if (!dir) return false;
 
-    int loaded = 0;
-    struct dirent* entry;
     std::vector<std::string> playlistFiles;
+    struct dirent* entry;
     while ((entry = readdir(dir)) != nullptr) {
         std::string filename = entry->d_name;
         if (filename.length() >= 4) {
-            std::string ext = "";
             size_t dot = filename.rfind('.');
             if (dot != std::string::npos) {
-                ext = filename.substr(dot);
+                std::string ext = filename.substr(dot);
                 std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
-            }
-            if (ext == ".m3u" || ext == ".m3u8") {
-                playlistFiles.push_back(filename);
+                if (ext == ".m3u" || ext == ".m3u8")
+                    playlistFiles.push_back(filename);
             }
         }
     }
     closedir(dir);
-
     std::sort(playlistFiles.begin(), playlistFiles.end());
 
+    int loaded = 0;
     for (const auto& filename : playlistFiles) {
         std::string path = dirPath + "/" + filename;
-        std::string sourceName = "";
+
+        // Xac dinh ten hien thi cho playlist nay
+        std::string sourceName;
         auto it = m_sourcesMeta.find(filename);
         if (it != m_sourcesMeta.end() && !it->second.name.empty()) {
             sourceName = it->second.name;
         } else {
-            if (filename == "default.m3u") sourceName = "Mặc định";
+            if (filename == "default.m3u")      sourceName = "Mac dinh";
             else if (filename == "vietnam.m3u") sourceName = "Việt Nam";
             else {
                 sourceName = filename;
@@ -125,22 +161,40 @@ bool IPTVManager::loadPlaylists(const std::string& directory) {
                 std::replace(sourceName.begin(), sourceName.end(), '_', ' ');
             }
             IPTVSource newSrc;
-            newSrc.name = sourceName;
-            newSrc.filename = filename;
-            newSrc.type = "file";
+            newSrc.name = sourceName; newSrc.filename = filename; newSrc.type = "file";
             m_sourcesMeta[filename] = newSrc;
         }
 
-        size_t count = 0;
-        if (parseM3UFile(path, sourceName, filename, &count)) {
+        // Tao slug cho playlist ID
+        std::string slug;
+        for (char c : filename) {
+            if (c == '.') break;
+            slug += ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) ? c :
+                    ((c >= 'A' && c <= 'Z') ? static_cast<char>(::tolower(c)) : '_');
+        }
+        if (slug.empty()) slug = "pl" + std::to_string(loaded);
+
+        // --- Parse vao Playlist object doc lap ---
+        Playlist pl;
+        pl.id         = slug;
+        pl.name       = sourceName;
+        pl.sourceFile = filename;
+        pl.sourcePath = path;
+
+        // Lay URL neu co trong meta
+        if (it != m_sourcesMeta.end()) pl.sourceUrl = it->second.url;
+
+        struct stat st;
+        if (stat(path.c_str(), &st) == 0) pl.fileSize = static_cast<size_t>(st.st_size);
+
+        if (parseM3UIntoPlaylist(path, pl)) {
+            m_playlists.push_back(std::move(pl));
+
             IPTVSource src = m_sourcesMeta[filename];
             src.name = sourceName;
             src.filename = filename;
-            src.channelCount = count;
-            struct stat st;
-            if (stat(path.c_str(), &st) == 0) {
-                src.fileSize = st.st_size;
-            }
+            src.channelCount = m_playlists.back().channelCount();
+            src.fileSize = m_playlists.back().fileSize;
             m_sources.push_back(src);
             loaded++;
         }
@@ -148,13 +202,20 @@ bool IPTVManager::loadPlaylists(const std::string& directory) {
 
     saveSourcesMeta();
 
+    // Rebuild flat backward-compat list tu m_playlists
+    rebuildFlatChannelList();
+
     Logger::info("Loaded " + std::to_string(m_channels.size()) + " IPTV channels from " +
                  std::to_string(loaded) + " playlist(s)");
-
-    return m_channels.size() > 0;
+    return !m_playlists.empty();
 }
 
-bool IPTVManager::parseM3UFile(const std::string& filepath, const std::string& sourceName, const std::string& filename, size_t* outChannelCount) {
+
+// ---------------------------------------------------------------------------
+// parseM3UIntoPlaylist — Parse file .m3u vao mot Playlist doc lap
+// Khong cham vao m_channels hay m_groups toan cuc
+// ---------------------------------------------------------------------------
+bool IPTVManager::parseM3UIntoPlaylist(const std::string& filepath, Playlist& out) {
     std::ifstream file(filepath);
     if (!file.is_open()) {
         Logger::error("Cannot open M3U file: " + filepath);
@@ -165,57 +226,79 @@ bool IPTVManager::parseM3UFile(const std::string& filepath, const std::string& s
     std::string currentGroup = "Chung";
     std::string currentName;
     std::string currentLogo;
-    size_t count = 0;
 
     while (std::getline(file, line)) {
-        if (!line.empty() && line.back() == '\r') {
-            line.pop_back();
-        }
-
+        if (!line.empty() && line.back() == '\r') line.pop_back();
         if (line.empty()) continue;
 
         if (line.rfind("#EXTINF:", 0) == 0) {
             currentName = extractName(line);
-            std::string group = extractGroup(line);
-            if (!group.empty()) {
-                currentGroup = group;
-            }
-            currentLogo = extractLogo(line);
-
-            if (currentName.empty()) {
-                currentName = "Kênh không tên";
-            }
+            std::string grp = extractGroup(line);
+            currentGroup = grp.empty() ? "Chung" : grp;
+            currentLogo  = extractLogo(line);
+            if (currentName.empty()) currentName = "Kênh không tên";
             continue;
         }
+        if (line[0] == '#') continue;
 
-        if (line[0] == '#') {
-            continue;
-        }
-
+        // Trim whitespace
         std::string url = line;
         while (!url.empty() && (url.front() == ' ' || url.front() == '\t')) url.erase(0, 1);
-        while (!url.empty() && (url.back() == ' ' || url.back() == '\t')) url.pop_back();
+        while (!url.empty() && (url.back()  == ' ' || url.back()  == '\t')) url.pop_back();
 
         if (!url.empty() && url.find("://") != std::string::npos) {
-            IPTVChannel channel;
-            channel.name = currentName;
-            channel.url = url;
-            channel.group = currentGroup;
-            channel.logo = currentLogo;
-            channel.source = sourceName;
-            channel.sourceFile = filename;
-            channel.isFavorite = isFavorite(currentName);
+            PlaylistItem item;
+            item.name       = currentName;
+            item.url        = url;
+            item.group      = currentGroup;
+            item.logo       = currentLogo;
+            item.isFavorite = isFavorite(currentName);
 
-            m_channels.push_back(channel);
-
-            size_t idx = m_channels.size() - 1;
-            m_groups[currentGroup].push_back(idx);
-            count++;
+            size_t idx = out.channels.size();
+            out.channels.push_back(std::move(item));
+            out.groups[currentGroup].push_back(idx);
         }
     }
-
     file.close();
-    if (outChannelCount) *outChannelCount = count;
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// rebuildFlatChannelList — Gop toan bo m_playlists thanh m_channels
+// (backward-compat cho UIManager hien tai)
+// ---------------------------------------------------------------------------
+void IPTVManager::rebuildFlatChannelList() {
+    m_channels.clear();
+    m_groups.clear();
+
+    for (const auto& pl : m_playlists) {
+        for (const auto& item : pl.channels) {
+            IPTVChannel ch = IPTVChannel::fromItem(item, pl.name, pl.sourceFile);
+            size_t globalIdx = m_channels.size();
+            m_channels.push_back(std::move(ch));
+            m_groups[m_channels.back().group].push_back(globalIdx);
+        }
+    }
+    Logger::info("rebuildFlatChannelList: " + std::to_string(m_channels.size()) +
+                 " channels from " + std::to_string(m_playlists.size()) + " playlists");
+}
+
+// ---------------------------------------------------------------------------
+// parseM3UFile — Backward-compat: delegate sang parseM3UIntoPlaylist
+// ---------------------------------------------------------------------------
+bool IPTVManager::parseM3UFile(const std::string& filepath, const std::string& sourceName,
+                                const std::string& filename, size_t* outChannelCount) {
+    Playlist tmp;
+    tmp.id = filename; tmp.name = sourceName; tmp.sourceFile = filename;
+    if (!parseM3UIntoPlaylist(filepath, tmp)) return false;
+    if (outChannelCount) *outChannelCount = tmp.channelCount();
+    // Ghi thang vao flat list (can thiet cho cac caller cu)
+    for (const auto& item : tmp.channels) {
+        IPTVChannel ch = IPTVChannel::fromItem(item, sourceName, filename);
+        size_t idx = m_channels.size();
+        m_channels.push_back(std::move(ch));
+        m_groups[m_channels.back().group].push_back(idx);
+    }
     return true;
 }
 
@@ -373,22 +456,28 @@ void IPTVManager::loadSourcesMeta() {
         if (!line.empty() && line.back() == '\r') line.pop_back();
         if (line.empty() || line[0] == '#') continue;
 
-        // format: filename|name|type|url
+        // format: filename|name|type|url|lastRefreshed|refreshIntervalHours
         std::stringstream ss(line);
-        std::string fn, name, type, url;
+        std::string fn, name, type, url, tsStr, intervalStr;
         if (std::getline(ss, fn, '|') && std::getline(ss, name, '|')) {
             std::getline(ss, type, '|');
             std::getline(ss, url, '|');
+            std::getline(ss, tsStr, '|');
+            std::getline(ss, intervalStr, '|');
+
             IPTVSource src;
             src.filename = fn;
             src.name = name;
             src.type = type.empty() ? "file" : type;
             src.url = url;
+            src.lastRefreshed = tsStr.empty() ? 0 : static_cast<std::time_t>(std::stoll(tsStr));
+            src.refreshIntervalHours = intervalStr.empty() ? 24 : std::stoi(intervalStr);
             m_sourcesMeta[fn] = src;
         }
     }
     file.close();
 }
+
 
 void IPTVManager::saveSourcesMeta() {
     std::string metaPath = m_iptvDir + "/sources.txt";
@@ -396,15 +485,19 @@ void IPTVManager::saveSourcesMeta() {
     if (!file.is_open()) return;
 
     file << "# RomCloud IPTV Sources Metadata\n";
-    file << "# filename|name|type|url\n";
+    file << "# filename|name|type|url|lastRefreshed|refreshIntervalHours\n";
     for (const auto& pair : m_sourcesMeta) {
-        file << pair.second.filename << "|"
-             << pair.second.name << "|"
-             << pair.second.type << "|"
-             << pair.second.url << "\n";
+        const auto& s = pair.second;
+        file << s.filename << "|"
+             << s.name << "|"
+             << s.type << "|"
+             << s.url << "|"
+             << static_cast<long long>(s.lastRefreshed) << "|"
+             << s.refreshIntervalHours << "\n";
     }
     file.close();
 }
+
 
 bool IPTVManager::addSourceFromUrl(const std::string& url, const std::string& customName, std::string& outError, std::string& outFilename, size_t& outChannelCount) {
     outChannelCount = 0;
@@ -546,6 +639,8 @@ bool IPTVManager::addSourceFromUrl(const std::string& url, const std::string& cu
     meta.type = "url";
     meta.url = cleanUrl;
     meta.fileSize = responseBody.size();
+    meta.lastRefreshed = std::time(nullptr); // danh dau moi tai ve
+    meta.refreshIntervalHours = 24;          // default: tu dong refresh moi 24 gio
     m_sourcesMeta[targetFilename] = meta;
     saveSourcesMeta();
 
@@ -622,6 +717,164 @@ IPTVChannel* IPTVManager::getChannel(size_t index) {
     }
     return nullptr;
 }
+
+// ---------------------------------------------------------------------------
+// refreshPlaylistFromUrl
+// Tai lai noi dung tu URL nguon, ghi de file .m3u, cap nhat lastRefreshed
+// ---------------------------------------------------------------------------
+bool IPTVManager::refreshPlaylistFromUrl(const std::string& filename, std::string& outError) {
+    outError.clear();
+    auto it = m_sourcesMeta.find(filename);
+    if (it == m_sourcesMeta.end() || it->second.type != "url" || it->second.url.empty()) {
+        outError = "Playlist không có URL nguồn hoặc không phải loại URL";
+        return false;
+    }
+
+    const std::string& url = it->second.url;
+    Logger::info("IPTV: Refreshing playlist '" + filename + "' from URL: " + url);
+
+    CURL* curl = curl_easy_init();
+    if (!curl) {
+        outError = "Không thể khởi tạo CURL";
+        return false;
+    }
+
+    std::string responseBody;
+    struct curl_slist* headers = nullptr;
+    headers = curl_slist_append(headers,
+        "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36");
+    headers = curl_slist_append(headers, "Accept: */*");
+
+    curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curlWriteBufferCallback);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &responseBody);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
+    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 15L);
+    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 5L);
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
+    curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
+
+    CURLcode res = curl_easy_perform(curl);
+    long httpCode = 0;
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &httpCode);
+    curl_slist_free_all(headers);
+    curl_easy_cleanup(curl);
+
+    if (res != CURLE_OK) {
+        outError = "Lỗi kết nối: " + std::string(curl_easy_strerror(res));
+        Logger::error("IPTV refresh error [" + filename + "]: " + outError);
+        return false;
+    }
+    if (httpCode < 200 || httpCode >= 400) {
+        outError = "Máy chủ trả về HTTP " + std::to_string(httpCode);
+        Logger::error("IPTV refresh error [" + filename + "]: " + outError);
+        return false;
+    }
+    if (responseBody.empty() ||
+        (responseBody.find("#EXTM3U") == std::string::npos &&
+         responseBody.find("#EXTINF") == std::string::npos)) {
+        outError = "Nội dung tải về không phải M3U hợp lệ";
+        return false;
+    }
+
+    // Ghi de file playlist cu
+    std::string outPath = m_iptvDir + "/" + filename;
+    std::ofstream outFile(outPath, std::ios::binary);
+    if (!outFile.is_open()) {
+        outError = "Không thể ghi file: " + outPath;
+        return false;
+    }
+    outFile.write(responseBody.data(), responseBody.size());
+    outFile.close();
+    sync();
+
+    // Cap nhat metadata: lastRefreshed = now
+    it->second.lastRefreshed = std::time(nullptr);
+    it->second.fileSize = responseBody.size();
+    saveSourcesMeta();
+
+    // Reload tat ca playlist
+    loadPlaylists(m_iptvDir);
+
+    Logger::info("IPTV: Refreshed '" + filename + "' OK (" +
+                 std::to_string(responseBody.size()) + " bytes, " +
+                 std::to_string(m_channels.size()) + " channels total)");
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// checkAndAutoRefresh
+// Goi sau loadPlaylists() luc startup, tu dong tai lai cac playlist stale
+// Tra ve so playlist da duoc refresh
+// ---------------------------------------------------------------------------
+int IPTVManager::checkAndAutoRefresh() {
+    int refreshed = 0;
+    std::vector<std::string> staleFiles;
+
+    for (const auto& pair : m_sourcesMeta) {
+        if (pair.second.isStale()) {
+            staleFiles.push_back(pair.first);
+        }
+    }
+
+    if (staleFiles.empty()) {
+        Logger::info("IPTV: All URL playlists are up to date (no auto-refresh needed)");
+        return 0;
+    }
+
+    Logger::info("IPTV: Auto-refreshing " + std::to_string(staleFiles.size()) + " stale playlist(s)...");
+    for (const auto& fn : staleFiles) {
+        std::string err;
+        if (refreshPlaylistFromUrl(fn, err)) {
+            refreshed++;
+            Logger::info("IPTV: Auto-refresh OK: " + fn);
+        } else {
+            Logger::warn("IPTV: Auto-refresh FAILED [" + fn + "]: " + err);
+        }
+    }
+    return refreshed;
+}
+
+// ---------------------------------------------------------------------------
+// setRefreshInterval
+// ---------------------------------------------------------------------------
+void IPTVManager::setRefreshInterval(const std::string& filename, int hours) {
+    auto it = m_sourcesMeta.find(filename);
+    if (it != m_sourcesMeta.end()) {
+        it->second.refreshIntervalHours = hours;
+        saveSourcesMeta();
+        Logger::info("IPTV: Set refresh interval for '" + filename +
+                     "' to " + std::to_string(hours) + "h");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// getLastRefreshedStr
+// ---------------------------------------------------------------------------
+std::string IPTVManager::getLastRefreshedStr(const std::string& filename) const {
+    auto it = m_sourcesMeta.find(filename);
+    if (it != m_sourcesMeta.end()) {
+        return it->second.lastRefreshedStr();
+    }
+    return "Không rõ";
+}
+
+// ---------------------------------------------------------------------------
+// getStalePlaylistFiles
+// ---------------------------------------------------------------------------
+std::vector<std::string> IPTVManager::getStalePlaylistFiles() const {
+    std::vector<std::string> result;
+    for (const auto& pair : m_sourcesMeta) {
+        if (pair.second.isStale()) result.push_back(pair.first);
+    }
+    return result;
+}
+
+
 
 bool IPTVManager::isMediaPlayerInstalled() const {
     std::string appRoot = AppConfig::instance().getAppRoot();
@@ -827,222 +1080,189 @@ static std::string resolveCappedHlsUrl(const std::string& url, int targetHeight 
     return url;
 }
 
-bool IPTVManager::playChannel(const IPTVChannel& channel) {
-    stop();
-
-    if (channel.url.empty()) {
-        Logger::error("IPTV channel URL is empty");
-        return false;
+static std::string escapeJsonString(const std::string& input) {
+    std::string output;
+    for (char c : input) {
+        if (c == '"') output += "\\\"";
+        else if (c == '\\') output += "\\\\";
+        else if (c == '\n') output += "\\n";
+        else if (c == '\r') output += "\\r";
+        else if (c == '\t') output += "\\t";
+        else output += c;
     }
-
-    ensureMediaPlayerAvailable();
-
-    Logger::info("Playing IPTV channel: " + channel.name);
-    Logger::info("URL: " + channel.url);
-    std::string playUrl = resolveCappedHlsUrl(channel.url, 720);
-
-    std::string appRoot = AppConfig::instance().getAppRoot();
-    if (appRoot.empty()) appRoot = "/mnt/SDCARD/Apps/RomCloud";
-    std::string sdRoot = AppConfig::instance().getSdRoot();
-
-    std::vector<std::string> playerCandidates = {
-        appRoot + "/bin/mpv",
-        sdRoot + "/System/bin/mpv",
-        sdRoot + "/Emus/VIDEOS/mpv.sh",
-        sdRoot + "/Emu/VIDEOS/mpv.sh",
-        sdRoot + "/Emu/MEDIA/bin64/ffplay",
-        sdRoot + "/Emu/MEDIA/bin32/ffplay",
-        "/usr/trimui/bin/mpv",
-        "/usr/bin/mpv",
-        appRoot + "/bin/ffplay",
-        sdRoot + "/System/bin/ffplay",
-        "/usr/bin/ffplay"
-    };
-
-    std::string playerPath;
-    for (const auto& candidate : playerCandidates) {
-        struct stat st;
-        if (stat(candidate.c_str(), &st) == 0 && st.st_size > 1000 && access(candidate.c_str(), X_OK) == 0) {
-            playerPath = candidate;
-            break;
-        }
-    }
-
-    if (playerPath.empty()) {
-        Logger::error("No valid media player (mpv/ffplay) found on system");
-        return false;
-    }
-
-    Logger::info("Selected IPTV player: " + playerPath);
-
-    unlink("/tmp/mpv_iptv.sock");
-
-    // Prevent TrimUI screen standby while watching video
-    FILE* fwake = fopen("/tmp/stay_awake", "w");
-    if (fwake) {
-        fputs("1\n", fwake);
-        fclose(fwake);
-    }
-
-    pid_t pid = fork();
-    if (pid == 0) {
-        // Child process: create independent process group
-        setpgid(0, 0);
-
-        // Redirect stdout & stderr to iptv_mpv.log for diagnostics
-        std::string logPath = appRoot + "/iptv_mpv.log";
-        int logFd = open(logPath.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
-        if (logFd >= 0) {
-            dup2(logFd, STDOUT_FILENO);
-            dup2(logFd, STDERR_FILENO);
-            close(logFd);
-        }
-
-        // Export library paths so player can find codec libraries (RomCloud lib, SpruceOS Emu/MEDIA lib, system libs)
-        std::string libPath = appRoot + "/lib:" + sdRoot + "/Emu/MEDIA/lib64:" + sdRoot + "/Emu/MEDIA/lib32:" + sdRoot + "/System/lib:/usr/lib:/lib";
-        setenv("LD_LIBRARY_PATH", libPath.c_str(), 1);
-        setenv("HOME", appRoot.c_str(), 1);
-        setenv("YTDL_EXE", (appRoot + "/bin/yt-dlp").c_str(), 1);
-
-        std::string inputConf = appRoot + "/config/input.conf";
-
-        if (playerPath.find("mpv.sh") != std::string::npos) {
-            execl("/bin/sh", "sh", playerPath.c_str(), playUrl.c_str(), nullptr);
-        } else if (playerPath.find("mpv") != std::string::npos) {
-            std::vector<std::string> argList = {
-                playerPath,
-                playUrl,
-                "--input-ipc-server=/tmp/mpv_iptv.sock",
-                "--fullscreen",
-                "--keepaspect=yes",
-                "--hwdec=auto",
-                "--vd-lavc-threads=4",
-                "--vd-lavc-fast",
-                "--vd-lavc-skiploopfilter=nonref",
-                "--vd-lavc-framedrop=nonref",
-                "--sws-scaler=fast-bilinear",
-                "--dscale=bilinear",
-                "--scale=bilinear",
-                "--framedrop=vo",
-                "--demuxer-max-bytes=16M",
-                "--demuxer-readahead-secs=5",
-                "--audio-buffer=0.5",
-                "--terminal=no"
-            };
-            if (access(inputConf.c_str(), R_OK) == 0) {
-                argList.push_back("--input-conf=" + inputConf);
-            }
-            std::vector<char*> cArgs;
-            for (auto& s : argList) {
-                cArgs.push_back(const_cast<char*>(s.c_str()));
-            }
-            cArgs.push_back(nullptr);
-
-            execv(playerPath.c_str(), cArgs.data());
-        } else {
-            // ffplay
-            const char* args[] = {
-                playerPath.c_str(),
-                "-fs",
-                "-autoexit",
-                "-framedrop",
-                "-loglevel", "warning",
-                playUrl.c_str(),
-                nullptr
-            };
-            execvp(playerPath.c_str(), const_cast<char* const*>(args));
-        }
-        _exit(1);
-    } else if (pid > 0) {
-        m_mpvPid = pid;
-        m_isPlaying = true;
-        m_currentChannel = channel.name;
-        uint32_t playStartTime = SDL_GetTicks();
-        Logger::info("IPTV player started with PID: " + std::to_string(pid) + " using " + playerPath);
-
-        // Responsive loop: wait for player to exit OR user to press B/Menu/Select
-        int status = 0;
-        while (m_isPlaying && m_mpvPid > 0) {
-            pid_t res = waitpid(m_mpvPid, &status, WNOHANG);
-            if (res != 0) {
-                break;
-            }
-
-            SDL_Event ev;
-            bool shouldExit = false;
-            while (SDL_PollEvent(&ev)) {
-                if (ev.type == SDL_CONTROLLERBUTTONDOWN) {
-                    // TrimUI physical B button = SDL_CONTROLLER_BUTTON_A (or Menu / Back)
-                    if (ev.cbutton.button == SDL_CONTROLLER_BUTTON_A ||
-                        ev.cbutton.button == SDL_CONTROLLER_BUTTON_GUIDE ||
-                        ev.cbutton.button == SDL_CONTROLLER_BUTTON_BACK) {
-                        Logger::info("User pressed B/Menu button, stopping IPTV player");
-                        shouldExit = true;
-                        break;
-                    }
-                } else if (ev.type == SDL_KEYDOWN) {
-                    if (ev.key.keysym.sym == SDLK_b || ev.key.keysym.sym == SDLK_ESCAPE || ev.key.keysym.sym == SDLK_q) {
-                        Logger::info("User pressed key B/ESC/Q, stopping IPTV player");
-                        shouldExit = true;
-                        break;
-                    }
-                }
-            }
-
-            if (shouldExit) {
-                stop();
-                break;
-            }
-
-            SDL_Delay(40);
-        }
-
-        // Clean up stay_awake
-        unlink("/tmp/stay_awake");
-
-        uint32_t playDuration = SDL_GetTicks() - playStartTime;
-        bool playSuccess = true;
-
-        if (WIFEXITED(status)) {
-            int exitCode = WEXITSTATUS(status);
-            Logger::info("IPTV player exited with code: " + std::to_string(exitCode) + " after " + std::to_string(playDuration) + "ms");
-            if (exitCode != 0) {
-                if (playDuration < 3000) {
-                    playSuccess = false;
-                }
-                // Read last lines of iptv_mpv.log for diagnostics
-                std::ifstream logFile(appRoot + "/iptv_mpv.log");
-                if (logFile.is_open()) {
-                    std::string errLine;
-                    int count = 0;
-                    while (std::getline(logFile, errLine) && count++ < 10) {
-                        if (!errLine.empty()) {
-                            Logger::warn("mpv: " + errLine);
-                        }
-                    }
-                }
-            }
-        } else if (WIFSIGNALED(status)) {
-            Logger::info("IPTV player terminated by signal: " + std::to_string(WTERMSIG(status)));
-        }
-
-        m_mpvPid = -1;
-        m_isPlaying = false;
-        m_currentChannel = "";
-        Logger::info("IPTV player finished, returning to RomCloud UI");
-
-        // Flush any button events queued while player was active and reset controller state
-        SDL_PumpEvents();
-        SDL_FlushEvents(SDL_FIRSTEVENT, SDL_LASTEVENT);
-        InputManager::instance().reset();
-
-        return playSuccess;
-    }
-
-    unlink("/tmp/stay_awake");
-    Logger::error("Failed to fork IPTV player");
-    return false;
+    return output;
 }
+
+static std::string sanitizeAssText(const std::string& input) {
+    std::string output;
+    for (char c : input) {
+        if (c == '{') output += '(';
+        else if (c == '}') output += ')';
+        else if (c == '\\') output += '/';
+        else output += c;
+    }
+    return output;
+}
+
+bool IPTVManager::sendMpvIpcOverSocket(const std::string& jsonCmd) {
+    if (m_iptvIpcSocket < 0) {
+        if (access("/tmp/mpv_iptv.sock", F_OK) != 0) {
+            Logger::warn("[IPTV] IPC socket not found");
+            return false;
+        }
+        int sock = socket(AF_UNIX, SOCK_STREAM, 0);
+        if (sock < 0) return false;
+        struct sockaddr_un addr;
+        memset(&addr, 0, sizeof(addr));
+        addr.sun_family = AF_UNIX;
+        strncpy(addr.sun_path, "/tmp/mpv_iptv.sock", sizeof(addr.sun_path) - 1);
+        if (connect(sock, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
+            close(sock);
+            return false;
+        }
+        m_iptvIpcSocket = sock;
+    }
+
+    std::string cmd = jsonCmd + "\n";
+    ssize_t sent = send(m_iptvIpcSocket, cmd.c_str(), cmd.length(), MSG_NOSIGNAL);
+    if (sent != (ssize_t)cmd.length()) {
+        Logger::warn("[IPTV] IPC send failed, resetting socket");
+        close(m_iptvIpcSocket);
+        m_iptvIpcSocket = -1;
+        return false;
+    }
+
+    // Drain any pending responses from mpv so the socket never clogs
+    char drainBuf[1024];
+    while (recv(m_iptvIpcSocket, drainBuf, sizeof(drainBuf), MSG_DONTWAIT) > 0) {}
+
+    return true;
+}
+
+static std::string buildChannelListAss(
+    const std::vector<IPTVChannel>& channels,
+    size_t selectedIndex,
+    size_t currentPlayingIndex,
+    int screenW,
+    int screenH,
+    int videoH,
+    const std::string& statusMessage = ""
+) {
+    if (channels.empty()) return "";
+
+    int panelH = 360;
+    int panelY = screenH - panelH;
+
+    std::ostringstream ss;
+    // ASS v4 header (minimal, compatible with mpv 0.32)
+    ss << "[Script Info]\nTitle: IPTV Channel List\n\n";
+    ss << "[V4+ Styles]\n";
+    ss << "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n";
+    ss << "Style: Header," << "Arial,20,&H00FFD700,&H00FFD700,&H00000000,&H00000000,1,0,0,1,1,0,2,20,20,10,1\n";
+    ss << "Style: Counter," << "Arial,16,&H00AAAAAA,&H00AAAAAA,&H00000000,&H00000000,0,0,0,1,1,0,3,20,20,10,1\n";
+    ss << "Style: Item," << "Arial,18,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,0,0,0,1,1,0,2,20,20,10,1\n";
+    ss << "Style: ItemSel," << "Arial,18,&H00FFFFFF,&H00FFFFFF,&H00FFD700,&H00000000,1,0,0,1,1,0,2,20,20,10,1\n";
+    ss << "Style: Group," << "Arial,15,&H00AAAAAA,&H00AAAAAA,&H00000000,&H00000000,0,0,0,1,1,0,2,300,20,10,1\n";
+    ss << "Style: Badge," << "Arial,14,&H0000FF00,&H0000FF00,&H00000000,&H00000000,1,0,0,1,1,0,3,20,20,10,1\n";
+    ss << "Style: Footer," << "Arial,15,&H00888888,&H00888888,&H00000000,&H00000000,0,0,0,1,1,0,2,20,20,10,1\n";
+    ss << "\n[Events]\n";
+
+    // Draw solid dark background box at bottom panel
+    ss << "Dialogue: 0," << panelY/10.0 << ":00:00.00," << (panelY+panelH)/10.0 << ":00:00.00,";
+    ss << "Background,,0,0,0,,";
+    ss << "{\\an7\\pos(0," << panelY << ")\\p1\\1c&H181410&\\1a&HFF&\\bord0\\shad0}";
+    ss << "m 0 0 l " << screenW << " 0 l " << screenW << " " << panelH << " l 0 " << panelH << "{\\p0}\n";
+
+    // Accent gold line
+    ss << "Dialogue: 0," << panelY/10.0 << ":00:00.00," << (panelY+1)/10.0 << ":00:00.00,";
+    ss << "Accent,,0,0,0,,";
+    ss << "{\\an7\\pos(0," << panelY << ")\\p1\\1c&HFFD700&\\1a&H99&\\bord0\\shad0}";
+    ss << "m 0 0 l " << screenW << " 0 l " << screenW << " 2 l 0 2{\\p0}\n";
+
+    // Header: "XEM TV"
+    ss << "Dialogue: 0," << panelY/10.0 << ":00:00.50," << (panelY+40)/10.0 << ":00:00.00,";
+    ss << "Header,,0,0,0,,";
+    ss << "{\\an7\\pos(20," << (panelY + 8) << ")}XEM TV";
+    if (!statusMessage.empty()) {
+        ss << "  {\\fs14\\c&H00D7FF&}" << sanitizeAssText(statusMessage);
+    }
+    ss << "\n";
+
+    // Channel counter
+    ss << "Dialogue: 0," << panelY/10.0 << ":00:00.50," << (panelY+40)/10.0 << ":00:00.00,";
+    ss << "Counter,,0,0,0,,";
+    ss << "{\\an9\\pos(" << (screenW - 20) << "," << (panelY + 10) << ")}" << channels.size() << " kênh";
+
+
+    int visibleCount = (panelH >= 260) ? 5 : 3;
+    int half = visibleCount / 2;
+    int startIdx = (int)selectedIndex - half;
+    if (startIdx + visibleCount > (int)channels.size()) {
+        startIdx = (int)channels.size() - visibleCount;
+    }
+    if (startIdx < 0) startIdx = 0;
+    int endIdx = std::min((int)channels.size(), startIdx + visibleCount);
+
+    int contentStartY = panelY + 36;
+    int availableH = (panelH - 56);
+    int itemH = std::max(34, availableH / visibleCount);
+
+    for (int i = startIdx; i < endIdx; ++i) {
+        int rowY = contentStartY + (i - startIdx) * itemH;
+        bool isSel = (i == (int)selectedIndex);
+        bool isPlay = (i == (int)currentPlayingIndex);
+        std::string chanName = truncateUtf8Chars(sanitizeAssText(channels[i].name), 24);
+        std::string groupName = sanitizeAssText(channels[i].group);
+        if (groupName.empty()) groupName = "Truyền hình";
+        groupName = truncateUtf8Chars(groupName, 14);
+
+        char idxBuf[8];
+        snprintf(idxBuf, sizeof(idxBuf), "%02d", i + 1);
+
+        std::string style = isSel ? "ItemSel" : "Item";
+
+        // Selection highlight bar
+        if (isSel) {
+            ss << "Dialogue: 0," << rowY/10.0 << ":00:00.00," << (rowY+itemH-4)/10.0 << ":00:00.00,";
+            ss << "Back,,0,0,0,,";
+            ss << "{\\an7\\pos(12," << rowY << ")\\p1\\1c&H251B12&\\1a&H99&\\bord1.5\\3c&HFFD700&\\shad0}";
+            ss << "m 0 0 l " << (screenW - 24) << " 0 l " << (screenW - 24) << " " << (itemH - 4) << " l 0 " << (itemH - 4) << "{\\p0}\n";
+        }
+
+        // Index + name
+        ss << "Dialogue: 0," << rowY/10.0 << ":00:00.00," << (rowY+itemH)/10.0 << ":00:00.00,";
+        ss << style << ",,0,0,0,,";
+        ss << "{\\an7\\pos(22," << (rowY + 6) << ")}{\\c&HFFD700&}" << idxBuf << "  {\\c" << (isSel ? "&HFFFFFF&" : "&HE2E2E2&") << "}" << chanName << "\n";
+
+        // Group
+        ss << "Dialogue: 0," << rowY/10.0 << ":00:00.00," << (rowY+itemH)/10.0 << ":00:00.00,";
+        ss << "Group,,0,0,0,,";
+        ss << "{\\an7\\pos(" << (screenW / 2 + 10) << "," << (rowY + 7) << ")}" << groupName << "\n";
+
+        // Playing badge
+        if (isPlay) {
+            ss << "Dialogue: 0," << rowY/10.0 << ":00:00.00," << (rowY+28)/10.0 << ":00:00.00,";
+            ss << "Badge,,0,0,0,,";
+            ss << "{\\an9\\pos(" << (screenW - 100) << "," << (rowY + 5) << ")}";
+            ss << (isSel ? "Đang Xem" : "Đang Xem");
+            ss << "\n";
+        }
+    }
+
+    // Footer
+    ss << "Dialogue: 0," << (screenH-22)/10.0 << ":00:00.00," << screenH/10.0 << ":00:00.00,";
+    ss << "Footer,,0,0,0,,";
+    ss << "{\\an7\\pos(20," << (screenH - 18) << ")}";
+    ss << "Up/Down: Chọn kênh  |  [A]: Chuyển kênh  |  [SELECT]: Ẩn/Hiện  |  [B]: Thoát\n";
+
+    return ss.str();
+}
+
+// ─────────────────────────────────────────────
+// IPTV Non-Blocking Playback
+// mpv runs fullscreen in its own window on top of the screen,
+// SDL UI continues to render channel list in the bottom ~360px region.
+// ─────────────────────────────────────────────
 
 bool IPTVManager::sendMpvIpcCommand(const std::string& jsonCmd, std::string* response, const std::string& sockPath) {
     int sock = socket(AF_UNIX, SOCK_STREAM, 0);
@@ -1076,7 +1296,8 @@ bool IPTVManager::sendMpvIpcCommand(const std::string& jsonCmd, std::string* res
     }
 
     std::string cmd = jsonCmd + "\n";
-    send(sock, cmd.c_str(), cmd.length(), 0);
+    ssize_t sent = send(sock, cmd.c_str(), cmd.length(), 0);
+    if (sent < 0) { close(sock); return false; }
 
     if (response) {
         char buf[2048];
@@ -1139,6 +1360,616 @@ static std::string fetchYouTubeStreamUrl(const std::string& videoId, const std::
     }
     pclose(pipe);
     return streamUrl;
+}
+
+// iptvDbg: log chẩn đoán riêng (Logger chỉ ghi WARN/ERROR ra disk,
+// INFO bị lọc nên không thấy gì khi debug chuyển kênh).
+static void iptvDbg(const std::string& msg) {
+    FILE* f = fopen("/tmp/iptv_debug.log", "a");
+    if (!f) return;
+    fprintf(f, "[%u] %s\n", SDL_GetTicks(), msg.c_str());
+    fclose(f);
+}
+
+// spawnMpvForUrl: fork mpv moi cho URL da resolve (restart doi kenh).
+pid_t IPTVManager::spawnMpvForUrl(const std::string& url) {
+    std::string appRoot = AppConfig::instance().getAppRoot();
+    if (appRoot.empty()) appRoot = "/mnt/SDCARD/Apps/RomCloud";
+    std::string sdRoot = AppConfig::instance().getSdRoot();
+    std::string playerPath = appRoot + "/bin/mpv";
+    if (access(playerPath.c_str(), X_OK) != 0) playerPath = sdRoot + "/System/bin/mpv";
+    if (access(playerPath.c_str(), X_OK) != 0) playerPath = "/usr/trimui/bin/mpv";
+    if (access(playerPath.c_str(), X_OK) != 0) return -1;
+    std::string inputConf = appRoot + "/config/input.conf";
+    unlink("/tmp/mpv_iptv.sock");
+    FILE* fw = fopen("/tmp/stay_awake", "w");
+    if (fw) { fputs("1\n", fw); fclose(fw); }
+    pid_t pid = fork();
+    if (pid != 0) return pid;
+    setpgid(0, 0);
+    std::string libP = appRoot + "/lib:" + sdRoot + "/System/lib:/usr/lib:/lib";
+    setenv("LD_LIBRARY_PATH", libP.c_str(), 1);
+    setenv("HOME", appRoot.c_str(), 1);
+    std::vector<std::string> args = { playerPath, url,
+        "--input-ipc-server=/tmp/mpv_iptv.sock", "--fullscreen", "--keepaspect=yes",
+        "--video-align-y=-1", "--video-align-x=0", "--hwdec=auto",
+        "--vd-lavc-threads=4", "--vd-lavc-fast", "--framedrop=vo",
+        "--demuxer-max-bytes=32M", "--demuxer-readahead-secs=8",
+        "--terminal=no", "--tls-verify=no" };
+    if (access(inputConf.c_str(), R_OK) == 0) args.push_back("--input-conf=" + inputConf);
+    std::vector<char*> cA;
+    for (auto& a : args) cA.push_back(const_cast<char*>(a.c_str()));
+    cA.push_back(nullptr);
+    execv(playerPath.c_str(), cA.data());
+    _exit(1);
+}
+static void killMpvPidBlocking(pid_t pid) {
+    if (pid <= 0) return;
+    { // IPC quit truoc cho sach
+        int s = socket(AF_UNIX, SOCK_STREAM, 0);
+        if (s >= 0) {
+            struct sockaddr_un a; memset(&a, 0, sizeof(a));
+            a.sun_family = AF_UNIX;
+            strncpy(a.sun_path, "/tmp/mpv_iptv.sock", sizeof(a.sun_path) - 1);
+            struct timeval tv; tv.tv_sec = 0; tv.tv_usec = 150000;
+            setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, (const char*)&tv, sizeof tv);
+            if (connect(s, (struct sockaddr*)&a, sizeof(a)) == 0) {
+                const char* q = "{\"command\":[\"quit\"]}\n";
+                send(s, q, strlen(q), 0);
+            }
+            close(s);
+        }
+    }
+    int st = 0;
+    for (int i = 0; i < 15; ++i) {
+        if (waitpid(pid, &st, WNOHANG) > 0) return;
+        usleep(20000);
+    }
+    if (kill(pid, 0) == 0) {
+        kill(-pid, SIGTERM); kill(pid, SIGTERM);
+        for (int i = 0; i < 15; ++i) {
+            if (waitpid(pid, &st, WNOHANG) > 0) return;
+            usleep(20000);
+        }
+    }
+    if (kill(pid, 0) == 0) {
+        kill(-pid, SIGKILL); kill(pid, SIGKILL);
+        waitpid(pid, &st, 0);
+    }
+    unlink("/tmp/mpv_iptv.sock");
+}
+
+// switchIPTVChannelByIndex: RESTART mpv sach cho kenh moi (thay vi loadfile).
+bool IPTVManager::switchIPTVChannelByIndex(size_t idx) {
+    if (m_iptvChannelList.empty() || idx >= m_iptvChannelList.size()) return false;
+    // Debounce: chặn double-fire trong 300ms (bấm A 2 lần)
+    uint32_t nowMs = SDL_GetTicks();
+    iptvDbg("SWITCH req idx=" + std::to_string(idx) + " cur=" + std::to_string(m_iptvCurrentIndex));
+    if (nowMs - m_lastASwitchMs < 300) {
+        iptvDbg("SWITCH debounced (<300ms), skip");
+        return true;
+    }
+    m_lastASwitchMs = nowMs;
+    IPTVChannel ch = m_iptvChannelList[idx];
+    if (ch.url.empty()) return false;
+    uint32_t t0 = SDL_GetTicks();
+    bool cacheHit = false;
+    std::string url;
+    {
+        std::lock_guard<std::mutex> lock(m_streamCacheMutex);
+        auto it = m_streamUrlCache.find(ch.url);
+        if (it != m_streamUrlCache.end()) {
+            url = it->second;
+            cacheHit = true;
+        } else {
+            url = resolveCappedHlsUrl(ch.url, 720);
+            if (m_streamUrlCache.size() >= kStreamCacheMax) {
+                m_streamUrlCache.erase(m_streamUrlCache.begin());
+            }
+            m_streamUrlCache[ch.url] = url;
+        }
+    }
+    {
+        std::lock_guard<std::mutex> pl(m_prefetchMutex);
+        if (m_prefetchKey == ch.url && !m_prefetchUrl.empty()) {
+            url = m_prefetchUrl;
+            cacheHit = true;
+            iptvDbg("SWITCH prefetch HIT");
+        }
+    }
+    iptvDbg("SWITCH resolve hit=" + std::string(cacheHit ? "1" : "0") +
+            " took=" + std::to_string(SDL_GetTicks() - t0) + "ms");
+    if (url.empty()) return false;
+    uint32_t tk = SDL_GetTicks();
+    iptvDbg("SWITCH kill old pid=" + std::to_string(m_mpvPid));
+    killMpvPidBlocking(m_mpvPid);
+    m_mpvPid = -1;
+    iptvDbg("SWITCH killed took=" + std::to_string(SDL_GetTicks() - tk) + "ms");
+    uint32_t ts = SDL_GetTicks();
+    pid_t npid = spawnMpvForUrl(url);
+    if (npid <= 0) { iptvDbg("SWITCH spawn FAIL"); return false; }
+    m_mpvPid = npid;
+    int wst = 0;
+    for (int i = 0; i < 25; ++i) {
+        if (waitpid(m_mpvPid, &wst, WNOHANG) != 0) {
+            m_mpvPid = -1;
+            iptvDbg("SWITCH new died early");
+            return false;
+        }
+        if (access("/tmp/mpv_iptv.sock", F_OK) == 0) { SDL_Delay(150); break; }
+        SDL_Delay(100);
+    }
+    iptvDbg("SWITCH spawned pid=" + std::to_string(npid) +
+            " took=" + std::to_string(SDL_GetTicks() - ts) + "ms");
+    m_iptvSelectedIndex = idx;
+    m_iptvCurrentIndex = idx;
+    m_currentChannel = ch.name;
+    {
+        std::vector<std::string> keys;
+        if (idx + 1 < m_iptvChannelList.size()) keys.push_back(m_iptvChannelList[idx + 1].url);
+        if (idx > 0) keys.push_back(m_iptvChannelList[idx - 1].url);
+        std::thread([this, keys]() {
+            for (auto& k : keys) {
+                if (k.empty()) continue;
+                { std::lock_guard<std::mutex> l(m_streamCacheMutex);
+                  if (m_streamUrlCache.find(k) != m_streamUrlCache.end()) continue; }
+                std::string u = resolveCappedHlsUrl(k, 720);
+                if (u.empty()) continue;
+                { std::lock_guard<std::mutex> l(m_streamCacheMutex);
+                  if (m_streamUrlCache.size() >= kStreamCacheMax) m_streamUrlCache.erase(m_streamUrlCache.begin());
+                  m_streamUrlCache[k] = u; }
+                { std::lock_guard<std::mutex> pl(m_prefetchMutex);
+                  m_prefetchKey = k; m_prefetchUrl = u; }
+                iptvDbg("PREFETCH done");
+            }
+        }).detach();
+    }
+    Logger::info("IPTV: switched restart to: " + ch.name);
+    return true;
+}
+
+// showIPTVChannelOSD: ve list 3 dong (prev/highlight/next) vao dai den duoi.
+// Video 16:9 full-width dinh mep tren (y=0..576) -> panel 1024x192 tai (0,576).
+void IPTVManager::showIPTVChannelOSD(
+    const std::vector<IPTVChannel>& channels,
+    int selectedIndex,
+    const std::string& groupName,
+    int durationMs)
+{
+    (void)durationMs; // list hien lien tuc, khong tu an
+    if (m_mpvPid <= 0) return;
+    if (channels.empty()) return;
+    if (selectedIndex < 0) selectedIndex = 0;
+    if (selectedIndex >= (int)channels.size()) selectedIndex = (int)channels.size() - 1;
+
+    // Get font path (same as UIManager uses)
+    std::string appRoot = AppConfig::instance().getAppRoot();
+    if (appRoot.empty()) appRoot = "/mnt/SDCARD/Apps/RomCloud";
+    std::string fontPath = resolveOsdFont(appRoot);
+
+    // Open fonts if not cached (ten kenh to + header/footer nho)
+    static TTF_Font* s_fontBig = nullptr;
+    static TTF_Font* s_fontSmall = nullptr;
+    if (!s_fontBig) {
+        if (TTF_Init() == -1) return;
+        s_fontBig = TTF_OpenFont(fontPath.c_str(), 24);
+        s_fontSmall = TTF_OpenFont(fontPath.c_str(), 18);
+        if (!s_fontBig || !s_fontSmall) return;
+    }
+
+    // Panel 1024x192 nam gon trong dai den duoi video (576..768)
+    const int CW = 1024;
+    const int CH = 192;
+    const int OY = 576;
+    const int STRIDE = CW * 4;
+    std::vector<uint8_t> canvas(STRIDE * CH, 0);
+
+    auto fillRect = [&](int x, int y, int w, int h, uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
+        if (x < 0) { w += x; x = 0; }
+        if (y < 0) { h += y; y = 0; }
+        if (x + w > CW) w = CW - x;
+        if (y + h > CH) h = CH - y;
+        if (w <= 0 || h <= 0) return;
+        for (int yy = y; yy < y + h; yy++)
+            for (int xx = x; xx < x + w; xx++) {
+                size_t i = size_t(yy) * STRIDE + xx * 4;
+                canvas[i+0] = b; canvas[i+1] = g; canvas[i+2] = r; canvas[i+3] = a;
+            }
+    };
+
+    auto blitText = [&](TTF_Font* font, const std::string& text, SDL_Color color,
+                        int x, int y, uint8_t alpha) {
+        if (text.empty() || !font) return;
+        SDL_Surface* s = TTF_RenderUTF8_Blended(font, text.c_str(), color);
+        if (!s) return;
+        SDL_LockSurface(s);
+        for (int yy = 0; yy < s->h; yy++) {
+            if (y + yy < 0 || y + yy >= CH) continue;
+            for (int xx = 0; xx < s->w; xx++) {
+                if (x + xx < 0 || x + xx >= CW) continue;
+                uint32_t px = ((uint32_t*)s->pixels)[yy * (s->pitch / 4) + xx];
+                uint8_t a = (px >> 24) & 0xFF;
+                if (a < 16) continue;
+                size_t i = size_t(y + yy) * STRIDE + (x + xx) * 4;
+                uint8_t sr = (px >> 16) & 0xFF, sg = (px >> 8) & 0xFF, sb = px & 0xFF;
+                uint16_t aa = (uint16_t)a * alpha / 255, inv = 255 - aa;
+                canvas[i+0] = (uint8_t)((sb * aa + canvas[i+0] * inv) / 255);
+                canvas[i+1] = (uint8_t)((sg * aa + canvas[i+1] * inv) / 255);
+                canvas[i+2] = (uint8_t)((sr * aa + canvas[i+2] * inv) / 255);
+                if (canvas[i+3] < alpha) canvas[i+3] = alpha;
+            }
+        }
+        SDL_UnlockSurface(s);
+        SDL_FreeSurface(s);
+    };
+
+    SDL_Color white = {255, 255, 255, 255};
+    SDL_Color gold  = {255, 215, 0, 255};
+    SDL_Color gray  = {170, 180, 195, 255};
+    SDL_Color dim   = {130, 140, 155, 255};
+    SDL_Color green = {34, 197, 94, 255};
+
+    auto fillCircle = [&](int cx, int cy, int rad, uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
+        for (int yy = cy - rad; yy <= cy + rad; yy++) {
+            if (yy < 0 || yy >= CH) continue;
+            for (int xx = cx - rad; xx <= cx + rad; xx++) {
+                if (xx < 0 || xx >= CW) continue;
+                int dx = xx - cx, dy = yy - cy;
+                if (dx * dx + dy * dy > rad * rad) continue;
+                size_t i = size_t(yy) * STRIDE + xx * 4;
+                canvas[i+0] = b; canvas[i+1] = g; canvas[i+2] = r; canvas[i+3] = a;
+            }
+        }
+    };
+
+    // Nen den mo + vien vang tren
+    fillRect(0, 0, CW, CH, 14, 18, 26, 235);
+    fillRect(0, 0, CW, 3, 255, 215, 0, 255);
+
+    // Header: tên group + số kênh (giữ nguyên dấu tiếng Việt, font hệ thống đủ glyph)
+    std::string grp = groupName;
+    if (grp.empty() && selectedIndex < (int)channels.size()) grp = channels[selectedIndex].group;
+
+    if (grp.empty()) grp = "Truyền hình";
+    grp = truncateUtf8Chars(grp, 40);
+    char cntBuf[64];
+    snprintf(cntBuf, sizeof(cntBuf), "%d kênh", (int)channels.size());
+    blitText(s_fontSmall, grp, gold, 20, 8, 255);
+    blitText(s_fontSmall, cntBuf, gray, CW - 120, 8, 255);
+
+    // Cua so 3 dong neo theo highlight: [prev][highlight][next]
+    int n = (int)channels.size();
+    int start = selectedIndex - 1;
+    if (selectedIndex <= 0) start = 0;
+    if (selectedIndex >= n - 1) start = n - 3;
+    if (start < 0) start = 0;
+    int end = std::min(n, start + 3);
+
+    const int rowY0 = 38;
+    const int rowH = 40;
+    for (int r = 0; r < (end - start); r++) {
+        int i = start + r;
+        int ry = rowY0 + r * rowH;
+        bool isSel = (i == selectedIndex);
+        bool isPlay = (i == (int)m_iptvCurrentIndex);
+        if (isSel) {
+            fillRect(12, ry, CW - 24, rowH - 4, 37, 27, 18, 235);
+            fillRect(12, ry, CW - 24, 2, 255, 215, 0, 255);
+            fillRect(12, ry + rowH - 6, CW - 24, 2, 255, 215, 0, 255);
+        }
+        std::string nm = truncateUtf8Chars(channels[i].name, 30);
+        char idxBuf[16];
+        snprintf(idxBuf, sizeof(idxBuf), "%02d", i + 1);
+        blitText(s_fontBig, idxBuf, isSel ? gold : dim, 28, ry + 6, 255);
+        blitText(s_fontBig, nm, isSel ? white : gray, 90, ry + 6, 255);
+        if (isPlay) {
+            int dotCX = CW - 165, dotCY = ry + 20;
+            fillCircle(dotCX, dotCY, 7, 34, 197, 94, 255);
+            blitText(s_fontSmall, isSel ? "ĐANG XEM" : "đang xem", gold, CW - 150, ry + 10, 255);
+        }
+    }
+
+    blitText(s_fontSmall, "Up/Down: Chọn  |  A: Chuyển kênh  |  SELECT: Ẩn/Hiện  |  B: Thoát",
+             dim, 20, CH - 24, 255);
+
+    // Write to raw file
+    FILE* fp = fopen("/tmp/osd_list.raw", "wb");
+    if (!fp) return;
+    fwrite(canvas.data(), 1, canvas.size(), fp);
+    fclose(fp);
+
+    char cmd[256];
+    snprintf(cmd, sizeof(cmd),
+        "{\"command\":[\"overlay-add\",1,0,%d,\"/tmp/osd_list.raw\",0,\"bgra\",%d,%d,%d]}\n",
+        OY, CW, CH, STRIDE);
+
+    std::string reply;
+    bool ok = sendMpvIpcCommand(cmd, &reply, "/tmp/mpv_iptv.sock");
+    { FILE* f = fopen("/tmp/osd_debug.log", "a"); if (f) { fprintf(f, "overlay-add list3: ok=%d surf=(%dx%d)@(0,%d)\n", ok, CW, CH, OY); fclose(f); } }
+}
+
+// playChannel: blocking. Forks mpv and handles all playback controls + channel list OSD
+// in the same process. This is the same pattern as playYouTubeVideo.
+bool IPTVManager::playChannel(const IPTVChannel& channel, size_t initialIndex, const std::vector<IPTVChannel>& customList) {
+    stop();
+
+    if (channel.url.empty()) {
+        Logger::error("IPTV: channel URL is empty");
+        return false;
+    }
+
+    m_iptvChannelList = customList.empty() ? m_channels : customList;
+    m_iptvSelectedIndex = initialIndex;
+    m_iptvCurrentIndex = initialIndex;
+
+    // Resolve URL với LRU cache (bản cũ chạy ổn: nhiều nguồn cần User-Agent
+    // khi lấy master playlist, mpv 0.32 gửi thẳng hay rớt).
+    std::string url;
+    {
+        std::lock_guard<std::mutex> lock(m_streamCacheMutex);
+        auto it = m_streamUrlCache.find(channel.url);
+        if (it != m_streamUrlCache.end()) {
+            url = it->second;
+        } else {
+            url = resolveCappedHlsUrl(channel.url, 720);
+            if (m_streamUrlCache.size() >= kStreamCacheMax) {
+                m_streamUrlCache.erase(m_streamUrlCache.begin());
+            }
+            m_streamUrlCache[channel.url] = url;
+        }
+    }
+    if (url.empty()) {
+        Logger::error("IPTV: URL resolution failed for: " + channel.url);
+        return false;
+    }
+    Logger::info("IPTV: playing channel: " + channel.name);
+
+    std::string appRoot = AppConfig::instance().getAppRoot();
+    if (appRoot.empty()) appRoot = "/mnt/SDCARD/Apps/RomCloud";
+    std::string sdRoot = AppConfig::instance().getSdRoot();
+
+    std::string playerPath = appRoot + "/bin/mpv";
+    if (access(playerPath.c_str(), X_OK) != 0) playerPath = sdRoot + "/System/bin/mpv";
+    if (access(playerPath.c_str(), X_OK) != 0) playerPath = "/usr/trimui/bin/mpv";
+    if (access(playerPath.c_str(), X_OK) != 0) {
+        Logger::error("IPTV: No mpv binary found");
+        return false;
+    }
+
+    std::string inputConf = appRoot + "/config/input.conf";
+    std::string fontPath = resolveOsdFont(appRoot);
+    unlink("/tmp/mpv_iptv.sock");
+
+    FILE* fwake = fopen("/tmp/stay_awake", "w");
+    if (fwake) { fputs("1\n", fwake); fclose(fwake); }
+
+    pid_t pid = fork();
+    if (pid == 0) {
+        setpgid(0, 0);
+        std::string libPath = appRoot + "/lib:" + sdRoot + "/Emu/MEDIA/lib64:" + sdRoot + "/Emu/MEDIA/lib32:" + sdRoot + "/System/lib:/usr/lib:/lib";
+        setenv("LD_LIBRARY_PATH", libPath.c_str(), 1);
+        setenv("HOME", appRoot.c_str(), 1);
+
+        std::vector<std::string> argList = {
+            playerPath, url,
+            "--input-ipc-server=/tmp/mpv_iptv.sock",
+            "--fullscreen", "--keepaspect=yes",
+            // Video full-width + dinh mep tren (0,0): dai den don het xuong duoi cho list kenh
+            "--video-align-y=-1", "--video-align-x=0",
+            "--hwdec=auto", "--vd-lavc-threads=4", "--vd-lavc-fast",
+            "--vd-lavc-skiploopfilter=nonref", "--vd-lavc-framedrop=nonref",
+            "--sws-scaler=fast-bilinear", "--dscale=bilinear", "--scale=bilinear",
+            "--framedrop=vo",
+            "--demuxer-max-bytes=32M", "--demuxer-readahead-secs=8", "--audio-buffer=1.0",
+            "--terminal=no",
+            "--osd-level=2",
+            "--osd-bar=no",
+            "--osd-font-size=24",
+            "--osd-margin-x=16",
+            "--osd-margin-y=8",
+            "--osd-align-x=left",
+            "--osd-align-y=bottom",
+            "--osd-border-size=1",
+            "--osd-duration=3000",
+            "--tls-verify=no"
+        };
+        if (access(inputConf.c_str(), R_OK) == 0) argList.push_back("--input-conf=" + inputConf);
+
+        std::vector<char*> cArgs;
+        for (auto& s : argList) cArgs.push_back(const_cast<char*>(s.c_str()));
+        cArgs.push_back(nullptr);
+        execv(playerPath.c_str(), cArgs.data());
+        _exit(1);
+
+    } else if (pid > 0) {
+        m_mpvPid = pid;
+        m_isPlaying = true;
+        m_currentChannel = channel.name;
+        uint32_t playStartTime = SDL_GetTicks();
+        m_lastASwitchMs = 0;
+        bool isPaused = false;
+        bool channelListVisible = false;
+        m_overlayExpireTime = 0;
+        Logger::info("IPTV: mpv started with PID: " + std::to_string(pid));
+
+        SDL_PumpEvents();
+        SDL_FlushEvents(SDL_FIRSTEVENT, SDL_LASTEVENT);
+
+        // Wait for IPC socket
+        int status = 0;
+        for (int i = 0; i < 20; ++i) {
+            pid_t res = waitpid(m_mpvPid, &status, WNOHANG);
+            if (res != 0) break;
+            if (access("/tmp/mpv_iptv.sock", F_OK) == 0) {
+                SDL_Delay(100);
+                break;
+            }
+            SDL_Delay(100);
+        }
+
+        // Blocking control loop
+        // List hien ngay tu khi bat kenh: video dinh mep tren, list 3 dong o dai den duoi
+        channelListVisible = true;
+        showIPTVChannelOSD(m_iptvChannelList, (int)m_iptvSelectedIndex, "", 0);
+        while (m_isPlaying && m_mpvPid > 0) {
+            pid_t res = waitpid(m_mpvPid, &status, WNOHANG);
+            if (res != 0) break;
+
+            if (m_overlayExpireTime > 0 && SDL_GetTicks() >= m_overlayExpireTime) {
+                sendMpvIpcCommand("{\"command\":[\"overlay-remove\",0]}", nullptr, "/tmp/mpv_iptv.sock");
+                m_overlayExpireTime = 0;
+            }
+
+            InputManager::instance().update();
+            auto& input = InputManager::instance();
+
+            if (SDL_GetTicks() - playStartTime < 600) {
+                SDL_Delay(35);
+                continue;
+            }
+
+            // B: Quit
+            if (input.isButtonJustPressed(Button::B) || input.isButtonJustPressed(Button::MENU)) {
+                stop();
+                break;
+
+            // A: Chuyển kênh khi list hien, Pause/Resume khi list an
+            } else if (input.isButtonJustPressed(Button::A)) {
+                iptvDbg("BTN A pressed, listVisible=" + std::string(channelListVisible ? "1" : "0") +
+                        " sel=" + std::to_string(m_iptvSelectedIndex) + " cur=" + std::to_string(m_iptvCurrentIndex));
+                if (channelListVisible && !m_iptvChannelList.empty()) {
+                    size_t idx = m_iptvSelectedIndex;
+                    if (idx < m_iptvChannelList.size()) {
+                        if (idx != m_iptvCurrentIndex) {
+                            uint32_t ta = SDL_GetTicks();
+                            bool okSw = switchIPTVChannelByIndex(idx);
+                            iptvDbg("BTN A switch done ok=" + std::string(okSw ? "1" : "0") +
+                                    " total=" + std::to_string(SDL_GetTicks() - ta) + "ms");
+                            if (okSw) {
+                                // BO showIPTVChannelOSD ngay sau switch: video vua restart
+                                // can ~600ms de mpv chay frame dau, OSD cu dang hien se
+                                // bi dep de ghi lai -> man hinh toi den, nguoi dung tuong
+                                // A chua an nen bam A lan 2. Bo ve -> tranh giac "2 lan A".
+                                iptvDbg("MPV restart ok, skip OSD redraw");
+                            }
+                        } else {
+                            sendMpvIpcCommand("{\"command\":[\"show-text\",\"Đang xem kênh này\",1200]}", nullptr, "/tmp/mpv_iptv.sock");
+                        }
+                    }
+                } else {
+                    isPaused = !isPaused;
+                    sendMpvIpcCommand("{\"command\":[\"cycle\",\"pause\"]}", nullptr, "/tmp/mpv_iptv.sock");
+                    showOverlayIcon(isPaused ? "pause" : "play", 1500);
+                sendMpvIpcCommand(
+                    isPaused ? "{\"command\":[\"show-text\",\"{\\\\an2\\\\fs44\\\\bord2\\\\b1}❚❚  TẠM DỪNG\", 1500]}"
+                             : "{\"command\":[\"show-text\",\"{\\\\an2\\\\fs44\\\\bord2\\\\b1}▶  ĐANG PHÁT\", 1500]}",
+                    nullptr, "/tmp/mpv_iptv.sock");
+                }
+
+            // LEFT: Seek -10s
+            } else if (input.isButtonJustPressed(Button::LEFT)) {
+                sendMpvIpcCommand("{\"command\":[\"seek\",-10,\"relative\"]}", nullptr, "/tmp/mpv_iptv.sock");
+                showOverlayIcon("rewind", 1200);
+                sendMpvIpcCommand("{\"command\":[\"show-text\",\"{\\\\an2\\\\fs44\\\\bord2\\\\b1}◀◀  -10s\", 1200]}", nullptr, "/tmp/mpv_iptv.sock");
+
+            // RIGHT: Seek +10s
+            } else if (input.isButtonJustPressed(Button::RIGHT)) {
+                sendMpvIpcCommand("{\"command\":[\"seek\",10,\"relative\"]}", nullptr, "/tmp/mpv_iptv.sock");
+                showOverlayIcon("forward", 1200);
+                sendMpvIpcCommand("{\"command\":[\"show-text\",\"{\\\\an2\\\\fs44\\\\bord2\\\\b1}▶▶  +10s\", 1200]}", nullptr, "/tmp/mpv_iptv.sock");
+
+            // L1: Nhay 8 kenh khi list hien, Seek -60s khi list an
+            } else if (input.isButtonJustPressed(Button::L1)) {
+                if (channelListVisible && !m_iptvChannelList.empty()) {
+                    m_iptvSelectedIndex = (m_iptvSelectedIndex >= 8) ? m_iptvSelectedIndex - 8 : 0;
+                    showIPTVChannelOSD(m_iptvChannelList, (int)m_iptvSelectedIndex, "", 0);
+                } else {
+                    sendMpvIpcCommand("{\"command\":[\"seek\",-60,\"relative\"]}", nullptr, "/tmp/mpv_iptv.sock");
+                    showOverlayIcon("rewind", 1400);
+                    sendMpvIpcCommand("{\"command\":[\"show-text\",\"{\\\\an2\\\\fs44\\\\bord2\\\\b1}◀◀  -60s\", 1400]}", nullptr, "/tmp/mpv_iptv.sock");
+                }
+
+            // R1: Nhay 8 kenh khi list hien, Seek +60s khi list an
+            } else if (input.isButtonJustPressed(Button::R1)) {
+                if (channelListVisible && !m_iptvChannelList.empty()) {
+                    m_iptvSelectedIndex = std::min(m_iptvChannelList.size() - 1, m_iptvSelectedIndex + 8);
+                    showIPTVChannelOSD(m_iptvChannelList, (int)m_iptvSelectedIndex, "", 0);
+                } else {
+                    sendMpvIpcCommand("{\"command\":[\"seek\",60,\"relative\"]}", nullptr, "/tmp/mpv_iptv.sock");
+                    showOverlayIcon("forward", 1400);
+                    sendMpvIpcCommand("{\"command\":[\"show-text\",\"{\\\\an2\\\\fs44\\\\bord2\\\\b1}▶▶  +60s\", 1400]}", nullptr, "/tmp/mpv_iptv.sock");
+                }
+
+            // UP: Chuyen highlight khi list hien, Volume +5 khi list an
+            } else if (input.isButtonJustPressed(Button::UP)) {
+                if (channelListVisible && !m_iptvChannelList.empty()) {
+                    m_iptvSelectedIndex = (m_iptvSelectedIndex > 0) ? m_iptvSelectedIndex - 1 : m_iptvChannelList.size() - 1;
+                    showIPTVChannelOSD(m_iptvChannelList, (int)m_iptvSelectedIndex, "", 0);
+                } else {
+                    sendMpvIpcCommand("{\"command\":[\"add\",\"volume\",5]}", nullptr, "/tmp/mpv_iptv.sock");
+                    sendMpvIpcCommand("{\"command\":[\"show-text\",\"{\\\\an5\\\\fs70\\\\bord3\\\\b1}▲  Âm lượng +5%\", 1200]}", nullptr, "/tmp/mpv_iptv.sock");
+                }
+
+            // DOWN: Chuyen highlight khi list hien, Volume -5 khi list an
+            } else if (input.isButtonJustPressed(Button::DOWN)) {
+                if (channelListVisible && !m_iptvChannelList.empty()) {
+                    m_iptvSelectedIndex = (m_iptvSelectedIndex + 1 < m_iptvChannelList.size()) ? m_iptvSelectedIndex + 1 : 0;
+                    showIPTVChannelOSD(m_iptvChannelList, (int)m_iptvSelectedIndex, "", 0);
+                } else {
+                    sendMpvIpcCommand("{\"command\":[\"add\",\"volume\",-5]}", nullptr, "/tmp/mpv_iptv.sock");
+                    sendMpvIpcCommand("{\"command\":[\"show-text\",\"{\\\\an5\\\\fs70\\\\bord3\\\\b1}▼  Âm lượng -5%\", 1200]}", nullptr, "/tmp/mpv_iptv.sock");
+                }
+
+            // X: Aspect ratio
+            } else if (input.isButtonJustPressed(Button::X)) {
+                sendMpvIpcCommand("{\"command\":[\"cycle-values\",\"video-aspect-override\",\"16:9\",\"4:3\",\"-1\"]}", nullptr, "/tmp/mpv_iptv.sock");
+                sendMpvIpcCommand("{\"command\":[\"show-text\",\"{\\\\an5\\\\fs75\\\\bord3\\\\b1}Tỉ lệ màn hình\", 1400]}", nullptr, "/tmp/mpv_iptv.sock");
+
+            // Y: Subtitles
+            } else if (input.isButtonJustPressed(Button::Y)) {
+                sendMpvIpcCommand("{\"command\":[\"cycle\",\"sub\"]}", nullptr, "/tmp/mpv_iptv.sock");
+                sendMpvIpcCommand("{\"command\":[\"show-text\",\"{\\\\an5\\\\fs75\\\\bord3\\\\b1}Phụ đề (CC)\", 1400]}", nullptr, "/tmp/mpv_iptv.sock");
+
+            // START: Playback speed
+            } else if (input.isButtonJustPressed(Button::START)) {
+                sendMpvIpcCommand("{\"command\":[\"cycle-values\",\"speed\",\"1.0\",\"1.25\",\"1.5\",\"0.75\"]}", nullptr, "/tmp/mpv_iptv.sock");
+                sendMpvIpcCommand("{\"command\":[\"show-text\",\"{\\\\an5\\\\fs80\\\\bord3\\\\b1}Tốc độ phát\", 1400]}", nullptr, "/tmp/mpv_iptv.sock");
+
+            // SELECT: Toggle channel list OSD
+            } else if (input.isButtonJustPressed(Button::SELECT)) {
+                channelListVisible = !channelListVisible;
+                if (channelListVisible) {
+                    showIPTVChannelOSD(m_iptvChannelList, (int)m_iptvSelectedIndex, "", 0);
+                } else {
+                    sendMpvIpcCommand("{\"command\":[\"overlay-remove\",1]}", nullptr, "/tmp/mpv_iptv.sock");
+                }
+            }
+
+            SDL_Delay(35);
+        }
+
+        if (m_overlayExpireTime > 0) {
+            sendMpvIpcCommand("{\"command\":[\"overlay-remove\",0]}", nullptr, "/tmp/mpv_iptv.sock");
+            m_overlayExpireTime = 0;
+        }
+
+        unlink("/tmp/stay_awake");
+        unlink("/tmp/mpv_iptv.sock");
+        m_isPlaying = false;
+        m_currentChannel = "";
+        m_mpvPid = -1;
+        m_iptvChannelList.clear();
+
+        SDL_PumpEvents();
+        SDL_FlushEvents(SDL_FIRSTEVENT, SDL_LASTEVENT);
+        InputManager::instance().reset();
+        Logger::info("IPTV: player finished");
+        return true;
+    }
+
+    unlink("/tmp/stay_awake");
+    Logger::error("IPTV: failed to fork");
+    return false;
 }
 
 bool IPTVManager::switchYouTubeQuality(const std::string& videoId, const std::string& targetQuality) {
@@ -1304,7 +2135,7 @@ bool IPTVManager::playYouTubeVideo(const std::string& videoId, const std::string
                 "--osd-border-size=3",
                 "--osd-duration=1400"
             };
-            std::string fontPath = appRoot + "/assets/fonts/font.ttf";
+            std::string fontPath = resolveOsdFont(appRoot);
             if (access(fontPath.c_str(), R_OK) == 0) {
                 argList.push_back("--osd-font=" + fontPath);
             }
@@ -1472,6 +2303,10 @@ bool IPTVManager::stop() {
         m_mpvPid = -1;
     }
 
+    if (m_iptvIpcSocket >= 0) {
+        close(m_iptvIpcSocket);
+        m_iptvIpcSocket = -1;
+    }
     unlink("/tmp/mpv_iptv.sock");
     unlink("/tmp/mpv_youtube.sock");
     unlink("/tmp/stay_awake");
@@ -1532,6 +2367,216 @@ void IPTVManager::createDefaultPlaylist(const std::string& filepath) {
 
     file.close();
     Logger::info("Created default playlist: " + filepath);
+}
+
+bool IPTVManager::playTikTokFeed(const std::vector<TikTokVideo>& feed, size_t initialIndex, const std::string& tagName) {
+    stop();
+
+    if (feed.empty()) {
+        Logger::error("[TikTok] Feed is empty");
+        return false;
+    }
+
+    ensureMediaPlayerAvailable();
+
+    std::string appRoot = AppConfig::instance().getAppRoot();
+    if (appRoot.empty()) appRoot = "/mnt/SDCARD/Apps/RomCloud";
+    std::string sdRoot = AppConfig::instance().getSdRoot();
+
+    std::string playerPath = appRoot + "/bin/mpv";
+    if (access(playerPath.c_str(), X_OK) != 0) {
+        playerPath = sdRoot + "/System/bin/mpv";
+    }
+    if (access(playerPath.c_str(), X_OK) != 0) {
+        playerPath = "/usr/trimui/bin/mpv";
+    }
+
+    size_t currentIndex = (initialIndex < feed.size()) ? initialIndex : 0;
+    std::string playUrl = feed[currentIndex].playUrl;
+    Logger::info("[TikTok] Playing video " + std::to_string(currentIndex + 1) + "/" + std::to_string(feed.size()) + ": " + playUrl);
+
+    unlink("/tmp/mpv_tiktok.sock");
+
+    // Keep screen awake
+    FILE* fwake = fopen("/tmp/stay_awake", "w");
+    if (fwake) {
+        fputs("1\n", fwake);
+        fclose(fwake);
+    }
+
+    pid_t pid = fork();
+    if (pid == 0) {
+        setpgid(0, 0);
+
+        std::string logPath = appRoot + "/tiktok_mpv.log";
+        int logFd = open(logPath.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        if (logFd >= 0) {
+            dup2(logFd, STDOUT_FILENO);
+            dup2(logFd, STDERR_FILENO);
+            close(logFd);
+        }
+
+        std::string libPath = appRoot + "/lib:" + sdRoot + "/Emu/MEDIA/lib64:" + sdRoot + "/Emu/MEDIA/lib32:" + sdRoot + "/System/lib:/usr/lib:/lib";
+        setenv("LD_LIBRARY_PATH", libPath.c_str(), 1);
+        setenv("HOME", appRoot.c_str(), 1);
+
+        std::vector<std::string> argList = {
+            playerPath,
+            playUrl,
+            "--input-ipc-server=/tmp/mpv_tiktok.sock",
+            "--fullscreen",
+            "--keepaspect=yes",
+            "--video-align-y=0", // Centered vertical video
+            "--hwdec=auto",
+            "--vd-lavc-threads=4",
+            "--vd-lavc-fast",
+            "--vd-lavc-skiploopfilter=nonref",
+            "--vd-lavc-framedrop=nonref",
+            "--sws-scaler=fast-bilinear",
+            "--dscale=bilinear",
+            "--scale=bilinear",
+            "--framedrop=vo",
+            "--demuxer-max-bytes=16M",
+            "--demuxer-readahead-secs=5",
+            "--audio-buffer=0.5",
+            "--sub-font-provider=none",
+            "--osd-font-provider=none",
+            "--sub-font=" + resolveOsdFont(appRoot),
+            "--osd-font=" + resolveOsdFont(appRoot),
+            "--osd-level=1",
+            "--osd-bar=no",
+            "--tls-verify=no",
+            "--terminal=no"
+        };
+
+        std::string inputConf = appRoot + "/config/input.conf";
+        if (access(inputConf.c_str(), R_OK) == 0) {
+            argList.push_back("--input-conf=" + inputConf);
+        }
+
+        std::vector<char*> cArgs;
+        for (auto& s : argList) {
+            cArgs.push_back(const_cast<char*>(s.c_str()));
+        }
+        cArgs.push_back(nullptr);
+
+        execv(playerPath.c_str(), cArgs.data());
+        _exit(1);
+    } else if (pid > 0) {
+        m_mpvPid = pid;
+        m_isPlaying = true;
+        m_currentChannel = "TikTok";
+
+        // Wait for mpv IPC socket
+        int status = 0;
+        for (int i = 0; i < 25; ++i) {
+            pid_t res = waitpid(m_mpvPid, &status, WNOHANG);
+            if (res != 0) break;
+            if (access("/tmp/mpv_tiktok.sock", F_OK) == 0) {
+                SDL_Delay(60);
+                break;
+            }
+            SDL_Delay(100);
+        }
+
+        auto showVideoOsd = [&](size_t idx, bool isNext) {
+            if (idx >= feed.size()) return;
+            const auto& item = feed[idx];
+            std::string prefix = isNext ? "[▼ " : "[▲ ";
+            std::string osdText = prefix + std::to_string(idx + 1) + "/" + std::to_string(feed.size()) + "] @" +
+                                  sanitizeAssText(item.author) + "\\n" + sanitizeAssText(item.title);
+            std::string cmd = "{\"command\":[\"show-text\",\"" + osdText + "\",3500]}";
+            sendMpvIpcCommand(cmd, nullptr, "/tmp/mpv_tiktok.sock");
+        };
+
+        // Show initial OSD
+        if (m_mpvPid > 0 && access("/tmp/mpv_tiktok.sock", F_OK) == 0) {
+            std::string tagDisplay = tagName.empty() ? "TikTok" : ("#" + tagName);
+            std::string initialText = tagDisplay + " [" + std::to_string(currentIndex + 1) + "/" + std::to_string(feed.size()) + "] @" +
+                                      sanitizeAssText(feed[currentIndex].author) + "\\n" + sanitizeAssText(feed[currentIndex].title);
+            std::string cmd = "{\"command\":[\"show-text\",\"" + initialText + "\",4000]}";
+            sendMpvIpcCommand(cmd, nullptr, "/tmp/mpv_tiktok.sock");
+        }
+
+        uint32_t lastEofCheck = SDL_GetTicks();
+
+        while (m_isPlaying && m_mpvPid > 0) {
+            pid_t res = waitpid(m_mpvPid, &status, WNOHANG);
+            if (res != 0) {
+                break;
+            }
+
+            InputManager::instance().update();
+
+            if (InputManager::instance().isButtonJustPressed(Button::B) ||
+                InputManager::instance().isButtonJustPressed(Button::MENU) ||
+                InputManager::instance().isButtonJustPressed(Button::SELECT)) {
+                Logger::info("[TikTok] User pressed B/Menu, stopping player");
+                sendMpvIpcCommand("{\"command\":[\"quit\"]}", nullptr, "/tmp/mpv_tiktok.sock");
+                break;
+            }
+
+            // Next video: DOWN or R1
+            if (InputManager::instance().isButtonJustPressed(Button::DOWN) ||
+                InputManager::instance().isButtonJustPressed(Button::R1) ||
+                InputManager::instance().isButtonJustPressed(Button::RIGHT)) {
+                currentIndex = (currentIndex + 1) % feed.size();
+                Logger::info("[TikTok] Next video (" + std::to_string(currentIndex + 1) + "/" + std::to_string(feed.size()) + "): " + feed[currentIndex].title);
+                std::string loadCmd = "{\"command\":[\"loadfile\",\"" + feed[currentIndex].playUrl + "\",\"replace\"]}";
+                sendMpvIpcCommand(loadCmd, nullptr, "/tmp/mpv_tiktok.sock");
+                showVideoOsd(currentIndex, true);
+            }
+            // Prev video: UP or L1
+            else if (InputManager::instance().isButtonJustPressed(Button::UP) ||
+                     InputManager::instance().isButtonJustPressed(Button::L1) ||
+                     InputManager::instance().isButtonJustPressed(Button::LEFT)) {
+                currentIndex = (currentIndex > 0) ? (currentIndex - 1) : (feed.size() - 1);
+                Logger::info("[TikTok] Prev video (" + std::to_string(currentIndex + 1) + "/" + std::to_string(feed.size()) + "): " + feed[currentIndex].title);
+                std::string loadCmd = "{\"command\":[\"loadfile\",\"" + feed[currentIndex].playUrl + "\",\"replace\"]}";
+                sendMpvIpcCommand(loadCmd, nullptr, "/tmp/mpv_tiktok.sock");
+                showVideoOsd(currentIndex, false);
+            }
+            // Pause / Resume: A
+            else if (InputManager::instance().isButtonJustPressed(Button::A)) {
+                sendMpvIpcCommand("{\"command\":[\"cycle\",\"pause\"]}", nullptr, "/tmp/mpv_tiktok.sock");
+            }
+
+            // Auto-advance check: every 600ms check eof-reached
+            uint32_t now = SDL_GetTicks();
+            if (now - lastEofCheck > 600) {
+                lastEofCheck = now;
+                std::string resp;
+                if (sendMpvIpcCommand("{\"command\":[\"get_property\",\"eof-reached\"]}", &resp, "/tmp/mpv_tiktok.sock")) {
+                    if (resp.find("\"data\":true") != std::string::npos) {
+                        currentIndex = (currentIndex + 1) % feed.size();
+                        Logger::info("[TikTok] Auto-advance to video (" + std::to_string(currentIndex + 1) + "/" + std::to_string(feed.size()) + ")");
+                        std::string loadCmd = "{\"command\":[\"loadfile\",\"" + feed[currentIndex].playUrl + "\",\"replace\"]}";
+                        sendMpvIpcCommand(loadCmd, nullptr, "/tmp/mpv_tiktok.sock");
+                        showVideoOsd(currentIndex, true);
+                    }
+                }
+            }
+
+            SDL_Delay(30);
+        }
+
+        unlink("/tmp/stay_awake");
+        unlink("/tmp/mpv_tiktok.sock");
+
+        m_mpvPid = -1;
+        m_isPlaying = false;
+        m_currentChannel = "";
+        Logger::info("[TikTok] Player closed, returning to UI");
+
+        SDL_PumpEvents();
+        SDL_FlushEvents(SDL_FIRSTEVENT, SDL_LASTEVENT);
+        InputManager::instance().reset();
+
+        return true;
+    }
+
+    unlink("/tmp/stay_awake");
+    return false;
 }
 
 } // namespace RomCloud
