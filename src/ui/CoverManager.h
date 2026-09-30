@@ -7,6 +7,7 @@
 #include <vector>
 #include <memory>
 #include "../database/DatabaseManager.h"
+#include "ImageCache.h"
 
 namespace RomCloud {
 
@@ -32,11 +33,10 @@ private:
     ~CoverManager();
 
     SDL_Renderer* m_renderer = nullptr;
-    std::unordered_map<std::string, CachedTexture> m_cache;
-    size_t m_maxCacheSize = 64;
+    // P2-2: dung ImageCache LRU chung (thay unordered_map + evict tay).
+    ImageCache m_cache{64};
 
     std::string resolveCoverPath(const GameRecord& game, const SystemRecord& sys);
-    void evictOldest();
 };
 
 } // namespace RomCloud

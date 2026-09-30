@@ -4,7 +4,14 @@
 #include "../iptv/TikTokManager.h"
 #include "../localsend/LocalSendProtocol.h"
 #include "CoverManager.h"
+#include "UiRenderer.h"
+#include "ImageCache.h"
 #include "UiTheme.h"
+#include "DialogManager.h"
+#include "../common/BackgroundTask.h"
+#include "VirtualKeyboard.h"
+#include "FileListView.h"
+#include "../fileexplorer/FileExplorer.h"
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_ttf.h>
 #include <string>
@@ -41,6 +48,7 @@ enum class UIState {
   LOCALSEND_SEND,       // Chọn file để gửi + danh sách target devices
   LOCALSEND_GAME_PICKER, // Chọn game LOCAL từ DB để gửi (thay vì raw file picker)
   LOCALSEND_PROGRESS,   // Xem progress upload/download
+  FILE_EXPLORER,      // P2-1: File Explorer dung chung FileListView + FileExplorer
   EXIT_REQUESTED
 };
 
@@ -63,6 +71,7 @@ private:
 
   SDL_Window *m_window = nullptr;
   SDL_Renderer *m_renderer = nullptr;
+  UiRenderer m_ui;
   TTF_Font *m_fontTitle = nullptr;
   TTF_Font *m_fontLarge = nullptr;
   TTF_Font *m_fontMedium = nullptr;
@@ -122,19 +131,24 @@ private:
   std::vector<std::string> m_localSendFolderEntries;  // path tuyệt đối của folder con
   bool m_localSendFolderLoaded = false;
   int m_localSendFolderFocus = 0;  // 0 = danh sách folder, 1 = nút Chốt (panel phải)
-  // Rename / New-folder keyboard (tai dung layout QWERTY nhu YouTube)
+  // Rename / New-folder keyboard (dung chung VirtualKeyboard/VkState)
   bool m_lsFolderRenaming = false;
   bool m_lsFolderRenameExisting = false;
-  std::string m_lsFolderRenameText;
   std::string m_lsFolderRenameOriginal;
-  int m_lsFolderKbRow = 0;
-  int m_lsFolderKbCol = 0;
-  bool m_lsFolderKbShift = false;
+  VkState m_lsFolderVk;
   // LOCALSEND_INCOMING: 2 screen — 0=picker 2 cột, 1=xác nhận cuối
   int m_localSendIncomingMode = 0;  // 0=picker, 1=confirm
   std::string m_localSendIncomingSavePath;  // path tuyệt đối đích lưu file
 
-  // Helper: gợi ý tên folder mới không trùng trong parent (NewFolder, NewFolder_2, ...)
+  // P2-1: File Explorer dung chung FileListView + FileExplorer (logic header-only).
+  FileExplorer m_explorer;
+  int m_explorerScroll = 0;
+  void renderFileExplorer();
+  void renderExplorerKeyboard();
+  bool handleExplorerInput();
+  bool handleExplorerKeyboard();
+  bool handleExplorerBrowser();
+  void syncExplorerDialogs();
   std::string suggestNewFolderName(const std::string& parentPath);
   void startLsFolderRename(bool existing);
   void commitLsFolderRename();
@@ -165,16 +179,13 @@ private:
   int m_activePlaylistIndex = -1;    // -1 = tat ca playlists
 
   // IPTV Search & Virtual Keyboard State
-  std::string m_iptvSearchQuery;
   std::vector<IPTVChannel> m_iptvSearchResults;
   int m_iptvSearchSelectedIndex = 0;
   int m_iptvSearchScrollOffset = 0;
-  int m_iptvKbRow = 0;
-  int m_iptvKbCol = 0;
-  bool m_iptvKbInResults = false;
+  VkState m_iptvVk; // query/row/col/shift/telex/inResults unified
 
-  // YouTube Search State
-  std::string m_ytSearchQuery;
+  // YouTube Search State (keyboard unified on VkState)
+  VkState m_ytVk;
   std::string m_ytLastSearchQuery;
   std::vector<std::string> m_ytSearchResults;       // current page results (up to 6)
   std::vector<std::string> m_ytAllCachedResults;    // cache of all fetched results for current query
@@ -199,16 +210,12 @@ private:
   void saveYouTubeHistory(const std::string& query);
 
   // TikTok Search State
-  std::string m_ttSearchQuery;
   std::string m_ttLastSearchQuery;
   std::vector<std::string> m_ttSearchResults;
   int m_ttSearchSelectedIndex = 0;
   int m_ttSearchScrollOffset = 0;
   int m_ttCurrentPage = 1;
-  int m_ttKbRow = 0;
-  int m_ttKbCol = 0;
-  bool m_ttKbShift = false;
-  bool m_ttTelexMode = true;
+  VkState m_ttVk; // query/row/col/shift/telex unified
   std::string m_ttErrorMessage;
   std::atomic<bool> m_ttIsSearching{false};
   std::atomic<bool> m_ttSearchFinished{false};
@@ -244,20 +251,14 @@ private:
   int m_diagnosticsScrollOffset = 0;
 
   // Search state
-  std::string m_searchQuery;
   std::vector<GameRecord> m_searchResults;
   int m_searchSelectedIndex = 0;
   int m_searchScrollOffset = 0;
-  // On-screen keyboard
-  int m_kbCursorRow = 0;
-  int m_kbCursorCol = 0;
-  bool m_kbInResults = false; // false=typing, true=browsing results
+  VkState m_searchVk; // query/row/col/inResults unified (SEARCH, layout cu giu nguyen)
   std::vector<GameRecord> m_cachedGames;
 
-  // Notification toast
-  std::string m_toastMessage;
-  uint32_t m_toastExpiry = 0;
-  SDL_Color m_toastColor = {0, 180, 216, 255};
+  // Notification toast (DialogManager/ToastState la nguon duy nhat)
+  DialogManager m_dialogs;
 
   void showToast(const std::string &message,
                  SDL_Color color = {0, 180, 216, 255},
@@ -274,8 +275,13 @@ private:
   void renderSystemSelectState();
   void renderGameListState();
   void renderSearchState();
+  void openConfirmDeleteDialog();
+  void openConfirmBatchDeleteDialog();
+  void renderConfirmDialogFromState();
   void renderConfirmDeleteDialog();
   void renderConfirmBatchDeleteDialog();
+  void drawProgressBar(int x, int y, int w, int h, double frac, SDL_Color fill, bool rounded = false, SDL_Color bg = {35, 42, 54, 255});
+  void renderProgressDialogFromState();
   void renderDisclaimerState();
   void renderCloudLoginState();
   void renderSyncOverlay();
@@ -303,7 +309,6 @@ private:
 
   // YouTube integration
   bool m_ytTelexMode = true;
-  std::unordered_map<std::string, SDL_Texture*> m_ytThumbnails;
   std::unordered_map<std::string, std::string> m_ytStreamUrlCache;
   std::vector<std::string> runYouTubeSearch(const std::string& query, int page = 1);
   std::string resolveYouTubeStreamUrl(const std::string& videoId);
@@ -384,22 +389,22 @@ private:
   void drawAppFooter(const std::vector<UiTheme::FooterHint> &hints);
   void beginModalDim();
 
-  // Performance caches (60 FPS Smooth UI)
-  std::unordered_map<std::string, SDL_Texture*> m_gridIconCache;
-  std::unordered_map<std::string, SDL_Texture*> m_systemIconCache;
-  std::unordered_map<std::string, SDL_Texture*> m_buttonIconCache;
+  // Performance caches (60 FPS Smooth UI) — P2-2: dung ImageCache LRU chung.
+  // Icon/logo/button/grid do m_ui.images() giu; UIManager chi giu thumb YT (gioi han 24).
+  ImageCache m_ytThumbCache{24};
 
-  struct CachedTextTexture {
-      SDL_Texture* texture = nullptr;
-      int w = 0;
-      int h = 0;
-      uint32_t lastUsed = 0;
-  };
-  std::unordered_map<std::string, CachedTextTexture> m_textCache;
   void clearTextCache();
 
-  std::atomic<bool> m_isIndexing{false};
+  // P1-1: scan/index SD chay tren BackgroundTask (thay std::thread().detach()).
+  BackgroundTask m_indexTask;
+  // Media tasks: search YT/TT rieng (tranh wait-block UI khi chuyen man hinh),
+  // resolve (stream URL) + thumb (tai thumbnail) dung chung.
+  BackgroundTask m_ytSearchTask;
+  BackgroundTask m_ttSearchTask;
+  BackgroundTask m_resolveTask;
+  BackgroundTask m_thumbTask;
   std::atomic<bool> m_needLibraryRefresh{false};
+  bool isIndexing() const { return m_indexTask.isRunning(); }
 
 public:
   // Public API cho background worker threads (LocalSend, IPTV, etc.)

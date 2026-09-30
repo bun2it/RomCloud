@@ -39,12 +39,6 @@ void CoverManager::shutdown() {
 }
 
 void CoverManager::clearCache() {
-    for (auto& pair : m_cache) {
-        if (pair.second.texture) {
-            SDL_DestroyTexture(pair.second.texture);
-            pair.second.texture = nullptr;
-        }
-    }
     m_cache.clear();
 }
 
@@ -76,43 +70,13 @@ std::string CoverManager::resolveCoverPath(const GameRecord& game, const SystemR
     return "";
 }
 
-void CoverManager::evictOldest() {
-    if (m_cache.size() <= m_maxCacheSize) return;
-
-    std::string oldestKey = "";
-    uint32_t oldestTime = 0xFFFFFFFF;
-
-    for (const auto& pair : m_cache) {
-        if (pair.second.lastAccess < oldestTime) {
-            oldestTime = pair.second.lastAccess;
-            oldestKey = pair.first;
-        }
-    }
-
-    if (!oldestKey.empty()) {
-        auto it = m_cache.find(oldestKey);
-        if (it != m_cache.end()) {
-            if (it->second.texture) {
-                SDL_DestroyTexture(it->second.texture);
-            }
-            m_cache.erase(it);
-        }
-    }
-}
-
 SDL_Texture* CoverManager::getCoverTexture(const GameRecord& game, const SystemRecord& sys, int& outW, int& outH) {
     if (!m_renderer) return nullptr;
 
     std::string key = sys.code + ":" + game.filename;
-    uint32_t now = SDL_GetTicks();
 
-    auto it = m_cache.find(key);
-    if (it != m_cache.end()) {
-        it->second.lastAccess = now;
-        outW = it->second.width;
-        outH = it->second.height;
-        return it->second.texture;
-    }
+    SDL_Texture* hit = m_cache.get(key, &outW, &outH);
+    if (hit) return hit;
 
     std::string imgPath = resolveCoverPath(game, sys);
     if (imgPath.empty()) {
@@ -133,14 +97,7 @@ SDL_Texture* CoverManager::getCoverTexture(const GameRecord& game, const SystemR
         return nullptr;
     }
 
-    evictOldest();
-
-    CachedTexture cached;
-    cached.texture = texture;
-    cached.width = w;
-    cached.height = h;
-    cached.lastAccess = now;
-    m_cache[key] = cached;
+    m_cache.put(key, texture, w, h);
 
     outW = w;
     outH = h;

@@ -793,6 +793,49 @@ bool DatabaseManager::upsertGame(const GameRecord& game, int64_t* outInsertedId)
         }
         return false;
     } else {
+        // No row matches this cloud_file_id yet. If a row with the same
+        // system_id + filename exists (e.g. a LOCAL game indexed from SD),
+        // link the cloud ID onto it instead of inserting a duplicate.
+        const char* checkLocalSql2 = "SELECT id FROM games WHERE system_id = ? AND filename = ? LIMIT 1;";
+        sqlite3_stmt* checkLocal2 = nullptr;
+        int64_t existingLocalId = 0;
+        if (sqlite3_prepare_v2(m_db, checkLocalSql2, -1, &checkLocal2, nullptr) == SQLITE_OK) {
+            sqlite3_bind_int(checkLocal2, 1, game.systemId);
+            sqlite3_bind_text(checkLocal2, 2, game.filename.c_str(), -1, SQLITE_STATIC);
+            if (sqlite3_step(checkLocal2) == SQLITE_ROW) {
+                existingLocalId = sqlite3_column_int64(checkLocal2, 0);
+            }
+            sqlite3_finalize(checkLocal2);
+        }
+        if (existingLocalId > 0) {
+            const char* linkSql = R"(
+                UPDATE games SET
+                    cloud_file_id = ?,
+                    title = ?,
+                    size_bytes = ?,
+                    mime_type = ?,
+                    drive_modified_time = ?,
+                    checksum_sha256 = ?,
+                    updated_at = ?
+                WHERE id = ?;
+            )";
+            sqlite3_stmt* lstmt = nullptr;
+            if (sqlite3_prepare_v2(m_db, linkSql, -1, &lstmt, nullptr) == SQLITE_OK) {
+                sqlite3_bind_text(lstmt, 1, game.cloudFileId.c_str(), -1, SQLITE_STATIC);
+                sqlite3_bind_text(lstmt, 2, game.title.c_str(), -1, SQLITE_STATIC);
+                sqlite3_bind_int64(lstmt, 3, game.sizeBytes);
+                sqlite3_bind_text(lstmt, 4, game.mimeType.c_str(), -1, SQLITE_STATIC);
+                sqlite3_bind_text(lstmt, 5, game.driveModifiedTime.c_str(), -1, SQLITE_STATIC);
+                sqlite3_bind_text(lstmt, 6, game.checksumSha256.c_str(), -1, SQLITE_STATIC);
+                sqlite3_bind_text(lstmt, 7, now.c_str(), -1, SQLITE_STATIC);
+                sqlite3_bind_int64(lstmt, 8, existingLocalId);
+                sqlite3_step(lstmt);
+                sqlite3_finalize(lstmt);
+                if (outInsertedId) *outInsertedId = existingLocalId;
+                return true;
+            }
+            return false;
+        }
         const char* inSql = R"(
             INSERT INTO games (cloud_file_id, system_id, filename, title, size_bytes, mime_type, drive_modified_time, checksum_sha256, local_path, local_state, cover_path, created_at, updated_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);

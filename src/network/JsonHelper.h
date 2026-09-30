@@ -4,6 +4,7 @@
 #include <unordered_map>
 #include <sstream>
 #include <cctype>
+#include <cstdint>
 
 namespace RomCloud {
 

@@ -23,6 +23,11 @@
 #include <iomanip>
 #include <sstream>
 
+// PC Simulator mode - set by build_pc.sh
+#ifdef PC_SIMULATOR_MODE
+#include <iostream>
+#endif
+
 namespace RomCloud {
 
 static void signalHandler(int signum) {
@@ -48,6 +53,22 @@ bool Application::initSDL() {
     SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "1");
     SDL_SetHint(SDL_HINT_RENDER_VSYNC, "1");
 
+#ifdef PC_SIMULATOR_MODE
+    // PC Simulator: Windowed mode with title bar
+    m_window = SDL_CreateWindow(
+        "RomCloud Simulator [1024x768]",
+        SDL_WINDOWPOS_CENTERED,
+        SDL_WINDOWPOS_CENTERED,
+        1024,
+        768,
+        SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE
+    );
+    SDL_ShowCursor(SDL_ENABLE);
+    std::cout << "=== PC SIMULATOR MODE ===" << std::endl;
+    std::cout << "Controls: Arrow keys=D-pad, Enter=A, ESC=B, X=X, Y=Y, Q=L1, E=R1, TAB=SELECT, F1=START" << std::endl;
+    std::cout << "========================" << std::endl;
+#else
+    // TrimUI: Fullscreen mode
     m_window = SDL_CreateWindow(
         "RomCloud",
         SDL_WINDOWPOS_CENTERED,
@@ -56,6 +77,8 @@ bool Application::initSDL() {
         768,
         SDL_WINDOW_SHOWN | SDL_WINDOW_FULLSCREEN_DESKTOP
     );
+    SDL_ShowCursor(SDL_DISABLE);
+#endif
 
     if (!m_window) {
         Logger::error(std::string("SDL_CreateWindow failed: ") + SDL_GetError());

@@ -47,7 +47,8 @@ void UIManager::initGridMenu() {
         {"iptv", "XEM TV", "TV.png", "Kênh TV online"},
         {"youtube", "YOUTUBE", "YOUTUBE.png", "YouTube"},
         {"tiktok", "TIKTOK", "TIKTOK.png", "TikTok"},
-        {"localsend", "LOCAL SEND", "LOCALSEND.png", "Chia sẻ P2P trong LAN"},
+        {"localsend", "LOCAL SEND", "LOCALSEND.png", "Chia se P2P trong LAN"},
+        {"explorer", "FILE EXPLORER", "FOLDER.png", "Duyet file SD"},
         {"sync", "ĐỒNG BỘ", "SYNC.png", "Đồng bộ Google Drive"},
         {"upload", "TẢI LÊN", "UPLOAD.png", "Upload lên Drive"},
         {"ota", "CẬP NHẬT", "OTA.png", "Cập nhật OTA"},
@@ -100,6 +101,8 @@ bool UIManager::init(SDL_Window* window, SDL_Renderer* renderer) {
     }
 
     CoverManager::instance().init(m_renderer);
+    m_ui.bind(m_renderer, m_fontSmall, m_fontMedium, m_fontLarge,
+              AppConfig::instance().getAssetsDir());
     refreshSystems();
 
     // Auto-check for OTA updates in background on launch
@@ -133,18 +136,9 @@ bool UIManager::init(SDL_Window* window, SDL_Renderer* renderer) {
 
 void UIManager::shutdown() {
     CoverManager::instance().shutdown();
+    m_ui.unbind();
 
-    // Clean up cached textures
-    for (auto& pair : m_gridIconCache) {
-        if (pair.second) SDL_DestroyTexture(pair.second);
-    }
-    m_gridIconCache.clear();
-
-    for (auto& pair : m_systemIconCache) {
-        if (pair.second) SDL_DestroyTexture(pair.second);
-    }
-    m_systemIconCache.clear();
-
+    // P2-2: icon/logo/button/grid do m_ui.images() giu (unbind da clear).
     clearTextCache();
     clearThumbnailCache();
 
@@ -175,13 +169,17 @@ void UIManager::setState(UIState state) {
         initTikTokTags();
         m_ttFocusInTags = false;
         m_ttSelectedTagIndex = 0;
+    } else if (state == UIState::CONFIRM_DELETE) {
+        openConfirmDeleteDialog();
+    } else if (state == UIState::CONFIRM_BATCH_DELETE) {
+        openConfirmBatchDeleteDialog();
     }
 }
 
 void UIManager::showToast(const std::string& message, SDL_Color color, uint32_t durationMs) {
-    m_toastMessage = message;
-    m_toastColor = color;
-    m_toastExpiry = SDL_GetTicks() + durationMs;
+    uint32_t packed = ((uint32_t)color.r << 24) | ((uint32_t)color.g << 16) |
+                      ((uint32_t)color.b << 8) | (uint32_t)color.a;
+    m_dialogs.toastMsg(message, packed, durationMs);
 }
 
 void UIManager::refreshSystems() {
@@ -197,23 +195,33 @@ void UIManager::refreshGames() {
 }
 
 void UIManager::triggerManualSync() {
-    if (DriveSyncEngine::instance().isSyncing() || m_isIndexing) {
+    if (DriveSyncEngine::instance().isSyncing() || isIndexing()) {
         showToast(UiStrings::TOAST_SYNCING_DRIVE, {245, 158, 11, 255});
         return;
     }
     showToast(UiStrings::TOAST_SCANNING_SD, {0, 180, 216, 255}, 2000);
 
-    m_isIndexing = true;
-    std::thread([this]() {
-        RomIndexer::instance().scanAllSystems(AppConfig::instance().getRomsDir());
+    // P0-3: dua tien trinh quet SD len ProgressDialog dung chung (thay vi chi toast).
+    m_dialogs.progress.open("Dang quet the SD...", false);
+    auto systems = DatabaseManager::instance().getSystems(false);
+    uint64_t totalSys = systems.empty() ? 1 : systems.size();
+    m_indexTask.run([this, totalSys](TaskProgress& p) {
+        p.total = totalSys;
+        p.done = 0;
+        std::string romsDir = AppConfig::instance().getRomsDir();
+        auto all = DatabaseManager::instance().getSystems(false);
+        uint64_t idx = 0;
+        for (const auto& sys : all) {
+            if (p.cancel.load()) break;
+            RomIndexer::instance().scanSystem(sys, romsDir, nullptr);
+            p.done = ++idx;
+        }
         BoxartScraper::instance().startAutoScrapeSdCard(false);
         m_needLibraryRefresh = true;
-        m_isIndexing = false;
-
         if (AuthManager::instance().isLinked()) {
             DriveSyncEngine::instance().startSync();
         }
-    }).detach();
+    });
 }
 
 void UIManager::update() {
@@ -238,6 +246,23 @@ void UIManager::update() {
         // Try next in queue even after failure
         DownloadManager::instance().processNextInQueue();
     }
+
+    // P0-3: poll tien trinh quet SD tu BackgroundTask -> ProgressDialog dung chung.
+    // Dat truoc early-return sync de dialog tu dong dong khi sync noi tiep.
+    if (isIndexing()) {
+        const auto& tp = m_indexTask.progress();
+        m_dialogs.progress.update(tp.done.load(), tp.total.load() == 0 ? 1 : tp.total.load());
+        char buf[64];
+        std::snprintf(buf, sizeof(buf), "%llu / %llu he may",
+                      (unsigned long long)tp.done.load(),
+                      (unsigned long long)tp.total.load());
+        m_dialogs.progress.detail = buf;
+    } else if (m_dialogs.progress.visible &&
+               m_dialogs.progress.title == "Dang quet the SD...") {
+        m_dialogs.progress.close();
+    }
+    // P2-1: Explorer task (copy/xoa) -> ProgressDialog dung chung + forward toast/confirm.
+    syncExplorerDialogs();
 
     // If sync is running, allow cancel button [B]
     if (DriveSyncEngine::instance().isSyncing()) {
@@ -415,13 +440,13 @@ void UIManager::update() {
                         setState(UIState::IPTV_LIST);
                     }
                 } else if (selectedId == "youtube") {
-                    m_ytSearchQuery.clear();
+                    m_ytVk.query.clear();
                     m_ytSearchResults.clear();
                     m_ytSearchSelectedIndex = 0;
                     m_ytSearchScrollOffset = 0;
-                    m_ytKbRow = 0;
-                    m_ytKbCol = 0;
-                    m_ytKbInResults = false;
+                    m_ytVk.row = 0;
+                    m_ytVk.col = 0;
+                    m_ytVk.inResults = false;
                     m_ytErrorMessage.clear();
                     m_ytIsSearching = false;
                     m_ytSearchFinished = false;
@@ -430,14 +455,14 @@ void UIManager::update() {
                     m_ytPendingStreamUrl.clear();
                     setState(UIState::YOUTUBE_SEARCH);
                 } else if (selectedId == "tiktok") {
-                    m_ttSearchQuery.clear();
+                    m_ttVk.query.clear();
                     m_ttSearchResults.clear();
                     m_ttSearchSelectedIndex = 0;
                     m_ttSearchScrollOffset = 0;
-                    m_ttKbRow = 0;
-                    m_ttKbCol = 0;
-                    m_ttKbShift = false;
-                    m_ttTelexMode = true;
+                    m_ttVk.row = 0;
+                    m_ttVk.col = 0;
+                    m_ttVk.shift = false;
+                    m_ttVk.telexMode = true;
                     m_ttErrorMessage.clear();
                     m_ttIsSearching = false;
                     m_ttSearchFinished = false;
@@ -453,6 +478,10 @@ void UIManager::update() {
                     m_localSendSelectedDevice = 0;
                     m_localSendFolderSelected = 0;
                     setState(UIState::LOCALSEND_HOME);
+                } else if (selectedId == "explorer") {
+                    m_explorer.open("/mnt/SDCARD");
+                    m_explorerScroll = 0;
+                    setState(UIState::FILE_EXPLORER);
                 } else if (selectedId == "sync") {
                     triggerManualSync();
                 } else if (selectedId == "upload") {
@@ -725,13 +754,13 @@ void UIManager::update() {
 
                 if (input.isButtonJustPressed(Button::START)) {
                     // Open on-device search
-                    m_searchQuery.clear();
+                    m_searchVk.query.clear();
                     m_searchResults.clear();
                     m_searchSelectedIndex = 0;
                     m_searchScrollOffset = 0;
-                    m_kbCursorRow = 0;
-                    m_kbCursorCol = 0;
-                    m_kbInResults = false;
+                    m_searchVk.row = 0;
+                    m_searchVk.col = 0;
+                    m_searchVk.inResults = false;
                     setState(UIState::SEARCH);
                 }
 
@@ -744,15 +773,10 @@ void UIManager::update() {
 
         case UIState::CONFIRM_DELETE: {
             if (input.isButtonJustPressed(Button::A)) {
-                if (m_selectedGameIndex >= 0 && m_selectedGameIndex < static_cast<int>(m_cachedGames.size())) {
-                    auto& g = m_cachedGames[m_selectedGameIndex];
-                    DatabaseManager::instance().markGameDeletedLocally(g.id);
-                    refreshSystems();
-                    refreshGames();
-                    showToast("Đã xóa \"" + g.title + "\" khỏi thẻ nhớ.", {239, 68, 68, 255}, 3000);
-                }
+                m_dialogs.confirm.confirm();
                 setState(UIState::GAME_LIST);
             } else if (input.isButtonJustPressed(Button::B) || input.isButtonJustPressed(Button::X)) {
+                m_dialogs.confirm.cancel();
                 setState(UIState::GAME_LIST);
             }
             break;
@@ -760,19 +784,10 @@ void UIManager::update() {
 
         case UIState::CONFIRM_BATCH_DELETE: {
             if (input.isButtonJustPressed(Button::A)) {
-                // Confirm batch delete
-                int deletedCount = 0;
-                for (int64_t gameId : m_selectedGameIds) {
-                    DatabaseManager::instance().markGameDeletedLocally(gameId);
-                    deletedCount++;
-                }
-                refreshSystems();
-                refreshGames();
-                showToast("Đã xóa " + std::to_string(deletedCount) + " game khỏi thẻ nhớ.", {239, 68, 68, 255}, 4000);
-                m_multiSelectMode = false;
-                m_selectedGameIds.clear();
+                m_dialogs.confirm.confirm();
                 setState(UIState::GAME_LIST);
             } else if (input.isButtonJustPressed(Button::B) || input.isButtonJustPressed(Button::X)) {
+                m_dialogs.confirm.cancel();
                 setState(UIState::GAME_LIST);
             }
             break;
@@ -788,47 +803,47 @@ void UIManager::update() {
             static const int kbRowCount = 4;
             static const int kbColCount = 10;
 
-            if (!m_kbInResults) {
+            if (!m_searchVk.inResults) {
                 // Navigate keyboard
                 if (input.isButtonJustPressed(Button::UP)) {
-                    if (m_kbCursorRow > 0) {
-                        m_kbCursorRow--;
+                    if (m_searchVk.row > 0) {
+                        m_searchVk.row--;
                     }
                 } else if (input.isButtonJustPressed(Button::DOWN)) {
-                    if (m_kbCursorRow < kbRowCount - 1) {
-                        m_kbCursorRow++;
+                    if (m_searchVk.row < kbRowCount - 1) {
+                        m_searchVk.row++;
                     } else {
                         // Go to results if any
                         if (!m_searchResults.empty()) {
-                            m_kbInResults = true;
+                            m_searchVk.inResults = true;
                             m_searchSelectedIndex = 0;
                             m_searchScrollOffset = 0;
                         }
                     }
                 } else if (input.isButtonJustPressed(Button::LEFT)) {
-                    if (m_kbCursorCol > 0) m_kbCursorCol--;
-                    else m_kbCursorCol = kbColCount - 1;
+                    if (m_searchVk.col > 0) m_searchVk.col--;
+                    else m_searchVk.col = kbColCount - 1;
                 } else if (input.isButtonJustPressed(Button::RIGHT)) {
-                    if (m_kbCursorCol < kbColCount - 1) m_kbCursorCol++;
-                    else m_kbCursorCol = 0;
+                    if (m_searchVk.col < kbColCount - 1) m_searchVk.col++;
+                    else m_searchVk.col = 0;
                 } else if (input.isButtonJustPressed(Button::A)) {
-                    char ch = kbRows[m_kbCursorRow][m_kbCursorCol];
+                    char ch = kbRows[m_searchVk.row][m_searchVk.col];
                     if (ch == '<') { // Backspace
-                        if (!m_searchQuery.empty()) m_searchQuery.pop_back();
+                        if (!m_searchVk.query.empty()) m_searchVk.query.pop_back();
                     } else if (ch == '*') { // OK
                         if (!m_searchResults.empty()) {
-                            m_kbInResults = true;
+                            m_searchVk.inResults = true;
                             m_searchSelectedIndex = 0;
                             m_searchScrollOffset = 0;
                         }
                     } else if (ch == '_') {
-                        if (m_searchQuery.size() < 30) m_searchQuery += ' ';
+                        if (m_searchVk.query.size() < 30) m_searchVk.query += ' ';
                     } else {
-                        if (m_searchQuery.size() < 30) m_searchQuery += ch;
+                        if (m_searchVk.query.size() < 30) m_searchVk.query += ch;
                     }
                     // Auto-search as user types
-                    if (m_searchQuery.length() >= 2) {
-                        m_searchResults = DatabaseManager::instance().searchAllGames(m_searchQuery, 50);
+                    if (m_searchVk.query.length() >= 2) {
+                        m_searchResults = DatabaseManager::instance().searchAllGames(m_searchVk.query, 50);
                     } else {
                         m_searchResults.clear();
                     }
@@ -836,7 +851,7 @@ void UIManager::update() {
                     m_searchScrollOffset = 0;
                 } else if (input.isButtonJustPressed(Button::X)) {
                     // Clear query
-                    m_searchQuery.clear();
+                    m_searchVk.query.clear();
                     m_searchResults.clear();
                     m_searchSelectedIndex = 0;
                     m_searchScrollOffset = 0;
@@ -851,7 +866,7 @@ void UIManager::update() {
                         if (m_searchSelectedIndex < m_searchScrollOffset)
                             m_searchScrollOffset = m_searchSelectedIndex;
                     } else {
-                        m_kbInResults = false; // go back to keyboard
+                        m_searchVk.inResults = false; // go back to keyboard
                     }
                 } else if (input.isButtonJustPressed(Button::DOWN)) {
                     if (m_searchSelectedIndex < numResults - 1) {
@@ -877,7 +892,7 @@ void UIManager::update() {
                                         DownloadManager::instance().processNextInQueue();
                                     }
                                     // Refresh results state
-                                    m_searchResults = DatabaseManager::instance().searchAllGames(m_searchQuery, 50);
+                                    m_searchResults = DatabaseManager::instance().searchAllGames(m_searchVk.query, 50);
                                 }
                             }
                         }
@@ -899,7 +914,7 @@ void UIManager::update() {
                                 // Delete directly via markGameDeletedLocally
                                 DatabaseManager::instance().markGameDeletedLocally(g.id);
                                 refreshSystems();
-                                m_searchResults = DatabaseManager::instance().searchAllGames(m_searchQuery, 50);
+                                m_searchResults = DatabaseManager::instance().searchAllGames(m_searchVk.query, 50);
                                 if (m_searchSelectedIndex >= static_cast<int>(m_searchResults.size()))
                                     m_searchSelectedIndex = std::max(0, static_cast<int>(m_searchResults.size()) - 1);
                                 showToast("Đã xóa \"" + g.title + "\" khỏi thẻ nhớ.", {239, 68, 68, 255}, 3000);
@@ -1380,10 +1395,10 @@ void UIManager::update() {
                 m_iptvScrollOffset = 0;
                 showToast(m_iptvShowFavoritesOnly ? "★ Đang lọc: Kênh Yêu Thích" : "Đang lọc: Tất cả kênh", {0, 180, 216, 255}, 2000);
             } else if (input.isButtonJustPressed(Button::SELECT) || input.isButtonJustPressed(Button::START)) {
-                m_iptvSearchQuery.clear();
+                m_iptvVk.query.clear();
                 m_iptvSearchResults.clear();
-                m_iptvKbRow = 0; m_iptvKbCol = 0;
-                m_iptvKbInResults = false;
+                m_iptvVk.row = 0; m_iptvVk.col = 0;
+                m_iptvVk.inResults = false;
                 m_iptvSearchSelectedIndex = 0;
                 m_iptvSearchScrollOffset = 0;
                 setState(UIState::IPTV_SEARCH);
@@ -1403,67 +1418,67 @@ void UIManager::update() {
             static const int kbRowCount = 4;
             static const int kbColCount = 10;
 
-            if (!m_iptvKbInResults) {
+            if (!m_iptvVk.inResults) {
                 if (input.isButtonJustPressed(Button::UP)) {
-                    if (m_iptvKbRow > 0) {
-                        m_iptvKbRow--;
+                    if (m_iptvVk.row > 0) {
+                        m_iptvVk.row--;
                     }
                 } else if (input.isButtonJustPressed(Button::DOWN)) {
-                    if (m_iptvKbRow < kbRowCount - 1) {
-                        m_iptvKbRow++;
+                    if (m_iptvVk.row < kbRowCount - 1) {
+                        m_iptvVk.row++;
                     } else if (!m_iptvSearchResults.empty()) {
-                        m_iptvKbInResults = true;
+                        m_iptvVk.inResults = true;
                         m_iptvSearchSelectedIndex = 0;
                         m_iptvSearchScrollOffset = 0;
                     }
                 } else if (input.isButtonJustPressed(Button::LEFT)) {
-                    if (m_iptvKbCol > 0) {
-                        m_iptvKbCol--;
+                    if (m_iptvVk.col > 0) {
+                        m_iptvVk.col--;
                     } else {
-                        m_iptvKbCol = kbColCount - 1;
+                        m_iptvVk.col = kbColCount - 1;
                     }
                 } else if (input.isButtonJustPressed(Button::RIGHT)) {
-                    if (m_iptvKbCol < kbColCount - 1) {
-                        m_iptvKbCol++;
+                    if (m_iptvVk.col < kbColCount - 1) {
+                        m_iptvVk.col++;
                     } else {
-                        m_iptvKbCol = 0;
+                        m_iptvVk.col = 0;
                     }
                 } else if (input.isButtonJustPressed(Button::A)) {
-                    char ch = qwertyRows[m_iptvKbRow][m_iptvKbCol];
+                    char ch = qwertyRows[m_iptvVk.row][m_iptvVk.col];
                     if (ch == '<') {
-                        if (!m_iptvSearchQuery.empty()) {
-                            m_iptvSearchQuery.pop_back();
+                        if (!m_iptvVk.query.empty()) {
+                            m_iptvVk.query.pop_back();
                         }
                     } else if (ch == '_') {
-                        if (m_iptvSearchQuery.length() < 30) {
-                            m_iptvSearchQuery += ' ';
+                        if (m_iptvVk.query.length() < 30) {
+                            m_iptvVk.query += ' ';
                         }
                     } else if (ch == '*') {
                         if (!m_iptvSearchResults.empty()) {
-                            m_iptvKbInResults = true;
+                            m_iptvVk.inResults = true;
                             m_iptvSearchSelectedIndex = 0;
                             m_iptvSearchScrollOffset = 0;
                         }
                     } else {
-                        if (m_iptvSearchQuery.length() < 30) {
-                            m_iptvSearchQuery += ch;
+                        if (m_iptvVk.query.length() < 30) {
+                            m_iptvVk.query += ch;
                         }
                     }
-                    if (!m_iptvSearchQuery.empty()) {
-                        m_iptvSearchResults = IPTVManager::instance().search(m_iptvSearchQuery);
+                    if (!m_iptvVk.query.empty()) {
+                        m_iptvSearchResults = IPTVManager::instance().search(m_iptvVk.query);
                     } else {
                         m_iptvSearchResults.clear();
                     }
                     m_iptvSearchSelectedIndex = 0;
                     m_iptvSearchScrollOffset = 0;
                 } else if (input.isButtonJustPressed(Button::X)) {
-                    m_iptvSearchQuery.clear();
+                    m_iptvVk.query.clear();
                     m_iptvSearchResults.clear();
                     m_iptvSearchSelectedIndex = 0;
                     m_iptvSearchScrollOffset = 0;
                 } else if (input.isButtonJustPressed(Button::START)) {
                     if (!m_iptvSearchResults.empty()) {
-                        m_iptvKbInResults = true;
+                        m_iptvVk.inResults = true;
                         m_iptvSearchSelectedIndex = 0;
                         m_iptvSearchScrollOffset = 0;
                     }
@@ -1481,7 +1496,7 @@ void UIManager::update() {
                             m_iptvSearchScrollOffset = m_iptvSearchSelectedIndex;
                         }
                     } else {
-                        m_iptvKbInResults = false;
+                        m_iptvVk.inResults = false;
                     }
                 } else if (input.isButtonJustPressed(Button::DOWN)) {
                     if (m_iptvSearchSelectedIndex < resultCount - 1) {
@@ -1506,7 +1521,7 @@ void UIManager::update() {
                         }
                     }
                 } else if (input.isButtonJustPressed(Button::LEFT)) {
-                    m_iptvKbInResults = false;
+                    m_iptvVk.inResults = false;
                 } else if (input.isButtonJustPressed(Button::A)) {
                     if (resultCount > 0 && m_iptvSearchSelectedIndex >= 0 && m_iptvSearchSelectedIndex < resultCount) {
                         const auto& selChan = m_iptvSearchResults[m_iptvSearchSelectedIndex];
@@ -1530,7 +1545,7 @@ void UIManager::update() {
                         }
                     }
                 } else if (input.isButtonJustPressed(Button::B)) {
-                    m_iptvKbInResults = false;
+                    m_iptvVk.inResults = false;
                 }
             }
             break;
@@ -1565,8 +1580,8 @@ void UIManager::update() {
                         m_ytSelectedTagIndex += 4;
                     } else {
                         m_ytFocusInTags = false;
-                        m_ytKbRow = 0;
-                        m_ytKbCol = (m_ytSelectedTagIndex % 4) * 2 + 1;
+                        m_ytVk.row = 0;
+                        m_ytVk.col = (m_ytSelectedTagIndex % 4) * 2 + 1;
                     }
                 } else if (input.isButtonJustPressed(Button::LEFT)) {
                     if (m_ytSelectedTagIndex > 0) m_ytSelectedTagIndex--;
@@ -1576,7 +1591,7 @@ void UIManager::update() {
                     else m_ytSelectedTagIndex = 0;
                 } else if (input.isButtonJustPressed(Button::A) || input.isButtonJustPressed(Button::START)) {
                     if (m_ytSelectedTagIndex >= 0 && m_ytSelectedTagIndex < tagCount) {
-                        m_ytSearchQuery = m_ytSearchHistory[m_ytSelectedTagIndex];
+                        m_ytVk.query = m_ytSearchHistory[m_ytSelectedTagIndex];
                         triggerYouTubeSearch();
                     }
                 } else if (input.isButtonJustPressed(Button::B)) {
@@ -1588,58 +1603,58 @@ void UIManager::update() {
             }
 
             if (input.isButtonJustPressed(Button::UP)) {
-                if (m_ytKbRow > 0) {
-                    m_ytKbRow--;
+                if (m_ytVk.row > 0) {
+                    m_ytVk.row--;
                 } else if (!m_ytSearchHistory.empty()) {
                     m_ytFocusInTags = true;
                     int tagCount = std::min(8, static_cast<int>(m_ytSearchHistory.size()));
-                    m_ytSelectedTagIndex = std::min(tagCount - 1, m_ytKbCol / 2);
+                    m_ytSelectedTagIndex = std::min(tagCount - 1, m_ytVk.col / 2);
                 }
             } else if (input.isButtonJustPressed(Button::DOWN)) {
-                if (m_ytKbRow < 4) m_ytKbRow++;
+                if (m_ytVk.row < 4) m_ytVk.row++;
             } else if (input.isButtonJustPressed(Button::LEFT)) {
-                if (m_ytKbRow == 4) {
-                    int actionIdx = m_ytKbCol / 2;
+                if (m_ytVk.row == 4) {
+                    int actionIdx = m_ytVk.col / 2;
                     if (actionIdx > 0) actionIdx--;
                     else actionIdx = 4;
-                    m_ytKbCol = actionIdx * 2;
+                    m_ytVk.col = actionIdx * 2;
                 } else {
-                    if (m_ytKbCol > 0) m_ytKbCol--;
-                    else m_ytKbCol = 9;
+                    if (m_ytVk.col > 0) m_ytVk.col--;
+                    else m_ytVk.col = 9;
                 }
             } else if (input.isButtonJustPressed(Button::RIGHT)) {
-                if (m_ytKbRow == 4) {
-                    int actionIdx = m_ytKbCol / 2;
+                if (m_ytVk.row == 4) {
+                    int actionIdx = m_ytVk.col / 2;
                     if (actionIdx < 4) actionIdx++;
                     else actionIdx = 0;
-                    m_ytKbCol = actionIdx * 2;
+                    m_ytVk.col = actionIdx * 2;
                 } else {
-                    if (m_ytKbCol < 9) m_ytKbCol++;
-                    else m_ytKbCol = 0;
+                    if (m_ytVk.col < 9) m_ytVk.col++;
+                    else m_ytVk.col = 0;
                 }
             } else if (input.isButtonJustPressed(Button::A)) {
-                if (m_ytKbRow < 4) {
-                    char ch = m_ytKbShift ? upperRows[m_ytKbRow][m_ytKbCol] : lowerRows[m_ytKbRow][m_ytKbCol];
-                    if (m_ytSearchQuery.length() < 60) {
-                        if (m_ytTelexMode) {
-                            m_ytSearchQuery = TelexHelper::processTelex(m_ytSearchQuery, ch);
+                if (m_ytVk.row < 4) {
+                    char ch = m_ytVk.shift ? upperRows[m_ytVk.row][m_ytVk.col] : lowerRows[m_ytVk.row][m_ytVk.col];
+                    if (m_ytVk.query.length() < 60) {
+                        if (m_ytVk.telexMode) {
+                            m_ytVk.query = TelexHelper::processTelex(m_ytVk.query, ch);
                         } else {
-                            m_ytSearchQuery += ch;
+                            m_ytVk.query += ch;
                         }
                     }
                 } else {
-                    int actionIdx = m_ytKbCol / 2;
+                    int actionIdx = m_ytVk.col / 2;
                     if (actionIdx == 0) {
-                        m_ytKbShift = !m_ytKbShift;
+                        m_ytVk.shift = !m_ytVk.shift;
                     } else if (actionIdx == 1) {
-                        m_ytTelexMode = !m_ytTelexMode;
-                        showToast(m_ytTelexMode ? "Chế độ: TELEX" : "Chế độ: TIẾNG ANH (US)", {0, 200, 83, 255}, 1200);
+                        m_ytVk.telexMode = !m_ytVk.telexMode;
+                        showToast(m_ytVk.telexMode ? "Chế độ: TELEX" : "Chế độ: TIẾNG ANH (US)", {0, 200, 83, 255}, 1200);
                     } else if (actionIdx == 2) {
-                        if (m_ytSearchQuery.length() < 60) m_ytSearchQuery += ' ';
+                        if (m_ytVk.query.length() < 60) m_ytVk.query += ' ';
                     } else if (actionIdx == 3) {
-                        TelexHelper::popUtf8(m_ytSearchQuery);
+                        TelexHelper::popUtf8(m_ytVk.query);
                     } else if (actionIdx == 4) {
-                        if (!m_ytSearchQuery.empty()) {
+                        if (!m_ytVk.query.empty()) {
                             triggerYouTubeSearch();
                         } else if (!m_ytSearchResults.empty()) {
                             setState(UIState::YOUTUBE_RESULTS);
@@ -1647,23 +1662,23 @@ void UIManager::update() {
                     }
                 }
             } else if (input.isButtonJustPressed(Button::L1)) {
-                m_ytKbShift = !m_ytKbShift;
+                m_ytVk.shift = !m_ytVk.shift;
             } else if (input.isButtonJustPressed(Button::R1)) {
-                m_ytTelexMode = !m_ytTelexMode;
-                showToast(m_ytTelexMode ? "Chế độ: TELEX" : "Chế độ: TIẾNG ANH (US)", {0, 200, 83, 255}, 1200);
+                m_ytVk.telexMode = !m_ytVk.telexMode;
+                showToast(m_ytVk.telexMode ? "Chế độ: TELEX" : "Chế độ: TIẾNG ANH (US)", {0, 200, 83, 255}, 1200);
             } else if (input.isButtonJustPressed(Button::X)) {
-                if (m_ytSearchQuery.length() < 60) m_ytSearchQuery += ' ';
+                if (m_ytVk.query.length() < 60) m_ytVk.query += ' ';
             } else if (input.isButtonJustPressed(Button::Y)) {
-                TelexHelper::popUtf8(m_ytSearchQuery);
+                TelexHelper::popUtf8(m_ytVk.query);
             } else if (input.isButtonJustPressed(Button::START)) {
-                if (!m_ytSearchQuery.empty()) {
+                if (!m_ytVk.query.empty()) {
                     triggerYouTubeSearch();
                 } else if (!m_ytSearchResults.empty()) {
                     setState(UIState::YOUTUBE_RESULTS);
                 }
             } else if (input.isButtonJustPressed(Button::B)) {
-                if (!m_ytSearchQuery.empty()) {
-                    TelexHelper::popUtf8(m_ytSearchQuery);
+                if (!m_ytVk.query.empty()) {
+                    TelexHelper::popUtf8(m_ytVk.query);
                 } else if (!m_ytSearchResults.empty()) {
                     setState(UIState::YOUTUBE_RESULTS);
                 } else {
@@ -1748,7 +1763,7 @@ void UIManager::update() {
                     m_ytIsSearching = true;
                     showToast("Đang tải trang tiếp theo...", {0, 180, 216, 255}, 1500);
                     std::string query = m_ytLastSearchQuery;
-                    std::thread([this, query, targetPage, startIdx]() {
+                    m_ytSearchTask.run([this, query, targetPage, startIdx](TaskProgress&) {
                         std::string appRoot = AppConfig::instance().getAppRoot();
                         if (appRoot.empty()) appRoot = "/mnt/SDCARD/Apps/RomCloud";
                         std::string scriptPath = appRoot + "/scripts/youtube_search.sh";
@@ -1789,7 +1804,7 @@ void UIManager::update() {
                             showToast("Đã đến trang cuối", {245, 158, 11, 255}, 2000);
                         }
                         m_ytIsSearching = false;
-                    }).detach();
+                    });
                 }
             } else if (input.isButtonJustPressed(Button::A)) {
                 if (m_ytSearchSelectedIndex >= 0 && m_ytSearchSelectedIndex < resultCount) {
@@ -1838,8 +1853,8 @@ void UIManager::update() {
                         m_ttSelectedTagIndex += 4;
                     } else {
                         m_ttFocusInTags = false;
-                        m_ttKbRow = 0;
-                        m_ttKbCol = (m_ttSelectedTagIndex % 4) * 2 + 1;
+                        m_ttVk.row = 0;
+                        m_ttVk.col = (m_ttSelectedTagIndex % 4) * 2 + 1;
                     }
                 } else if (input.isButtonJustPressed(Button::LEFT)) {
                     if (m_ttSelectedTagIndex > 0) m_ttSelectedTagIndex--;
@@ -1849,7 +1864,7 @@ void UIManager::update() {
                     else m_ttSelectedTagIndex = 0;
                 } else if (input.isButtonJustPressed(Button::A) || input.isButtonJustPressed(Button::START)) {
                     if (m_ttSelectedTagIndex >= 0 && m_ttSelectedTagIndex < tagCount) {
-                        m_ttSearchQuery = m_ttTrendingTags[m_ttSelectedTagIndex];
+                        m_ttVk.query = m_ttTrendingTags[m_ttSelectedTagIndex];
                         triggerTikTokSearch();
                     }
                 } else if (input.isButtonJustPressed(Button::B)) {
@@ -1861,80 +1876,80 @@ void UIManager::update() {
             }
 
             if (input.isButtonJustPressed(Button::UP)) {
-                if (m_ttKbRow > 0) {
-                    m_ttKbRow--;
+                if (m_ttVk.row > 0) {
+                    m_ttVk.row--;
                 } else if (!m_ttTrendingTags.empty()) {
                     m_ttFocusInTags = true;
                     int tagCount = static_cast<int>(m_ttTrendingTags.size());
-                    m_ttSelectedTagIndex = std::min(tagCount - 1, m_ttKbCol / 2);
+                    m_ttSelectedTagIndex = std::min(tagCount - 1, m_ttVk.col / 2);
                 }
             } else if (input.isButtonJustPressed(Button::DOWN)) {
-                if (m_ttKbRow < 4) m_ttKbRow++;
+                if (m_ttVk.row < 4) m_ttVk.row++;
             } else if (input.isButtonJustPressed(Button::LEFT)) {
-                if (m_ttKbRow == 4) {
-                    int actionIdx = m_ttKbCol / 2;
+                if (m_ttVk.row == 4) {
+                    int actionIdx = m_ttVk.col / 2;
                     if (actionIdx > 0) actionIdx--;
                     else actionIdx = 4;
-                    m_ttKbCol = actionIdx * 2;
+                    m_ttVk.col = actionIdx * 2;
                 } else {
-                    if (m_ttKbCol > 0) m_ttKbCol--;
-                    else m_ttKbCol = 9;
+                    if (m_ttVk.col > 0) m_ttVk.col--;
+                    else m_ttVk.col = 9;
                 }
             } else if (input.isButtonJustPressed(Button::RIGHT)) {
-                if (m_ttKbRow == 4) {
-                    int actionIdx = m_ttKbCol / 2;
+                if (m_ttVk.row == 4) {
+                    int actionIdx = m_ttVk.col / 2;
                     if (actionIdx < 4) actionIdx++;
                     else actionIdx = 0;
-                    m_ttKbCol = actionIdx * 2;
+                    m_ttVk.col = actionIdx * 2;
                 } else {
-                    if (m_ttKbCol < 9) m_ttKbCol++;
-                    else m_ttKbCol = 0;
+                    if (m_ttVk.col < 9) m_ttVk.col++;
+                    else m_ttVk.col = 0;
                 }
             } else if (input.isButtonJustPressed(Button::A)) {
-                if (m_ttKbRow < 4) {
-                    char ch = m_ttKbShift ? upperRows[m_ttKbRow][m_ttKbCol] : lowerRows[m_ttKbRow][m_ttKbCol];
-                    if (m_ttSearchQuery.length() < 60) {
-                        if (m_ttTelexMode) {
-                            m_ttSearchQuery = TelexHelper::processTelex(m_ttSearchQuery, ch);
+                if (m_ttVk.row < 4) {
+                    char ch = m_ttVk.shift ? upperRows[m_ttVk.row][m_ttVk.col] : lowerRows[m_ttVk.row][m_ttVk.col];
+                    if (m_ttVk.query.length() < 60) {
+                        if (m_ttVk.telexMode) {
+                            m_ttVk.query = TelexHelper::processTelex(m_ttVk.query, ch);
                         } else {
-                            m_ttSearchQuery += ch;
+                            m_ttVk.query += ch;
                         }
                     }
                 } else {
-                    int actionIdx = m_ttKbCol / 2;
+                    int actionIdx = m_ttVk.col / 2;
                     if (actionIdx == 0) {
-                        m_ttKbShift = !m_ttKbShift;
+                        m_ttVk.shift = !m_ttVk.shift;
                     } else if (actionIdx == 1) {
-                        m_ttTelexMode = !m_ttTelexMode;
-                        showToast(m_ttTelexMode ? "Chế độ: TELEX" : "Chế độ: TIẾNG ANH (US)", {0, 200, 83, 255}, 1200);
+                        m_ttVk.telexMode = !m_ttVk.telexMode;
+                        showToast(m_ttVk.telexMode ? "Chế độ: TELEX" : "Chế độ: TIẾNG ANH (US)", {0, 200, 83, 255}, 1200);
                     } else if (actionIdx == 2) {
-                        if (m_ttSearchQuery.length() < 60) m_ttSearchQuery += ' ';
+                        if (m_ttVk.query.length() < 60) m_ttVk.query += ' ';
                     } else if (actionIdx == 3) {
-                        TelexHelper::popUtf8(m_ttSearchQuery);
+                        TelexHelper::popUtf8(m_ttVk.query);
                     } else if (actionIdx == 4) {
-                        if (!m_ttSearchQuery.empty()) {
+                        if (!m_ttVk.query.empty()) {
                             triggerTikTokSearch();
                         }
                     }
                 }
             } else if (input.isButtonJustPressed(Button::L1)) {
-                m_ttKbShift = !m_ttKbShift;
+                m_ttVk.shift = !m_ttVk.shift;
             } else if (input.isButtonJustPressed(Button::R1)) {
-                m_ttTelexMode = !m_ttTelexMode;
-                showToast(m_ttTelexMode ? "Chế độ: TELEX" : "Chế độ: TIẾNG ANH (US)", {0, 200, 83, 255}, 1200);
+                m_ttVk.telexMode = !m_ttVk.telexMode;
+                showToast(m_ttVk.telexMode ? "Chế độ: TELEX" : "Chế độ: TIẾNG ANH (US)", {0, 200, 83, 255}, 1200);
             } else if (input.isButtonJustPressed(Button::X)) {
-                if (m_ttSearchQuery.length() < 60) m_ttSearchQuery += ' ';
+                if (m_ttVk.query.length() < 60) m_ttVk.query += ' ';
             } else if (input.isButtonJustPressed(Button::Y)) {
-                TelexHelper::popUtf8(m_ttSearchQuery);
+                TelexHelper::popUtf8(m_ttVk.query);
             } else if (input.isButtonJustPressed(Button::START)) {
-                if (!m_ttSearchQuery.empty()) {
+                if (!m_ttVk.query.empty()) {
                     triggerTikTokSearch();
                 } else {
                     triggerTikTokTrending();
                 }
             } else if (input.isButtonJustPressed(Button::B)) {
-                if (!m_ttSearchQuery.empty()) {
-                    TelexHelper::popUtf8(m_ttSearchQuery);
+                if (!m_ttVk.query.empty()) {
+                    TelexHelper::popUtf8(m_ttVk.query);
                 } else {
                     setState(UIState::MENU);
                 }
@@ -2205,6 +2220,11 @@ void UIManager::update() {
             break;
         }
 
+        case UIState::FILE_EXPLORER: {
+            if (!handleExplorerInput()) setState(UIState::MENU);
+            break;
+        }
+
         case UIState::LOCALSEND_SEND: {
             // Legacy: chuyển thẳng sang Game Picker (LOCALSEND_SEND giờ chỉ là
             // bước chọn device → mở game picker).
@@ -2335,772 +2355,122 @@ std::string UIManager::suggestNewFolderName(const std::string& parentPath) {
     return "NewFolder";
 }
 
-void UIManager::clearTextCache() {
-    for (auto& pair : m_textCache) {
-        if (pair.second.texture) {
-            SDL_DestroyTexture(pair.second.texture);
-        }
-    }
-    m_textCache.clear();
-}
+void UIManager::clearTextCache() { m_ui.clearTextCache(); }
 
 void UIManager::drawText(const std::string& text, int x, int y, SDL_Color color, TTF_Font* font, bool centered) {
-    if (!font || text.empty()) return;
-
-    // Cache key combining font pointer, color (packed 32-bit), and text content
-    char keyBuf[128];
-    uint32_t colorInt = (color.r << 24) | (color.g << 16) | (color.b << 8) | color.a;
-    std::snprintf(keyBuf, sizeof(keyBuf), "%p_%08x_", (void*)font, colorInt);
-    std::string key = std::string(keyBuf) + text;
-
-    SDL_Texture* texture = nullptr;
-    int texW = 0, texH = 0;
-
-    auto it = m_textCache.find(key);
-    if (it != m_textCache.end()) {
-        texture = it->second.texture;
-        texW = it->second.w;
-        texH = it->second.h;
-        it->second.lastUsed = SDL_GetTicks();
-    } else {
-        SDL_Surface* surface = TTF_RenderUTF8_Blended(font, text.c_str(), color);
-        if (!surface) return;
-        texture = SDL_CreateTextureFromSurface(m_renderer, surface);
-        texW = surface->w;
-        texH = surface->h;
-        SDL_FreeSurface(surface);
-        if (!texture) return;
-
-        // Keep cache bounded to max 256 items (~2MB RAM)
-        if (m_textCache.size() >= 256) {
-            auto oldest = m_textCache.begin();
-            for (auto iter = m_textCache.begin(); iter != m_textCache.end(); ++iter) {
-                if (iter->second.lastUsed < oldest->second.lastUsed) {
-                    oldest = iter;
-                }
-            }
-            if (oldest->second.texture) {
-                SDL_DestroyTexture(oldest->second.texture);
-            }
-            m_textCache.erase(oldest);
-        }
-
-        m_textCache[key] = {texture, texW, texH, SDL_GetTicks()};
-    }
-
-    int sx = PlatformInfo::instance().scaleX(x);
-    int sy = PlatformInfo::instance().scaleY(y);
-    int drawX = centered ? (sx - texW / 2) : sx;
-    int drawY = sy;
-    SDL_Rect dstRect = {drawX, drawY, texW, texH};
-    SDL_RenderCopy(m_renderer, texture, nullptr, &dstRect);
+    m_ui.drawText(text, x, y, color, font, centered);
 }
 
 void UIManager::drawRect(int x, int y, int w, int h, SDL_Color color, bool filled) {
-    // Scale coordinates and dimensions
-    int sx = PlatformInfo::instance().scaleX(x);
-    int sy = PlatformInfo::instance().scaleY(y);
-    int sw = PlatformInfo::instance().scaleW(w);
-    int sh = PlatformInfo::instance().scaleH(h);
-
-    SDL_SetRenderDrawColor(m_renderer, color.r, color.g, color.b, color.a);
-    SDL_Rect rect = {sx, sy, sw, sh};
-    if (filled) {
-        SDL_RenderFillRect(m_renderer, &rect);
-    } else {
-        SDL_RenderDrawRect(m_renderer, &rect);
-    }
+    m_ui.drawRect(x, y, w, h, color, filled);
 }
 
 void UIManager::drawBorder(int x, int y, int w, int h, SDL_Color color, int thickness) {
-    // Scale coordinates, dimensions, and thickness
-    int sx = PlatformInfo::instance().scaleX(x);
-    int sy = PlatformInfo::instance().scaleY(y);
-    int sw = PlatformInfo::instance().scaleW(w);
-    int sh = PlatformInfo::instance().scaleH(h);
-    int st = PlatformInfo::instance().scaleW(thickness);
-
-    SDL_SetRenderDrawColor(m_renderer, color.r, color.g, color.b, color.a);
-    for (int i = 0; i < st; ++i) {
-        SDL_Rect rect = {sx + i, sy + i, sw - 2 * i, sh - 2 * i};
-        SDL_RenderDrawRect(m_renderer, &rect);
-    }
+    m_ui.drawBorder(x, y, w, h, color, thickness);
 }
 
 void UIManager::drawRoundedRect(int x, int y, int w, int h, int radius, SDL_Color color, bool filled) {
-    // Scale coordinates, dimensions, and radius
-    int sx = PlatformInfo::instance().scaleX(x);
-    int sy = PlatformInfo::instance().scaleY(y);
-    int sw = PlatformInfo::instance().scaleW(w);
-    int sh = PlatformInfo::instance().scaleH(h);
-    int sr = PlatformInfo::instance().scaleW(radius);
-
-    if (sw <= 0 || sh <= 0) return;
-    int maxR = std::min(sw, sh) / 2;
-    if (sr > maxR) sr = maxR;
-    if (sr <= 0) {
-        drawRect(sx, sy, sw, sh, color, filled);
-        return;
-    }
-
-    if (filled) {
-        SDL_SetRenderDrawColor(m_renderer, color.r, color.g, color.b, color.a);
-        SDL_Rect centerRect = {sx, sy + sr, sw, sh - 2 * sr};
-        if (centerRect.h > 0) {
-            SDL_RenderFillRect(m_renderer, &centerRect);
-        }
-
-        for (int dy = 0; dy < sr; ++dy) {
-            int ry = sr - 1 - dy;
-            int dx = static_cast<int>(std::sqrt(sr * sr - ry * ry));
-            int lineW = sw - 2 * (sr - dx);
-            int lineX = sx + sr - dx;
-
-            if (lineW > 0) {
-                SDL_Rect topSlice = {lineX, sy + dy, lineW, 1};
-                SDL_RenderFillRect(m_renderer, &topSlice);
-                SDL_Rect btmSlice = {lineX, sy + sh - 1 - dy, lineW, 1};
-                SDL_RenderFillRect(m_renderer, &btmSlice);
-            }
-        }
-    } else {
-        drawRoundedBorder(sx, sy, sw, sh, sr, color, 1);
-    }
+    m_ui.drawRoundedRect(x, y, w, h, radius, color, filled);
 }
 
 void UIManager::drawRoundedBorder(int x, int y, int w, int h, int radius, SDL_Color color, int thickness) {
-    // Scale coordinates, dimensions, radius, and thickness
-    int sx = PlatformInfo::instance().scaleX(x);
-    int sy = PlatformInfo::instance().scaleY(y);
-    int sw = PlatformInfo::instance().scaleW(w);
-    int sh = PlatformInfo::instance().scaleH(h);
-    int sr = PlatformInfo::instance().scaleW(radius);
-    int st = PlatformInfo::instance().scaleW(thickness);
-
-    if (sw <= 0 || sh <= 0) return;
-    int maxR = std::min(sw, sh) / 2;
-    if (sr > maxR) sr = maxR;
-    if (sr <= 0) {
-        drawBorder(sx, sy, sw, sh, color, st);
-        return;
-    }
-
-    SDL_SetRenderDrawColor(m_renderer, color.r, color.g, color.b, color.a);
-
-    // Straight bars
-    SDL_Rect topBar = {sx + sr, sy, sw - 2 * sr, st};
-    SDL_Rect btmBar = {sx + sr, sy + sh - st, sw - 2 * sr, st};
-    SDL_RenderFillRect(m_renderer, &topBar);
-    SDL_RenderFillRect(m_renderer, &btmBar);
-
-    SDL_Rect leftBar = {sx, sy + sr, st, sh - 2 * sr};
-    SDL_Rect rightBar = {sx + sw - st, sy + sr, st, sh - 2 * sr};
-    SDL_RenderFillRect(m_renderer, &leftBar);
-    SDL_RenderFillRect(m_renderer, &rightBar);
-
-    // Corner arcs using 1-px high fill rects
-    for (int dy = 0; dy < sr; ++dy) {
-        int ry = sr - 1 - dy;
-        int outerDx = static_cast<int>(std::sqrt(sr * sr - ry * ry));
-        int innerR = std::max(0, sr - st);
-        int innerDx = (ry < innerR) ? static_cast<int>(std::sqrt(innerR * innerR - ry * ry)) : 0;
-        int segW = std::max(st, outerDx - innerDx);
-
-        SDL_Rect tl = {sx + sr - outerDx, sy + dy, segW, 1};
-        SDL_RenderFillRect(m_renderer, &tl);
-
-        SDL_Rect tr = {sx + sw - sr + outerDx - segW, sy + dy, segW, 1};
-        SDL_RenderFillRect(m_renderer, &tr);
-
-        SDL_Rect bl = {sx + sr - outerDx, sy + sh - 1 - dy, segW, 1};
-        SDL_RenderFillRect(m_renderer, &bl);
-
-        SDL_Rect br = {sx + sw - sr + outerDx - segW, sy + sh - 1 - dy, segW, 1};
-        SDL_RenderFillRect(m_renderer, &br);
-    }
+    m_ui.drawRoundedBorder(x, y, w, h, radius, color, thickness);
 }
 
 void UIManager::drawBadge(int x, int y, int w, int h, const std::string& text, SDL_Color bg, SDL_Color fg) {
-    int rad = h / 2; // Chuan A: pill full-round mem mai
-    drawRoundedRect(x, y, w, h, rad, bg, true);
-    // Neu text bat dau bang "[NUT]" -> ve icon + label can giua trong badge
-    // (thay the kieu chu "[A] OK" cu bang icon that trong assets/button_icons)
-    std::string btn, label = text;
-    if (!text.empty() && text[0] == '[') {
-        size_t end = text.find(']');
-        if (end != std::string::npos && end >= 2 && end <= 9) {
-            btn = text.substr(1, end - 1);
-            label = text.substr(end + 1);
-            while (!label.empty() && label[0] == ' ') label.erase(0, 1);
-            // Chuan hoa ten nut
-            std::string up = btn;
-            for (char &c : up) c = (char)toupper((unsigned char)c);
-            if (up == "OK") btn = "A";
-            else if (up == "D-PAD" || up == "D-PAD]") btn = "DPAD";
-            else btn = up;
-        }
-    }
-    if (!btn.empty() && btn != "LEN" && m_fontSmall) {
-        int iconSize = h - 10;
-        if (iconSize < 16) iconSize = 16;
-        if (iconSize > 32) iconSize = 32;
-        int lw = textWidth(label, m_fontSmall);
-        int gap = lw > 0 ? 6 : 0;
-        int totalW = iconSize + gap + lw;
-        int sx = x + (w - totalW) / 2;
-        int centerY = y + h / 2;
-        drawButtonIcon(btn, sx, centerY - iconSize / 2, iconSize);
-        if (lw > 0) {
-            int th = TTF_FontHeight(m_fontSmall);
-            drawText(label, sx + iconSize + gap, centerY - th / 2, fg, m_fontSmall);
-        }
-        return;
-    }
-    // Can giua doc dung chieu cao that cua font (truoc day cung 16px -> lech)
-    int th = m_fontSmall ? TTF_FontHeight(m_fontSmall) : 16;
-    drawText(text, x + w / 2, y + (h - th) / 2, fg, m_fontSmall, true);
+    m_ui.drawBadge(x, y, w, h, text, bg, fg);
 }
 
 void UIManager::drawIcon(const std::string& iconName, int x, int y, int w, int h) {
-    SDL_Texture* texture = nullptr;
-    auto it = m_systemIconCache.find(iconName);
-    if (it != m_systemIconCache.end()) {
-        texture = it->second;
-    } else {
-        std::string iconsDir = AppConfig::instance().getAssetsDir() + "/icons";
-        std::string iconPath = iconsDir + "/" + iconName + ".png";
-        SDL_Surface* surface = IMG_Load(iconPath.c_str());
-        if (surface) {
-            texture = SDL_CreateTextureFromSurface(m_renderer, surface);
-            SDL_FreeSurface(surface);
-            m_systemIconCache[iconName] = texture;
-        }
-    }
-
-    if (!texture) {
-        // Fallback: draw a colored rectangle if icon not found
-        drawRect(x, y, w, h, {60, 70, 85, 255}, true);
-        return;
-    }
-
-    int sx = PlatformInfo::instance().scaleX(x);
-    int sy = PlatformInfo::instance().scaleY(y);
-    int sw = PlatformInfo::instance().scaleW(w);
-    int sh = PlatformInfo::instance().scaleH(h);
-
-    int texW = 0, texH = 0;
-    SDL_QueryTexture(texture, nullptr, nullptr, &texW, &texH);
-    int drawW = sw;
-    int drawH = sh;
-    if (texW > 0 && texH > 0) {
-        float aspect = static_cast<float>(texW) / static_cast<float>(texH);
-        if (aspect >= 1.0f) {
-            drawW = std::min(sw, static_cast<int>(sh * aspect));
-            drawH = static_cast<int>(drawW / aspect);
-        } else {
-            drawH = std::min(sh, static_cast<int>(sw / aspect));
-            drawW = static_cast<int>(drawH * aspect);
-        }
-    }
-
-    int dstX = sx + (sw - drawW) / 2;
-    int dstY = sy + (sh - drawH) / 2;
-    SDL_Rect dst = {dstX, dstY, drawW, drawH};
-    SDL_RenderCopy(m_renderer, texture, nullptr, &dst);
+    m_ui.drawIcon(iconName, x, y, w, h);
 }
 
 void UIManager::drawPlayerIcon(const std::string& iconName, int x, int y, int w, int h) {
-    SDL_Texture* texture = nullptr;
-    std::string key = "player/" + iconName;
-    auto it = m_systemIconCache.find(key);
-    if (it != m_systemIconCache.end()) {
-        texture = it->second;
-    } else {
-        std::string iconPath = AppConfig::instance().getAssetsDir() + "/player_icons/" + iconName + ".png";
-        SDL_Surface* surface = IMG_Load(iconPath.c_str());
-        if (surface) {
-            texture = SDL_CreateTextureFromSurface(m_renderer, surface);
-            SDL_FreeSurface(surface);
-            m_systemIconCache[key] = texture;
-        }
-    }
-
-    if (!texture) {
-        // Fallback: text cu neu thieu file (Send=">", Receive="((")
-        const char* fb = (iconName == "send") ? ">" : "((";
-        drawText(fb, x, y, {255,255,255,255}, m_fontLarge, false);
-        return;
-    }
-
-    int sx = PlatformInfo::instance().scaleX(x);
-    int sy = PlatformInfo::instance().scaleY(y);
-    int sw = PlatformInfo::instance().scaleW(w);
-    int sh = PlatformInfo::instance().scaleH(h);
-
-    int texW = 0, texH = 0;
-    SDL_QueryTexture(texture, nullptr, nullptr, &texW, &texH);
-    int drawW = sw, drawH = sh;
-    if (texW > 0 && texH > 0) {
-        float aspect = static_cast<float>(texW) / static_cast<float>(texH);
-        if (aspect >= 1.0f) {
-            drawW = std::min(sw, static_cast<int>(sh * aspect));
-            drawH = static_cast<int>(drawW / aspect);
-        } else {
-            drawH = std::min(sh, static_cast<int>(sw / aspect));
-            drawW = static_cast<int>(drawH * aspect);
-        }
-    }
-    int dstX = sx + (sw - drawW) / 2;
-    int dstY = sy + (sh - drawH) / 2;
-    SDL_Rect dst = {dstX, dstY, drawW, drawH};
-    // Nhuộm trắng để icon hòa với theme sidebar (texture trắng trong suốt)
-    SDL_SetTextureColorMod(texture, 255, 255, 255);
-    SDL_RenderCopy(m_renderer, texture, nullptr, &dst);
+    m_ui.drawPlayerIcon(iconName, x, y, w, h);
 }
 
 void UIManager::drawButtonIcon(const std::string& button, int x, int y, int size) {
-    static const std::unordered_map<std::string, std::string> iconMap = {
-        {"A", "a.png"},
-        {"B", "b.png"},
-        {"X", "x.png"},
-        {"Y", "y.png"},
-        {"L1", "l1.png"},
-        {"R1", "r1.png"},
-        {"L2", "l2.png"},
-        {"R2", "r2.png"},
-        {"START", "start_icon.png"},
-        {"SELECT", "view.png"},
-        {"MENU", "options.png"},
-        {"HOME", "options.png"},
-        {"VIEW", "view.png"},
-        {"BACK", "back_icon.png"},
-        {"DPAD", "dpad.png"},
-        {"UP", "up.png"},
-        {"DOWN", "down.png"},
-        {"LEFT", "left.png"},
-        {"RIGHT", "right.png"},
-    };
-
-    auto it = iconMap.find(button);
-    std::string iconFile = (it != iconMap.end()) ? it->second : "";
-
-    SDL_Texture* tex = nullptr;
-    if (!iconFile.empty()) {
-        if (m_buttonIconCache.find(iconFile) != m_buttonIconCache.end()) {
-            tex = m_buttonIconCache[iconFile];
-        } else {
-            std::string iconsDir = AppConfig::instance().getAssetsDir() + "/button_icons";
-            std::string iconPath = iconsDir + "/" + iconFile;
-            SDL_Surface* surf = IMG_Load(iconPath.c_str());
-            if (surf) {
-                tex = SDL_CreateTextureFromSurface(m_renderer, surf);
-                SDL_FreeSurface(surf);
-                m_buttonIconCache[iconFile] = tex;
-            }
-        }
-    }
-
-    if (tex) {
-        int iw = 0, ih = 0;
-        SDL_QueryTexture(tex, nullptr, nullptr, &iw, &ih);
-        float scale = (float)size / std::max(iw, ih);
-        int dw = (int)(iw * scale);
-        int dh = (int)(ih * scale);
-        int dx = x + (size - dw) / 2;
-        int dy = y + (size - dh) / 2;
-        SDL_Rect dst = {dx, dy, dw, dh};
-        SDL_RenderCopy(m_renderer, tex, nullptr, &dst);
-    } else {
-        // Fallback: colored rounded square
-        SDL_Color bgColor = {60, 60, 60, 255};
-        if (button == "A") bgColor = {16, 150, 60, 255};
-        else if (button == "B") bgColor = {200, 30, 30, 255};
-        else if (button == "X") bgColor = {30, 90, 200, 255};
-        else if (button == "Y") bgColor = {200, 180, 20, 255};
-
-        int rad = size / 4;
-        drawRoundedRect(x, y, size, size, rad, bgColor, true);
-        drawText(button, x + 4, y + 4, {255,255,255,255}, m_fontSmall);
-    }
+    m_ui.drawButtonIcon(button, x, y, size);
 }
 
 int UIManager::textHeight(TTF_Font *font) {
-    if (!font) return 0;
-    return TTF_FontHeight(font);
+    return m_ui.textHeight(font);
 }
 
 int UIManager::textWidth(const std::string &text, TTF_Font *font) {
-    if (!font || text.empty()) return 0;
-    int w = 0, h = 0;
-    if (TTF_SizeUTF8(font, text.c_str(), &w, &h) != 0) return 0;
-    return w;
+    return m_ui.textWidth(text, font);
 }
 
-// Cat chu theo pixel, lui tung ky tu UTF-8 (khong cat giua dau tieng Viet)
 std::string UIManager::truncateToWidth(const std::string &text, TTF_Font *font, int maxPx) {
-    if (!font || text.empty() || maxPx <= 0) return text;
-    if (textWidth(text, font) <= maxPx) return text;
-    int ellipsisW = textWidth("...", font);
-    int avail = maxPx - ellipsisW;
-    if (avail <= 0) return "...";
-    // Lui tung ky tu UTF-8 tu cuoi
-    size_t end = text.size();
-    while (end > 0) {
-        size_t prev = end - 1;
-        while (prev > 0 && (static_cast<unsigned char>(text[prev]) & 0xC0) == 0x80) prev--;
-        std::string cand = text.substr(0, prev) + "...";
-        if (textWidth(cand, font) <= maxPx) return cand;
-        end = prev;
-    }
-    return "...";
+    return m_ui.truncateToWidth(text, font, maxPx);
 }
 
 int UIManager::pillWidth(const std::string &text, TTF_Font *font) {
-    TTF_Font *f = font ? font : m_fontSmall;
-    int tw = textWidth(text, f);
-    int w = tw + UiTheme::PILL_PAD_X * 2;
-    if (w < UiTheme::PILL_MIN_W) w = UiTheme::PILL_MIN_W;
-    if (w > UiTheme::PILL_MAX_W) w = UiTheme::PILL_MAX_W;
-    return w;
+    return m_ui.pillWidth(text, font);
 }
 
-// Pill chuan A: full-round h/2, active = FOCUS_BG + glow, inactive = PILL_BG + border
 void UIManager::drawPill(int x, int y, int w, int h, const std::string &text, bool active, TTF_Font *font) {
-    TTF_Font *f = font ? font : m_fontSmall;
-    int rad = h / 2;
-    SDL_Color bg = active ? UiTheme::PILL_BG_ACTIVE : UiTheme::PILL_BG;
-    drawRoundedRect(x, y, w, h, rad, bg, true);
-    if (active) drawRoundedBorder(x, y, w, h, rad, UiTheme::FOCUS_GLOW, 1);
-    else drawRoundedBorder(x, y, w, h, rad, UiTheme::PILL_BORDER, 1);
-    if (!f) return;
-    SDL_Color fg = active ? UiTheme::TEXT_MAIN : UiTheme::PILL_TEXT_DIM;
-    std::string disp = truncateToWidth(text, f, w - UiTheme::PILL_PAD_X * 2);
-    int th = TTF_FontHeight(f);
-    drawText(disp, x + w / 2, y + (h - th) / 2, fg, f, true);
+    m_ui.drawPill(x, y, w, h, text, active, font);
 }
 
 void UIManager::drawButton(int x, int y, int w, int h, const std::string &label, bool focused, bool danger) {
-    if (w < UiTheme::BTN_MIN_W) w = UiTheme::BTN_MIN_W;
-    SDL_Color bg;
-    if (danger && focused) bg = UiTheme::ACCENT_RED;
-    else if (focused) bg = UiTheme::FOCUS_BG;
-    else bg = UiTheme::PILL_BG;
-    drawRoundedRect(x, y, w, h, UiTheme::RADIUS_BTN, bg, true);
-    if (focused) drawRoundedBorder(x, y, w, h, UiTheme::RADIUS_BTN, UiTheme::FOCUS_GLOW, 2);
-    else drawRoundedBorder(x, y, w, h, UiTheme::RADIUS_BTN, UiTheme::PILL_BORDER, 1);
-    if (!m_fontSmall) return;
-    std::string disp = truncateToWidth(label, m_fontSmall, w - 24);
-    int th = TTF_FontHeight(m_fontSmall);
-    drawText(disp, x + w / 2, y + (h - th) / 2, UiTheme::TEXT_MAIN, m_fontSmall, true);
+    m_ui.drawButton(x, y, w, h, label, focused, danger);
 }
 
 void UIManager::drawRow(int x, int y, int w, int h, bool focused, bool dim) {
-    if (focused) {
-        drawRoundedRect(x - 2, y - 2, w + 4, h + 4, UiTheme::RADIUS_ROW + 2, UiTheme::FOCUS_GLOW, false);
-        drawRoundedRect(x, y, w, h, UiTheme::RADIUS_ROW, UiTheme::FOCUS_BG, true);
-    } else {
-        SDL_Color bg = dim ? UiTheme::CARD_BG : UiTheme::CARD_SOLID;
-        drawRoundedRect(x, y, w, h, UiTheme::RADIUS_ROW, bg, true);
-        drawRoundedBorder(x, y, w, h, UiTheme::RADIUS_ROW, UiTheme::CARD_BORDER, 1);
-    }
+    m_ui.drawRow(x, y, w, h, focused, dim);
 }
 
 int UIManager::textYCentered(int y, int h, TTF_Font *font) {
-    int th = font ? TTF_FontHeight(font) : 16;
-    return y + (h - th) / 2;
+    return m_ui.textYCentered(y, h, font);
 }
 
 void UIManager::drawRowMainSub(int x, int y, int h, const std::string &main, TTF_Font *fMain,
                                const std::string &sub, TTF_Font *fSub, int maxW, int gap) {
-    int thM = fMain ? TTF_FontHeight(fMain) : 0;
-    int thS = (!sub.empty() && fSub) ? TTF_FontHeight(fSub) : 0;
-    int blockH = thM + (thS > 0 ? gap + thS : 0);
-    int ty = y + (h - blockH) / 2;
-    std::string m = main;
-    std::string s = sub;
-    if (maxW > 0) {
-        if (fMain) m = truncateToWidth(main, fMain, maxW);
-        if (!sub.empty() && fSub) s = truncateToWidth(sub, fSub, maxW);
-    }
-    if (fMain) drawText(m, x, ty, UiTheme::TEXT_MAIN, fMain);
-    if (thS > 0) drawText(s, x, ty + thM + gap, UiTheme::TEXT_SUB, fSub);
+    m_ui.drawRowMainSub(x, y, h, main, fMain, sub, fSub, maxW, gap);
 }
 
 void UIManager::drawTextRight(const std::string &text, int rightX, int y, SDL_Color color, TTF_Font *font) {
-    if (!font || text.empty()) return;
-    drawText(text, rightX - textWidth(text, font), y, color, font);
+    m_ui.drawTextRight(text, rightX, y, color, font);
 }
 
 int UIManager::drawFooterHint(const std::string &button, const std::string &label, int x,
                               int barY, int barH, SDL_Color color, TTF_Font *font,
                               int iconSize, int gap) {
-    // Can giua doc icon + text trong footer bar (barY..barY+barH)
-    int centerY = barY + barH / 2;
-    int iconY = centerY - iconSize / 2;
-    drawButtonIcon(button, x, iconY, iconSize);
-    int lx = x + iconSize + gap;
-    int th = textHeight(font);
-    int ty = centerY - th / 2;
-    drawText(label, lx, ty, color, font);
-    return lx + textWidth(label, font);
+    return m_ui.drawFooterHint(button, label, x, barY, barH, color, font, iconSize, gap);
 }
 
 void UIManager::drawFooterHintsCentered(
     const std::vector<std::pair<std::string,std::string>> &hints,
     int barY, int barH, SDL_Color color, TTF_Font *font,
     int iconSize, int gap, int hintGap) {
-    if (hints.empty() || !font) return;
-    int totalW = 0;
-    for (size_t i = 0; i < hints.size(); ++i) {
-        totalW += iconSize + gap + textWidth(hints[i].second, font);
-        if (i + 1 < hints.size()) totalW += hintGap;
-    }
-    int x = (1024 - totalW) / 2;
-    if (x < 8) x = 8;
-    for (size_t i = 0; i < hints.size(); ++i) {
-        x = drawFooterHint(hints[i].first, hints[i].second, x, barY, barH, color, font, iconSize, gap);
-        if (i + 1 < hints.size()) x += hintGap;
-    }
+    m_ui.drawFooterHintsCentered(hints, barY, barH, color, font, iconSize, gap, hintGap);
 }
 
 void UIManager::drawBadgeDual(int x, int y, int w, int h,
                      const std::string &btn1, const std::string &label1,
                      const std::string &btn2, const std::string &label2,
                      SDL_Color bg, SDL_Color fg) {
-    int rad = h / 2; // Chuan A: pill full-round
-    drawRoundedRect(x, y, w, h, rad, bg, true);
-    if (!m_fontSmall) return;
-    int iconSize = h - 12;
-    if (iconSize < 16) iconSize = 16;
-    if (iconSize > 32) iconSize = 32;
-    int gap = 6;
-    int sepW = textWidth("  •  ", m_fontSmall);
-    int totalW = iconSize + gap + textWidth(label1, m_fontSmall) + sepW +
-                 iconSize + gap + textWidth(label2, m_fontSmall);
-    int sx = x + (w - totalW) / 2;
-    int centerY = y + h / 2;
-    int th = TTF_FontHeight(m_fontSmall);
-    drawButtonIcon(btn1, sx, centerY - iconSize / 2, iconSize);
-    sx += iconSize + gap;
-    if (!label1.empty()) {
-        drawText(label1, sx, centerY - th / 2, fg, m_fontSmall);
-        sx += textWidth(label1, m_fontSmall);
-    }
-    drawText("  •  ", sx, centerY - th / 2, fg, m_fontSmall);
-    sx += sepW;
-    drawButtonIcon(btn2, sx, centerY - iconSize / 2, iconSize);
-    sx += iconSize + gap;
-    if (!label2.empty())
-        drawText(label2, sx, centerY - th / 2, fg, m_fontSmall);
-}
-
-static std::string normalizeBtn(const std::string &b) {
-    std::string up = b;
-    for (char &c : up) c = (char)toupper((unsigned char)c);
-    if (up == "OK") return "A";
-    if (up == "D-PAD") return "DPAD";
-    if (up == "L") return "L1";
-    if (up == "R") return "R1";
-    return up;
+    m_ui.drawBadgeDual(x, y, w, h, btn1, label1, btn2, label2, bg, fg);
 }
 
 void UIManager::drawInlineHintsCentered(const std::string &text, int centerX, int y,
                                SDL_Color color, TTF_Font *font, int iconSize, int gap) {
-    if (!font || text.empty()) return;
-    struct Seg { bool isBtn; std::string s; };
-    std::vector<Seg> segs;
-    size_t i = 0, n = text.size();
-    std::string cur;
-    auto flushCur = [&]() { if (!cur.empty()) { segs.push_back({false, cur}); cur.clear(); } };
-    while (i < n) {
-        if (text[i] == '[') {
-            size_t end = text.find(']', i + 1);
-            if (end != std::string::npos && end - i >= 2 && end - i <= 10) {
-                std::string inside = text.substr(i + 1, end - i - 1);
-                bool ok = !inside.empty();
-                for (char c : inside) {
-                    char u = (char)toupper((unsigned char)c);
-                    if (!((u >= 'A' && u <= 'Z') || (u >= '0' && u <= '9') || c == '-' || c == '/')) { ok = false; break; }
-                }
-                if (ok) {
-                    flushCur();
-                    segs.push_back({true, normalizeBtn(inside)});
-                    i = end + 1;
-                    // an 1 space ke sau ] de icon sat chu hon
-                    if (i < n && text[i] == ' ') i++;
-                    continue;
-                }
-            }
-        }
-        cur += text[i++];
-    }
-    flushCur();
-    int th = textHeight(font);
-    int totalW = 0;
-    for (auto &s : segs) {
-        if (s.isBtn) totalW += iconSize + gap;
-        else totalW += textWidth(s.s, font);
-    }
-    int x = centerX - totalW / 2;
-    for (auto &s : segs) {
-        if (s.isBtn) {
-            drawButtonIcon(s.s, x, y + (th - iconSize) / 2, iconSize);
-            x += iconSize + gap;
-        } else {
-            drawText(s.s, x, y, color, font);
-            x += textWidth(s.s, font);
-        }
-    }
-}
-// ---- UiTheme helpers: 10-Foot Leanback tokens, khong doi logic nghiep vu ----
-void UIManager::drawAppBackground() {
-    drawRect(0, 0, UiTheme::APP_W, UiTheme::APP_H, UiTheme::BG_APP, true);
-}
-void UIManager::drawCard(int x, int y, int w, int h) {
-    drawRoundedRect(x, y, w, h, UiTheme::RADIUS_CARD, UiTheme::CARD_BG, true);
-    drawRoundedBorder(x, y, w, h, UiTheme::RADIUS_CARD, UiTheme::CARD_BORDER, 1);
-}
-void UIManager::drawFocusRow(int x, int y, int w, int h) {
-    // glow ngoai + nen focus de nhin ro tu xa
-    drawRoundedRect(x - 2, y - 2, w + 4, h + 4, UiTheme::RADIUS_ROW + 2, UiTheme::FOCUS_GLOW, false);
-    drawRoundedRect(x, y, w, h, UiTheme::RADIUS_ROW, UiTheme::FOCUS_BG, true);
-}
-void UIManager::drawAppHeader(const std::string &title, const std::string &sub) {
-    if (!m_fontLarge) return;
-    drawText(title, 32, 22, UiTheme::TEXT_MAIN, m_fontLarge);
-    if (!sub.empty() && m_fontSmall)
-        drawText(sub, 34, 22 + TTF_FontHeight(m_fontLarge) + 2, UiTheme::TEXT_DIM, m_fontSmall);
-}
-void UIManager::drawPadIcon(UiTheme::PadBtn btn, int x, int y, int size) {
-    using PB = UiTheme::PadBtn;
-    if (btn == PB::L1R1) {
-        int half = size / 2 - 1;
-        drawButtonIcon("L1", x, y + (size - half) / 2, half);
-        drawButtonIcon("R1", x + half + 2, y + (size - half) / 2, half);
-        return;
-    }
-    if (btn == PB::UPDOWN) {
-        int half = size / 2 - 1;
-        drawButtonIcon("UP", x, y + (size - half) / 2, half);
-        drawButtonIcon("DOWN", x + half + 2, y + (size - half) / 2, half);
-        return;
-    }
-    const char *s = "A";
-    switch (btn) {
-        case PB::A: s = "A"; break;
-        case PB::B: s = "B"; break;
-        case PB::X: s = "X"; break;
-        case PB::Y: s = "Y"; break;
-        case PB::START: s = "START"; break;
-        case PB::SELECT: s = "SELECT"; break;
-        case PB::DPAD: s = "DPAD"; break;
-        case PB::L1: s = "L1"; break;
-        case PB::R1: s = "R1"; break;
-        case PB::AB: s = "A"; break;
-        default: s = "A"; break;
-    }
-    drawButtonIcon(s, x, y, size);
-    if (btn == PB::AB) drawButtonIcon("B", x + size / 2, y, size / 2);
-}
-void UIManager::drawAppFooter(const std::vector<UiTheme::FooterHint> &hints) {
-    using PB = UiTheme::PadBtn;
-    if (!m_fontSmall || hints.empty()) return;
-    // nen footer + duong ke tren
-    drawRect(0, UiTheme::FOOTER_Y, UiTheme::APP_W, UiTheme::FOOTER_H, UiTheme::FOOTER_BG, true);
-    drawRect(0, UiTheme::FOOTER_Y, UiTheme::APP_W, 1, UiTheme::FOOTER_LINE, true);
-    auto btnToStr = [](PB b) -> std::string {
-        switch (b) {
-            case PB::A: return "A"; case PB::B: return "B";
-            case PB::X: return "X"; case PB::Y: return "Y";
-            case PB::START: return "START"; case PB::SELECT: return "SELECT";
-            case PB::DPAD: return "DPAD"; case PB::L1: return "L1";
-            case PB::R1: return "R1"; case PB::UPDOWN: return "UP";
-            case PB::L1R1: return "L1"; case PB::AB: return "A";
-            default: return "A";
-        }
-    };
-    std::vector<std::pair<std::string,std::string>> legacy;
-    legacy.reserve(hints.size());
-    for (auto &h : hints) legacy.emplace_back(btnToStr(h.btn), std::string(h.label ? h.label : ""));
-    // anti-overflow: thu hintGap khi tong rong > 1008
-    int iconSize = UiTheme::FOOTER_ICON, gap = UiTheme::FOOTER_GAP, hintGap = UiTheme::FOOTER_HINT_GAP;
-    int totalW = 0;
-    for (size_t i = 0; i < legacy.size(); ++i) {
-        totalW += iconSize + gap + textWidth(legacy[i].second, m_fontSmall);
-        if (i + 1 < legacy.size()) totalW += hintGap;
-    }
-    if (totalW > 1008) hintGap = 20;
-    totalW = 0;
-    for (size_t i = 0; i < legacy.size(); ++i) {
-        totalW += iconSize + gap + textWidth(legacy[i].second, m_fontSmall);
-        if (i + 1 < legacy.size()) totalW += hintGap;
-    }
-    if (totalW > 1008 && iconSize > 22) iconSize = 22;
-    drawFooterHintsCentered(legacy, UiTheme::FOOTER_Y, UiTheme::FOOTER_H,
-                            UiTheme::TEXT_DIM, m_fontSmall, iconSize, gap, hintGap);
-}
-void UIManager::beginModalDim() {
-    drawRect(0, 0, UiTheme::APP_W, UiTheme::APP_H, UiTheme::DIM_OVERLAY, true);
+    m_ui.drawInlineHintsCentered(text, centerX, y, color, font, iconSize, gap);
 }
 
+void UIManager::drawAppBackground() { m_ui.drawAppBackground(); }
+void UIManager::drawCard(int x, int y, int w, int h) { m_ui.drawCard(x, y, w, h); }
+void UIManager::drawFocusRow(int x, int y, int w, int h) { m_ui.drawFocusRow(x, y, w, h); }
+void UIManager::drawAppHeader(const std::string &title, const std::string &sub) { m_ui.drawAppHeader(title, sub); }
+void UIManager::drawPadIcon(UiTheme::PadBtn btn, int x, int y, int size) { m_ui.drawPadIcon(btn, x, y, size); }
+void UIManager::drawAppFooter(const std::vector<UiTheme::FooterHint> &hints) { m_ui.drawAppFooter(hints); }
+void UIManager::beginModalDim() { m_ui.beginModalDim(); }
 
 void UIManager::drawGridIcon(const std::string &iconFile, int x, int y, int w, int h) {
-    SDL_Texture* texture = nullptr;
-    auto it = m_gridIconCache.find(iconFile);
-    if (it != m_gridIconCache.end()) {
-        texture = it->second;
-    } else {
-        std::string iconsDir = AppConfig::instance().getAssetsDir() + "/apps_icons";
-        std::string iconPath = iconsDir + "/" + iconFile;
-        SDL_Surface* surface = IMG_Load(iconPath.c_str());
-        if (surface) {
-            texture = SDL_CreateTextureFromSurface(m_renderer, surface);
-            SDL_FreeSurface(surface);
-            m_gridIconCache[iconFile] = texture;
-        }
-    }
-
-    if (!texture) {
-        drawRoundedRect(x + 10, y + 10, w - 20, h - 20, UiTheme::RADIUS_CARD, {60, 70, 85, 255}, true);
-        return;
-    }
-
-    // Scale destination coordinates and bounds
-    int sx = PlatformInfo::instance().scaleX(x);
-    int sy = PlatformInfo::instance().scaleY(y);
-    int sw = PlatformInfo::instance().scaleW(w);
-    int sh = PlatformInfo::instance().scaleH(h);
-
-    // Preserve exact 1:1 square aspect ratio of icons, centered in the slot
-    int texW = 0, texH = 0;
-    SDL_QueryTexture(texture, nullptr, nullptr, &texW, &texH);
-
-    int maxW = sw;
-    int maxH = sh;
-    int drawW = maxW;
-    int drawH = maxH;
-
-    if (texW > 0 && texH > 0) {
-        float aspect = static_cast<float>(texW) / static_cast<float>(texH);
-        if (aspect >= 1.0f) {
-            drawW = std::min(maxW, static_cast<int>(maxH * aspect));
-            drawH = static_cast<int>(drawW / aspect);
-        } else {
-            drawH = std::min(maxH, static_cast<int>(maxW / aspect));
-            drawW = static_cast<int>(drawH * aspect);
-        }
-    } else {
-        int side = std::min(maxW, maxH);
-        drawW = side;
-        drawH = side;
-    }
-
-    int dstX = sx + (sw - drawW) / 2;
-    int dstY = sy + (sh - drawH) / 2;
-
-    SDL_Rect dst = {dstX, dstY, drawW, drawH};
-    SDL_RenderCopy(m_renderer, texture, nullptr, &dst);
+    m_ui.drawGridIcon(iconFile, x, y, w, h);
 }
+
 
 void UIManager::renderHeader() {
     // Header removed to maximize full-screen view for all screens
@@ -3124,8 +2494,8 @@ void UIManager::renderSearchState() {
     // Query bar with rounded corners
     drawRoundedRect(panelX, panelY, panelW, 52, UiTheme::RADIUS_ROW, {22, 32, 46, 255}, true);
     drawRoundedBorder(panelX, panelY, panelW, 52, UiTheme::RADIUS_ROW, {0, 180, 216, 255}, 2);
-    std::string displayQuery = m_searchQuery.empty() ? UiStrings::SEARCH_PROMPT_INPUT : m_searchQuery + "_";
-    SDL_Color qColor = m_searchQuery.empty() ? SDL_Color{80, 95, 115, 255} : SDL_Color{255, 255, 255, 255};
+    std::string displayQuery = m_searchVk.query.empty() ? UiStrings::SEARCH_PROMPT_INPUT : m_searchVk.query + "_";
+    SDL_Color qColor = m_searchVk.query.empty() ? SDL_Color{80, 95, 115, 255} : SDL_Color{255, 255, 255, 255};
     drawText(displayQuery, panelX + 16, panelY + 14, qColor, m_fontMedium);
 
     // Keyboard with rounded keycaps
@@ -3139,7 +2509,7 @@ void UIManager::renderSearchState() {
         for (int col = 0; col < kbColCount; col++) {
             int cx = panelX + kbPadX + col * (cellW + gap);
             int cy = kbStartY + row * (cellH + 8);
-            bool isSel = (!m_kbInResults && m_kbCursorRow == row && m_kbCursorCol == col);
+            bool isSel = (!m_searchVk.inResults && m_searchVk.row == row && m_searchVk.col == col);
 
             char ch = kbRows[row][col];
             std::string label;
@@ -3166,7 +2536,7 @@ void UIManager::renderSearchState() {
     int rPanelH = 630;
 
     int numResults = static_cast<int>(m_searchResults.size());
-    if (m_searchQuery.length() < 2) {
+    if (m_searchVk.query.length() < 2) {
         drawText(UiStrings::SEARCH_PROMPT_MIN_CHARS, rPanelX + rPanelW / 2, rPanelY + 60, {80, 95, 115, 255}, m_fontSmall, true);
     } else if (numResults == 0) {
         drawText(UiStrings::SEARCH_NO_RESULTS, rPanelX + rPanelW / 2, rPanelY + 60, {239, 68, 68, 255}, m_fontSmall, true);
@@ -3181,7 +2551,7 @@ void UIManager::renderSearchState() {
         for (int i = 0; i < pageSize && (m_searchScrollOffset + i) < numResults; i++) {
             int idx = m_searchScrollOffset + i;
             const auto& g = m_searchResults[idx];
-            bool isSel = (m_kbInResults && idx == m_searchSelectedIndex);
+            bool isSel = (m_searchVk.inResults && idx == m_searchSelectedIndex);
 
             int itemY = listStartY + i * itemH;
             SDL_Color rowBg = isSel ? SDL_Color{2, 55, 82, 255} : SDL_Color{20, 28, 42, 255};
@@ -3218,7 +2588,7 @@ void UIManager::renderSearchState() {
     }
 
     // Hint: which panel is active
-    std::string hint = m_kbInResults ? UiStrings::SEARCH_NAV_UP_HINT : UiStrings::SEARCH_NAV_DOWN_HINT;
+    std::string hint = m_searchVk.inResults ? UiStrings::SEARCH_NAV_UP_HINT : UiStrings::SEARCH_NAV_DOWN_HINT;
     drawText(hint, 512, 705, {60, 75, 95, 255}, m_fontSmall, true);
 }
 
@@ -3259,7 +2629,7 @@ void UIManager::renderFooter() {
         x = drawFooterHint("START", UiStrings::BTN_SEARCH, x, barY, barH, cyan, m_fontSmall, iconSize, gap) + 30;
         x = drawFooterHint("SELECT", UiStrings::FOOTER_FILTER, x, barY, barH, fg, m_fontSmall, iconSize, gap) + 30;
     } else if (m_currentState == UIState::SEARCH) {
-        if (!m_kbInResults) {
+        if (!m_searchVk.inResults) {
             x = drawFooterHint("A", UiStrings::BTN_SELECT_CHAR, x, barY, barH, fg, m_fontSmall, iconSize, gap) + 30;
             x = drawFooterHint("X", UiStrings::BTN_CLEAR_ALL, x, barY, barH, fg, m_fontSmall, iconSize, gap) + 30;
         } else {
@@ -3299,6 +2669,12 @@ void UIManager::renderFooter() {
     } else if (m_currentState == UIState::OTA_UPDATE) {
         x = drawFooterHint("A", UiStrings::FOOTER_CONFIRM, x, barY, barH, fg, m_fontSmall, iconSize, gap) + 30;
         x = drawFooterHint("B", UiStrings::FOOTER_CANCEL, x, barY, barH, fg, m_fontSmall, iconSize, gap) + 30;
+    } else if (m_currentState == UIState::FILE_EXPLORER) {
+        x = drawFooterHint("A", "Vao", x, barY, barH, fg, m_fontSmall, iconSize, gap) + 30;
+        x = drawFooterHint("B", "Lui", x, barY, barH, fg, m_fontSmall, iconSize, gap) + 30;
+        x = drawFooterHint("X", "Cut", x, barY, barH, fg, m_fontSmall, iconSize, gap) + 30;
+        x = drawFooterHint("Y", "Copy", x, barY, barH, fg, m_fontSmall, iconSize, gap) + 30;
+        x = drawFooterHint("R1", "Paste", x, barY, barH, fg, m_fontSmall, iconSize, gap) + 30;
     } else {
         x = drawFooterHint("A", UiStrings::FOOTER_SELECT, x, barY, barH, fg, m_fontSmall, iconSize, gap) + 30;
         x = drawFooterHint("B", UiStrings::FOOTER_BACK, x, barY, barH, fg, m_fontSmall, iconSize, gap) + 30;
@@ -3309,17 +2685,19 @@ void UIManager::renderFooter() {
 }
 
 void UIManager::renderToast() {
-    uint32_t now = SDL_GetTicks();
-    if (now < m_toastExpiry && !m_toastMessage.empty()) {
+    if (!m_dialogs.toast.visible()) return;
+    uint32_t packed = m_dialogs.toast.colorPacked;
+    SDL_Color border = {(uint8_t)(packed >> 24), (uint8_t)(packed >> 16), (uint8_t)(packed >> 8), (uint8_t)packed};
+    {
         int toastW = 620;
         int toastH = 48;
         int toastX = (1024 - toastW) / 2;
         int toastY = 645;
 
         drawRoundedRect(toastX, toastY, toastW, toastH, 24, {20, 24, 32, 245}, true);
-        drawRoundedBorder(toastX, toastY, toastW, toastH, 24, m_toastColor, 2);
+        drawRoundedBorder(toastX, toastY, toastW, toastH, 24, border, 2);
         // Toast co the chua token [NUT] -> ve icon that can giua
-        drawInlineHintsCentered(m_toastMessage, 512, toastY + 14, {255, 255, 255, 255}, m_fontSmall, 24);
+        drawInlineHintsCentered(m_dialogs.toast.message, 512, toastY + 14, {255, 255, 255, 255}, m_fontSmall, 24);
     }
 }
 
@@ -3747,103 +3125,145 @@ void UIManager::renderGameListState() {
     }
 }
 
-void UIManager::renderConfirmDeleteDialog() {
-    // Dim background overlay
-    beginModalDim();
-
-    int dlgW = 640;
-    int dlgH = 340;
-    int dlgX = (1024 - dlgW) / 2;
-    int dlgY = (768 - dlgH) / 2;
-
-    // Borderless dialog - just rounded background
-    drawRoundedRect(dlgX, dlgY, dlgW, dlgH, UiTheme::RADIUS_MODAL, {24, 28, 38, 255}, true);
-
-    // Simple title with background color bar (no border)
-    drawRect(dlgX, dlgY, dlgW, 48, {185, 28, 28, 255}, true);
-    drawText(UiStrings::DIALOG_DELETE_TITLE, dlgX + dlgW / 2, dlgY + 14, {255, 255, 255, 255}, m_fontLarge, true);
-
-    if (m_selectedGameIndex >= 0 && m_selectedGameIndex < static_cast<int>(m_cachedGames.size())) {
-        const auto& game = m_cachedGames[m_selectedGameIndex];
-
-        drawText(game.title, dlgX + dlgW / 2, dlgY + 85, {255, 255, 255, 255}, m_fontMedium, true);
-        std::string sizeStr = std::string(UiStrings::DIALOG_DELETE_FILE_PREFIX) + game.filename + " (" + FileSystemManager::instance().formatBytes(game.sizeBytes) + ")";
-        drawText(sizeStr, dlgX + dlgW / 2, dlgY + 120, {0, 180, 216, 255}, m_fontSmall, true);
-
-        drawText(UiStrings::DIALOG_DELETE_PROMPT, dlgX + dlgW / 2, dlgY + 165, {220, 225, 235, 255}, m_fontSmall, true);
-        drawText(UiStrings::DIALOG_DELETE_SAFE_HINT, dlgX + dlgW / 2, dlgY + 195, {34, 197, 94, 255}, m_fontSmall, true);
-    }
-
-    // Action buttons with button icons
-    int btnW = 220;
-    int btnH = 50;
-    int btnY = dlgY + 250;
-    // A button (confirm - red background already in drawBadge)
-    drawBadge(dlgX + 60, btnY, btnW, btnH, UiStrings::BTN_CONFIRM_DELETE, {185, 28, 28, 255}, {255, 255, 255, 255});
-    // B button (cancel)
-    drawBadge(dlgX + dlgW - 60 - btnW, btnY, btnW, btnH, UiStrings::BTN_CANCEL_DELETE, {55, 65, 81, 255}, {255, 255, 255, 255});
+void UIManager::openConfirmDeleteDialog() {
+    if (m_selectedGameIndex < 0 || m_selectedGameIndex >= static_cast<int>(m_cachedGames.size())) return;
+    int64_t gameId = m_cachedGames[m_selectedGameIndex].id;
+    std::string gameTitle = m_cachedGames[m_selectedGameIndex].title;
+    std::string fileLine = std::string("File: ") + m_cachedGames[m_selectedGameIndex].filename +
+        " (" + FileSystemManager::instance().formatBytes(m_cachedGames[m_selectedGameIndex].sizeBytes) + ")";
+    m_dialogs.confirm.open(std::string(UiStrings::DIALOG_DELETE_TITLE),
+        {gameTitle, fileLine, std::string(UiStrings::DIALOG_DELETE_PROMPT)},
+        [this, gameId, gameTitle]() {
+            DatabaseManager::instance().markGameDeletedLocally(gameId);
+            refreshSystems();
+            refreshGames();
+            showToast("Đã xóa \"" + gameTitle + "\" khỏi thẻ nhớ.", {239, 68, 68, 255}, 3000);
+        }, true);
 }
 
-void UIManager::renderConfirmBatchDeleteDialog() {
-    // Dim background overlay
-    beginModalDim();
-
-    int dlgW = 680;
-    int dlgH = 400;
-    int dlgX = (1024 - dlgW) / 2;
-    int dlgY = (768 - dlgH) / 2;
-
-    // Borderless dialog - just rounded background
-    drawRoundedRect(dlgX, dlgY, dlgW, dlgH, UiTheme::RADIUS_MODAL, {24, 28, 38, 255}, true);
-
-    // Simple title bar (no border)
-    drawRect(dlgX, dlgY, dlgW, 48, {185, 28, 28, 255}, true);
-    drawText(UiStrings::MULTI_BATCH_DELETE_TITLE, dlgX + dlgW / 2, dlgY + 14, {255, 255, 255, 255}, m_fontLarge, true);
-
-    // Count of selected games
+void UIManager::openConfirmBatchDeleteDialog() {
     int selCount = static_cast<int>(m_selectedGameIds.size());
-
-    // Calculate total size
+    if (selCount <= 0) return;
     uint64_t totalSize = 0;
+    std::vector<std::string> lines;
+    lines.push_back("Bạn muốn xóa " + std::to_string(selCount) + " game khỏi thẻ nhớ?");
     for (int64_t gameId : m_selectedGameIds) {
         for (const auto& g : m_cachedGames) {
-            if (g.id == gameId) {
-                totalSize += g.sizeBytes;
-                break;
-            }
+            if (g.id == gameId) { totalSize += g.sizeBytes; break; }
         }
     }
-
-    drawText("Bạn muốn xóa " + std::to_string(selCount) + " game khỏi thẻ nhớ?", dlgX + dlgW / 2, dlgY + 80, {220, 225, 235, 255}, m_fontMedium, true);
-    drawText("Tổng dung lượng: " + FileSystemManager::instance().formatBytes(totalSize), dlgX + dlgW / 2, dlgY + 115, {0, 180, 216, 255}, m_fontSmall, true);
-
-    // Show selected game names (up to 5)
-    int nameY = dlgY + 155;
-    int shownCount = 0;
+    lines.push_back("Tổng dung lượng: " + FileSystemManager::instance().formatBytes(totalSize));
+    int shown = 0;
     for (const auto& g : m_cachedGames) {
-        if (shownCount >= 5) break;
-        auto it = std::find(m_selectedGameIds.begin(), m_selectedGameIds.end(), g.id);
-        if (it != m_selectedGameIds.end()) {
-            std::string title = g.title;
-            if (title.length() > 40) title = title.substr(0, 37) + "...";
-            drawText("- " + title, dlgX + 60, nameY, {200, 210, 225, 255}, m_fontSmall);
-            nameY += 28;
-            shownCount++;
+        if (shown >= 5) break;
+        if (std::find(m_selectedGameIds.begin(), m_selectedGameIds.end(), g.id) != m_selectedGameIds.end()) {
+            std::string t = g.title;
+            if (t.length() > 40) t = t.substr(0, 37) + "...";
+            lines.push_back("- " + t);
+            shown++;
         }
     }
+    std::vector<int64_t> ids = m_selectedGameIds;
+    m_dialogs.confirm.open(std::string(UiStrings::MULTI_BATCH_DELETE_TITLE), std::move(lines),
+        [this, ids]() {
+            for (int64_t gameId : ids) DatabaseManager::instance().markGameDeletedLocally(gameId);
+            refreshSystems();
+            refreshGames();
+            showToast("Đã xóa " + std::to_string(ids.size()) + " game khỏi thẻ nhớ.", {239, 68, 68, 255}, 4000);
+            m_multiSelectMode = false;
+            m_selectedGameIds.clear();
+        }, true);
+}
 
-    if (selCount > 5) {
-        drawText("... và " + std::to_string(selCount - 5) + " game khác", dlgX + 60, nameY, {140, 155, 170, 255}, m_fontSmall);
+void UIManager::renderConfirmDialogFromState() {
+    if (!m_dialogs.confirm.visible) return;
+    beginModalDim();
+
+    const auto& lines = m_dialogs.confirm.lines;
+    // Chieu cao co gian theo so dong (giong 340 don / 400 batch cu)
+    int dlgW = 680;
+    int dlgH = 200 + static_cast<int>(lines.size()) * 34;
+    if (dlgH < 300) dlgH = 300;
+    if (dlgH > 460) dlgH = 460;
+    int dlgX = (1024 - dlgW) / 2;
+    int dlgY = (768 - dlgH) / 2;
+    SDL_Color titleBg = m_dialogs.confirm.danger ? SDL_Color{185, 28, 28, 255} : SDL_Color{18, 55, 95, 255};
+
+    drawRoundedRect(dlgX, dlgY, dlgW, dlgH, UiTheme::RADIUS_MODAL, {24, 28, 38, 255}, true);
+    drawRect(dlgX, dlgY, dlgW, 48, titleBg, true);
+    drawText(m_dialogs.confirm.title, dlgX + dlgW / 2, dlgY + 14, {255, 255, 255, 255}, m_fontLarge, true);
+
+    int y = dlgY + 80;
+    for (size_t i = 0; i < lines.size(); ++i) {
+        SDL_Color c = {220, 225, 235, 255};
+        TTF_Font* f = m_fontSmall;
+        bool centered = true;
+        if (i == 0) { c = {255, 255, 255, 255}; f = m_fontMedium; }
+        else if (lines[i].rfind("- ", 0) == 0) { centered = false; }
+        else if (lines[i].rfind("File:", 0) == 0 || lines[i].rfind("Tổng", 0) == 0) { c = {0, 180, 216, 255}; }
+        if (centered) drawText(lines[i], dlgX + dlgW / 2, y, c, f, true);
+        else drawText(lines[i], dlgX + 60, y, {200, 210, 225, 255}, f, false);
+        y += (i == 0 ? 38 : 30);
+        if (y > dlgY + dlgH - 90) break;
     }
 
-    drawText(UiStrings::MULTI_BATCH_DELETE_SAFE, dlgX + dlgW / 2, dlgY + dlgH - 100, {34, 197, 94, 255}, m_fontSmall, true);
-
-    // Action buttons
     int btnW = 240;
     int btnH = 50;
     drawBadge(dlgX + 60, dlgY + dlgH - 70, btnW, btnH, UiStrings::MULTI_BATCH_DELETE_CONFIRM, {185, 28, 28, 255}, {255, 255, 255, 255});
     drawBadge(dlgX + dlgW - 60 - btnW, dlgY + dlgH - 70, btnW, btnH, UiStrings::BTN_CANCEL_DELETE, {55, 65, 81, 255}, {255, 255, 255, 255});
 }
+
+void UIManager::renderConfirmDeleteDialog() {
+    renderConfirmDialogFromState();
+}
+
+void UIManager::renderConfirmBatchDeleteDialog() {
+    renderConfirmDialogFromState();
+}
+
+void UIManager::renderProgressDialogFromState() {
+    if (!m_dialogs.progress.visible) return;
+    beginModalDim();
+
+    int dlgW = 620;
+    int dlgH = 220;
+    int dlgX = (1024 - dlgW) / 2;
+    int dlgY = (768 - dlgH) / 2;
+    drawRoundedRect(dlgX, dlgY, dlgW, dlgH, UiTheme::RADIUS_MODAL, {24, 28, 38, 255}, true);
+    drawRect(dlgX, dlgY, dlgW, 48, {18, 55, 95, 255}, true);
+    drawText(m_dialogs.progress.title, dlgX + dlgW / 2, dlgY + 14, {255, 255, 255, 255}, m_fontLarge, true);
+
+    if (!m_dialogs.progress.detail.empty()) {
+        drawText(m_dialogs.progress.detail, dlgX + dlgW / 2, dlgY + 80,
+                 {0, 180, 216, 255}, m_fontSmall, true);
+    }
+    int barW = dlgW - 120;
+    int barX = dlgX + 60;
+    int barY = dlgY + 120;
+    drawProgressBar(barX, barY, barW, 18, m_dialogs.progress.fraction(),
+                    {0, 180, 216, 255}, true);
+    char pctBuf[32];
+    std::snprintf(pctBuf, sizeof(pctBuf), "%.0f%%", m_dialogs.progress.fraction() * 100.0);
+    drawText(pctBuf, dlgX + dlgW / 2, barY + 28, {255, 255, 255, 255}, m_fontSmall, true);
+}
+void UIManager::drawProgressBar(int x, int y, int w, int h, double frac, SDL_Color fill, bool rounded, SDL_Color bg) {
+    if (frac < 0) frac = 0;
+    if (frac > 1) frac = 1;
+    int radius = rounded ? UiTheme::RADIUS_ROW : 0;
+    if (rounded) {
+        drawRoundedRect(x, y, w, h, radius, bg, true);
+    } else {
+        drawRect(x, y, w, h, bg, true);
+    }
+    int fw = (int)(w * frac);
+    if (fw <= 0) return;
+    if (rounded) {
+        drawRoundedRect(x, y, fw, h, radius, fill, true);
+    } else {
+        drawRect(x, y, fw, h, fill, true);
+    }
+}
+
 
 void UIManager::renderDisclaimerState() {
     // Borderless disclaimer card - no outer border
@@ -4146,16 +3566,13 @@ void UIManager::renderSyncOverlay() {
         std::string progressStr = "Hệ máy " + std::to_string(prog.currentSystemIndex) + " / " + std::to_string(prog.totalSystems);
         drawText(progressStr, boxX + boxW / 2, contentY + 35, {0, 180, 216, 255}, m_fontSmall, true);
 
-        // Progress bar
+        // Progress bar (ve chung drawProgressBar)
         int barW = 540;
         int barH = 16;
         int barX = boxX + (boxW - barW) / 2;
         int barY = contentY + 70;
-        drawRect(barX, barY, barW, barH, {35, 42, 54, 255}, true);
-        if (prog.totalSystems > 0) {
-            float pct = (float)prog.currentSystemIndex / (float)prog.totalSystems;
-            drawRect(barX, barY, (int)(barW * pct), barH, {0, 180, 216, 255}, true);
-        }
+        float syncPct = prog.totalSystems > 0 ? (float)prog.currentSystemIndex / (float)prog.totalSystems : 0.0f;
+        drawProgressBar(barX, barY, barW, barH, syncPct, {0, 180, 216, 255});
 
         int statY = contentY + 110;
         std::string stats = "Đã lưu vào kho: " + std::to_string(prog.cloudGamesFound) +
@@ -4204,14 +3621,13 @@ void UIManager::renderDownloadOverlay() {
     }
     drawText(statusMsg, boxX + boxW / 2, contentY + 75, {245, 158, 11, 255}, m_fontSmall, true);
 
-    // Progress bar
+    // Progress bar (ve chung drawProgressBar)
     int barW = 560;
     int barH = 18;
     int barX = boxX + (boxW - barW) / 2;
     int barY = contentY + 105;
-    drawRect(barX, barY, barW, barH, {35, 42, 54, 255}, true);
     float pct = std::max(0.0, std::min(100.0, prog.progressPct));
-    drawRect(barX, barY, (int)(barW * (pct / 100.0)), barH, {34, 197, 94, 255}, true);
+    drawProgressBar(barX, barY, barW, barH, pct / 100.0, {34, 197, 94, 255});
 
     // Size details
     std::string downloadedStr = FileSystemManager::instance().formatBytes(prog.bytesDownloaded);
@@ -4340,9 +3756,8 @@ void UIManager::renderReverseSyncState() {
             int barH = 20;
             int barX = cardX + (cardW - barW) / 2;
             int barY = contentY + 120;
-            drawRoundedRect(barX, barY, barW, barH, UiTheme::RADIUS_ROW, {35, 45, 60, 255}, true);
             float pct = std::max(0.0f, std::min(100.0f, (float)prog.progressPct));
-            drawRoundedRect(barX, barY, (int)(barW * (pct / 100.0)), barH, UiTheme::RADIUS_ROW, {168, 85, 247, 255}, true);
+            drawProgressBar(barX, barY, barW, barH, pct / 100.0, {168, 85, 247, 255}, true);
 
             // Stats & speed
             std::string speedStr = "";
@@ -4505,9 +3920,8 @@ void UIManager::renderOTAUpdateState() {
             int barH = 22;
             int barX = 512 - barW / 2;
             int barY = contentBoxY + 115;
-            drawRoundedRect(barX, barY, barW, barH, UiTheme::RADIUS_ROW, {35, 42, 54, 255}, true);
             float pct = std::max(0.0, std::min(100.0, prog.progressPct));
-            drawRoundedRect(barX, barY, (int)(barW * (pct / 100.0)), barH, UiTheme::RADIUS_ROW, {34, 197, 94, 255}, true);
+            drawProgressBar(barX, barY, barW, barH, pct / 100.0, {34, 197, 94, 255}, true);
 
             char pctBuf[32];
             std::snprintf(pctBuf, sizeof(pctBuf), "%.1f%%", pct);
@@ -4879,8 +4293,8 @@ void UIManager::renderIPTVSearchState() {
     // Search Query Box
     drawRoundedRect(panelX, panelY, panelW, 52, UiTheme::RADIUS_ROW, {22, 32, 46, 255}, true);
     drawRoundedBorder(panelX, panelY, panelW, 52, UiTheme::RADIUS_ROW, {0, 180, 216, 255}, 2);
-    std::string displayQuery = m_iptvSearchQuery.empty() ? "Nhập tên kênh (VTV, HBO...)" : m_iptvSearchQuery + "_";
-    SDL_Color qColor = m_iptvSearchQuery.empty() ? SDL_Color{80, 95, 115, 255} : SDL_Color{255, 255, 255, 255};
+    std::string displayQuery = m_iptvVk.query.empty() ? "Nhập tên kênh (VTV, HBO...)" : m_iptvVk.query + "_";
+    SDL_Color qColor = m_iptvVk.query.empty() ? SDL_Color{80, 95, 115, 255} : SDL_Color{255, 255, 255, 255};
     drawText(displayQuery, panelX + 16, panelY + 14, qColor, m_fontMedium);
 
     // QWERTY Virtual Keyboard
@@ -4894,7 +4308,7 @@ void UIManager::renderIPTVSearchState() {
         for (int col = 0; col < kbColCount; col++) {
             int cx = panelX + kbPadX + col * (cellW + gap);
             int cy = kbStartY + row * (cellH + 8);
-            bool isSel = (!m_iptvKbInResults && m_iptvKbRow == row && m_iptvKbCol == col);
+            bool isSel = (!m_iptvVk.inResults && m_iptvVk.row == row && m_iptvVk.col == col);
 
             char ch = qwertyRows[row][col];
             std::string label;
@@ -4919,7 +4333,7 @@ void UIManager::renderIPTVSearchState() {
     int rPanelW = 1024 - rPanelX - 24;
     int rPanelY = panelY;
 
-    if (m_iptvSearchQuery.empty()) {
+    if (m_iptvVk.query.empty()) {
         drawText("Nhập chữ cái trên bàn phím để tìm kênh.", rPanelX + rPanelW / 2, rPanelY + 60, {100, 115, 135, 255}, m_fontSmall, true);
         drawText("Hỗ trợ tìm theo tên kênh hoặc thể loại.", rPanelX + rPanelW / 2, rPanelY + 100, {80, 95, 115, 255}, m_fontSmall, true);
     } else if (numResults == 0) {
@@ -4932,7 +4346,7 @@ void UIManager::renderIPTVSearchState() {
         for (int i = 0; i < pageSize && (m_iptvSearchScrollOffset + i) < numResults; i++) {
             int idx = m_iptvSearchScrollOffset + i;
             const auto& chan = m_iptvSearchResults[idx];
-            bool isSel = (m_iptvKbInResults && idx == m_iptvSearchSelectedIndex);
+            bool isSel = (m_iptvVk.inResults && idx == m_iptvSearchSelectedIndex);
 
             int itemY = listStartY + i * (itemH + 6);
             SDL_Color rowBg = isSel ? SDL_Color{30, 58, 95, 255} : SDL_Color{22, 28, 38, 255};
@@ -4972,7 +4386,7 @@ void UIManager::renderIPTVSearchState() {
     drawRect(0, 715, 1024, 53, {18, 22, 30, 255}, true);
     drawRect(0, 715, 1024, 1, {40, 48, 62, 255}, true);
 
-    if (!m_iptvKbInResults) {
+    if (!m_iptvVk.inResults) {
         drawAppFooter({{UiTheme::PadBtn::B, "Lùi"}, {UiTheme::PadBtn::X, "Xóa"}});
     } else {
         drawAppFooter({{UiTheme::PadBtn::B, "Bàn phím"}, {UiTheme::PadBtn::X, "Thích"}, {UiTheme::PadBtn::L1, "Trang"}, {UiTheme::PadBtn::R1, "Trang"}});
@@ -5018,11 +4432,13 @@ void UIManager::render() {
         case UIState::LOCALSEND_SEND:       renderLocalSendSendPicker(); break;
         case UIState::LOCALSEND_GAME_PICKER: renderLocalSendHome(); renderLocalSendGamePicker(); break;
         case UIState::LOCALSEND_PROGRESS:   renderLocalSendHome(); renderLocalSendProgress(); break;
+        case UIState::FILE_EXPLORER:        renderFileExplorer(); break;
         default: break;
     }
 
     renderFooter();
     renderToast();
+    renderProgressDialogFromState();
     renderSyncOverlay();
     renderUploadOverlay();
     SDL_RenderPresent(m_renderer);
@@ -5399,23 +4815,18 @@ void UIManager::preloadYouTubeStreamUrl(const std::string& videoId) {
         std::lock_guard<std::mutex> lock(s_ytStreamMutex);
         if (m_ytStreamUrlCache.find(videoId) != m_ytStreamUrlCache.end()) return;
     }
-    std::thread([this, videoId]() {
+    m_resolveTask.run([this, videoId](TaskProgress&) {
         resolveYouTubeStreamUrl(videoId);
-    }).detach();
+    });
 }
 
 void UIManager::clearThumbnailCache() {
-    for (auto& pair : m_ytThumbnails) {
-        if (pair.second) {
-            SDL_DestroyTexture(pair.second);
-        }
-    }
-    m_ytThumbnails.clear();
+    m_ytThumbCache.clear();
 }
 
 void UIManager::startThumbnailDownloads(const std::vector<std::string>& videoIds) {
     if (videoIds.empty()) return;
-    std::thread([videoIds]() {
+    m_thumbTask.run([videoIds](TaskProgress&) {
         mkdir("/tmp/yt_thumbs", 0777);
         std::string batchCmd;
         int count = 0;
@@ -5452,28 +4863,28 @@ void UIManager::startThumbnailDownloads(const std::vector<std::string>& videoIds
         if (!batchCmd.empty()) {
             system(batchCmd.c_str());
         }
-    }).detach();
+    });
 }
 
 void UIManager::triggerYouTubeSearch() {
-    if (m_ytSearchQuery.empty()) {
+    if (m_ytVk.query.empty()) {
         showToast("Vui lòng nhập từ khóa tìm kiếm", {245, 158, 11, 255}, 2000);
         return;
     }
     if (m_ytIsSearching) return;
 
     m_ytCurrentPage = 1;
-    m_ytLastSearchQuery = m_ytSearchQuery;
+    m_ytLastSearchQuery = m_ytVk.query;
     m_ytAllCachedResults.clear();
     clearThumbnailCache();
-    saveYouTubeHistory(m_ytSearchQuery);
+    saveYouTubeHistory(m_ytVk.query);
 
     m_ytIsSearching = true;
     m_ytSearchFinished = false;
     m_ytErrorMessage.clear();
-    std::string query = m_ytSearchQuery;
+    std::string query = m_ytVk.query;
 
-    std::thread([this, query]() {
+    m_ytSearchTask.run([this, query](TaskProgress&) {
         auto results = runYouTubeSearch(query, 1);
         if (!results.empty()) {
             m_ytAllCachedResults = results;
@@ -5486,7 +4897,7 @@ void UIManager::triggerYouTubeSearch() {
         m_ytSearchSelectedIndex = 0;
         m_ytSearchScrollOffset = 0;
         m_ytSearchFinished = true;
-    }).detach();
+    });
 }
 
 void UIManager::playYouTubeVideo(const std::string& videoId) {
@@ -5506,11 +4917,11 @@ void UIManager::playYouTubeVideo(const std::string& videoId) {
     m_ytPendingStreamUrl.clear();
     m_ytPendingVideoId = videoId;
 
-    std::thread([this, videoId]() {
+    m_resolveTask.run([this, videoId](TaskProgress&) {
         std::string streamUrl = resolveYouTubeStreamUrl(videoId);
         m_ytPendingStreamUrl = streamUrl;
         m_ytVideoReady = true;
-    }).detach();
+    });
 }
 
 static std::string trimUtf8(const std::string& str) {
@@ -5648,8 +5059,8 @@ void UIManager::renderYouTubeSearchState() {
 
     // Current input mode badge (TELEX vs US) positioned safely to the right
     // Dat [R1] o dau de drawBadge parse thanh icon that
-    std::string modeText = m_ytTelexMode ? "[R1] TELEX" : "[R1] US";
-    SDL_Color modeBg = m_ytTelexMode ? SDL_Color{0, 200, 83, 255} : SDL_Color{25, 60, 78, 255};
+    std::string modeText = m_ytVk.telexMode ? "[R1] TELEX" : "[R1] US";
+    SDL_Color modeBg = m_ytVk.telexMode ? SDL_Color{0, 200, 83, 255} : SDL_Color{25, 60, 78, 255};
     drawBadge(220, 11, 108, 28, modeText, modeBg, {255, 255, 255, 255});
 
     // Right-side indicators: Battery & Clock
@@ -5677,8 +5088,8 @@ void UIManager::renderYouTubeSearchState() {
     drawRoundedRect(inX, inY, inW, inH, UiTheme::RADIUS_CARD, {12, 38, 50, 230}, true);
     drawRoundedBorder(inX, inY, inW, inH, UiTheme::RADIUS_CARD, {26, 72, 92, 255}, 1);
 
-    std::string dispQ = m_ytSearchQuery.empty() ? "Nhập từ khóa tìm kiếm video..." : (m_ytSearchQuery + " _");
-    SDL_Color qCol = m_ytSearchQuery.empty() ? SDL_Color{75, 115, 135, 255} : SDL_Color{255, 255, 255, 255};
+    std::string dispQ = m_ytVk.query.empty() ? "Nhập từ khóa tìm kiếm video..." : (m_ytVk.query + " _");
+    SDL_Color qCol = m_ytVk.query.empty() ? SDL_Color{75, 115, 135, 255} : SDL_Color{255, 255, 255, 255};
     drawText(dispQ, inX + 20, inY + (inH - textHeight(m_fontLarge)) / 2, qCol, m_fontLarge, false);
 
     // ─── Upper Section: Search History Chips (Y = 124 to 445) ───
@@ -5747,9 +5158,9 @@ void UIManager::renderYouTubeSearchState() {
         for (int col = 0; col < 10; col++) {
             int cx = kbStartX + col * (cellW + gapX);
             int cy = kbStartY + row * (cellH + gapY);
-            bool isSel = (!m_ytFocusInTags && m_ytKbRow == row && m_ytKbCol == col);
+            bool isSel = (!m_ytFocusInTags && m_ytVk.row == row && m_ytVk.col == col);
 
-            char ch = m_ytKbShift ? upperRows[row][col] : lowerRows[row][col];
+            char ch = m_ytVk.shift ? upperRows[row][col] : lowerRows[row][col];
             std::string label(1, ch);
 
             if (isSel) {
@@ -5773,8 +5184,8 @@ void UIManager::renderYouTubeSearchState() {
         std::string label;
     };
     ActionKey actKeys[5] = {
-        {"L1", m_ytKbShift ? "HOA" : "Thường"},
-        {"R1", m_ytTelexMode ? "TELEX" : "US"},
+        {"L1", m_ytVk.shift ? "HOA" : "Thường"},
+        {"R1", m_ytVk.telexMode ? "TELEX" : "US"},
         {"X", "Cách"},
         {"Y", "Xóa"},
         {"START", "Tìm"}
@@ -5782,7 +5193,7 @@ void UIManager::renderYouTubeSearchState() {
 
     for (int i = 0; i < 5; i++) {
         int cx = kbStartX + i * (actW + gapX);
-        bool isSel = (!m_ytFocusInTags && m_ytKbRow == 4 && (m_ytKbCol / 2) == i);
+        bool isSel = (!m_ytFocusInTags && m_ytVk.row == 4 && (m_ytVk.col / 2) == i);
 
         // Ve icon nut + label can giua trong phim (thay text "[L]" cu)
         int iconSz = 30, kgap = 8;
@@ -5820,28 +5231,21 @@ void UIManager::renderYouTubeSearchState() {
         drawRoundedRect(280, 290, 464, 140, UiTheme::RADIUS_ROW, SDL_Color{14, 38, 50, 255}, true);
         drawRoundedBorder(280, 290, 464, 140, UiTheme::RADIUS_ROW, {0, 200, 83, 255}, 2);
         drawText("ĐANG TÌM KIẾM...", 512, 325, {0, 200, 83, 255}, m_fontMedium, true);
-        std::string qText = "\"" + m_ytSearchQuery + "\"";
+        std::string qText = "\"" + m_ytVk.query + "\"";
         if (qText.length() > 36) qText = qText.substr(0, 33) + "...\"";
         drawText(qText, 512, 370, {240, 240, 240, 255}, m_fontSmall, true);
     }
 }
 
 void UIManager::renderYouTubeResultsState() {
-    // RAM Management: clean old thumbnails when switching pages or if cache exceeds 24
-    if (m_ytThumbnails.size() > 24) {
+    // RAM Management: giu thumbnail dang hien, xoa phan con lai khi vuot 24 (LRU 24).
+    if (m_ytThumbCache.size() > 24) {
         std::unordered_set<std::string> currentVisible;
         for (const auto& item : m_ytSearchResults) {
             size_t p = item.find('|');
             if (p != std::string::npos) currentVisible.insert(item.substr(0, p));
         }
-        for (auto it = m_ytThumbnails.begin(); it != m_ytThumbnails.end(); ) {
-            if (currentVisible.find(it->first) == currentVisible.end()) {
-                if (it->second) SDL_DestroyTexture(it->second);
-                it = m_ytThumbnails.erase(it);
-            } else {
-                ++it;
-            }
-        }
+        m_ytThumbCache.retainOnly(currentVisible);
     }
 
     // Pure dark background matching Image 1
@@ -5850,19 +5254,8 @@ void UIManager::renderYouTubeResultsState() {
     // Top Bar: YouTube Logo + Search Query on top left
     int logoH = 45;
     int logoW = 45;
-    SDL_Texture* ytLogo = nullptr;
-    auto itLogo = m_gridIconCache.find("YOUTUBE.png");
-    if (itLogo != m_gridIconCache.end()) {
-        ytLogo = itLogo->second;
-    } else {
-        std::string iconPath = AppConfig::instance().getAssetsDir() + "/apps_icons/YOUTUBE.png";
-        SDL_Surface* surf = IMG_Load(iconPath.c_str());
-        if (surf) {
-            ytLogo = SDL_CreateTextureFromSurface(m_renderer, surf);
-            SDL_FreeSurface(surf);
-            m_gridIconCache["YOUTUBE.png"] = ytLogo;
-        }
-    }
+    std::string ytLogoPath = AppConfig::instance().getAssetsDir() + "/apps_icons/YOUTUBE.png";
+    SDL_Texture* ytLogo = m_ui.getOrLoadImage("grid/YOUTUBE.png", ytLogoPath);
     int textStartX = 28;
     if (ytLogo) {
         int texW = 0, texH = 0;
@@ -5879,7 +5272,7 @@ void UIManager::renderYouTubeResultsState() {
         textStartX = 26 + logoW + 10;
     }
 
-    std::string queryDisplay = m_ytSearchQuery.empty() ? "" : (": " + m_ytSearchQuery);
+    std::string queryDisplay = m_ytVk.query.empty() ? "" : (": " + m_ytVk.query);
     if (!queryDisplay.empty()) {
         if (queryDisplay.length() > 38) queryDisplay = queryDisplay.substr(0, 35) + "...";
         drawText(queryDisplay, textStartX, 22, {245, 245, 245, 255}, m_fontMedium, false);
@@ -5944,7 +5337,7 @@ void UIManager::renderYouTubeResultsState() {
         int thumbY = cy + pad;
 
         if (!vid.empty()) {
-            if (m_ytThumbnails.find(vid) == m_ytThumbnails.end()) {
+            if (!m_ytThumbCache.contains(vid)) {
                 std::string thumbPath = "/tmp/yt_thumbs/" + vid + ".jpg";
                 struct stat st;
                 if (stat(thumbPath.c_str(), &st) == 0 && st.st_size > 1500) {
@@ -5963,21 +5356,23 @@ void UIManager::renderYouTubeResultsState() {
                         SDL_Surface* surf = IMG_Load(thumbPath.c_str());
                         if (surf) {
                             SDL_Texture* tex = SDL_CreateTextureFromSurface(m_renderer, surf);
+                            int iw = surf->w, ih = surf->h;
                             SDL_FreeSurface(surf);
-                            if (tex) m_ytThumbnails[vid] = tex;
+                            if (tex) m_ytThumbCache.put(vid, tex, iw, ih);
                         }
                     }
                 }
             }
         }
 
-        if (!vid.empty() && m_ytThumbnails.find(vid) != m_ytThumbnails.end() && m_ytThumbnails[vid]) {
+        SDL_Texture* thumbTex = !vid.empty() ? m_ytThumbCache.get(vid) : nullptr;
+        if (thumbTex) {
             int stx = PlatformInfo::instance().scaleX(thumbX);
             int sty = PlatformInfo::instance().scaleY(thumbY);
             int stw = PlatformInfo::instance().scaleW(thumbW);
             int sth = PlatformInfo::instance().scaleH(thumbH);
             SDL_Rect dstRect = {stx, sty, stw, sth};
-            SDL_RenderCopy(m_renderer, m_ytThumbnails[vid], nullptr, &dstRect);
+            SDL_RenderCopy(m_renderer, thumbTex, nullptr, &dstRect);
             drawRoundedBorder(thumbX, thumbY, thumbW, thumbH, UiTheme::RADIUS_ROW, {45, 45, 45, 180}, 1);
         } else {
             drawRoundedRect(thumbX, thumbY, thumbW, thumbH, UiTheme::RADIUS_ROW, SDL_Color{32, 32, 32, 255}, true);
@@ -6141,14 +5536,14 @@ void UIManager::triggerTikTokSearch() {
     if (m_ttIsSearching) return;
 
     m_ttCurrentPage = 1;
-    m_ttLastSearchQuery = m_ttSearchQuery;
+    m_ttLastSearchQuery = m_ttVk.query;
 
     m_ttIsSearching = true;
     m_ttSearchFinished = false;
     m_ttErrorMessage.clear();
-    std::string query = m_ttSearchQuery;
+    std::string query = m_ttVk.query;
 
-    std::thread([this, query]() {
+    m_ttSearchTask.run([this, query](TaskProgress&) {
         auto results = runTikTokSearch(query, 1);
         if (!results.empty()) {
             m_ttSearchResults = results;
@@ -6159,7 +5554,7 @@ void UIManager::triggerTikTokSearch() {
         m_ttSearchSelectedIndex = 0;
         m_ttSearchScrollOffset = 0;
         m_ttSearchFinished = true;
-    }).detach();
+    });
 }
 
 void UIManager::triggerTikTokTrending() {
@@ -6172,7 +5567,7 @@ void UIManager::triggerTikTokTrending() {
     m_ttSearchFinished = false;
     m_ttErrorMessage.clear();
 
-    std::thread([this]() {
+    m_ttSearchTask.run([this](TaskProgress&) {
         auto results = runTikTokTrending(1);
         if (!results.empty()) {
             m_ttSearchResults = results;
@@ -6183,7 +5578,7 @@ void UIManager::triggerTikTokTrending() {
         m_ttSearchSelectedIndex = 0;
         m_ttSearchScrollOffset = 0;
         m_ttSearchFinished = true;
-    }).detach();
+    });
 }
 
 void UIManager::playTikTokVideo(const std::string& tiktokUrl, const std::string& title) {
@@ -6195,13 +5590,13 @@ void UIManager::playTikTokVideo(const std::string& tiktokUrl, const std::string&
     m_ttPendingVideoId = tiktokUrl;
     m_ttPendingTitle = title;
 
-    std::thread([this, tiktokUrl]() {
+    m_resolveTask.run([this, tiktokUrl](TaskProgress&) {
         std::string streamUrl = resolveTikTokStreamUrl(tiktokUrl);
         if (!streamUrl.empty()) {
             m_ttPendingStreamUrl = streamUrl;
         }
         m_ttVideoReady = true;
-    }).detach();
+    });
 }
 
 // ─────────────────────────────────────────────
@@ -6228,8 +5623,8 @@ void UIManager::renderTikTokSearchState() {
     drawText("TikTok", 84, 15, {245, 250, 255, 255}, m_fontMedium, false);
 
     // Mode badge offset to 220 to avoid collision with title
-    std::string modeText = m_ttTelexMode ? "[R1] TELEX" : "[R1] US";
-    SDL_Color modeBg = m_ttTelexMode ? SDL_Color{255, 0, 80, 255} : SDL_Color{45, 45, 60, 255};
+    std::string modeText = m_ttVk.telexMode ? "[R1] TELEX" : "[R1] US";
+    SDL_Color modeBg = m_ttVk.telexMode ? SDL_Color{255, 0, 80, 255} : SDL_Color{45, 45, 60, 255};
     drawBadge(220, 11, 108, 28, modeText, modeBg, {255, 255, 255, 255});
 
     // Battery & Clock
@@ -6254,8 +5649,8 @@ void UIManager::renderTikTokSearchState() {
     drawRoundedRect(inX, inY, inW, inH, UiTheme::RADIUS_CARD, {22, 20, 32, 230}, true);
     drawRoundedBorder(inX, inY, inW, inH, UiTheme::RADIUS_CARD, {255, 0, 80, 180}, 1);
 
-    std::string dispQ = m_ttSearchQuery.empty() ? "Nhập từ khóa hoặc hashtag TikTok..." : (m_ttSearchQuery + " _");
-    SDL_Color qCol = m_ttSearchQuery.empty() ? SDL_Color{110, 100, 125, 255} : SDL_Color{255, 255, 255, 255};
+    std::string dispQ = m_ttVk.query.empty() ? "Nhập từ khóa hoặc hashtag TikTok..." : (m_ttVk.query + " _");
+    SDL_Color qCol = m_ttVk.query.empty() ? SDL_Color{110, 100, 125, 255} : SDL_Color{255, 255, 255, 255};
     drawText(dispQ, inX + 20, inY + (inH - textHeight(m_fontLarge)) / 2, qCol, m_fontLarge, false);
 
     // ─── Upper Section: Trending Hashtag Grid (Y = 124 to 445) ───
@@ -6323,9 +5718,9 @@ void UIManager::renderTikTokSearchState() {
         for (int col = 0; col < 10; col++) {
             int cx = kbStartX + col * (cellW + gapX);
             int cy = kbStartY + row * (cellH + gapY);
-            bool isSel = (!m_ttFocusInTags && m_ttKbRow == row && m_ttKbCol == col);
+            bool isSel = (!m_ttFocusInTags && m_ttVk.row == row && m_ttVk.col == col);
 
-            char ch = m_ttKbShift ? upperRows[row][col] : lowerRows[row][col];
+            char ch = m_ttVk.shift ? upperRows[row][col] : lowerRows[row][col];
             std::string label(1, ch);
 
             if (isSel) {
@@ -6349,8 +5744,8 @@ void UIManager::renderTikTokSearchState() {
         std::string label;
     };
     ActionKey actKeys[5] = {
-        {"L1", m_ttKbShift ? "HOA" : "Thường"},
-        {"R1", m_ttTelexMode ? "TELEX" : "US"},
+        {"L1", m_ttVk.shift ? "HOA" : "Thường"},
+        {"R1", m_ttVk.telexMode ? "TELEX" : "US"},
         {"X", "Cách"},
         {"Y", "Xóa"},
         {"START", "Tìm"}
@@ -6358,7 +5753,7 @@ void UIManager::renderTikTokSearchState() {
 
     for (int i = 0; i < 5; i++) {
         int cx = kbStartX + i * (actW + gapX);
-        bool isSel = (!m_ttFocusInTags && m_ttKbRow == 4 && (m_ttKbCol / 2) == i);
+        bool isSel = (!m_ttFocusInTags && m_ttVk.row == 4 && (m_ttVk.col / 2) == i);
 
         int iconSz = 30, kgap = 8;
         int lwTmp = textWidth(actKeys[i].label, m_fontMedium);
@@ -6395,7 +5790,7 @@ void UIManager::renderTikTokSearchState() {
         drawRoundedRect(280, 290, 464, 140, UiTheme::RADIUS_ROW, SDL_Color{25, 20, 35, 255}, true);
         drawRoundedBorder(280, 290, 464, 140, UiTheme::RADIUS_ROW, {255, 0, 80, 255}, 2);
         drawText("ĐANG TẢI TIKTOK...", 512, 325, {255, 0, 80, 255}, m_fontMedium, true);
-        std::string qText = m_ttSearchQuery.empty() ? "Video thịnh hành hôm nay" : ("\"" + m_ttSearchQuery + "\"");
+        std::string qText = m_ttVk.query.empty() ? "Video thịnh hành hôm nay" : ("\"" + m_ttVk.query + "\"");
         if (qText.length() > 36) qText = qText.substr(0, 33) + "...\"";
         drawText(qText, 512, 370, {240, 240, 240, 255}, m_fontSmall, true);
     }
@@ -6406,19 +5801,8 @@ void UIManager::renderTikTokResultsState() {
     drawAppBackground();
 
     // Top Bar: TikTok logo + query
-    SDL_Texture* ttLogo = nullptr;
-    auto itLogo = m_gridIconCache.find("TIKTOK.png");
-    if (itLogo != m_gridIconCache.end()) {
-        ttLogo = itLogo->second;
-    } else {
-        std::string iconPath = AppConfig::instance().getAssetsDir() + "/apps_icons/TIKTOK.png";
-        SDL_Surface* surf = IMG_Load(iconPath.c_str());
-        if (surf) {
-            ttLogo = SDL_CreateTextureFromSurface(m_renderer, surf);
-            SDL_FreeSurface(surf);
-            if (ttLogo) m_gridIconCache["TIKTOK.png"] = ttLogo;
-        }
-    }
+    std::string ttLogoPath = AppConfig::instance().getAssetsDir() + "/apps_icons/TIKTOK.png";
+    SDL_Texture* ttLogo = m_ui.getOrLoadImage("grid/TIKTOK.png", ttLogoPath);
 
     int logoH = 40;
     int logoW = 40;
@@ -6745,6 +6129,7 @@ void UIManager::renderLocalSendIncomingDialog() {
 void UIManager::startLsFolderRename(bool existing) {
     m_lsFolderRenameExisting = existing;
     m_lsFolderRenameOriginal.clear();
+    std::string init;
     if (existing) {
         if (m_localSendFolderSelected < 0 ||
             m_localSendFolderSelected >= (int)m_localSendFolderEntries.size()) {
@@ -6752,21 +6137,19 @@ void UIManager::startLsFolderRename(bool existing) {
             return;
         }
         m_lsFolderRenameOriginal = m_localSendFolderEntries[m_localSendFolderSelected];
-        std::string nm = m_lsFolderRenameOriginal.substr(
+        init = m_lsFolderRenameOriginal.substr(
             m_lsFolderRenameOriginal.find_last_of('/') + 1);
-        m_lsFolderRenameText = nm;
     } else {
-        m_lsFolderRenameText = suggestNewFolderName(m_localSendFolderCurrentPath);
+        init = suggestNewFolderName(m_localSendFolderCurrentPath);
     }
-    m_lsFolderKbRow = 0;
-    m_lsFolderKbCol = 0;
-    m_lsFolderKbShift = false;
+    VirtualKeyboard::reset(m_lsFolderVk, false);
+    m_lsFolderVk.query = init;
     m_lsFolderRenaming = true;
 }
 
 void UIManager::cancelLsFolderRename() {
     m_lsFolderRenaming = false;
-    m_lsFolderRenameText.clear();
+    m_lsFolderVk.query.clear();
     m_lsFolderRenameOriginal.clear();
 }
 
@@ -6779,7 +6162,7 @@ static std::string lsTrimName(const std::string& s) {
 }
 
 void UIManager::commitLsFolderRename() {
-    std::string name = lsTrimName(m_lsFolderRenameText);
+    std::string name = lsTrimName(m_lsFolderVk.query);
     if (name.empty() || name.find('/') != std::string::npos ||
         name == "." || name == "..") {
         showToast("Tên không hợp lệ", {239, 68, 68, 255}, 1500);
@@ -6820,56 +6203,42 @@ void UIManager::commitLsFolderRename() {
 
 bool UIManager::handleLsFolderKeyboardInput() {
     InputManager& input = InputManager::instance();
-    static const char* lowerRows[4] = {
-        "qwertyuiop", "asdfghjkl\'", "zxcvbnm,.?", "1234567890"
-    };
-    static const char* upperRows[4] = {
-        "QWERTYUIOP", "ASDFGHJKL\"", "ZXCVBNM;:/", "!@#$%^&*()"
-    };
-    const int colsPerRow[5] = {10, 10, 10, 10, 5};
-    auto clampCol = [&]() {
-        int mx = colsPerRow[m_lsFolderKbRow] - 1;
-        if (m_lsFolderKbCol > mx) m_lsFolderKbCol = mx;
-        if (m_lsFolderKbCol < 0) m_lsFolderKbCol = 0;
-    };
+    VkState& vk = m_lsFolderVk;
     if (input.isButtonJustPressed(Button::B)) { cancelLsFolderRename(); return true; }
     if (input.isButtonJustPressed(Button::UP)) {
-        if (m_lsFolderKbRow > 0) { m_lsFolderKbRow--; clampCol(); }
+        VirtualKeyboard::move(vk, -1, 0);
         return true;
     }
     if (input.isButtonJustPressed(Button::DOWN)) {
-        if (m_lsFolderKbRow < 4) { m_lsFolderKbRow++; clampCol(); }
+        VirtualKeyboard::move(vk, 1, 0);
         return true;
     }
     if (input.isButtonJustPressed(Button::LEFT)) {
-        int mx = colsPerRow[m_lsFolderKbRow];
-        m_lsFolderKbCol = (m_lsFolderKbCol - 1 + mx) % mx;
+        VirtualKeyboard::move(vk, 0, -1);
         return true;
     }
     if (input.isButtonJustPressed(Button::RIGHT)) {
-        int mx = colsPerRow[m_lsFolderKbRow];
-        m_lsFolderKbCol = (m_lsFolderKbCol + 1) % mx;
+        VirtualKeyboard::move(vk, 0, 1);
         return true;
     }
     if (input.isButtonJustPressed(Button::X)) {
-        if (!m_lsFolderRenameText.empty()) m_lsFolderRenameText.pop_back();
+        VirtualKeyboard::backspace(vk);
         return true;
     }
     if (input.isButtonJustPressed(Button::Y)) {
-        m_lsFolderKbShift = !m_lsFolderKbShift;
+        vk.shift = !vk.shift;
         return true;
     }
     if (input.isButtonJustPressed(Button::START)) { commitLsFolderRename(); return true; }
     if (input.isButtonJustPressed(Button::A)) {
-        if (m_lsFolderKbRow < 4) {
-            char ch = m_lsFolderKbShift ? upperRows[m_lsFolderKbRow][m_lsFolderKbCol]
-                                         : lowerRows[m_lsFolderKbRow][m_lsFolderKbCol];
-            if (m_lsFolderRenameText.size() < 60) m_lsFolderRenameText += ch;
+        if (vk.row < 4) {
+            char ch = VirtualKeyboard::charAt(vk);
+            if (ch) VirtualKeyboard::typeChar(vk, ch);
         } else {
-            int a = m_lsFolderKbCol;
-            if (a == 0) m_lsFolderKbShift = !m_lsFolderKbShift;
-            else if (a == 1) { if (m_lsFolderRenameText.size() < 60) m_lsFolderRenameText += ' '; }
-            else if (a == 2) { if (!m_lsFolderRenameText.empty()) m_lsFolderRenameText.pop_back(); }
+            int a = vk.col;
+            if (a == 0) vk.shift = !vk.shift;
+            else if (a == 1) VirtualKeyboard::typeSpace(vk);
+            else if (a == 2) VirtualKeyboard::backspace(vk);
             else if (a == 3) commitLsFolderRename();
             else cancelLsFolderRename();
         }
@@ -6891,9 +6260,9 @@ void UIManager::renderLsFolderKeyboard() {
     // O nhap ten
     drawRect(48, 130, 928, 64, {15, 23, 42, 255}, true);
     drawBorder(48, 130, 928, 64, {59, 130, 246, 255}, 2);
-    std::string shown = m_lsFolderRenameText.empty() ? "Nhập tên..." : m_lsFolderRenameText;
+    std::string shown = m_lsFolderVk.query.empty() ? "Nhập tên..." : m_lsFolderVk.query;
     drawText(shown, 68, 146,
-             m_lsFolderRenameText.empty() ? SDL_Color{100, 116, 139, 255}
+             m_lsFolderVk.query.empty() ? SDL_Color{100, 116, 139, 255}
                                            : SDL_Color{255, 255, 255, 255},
              m_fontLarge, false);
     static const char* lowerRows[4] = {
@@ -6908,8 +6277,8 @@ void UIManager::renderLsFolderKeyboard() {
         for (int col = 0; col < 10; col++) {
             int cx = kbStartX + col * (cellW + gapX);
             int cy = kbStartY + row * (cellH + gapY);
-            bool isSel = (m_lsFolderKbRow == row && m_lsFolderKbCol == col);
-            char ch = m_lsFolderKbShift ? upperRows[row][col] : lowerRows[row][col];
+            bool isSel = (m_lsFolderVk.row == row && m_lsFolderVk.col == col);
+            char ch = VirtualKeyboard::charAt(VkState{m_lsFolderVk.query, row, col, m_lsFolderVk.shift, false});
             drawRect(cx, cy, cellW, cellH, isSel ? SDL_Color{37, 99, 235, 255}
                                                  : SDL_Color{15, 23, 42, 255}, true);
             if (isSel) drawBorder(cx, cy, cellW, cellH, {147, 197, 253, 255}, 2);
@@ -6925,11 +6294,11 @@ void UIManager::renderLsFolderKeyboard() {
     int actY = kbStartY + 4 * (cellH + gapY);
     for (int i = 0; i < 5; i++) {
         int cx = kbStartX + i * (actW + gapX);
-        bool isSel = (m_lsFolderKbRow == 4 && m_lsFolderKbCol == i);
+        bool isSel = (m_lsFolderVk.row == 4 && m_lsFolderVk.col == i);
         SDL_Color bg = isSel ? SDL_Color{37, 99, 235, 255} : SDL_Color{15, 23, 42, 255};
         if (i == 3) bg = isSel ? SDL_Color{22, 163, 74, 255} : SDL_Color{20, 83, 45, 255};
         if (i == 4) bg = isSel ? SDL_Color{220, 38, 38, 255} : SDL_Color{69, 10, 10, 255};
-        if (i == 0 && m_lsFolderKbShift) bg = SDL_Color{29, 78, 216, 255};
+        if (i == 0 && m_lsFolderVk.shift) bg = SDL_Color{29, 78, 216, 255};
         drawRect(cx, actY, actW, cellH, bg, true);
         drawBorder(cx, actY, actW, cellH,
                    isSel ? SDL_Color{147, 197, 253, 255} : SDL_Color{30, 41, 59, 255},
@@ -7097,7 +6466,7 @@ void UIManager::renderLocalSendGamePicker() {
         m_lsRomList.clear();
         // Ép quét tươi thẻ SD (giống nút ĐỒNG BỘ) rồi mới đọc DB → số lượng khớp.
         try {
-            if (!m_isIndexing.load()) {
+            if (!isIndexing()) {
                 RomIndexer::instance().scanAllSystems(AppConfig::instance().getRomsDir(), nullptr);
                 refreshSystems();
             }
@@ -7230,10 +6599,8 @@ void UIManager::renderLsProgressRow(bool isSend, int idx, int x, int y, int w, b
     std::string pv = pathVal.size() > 72 ? std::string("...") + pathVal.substr(pathVal.size() - 69) : pathVal;
     drawText((isSend ? "Nguồn: " : "Lưu: ") + pv, tx, y + 34, metaC, m_fontSmall, false);
     double frac = tot == 0 ? 0 : (double)done / (double)tot;
-    if (frac > 1) frac = 1;
-    int barW = w - 28, fillW = (int)(barW * frac);
-    drawRoundedRect(tx, y + 58, barW, 14, 7, SDL_Color{15, 23, 42, 255}, true);
-    if (fillW > 0) drawRoundedRect(tx, y + 58, fillW, 14, 7, SDL_Color{59, 130, 246, 255}, true);
+    int barW = w - 28;
+    drawProgressBar(tx, y + 58, barW, 14, frac, SDL_Color{59, 130, 246, 255}, true, SDL_Color{15, 23, 42, 255});
     char info[160];
     snprintf(info, sizeof(info), "%d%%  %s / %s  %s  %s",
              (int)(frac * 100 + 0.5), LsUtil::humanSize(done).c_str(),
@@ -7392,4 +6759,3 @@ void UIManager::renderLsAppsList(int dlgX, int dlgY, int dlgW, int dlgH) {
 }
 
 } // namespace RomCloud
-
