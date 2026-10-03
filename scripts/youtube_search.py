@@ -233,6 +233,35 @@ def _strip_diacritics(s):
         return s
 
 
+def _fmt_subs_vn(count):
+    """Format subscriber int -> display string kieu Innertube VN.
+    Vi du: 1250000 -> '1,25 Tr người đăng ký'. Tra '' neu khong co."""
+    try:
+        n = int(float(count))
+    except (ValueError, TypeError):
+        return ""
+    if n <= 0:
+        return ""
+    if n >= 1000000:
+        t = f"{n / 1000000:.2f}".rstrip("0").rstrip(".").replace(".", ",")
+        return f"{t} Tr người đăng ký"
+    if n >= 1000:
+        t = f"{n / 1000:.1f}".rstrip("0").rstrip(".").replace(".", ",")
+        return f"{t} N người đăng ký"
+    return f"{n} người đăng ký"
+
+
+def _fmt_vcount_vn(count):
+    """Format video count int -> '1.234 video'. Tra '' neu khong co."""
+    try:
+        n = int(float(count))
+    except (ValueError, TypeError):
+        return ""
+    if n <= 0:
+        return ""
+    return f"{n:,}".replace(",", ".") + " video"
+
+
 def _lookup_channel(query):
     """Dùng `search_filter=channel` để tìm channel đầu tiên match query.
 
@@ -428,11 +457,19 @@ def _api_get_channel_info(channel_id):
     stats = item.get("statistics", {})
     if not name:
         return None
+    thumbs = item.get("snippet", {}).get("thumbnails", {})
+    avatar = ""
+    for q in ("high", "medium", "default"):
+        u = thumbs.get(q, {}).get("url", "")
+        if u:
+            avatar = u
+            break
     return {
         "id": item.get("id", channel_id),
         "name": name,
         "subscribers": int(stats.get("subscriberCount", 0) or 0),
         "video_count": int(stats.get("videoCount", 0) or 0),
+        "avatar": avatar,
     }
 
 
@@ -738,10 +775,11 @@ def _api_smart_search(query, max_results=20):
         ch_name = info["name"] if info else "Unknown"
         items = _api_channel_videos(ch_id, max_results)
         if items and info:
-            subs = info.get("subscribers", "")
-            vcount = info.get("video_count", "")
-            desc = info.get("description", "")
-            print(f"CHANNEL|{_safe(ch_name)}|{_safe(ch_id)}|{_safe(subs)}|{_safe(vcount)}|{_safe(desc)}", flush=True)
+            subs = _fmt_subs_vn(info.get("subscribers", 0))
+            vcount = _fmt_vcount_vn(info.get("video_count", 0))
+            avatar = info.get("avatar", "")
+            # Format chuan 5 cot (giong Innertube): CHANNEL|name|subs|vcount|avatar
+            print(f"CHANNEL|{_safe(ch_name)}|{_safe(subs)}|{_safe(vcount)}|{_safe(avatar)}", flush=True)
         for it in items:
             secs = _iso8601_to_seconds(it.get("duration_iso", ""))
             duration = fmt_duration(secs)
@@ -754,10 +792,11 @@ def _api_smart_search(query, max_results=20):
     if ch_info and _is_strong_channel_match(query, ch_info):
         items = _api_channel_videos(ch_info["id"], max_results - 1)
         if items:
-            subs = ch_info.get("subscribers", "")
-            vcount = ch_info.get("video_count", "")
-            desc = ch_info.get("description", "")
-            print(f"CHANNEL|{_safe(ch_info['name'])}|{_safe(ch_info['id'])}|{_safe(subs)}|{_safe(vcount)}|{_safe(desc)}", flush=True)
+            subs = _fmt_subs_vn(ch_info.get("subscribers", 0))
+            vcount = _fmt_vcount_vn(ch_info.get("video_count", 0))
+            avatar = ch_info.get("avatar", "")
+            # Format chuan 5 cot (giong Innertube): CHANNEL|name|subs|vcount|avatar
+            print(f"CHANNEL|{_safe(ch_info['name'])}|{_safe(subs)}|{_safe(vcount)}|{_safe(avatar)}", flush=True)
             for it in items:
                 secs = _iso8601_to_seconds(it.get("duration_iso", ""))
                 duration = fmt_duration(secs)
@@ -837,8 +876,10 @@ def smart_search(query, max_results=20):
 
     if channel_info and _is_strong_channel_match(query, channel_info):
         # Step 2: Output CHANNEL marker (flush để C++ parse được ngay)
-        print(f"CHANNEL|{_safe(channel_info['name'])}|{_safe(channel_info['id'])}|"
-              f"{channel_info['subscribers']}|{channel_info['video_count']}",
+        # Format chuan 5 cot: CHANNEL|name|subs|vcount|avatar
+        print(f"CHANNEL|{_safe(channel_info['name'])}|"
+              f"{_fmt_subs_vn(channel_info['subscribers'])}|"
+              f"{_fmt_vcount_vn(channel_info['video_count'])}|",
               flush=True)
         # Step 3: Output latest videos từ channel
         try:

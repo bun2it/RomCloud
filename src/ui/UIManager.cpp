@@ -251,8 +251,11 @@ void UIManager::setState(UIState state) {
   if ((m_currentState == UIState::YOUTUBE_RESULTS ||
        m_currentState == UIState::YOUTUBE_SEARCH) &&
       (state != UIState::YOUTUBE_RESULTS && state != UIState::YOUTUBE_SEARCH)) {
+    // Chi xa GPU cache (VRAM). GIU file /tmp/yt_thumbs/*: render tu
+    // nap lai texture tu file trong 1-2 frame (drawYtStandardThumb) nen
+    // Back tu video ve list/Home khong bi mat thumbnail. Xoa file o day
+    // la ly do list tran truoc day (phai tai lai het tu mang).
     clearThumbnailCache();
-    system("rm -rf /tmp/yt_thumbs/* 2>/dev/null &");
   }
 
   Logger::error("[STATE] SET");
@@ -6623,17 +6626,26 @@ std::string UIManager::resolveYouTubeStreamUrl(const std::string &videoId) {
   }
 
   char buffer[4096];
-  std::string streamUrl;
+  // -g co the tra 1 URL (progressive, co san audio) hoac 2 URL
+  // (DASH video-only + audio). Giua ca 2 bang '|' de phat qua --audio-file.
+  std::string videoStreamUrl, audioStreamUrl;
   while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
     std::string line(buffer);
     while (!line.empty() && (line.back() == '\n' || line.back() == '\r')) {
       line.pop_back();
     }
     if (line.find("http://") == 0 || line.find("https://") == 0) {
-      streamUrl = line;
-      break;
+      if (videoStreamUrl.empty())
+        videoStreamUrl = line;
+      else if (audioStreamUrl.empty()) {
+        audioStreamUrl = line;
+        break;
+      }
     }
   }
+  std::string streamUrl = videoStreamUrl;
+  if (!audioStreamUrl.empty())
+    streamUrl += "|" + audioStreamUrl;
   pclose(pipe);
 
   if (!streamUrl.empty()) {
@@ -6788,6 +6800,12 @@ void UIManager::startThumbnailDownloads(
     const std::vector<std::string> &videoIds) {
   if (videoIds.empty())
     return;
+  // Worker còn bận lô cũ: BỎ QUA lô mới. BackgroundTask::run() sẽ join()
+  // thread cũ -> block main thread hàng chục giây (8 ảnh x curl tối đa
+  // 4s), UI đơ toàn tập dù kết quả đã hiện. Thumb chỉ là trang trí:
+  // lô sau bù lại khi user chuyển trang/tìm mới, ô thiếu hiện placeholder.
+  if (m_thumbTask.isRunning())
+    return;
   m_thumbTask.run([videoIds](TaskProgress &) {
     mkdir("/tmp/yt_thumbs", 0777);
     DIR *dir = opendir("/tmp/yt_thumbs");
@@ -6875,6 +6893,7 @@ void UIManager::playYouTubeVideo(const std::string &videoId) {
   m_ytVideoReady = false;
   m_ytPendingStreamUrl.clear();
   m_ytPendingVideoId = videoId;
+  showToast("Đang tải video...", UiTheme::ACCENT_CYAN, 4000);
 
   m_resolveTask.run([this, videoId](TaskProgress &) {
     std::string streamUrl = resolveYouTubeStreamUrl(videoId);
@@ -9039,8 +9058,12 @@ void UIManager::applyYouTubeSearchResults(std::vector<std::string> results) {
     m_ytChannelAllVideos.clear();
   }
 
+  // Trang channel (query 'channel:<id>'): list full 6 video/trang ngay tu dau.
+  // Search thuong co matched channel: giu 3 video (3 o HÀNG 3 la video moi
+  // nhat cua kenh, layout card mac dinh).
+  bool isChannelQuery = m_ytLastSearchQuery.rfind("channel:", 0) == 0;
   int end =
-      m_ytMatchedChannel.matched
+      (m_ytMatchedChannel.matched && !isChannelQuery)
           ? std::min<int>(3, static_cast<int>(m_ytAllCachedResults.size()))
           : std::min<int>(6, static_cast<int>(m_ytAllCachedResults.size()));
   m_ytSearchResults.assign(m_ytAllCachedResults.begin(),

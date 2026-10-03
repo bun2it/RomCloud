@@ -21,7 +21,10 @@ else
     exit 1
 fi
 
-trap 'rm -rf /tmp/_MEI* /tmp/yt_cache 2>/dev/null' EXIT INT TERM
+trap 'rm -rf /tmp/_MEI* 2>/dev/null' EXIT INT TERM
+# NOTE: /tmp/yt_cache (yt-dlp cache) duoc GIU LAI giua cac lan goi de
+# tai su dung player JS/web cache -> video sau resolve nhanh hon.
+# Chi xoa _MEI* (PyInstaller unpack) de giai phong tmpfs RAM.
 
 PER_PAGE=6
 
@@ -73,21 +76,45 @@ case "$1" in
         # Clean stale PyInstaller temp folders to reclaim tmpfs RAM
         rm -rf /tmp/_MEI* 2>/dev/null
 
-        FORMAT="22/best[height<=720]/best"
+        # 720p: client mac dinh cho DASH (bv+ba) -> script in "VIDEO|AUDIO",
+        # C++ noi bang '|' va phat audio qua --audio-file. Cham hon android
+        # ~2s nhung co 720p that (android chi co toi 360p progressive).
+        # Uu tien AVC 30fps (itag 135): nhe CPU nhat cho A53. AV1/VP9
+        # 720p60 giai ma mem gay giat tren may yeu.
+        FORMAT="bv*[height<=720][fps<=30][vcodec^=avc]+ba/bv*[height<=720][vcodec^=avc]+ba/bv*[height<=720][fps<=30]+ba/bv*[height<=720]+ba/best[height<=720]/best"
         case "$QUALITY" in
             360) FORMAT="18/best[height<=360]" ;;
-            *)   FORMAT="22/best[height<=720]/best" ;;
+            *)   ;;
         esac
+        if [ "$QUALITY" = "360" ]; then
+            EXTRACTOR_ARGS="youtube:player_client=android"
+        else
+            EXTRACTOR_ARGS=""
+        fi
 
         # Fast direct stream URL via Android client (bypasses JS decipherer, ~2s)
-        RAW_URLS=$("$YTDLP" -g \
-            --cache-dir /tmp/yt_cache \
-            --no-warnings \
-            --no-check-certificates \
-            --extractor-args "youtube:player_client=android" \
-            -f "$FORMAT" \
-            --socket-timeout 8 \
-            "https://www.youtube.com/watch?v=${VIDEO_ID}" 2>/dev/null)
+        T0=$(date +%s)
+        if [ -n "$EXTRACTOR_ARGS" ]; then
+            RAW_URLS=$("$YTDLP" -g \
+                --cache-dir /tmp/yt_cache \
+                --no-warnings \
+                --no-playlist \
+                --no-check-certificates \
+                --extractor-args "$EXTRACTOR_ARGS" \
+                -f "$FORMAT" \
+                --socket-timeout 8 \
+                "https://www.youtube.com/watch?v=${VIDEO_ID}" 2>/dev/null)
+        else
+            RAW_URLS=$("$YTDLP" -g \
+                --cache-dir /tmp/yt_cache \
+                --no-warnings \
+                --no-playlist \
+                --no-check-certificates \
+                -f "$FORMAT" \
+                --socket-timeout 10 \
+                "https://www.youtube.com/watch?v=${VIDEO_ID}" 2>/dev/null)
+        fi
+        echo "yt_url main_branch $(( $(date +%s) - T0 ))s ${VIDEO_ID} q=${QUALITY}" >> /tmp/yt_timing.log 2>/dev/null
 
         V_URL=$(echo "$RAW_URLS" | sed -n '1p')
         A_URL=$(echo "$RAW_URLS" | sed -n '2p')
@@ -101,8 +128,11 @@ case "$1" in
             exit 0
         fi
 
-        # Fallback with multi-client
-        RAW_URLS=$("$YTDLP" -g --socket-timeout 8 --no-warnings --no-check-certificates --extractor-args "youtube:player_client=android,ios,web" -f "$FORMAT" "https://www.youtube.com/watch?v=${VIDEO_ID}" 2>/dev/null)
+        # Fallback: android progressive (luon co, toi da 360p) de dam bao
+        # video phat duoc thay vi bao loi khi client mac dinh that bai.
+        T0=$(date +%s)
+        RAW_URLS=$("$YTDLP" -g --cache-dir /tmp/yt_cache --socket-timeout 8 --no-warnings --no-playlist --no-check-certificates --extractor-args "youtube:player_client=android" -f "18/best[height<=360]/best" "https://www.youtube.com/watch?v=${VIDEO_ID}" 2>/dev/null)
+        echo "yt_url fallback_android360 $(( $(date +%s) - T0 ))s ${VIDEO_ID}" >> /tmp/yt_timing.log 2>/dev/null
         V_URL=$(echo "$RAW_URLS" | sed -n '1p')
         A_URL=$(echo "$RAW_URLS" | sed -n '2p')
 
