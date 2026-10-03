@@ -97,13 +97,14 @@ make_zip() {
     fi
 }
 
-# Create Lite Installer zip (no heavy mpv/lib bundles, only ~5MB, ideal for first-time copy)
+# Release rule (.agents/rules/release_ota.md): MỖI VERSION CHỈ 1 FILE ZIP DUY NHẤT
+# (RomCloud-vX.Y.Z.zip full). CẤM sinh thêm Lite/mpv_bundle/loose files.
+# OTA full-zip (UpdateManager::installFullZip) dùng chính file này.
 mkdir -p "$DIST_DIR"
-rm -f "$DIST_DIR/$ZIP_NAME" "$DIST_DIR/RomCloud-Lite-Installer.zip" "$DIST_DIR/mpv_bundle.zip"
-cd "$STAGING_DIR"
-make_zip "$DIST_DIR/RomCloud-Lite-Installer.zip" Apps
-
-# Now add mpv and libraries for Full package
+rm -f "$DIST_DIR"/RomCloud-v*.zip "$DIST_DIR"/RomCloud-Lite-Installer.zip \
+      "$DIST_DIR"/RomCloud-Install-To-Apps.zip "$DIST_DIR"/mpv_bundle.zip \
+      "$DIST_DIR"/bundle-*.zip "$DIST_DIR"/RomCloud "$DIST_DIR"/icon.png \
+      "$DIST_DIR"/launch.sh
 cd "$SCRIPT_DIR"
 if [ -f bin/mpv ]; then
     cp bin/mpv "$STAGING_DIR/Apps/RomCloud/bin/"
@@ -117,19 +118,11 @@ if [ -d lib ]; then
     cp -P lib/*.so* "$STAGING_DIR/Apps/RomCloud/lib/" 2>/dev/null || true
 fi
 
-# Create Full package zip
 cd "$STAGING_DIR"
 make_zip "$DIST_DIR/$ZIP_NAME" Apps
 
-# Create mpv_bundle.zip for OTA update delivery
-cd "$STAGING_DIR/Apps/RomCloud"
-make_zip "$DIST_DIR/mpv_bundle.zip" bin/mpv lib bin/yt-dlp bin/yt-dlp-glibc scripts config/youtube_api.key assets/player_icons assets/apps_icons/YOUTUBE.png
 cd "$SCRIPT_DIR"
 rm -rf "$STAGING_DIR"
 
-cp -f bin/RomCloud "$DIST_DIR/RomCloud"
-cp -f launch.sh "$DIST_DIR/launch.sh"
-cp -f icon.png "$DIST_DIR/icon.png"
-
-echo "=== Release Packages Created Successfully ==="
-ls -lh "$DIST_DIR/RomCloud-Lite-Installer.zip" "$DIST_DIR/$ZIP_NAME" "$DIST_DIR/mpv_bundle.zip" "$DIST_DIR/RomCloud" "$DIST_DIR/icon.png"
+echo "=== Release Package Created Successfully (single zip) ==="
+ls -lh "$DIST_DIR/$ZIP_NAME"

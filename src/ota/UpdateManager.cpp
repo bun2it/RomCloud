@@ -275,6 +275,19 @@ bool UpdateManager::checkForUpdatesSync(UpdateInfo &outInfo) {
   outInfo.iconUrl = iconUrl;
   outInfo.bundleUrl = bundleUrl;
   outInfo.osBundleUrl = osBundleUrl;
+  // Full single-zip OTA (v2.3.1+): 1 file duy nhất chứa toàn bộ runtime
+  // (bin, scripts, assets, lib) để mọi máy nhận đủ file, không lỗi YouTube
+  // hay mất icon như bản binary-only.
+  std::string fullZipUrl = "";
+  if (mResp.success && !mResp.body.empty() && mResp.statusCode == 200) {
+    fullZipUrl = JsonHelper::extractString(mResp.body, "full_zip_url");
+  }
+  if (fullZipUrl.empty() && !remoteVer.empty()) {
+    fullZipUrl = "https://github.com/" + std::string(GITHUB_REPO) +
+                 "/releases/download/v" + remoteVer + "/RomCloud-v" +
+                 remoteVer + ".zip";
+  }
+  outInfo.fullZipUrl = fullZipUrl;
   outInfo.changelog = changelog;
   outInfo.releaseDate = relDate;
   outInfo.osType = osType;
@@ -655,17 +668,17 @@ void UpdateManager::cancelUpdate() {
 // ============================================================================
 
 void UpdateManager::runDownloadWorker(UpdateInfo info) {
-  Logger::info("Starting OTA update: v" + info.remoteVersion + " for " + info.osType);
+  Logger::info("Starting full-zip OTA update: v" + info.remoteVersion);
 
-  std::string binDir = AppConfig::instance().getBinDir();
-  std::string newBinPath = binDir + "/RomCloud.new";
-  std::string finalBinPath = binDir + "/RomCloud";
+  std::string appRoot = AppConfig::instance().getAppRoot();
+  std::string zipPath = appRoot + "/ota_update.zip";
+  std::string zipUrl = info.fullZipUrl.empty() ? info.downloadUrl : info.fullZipUrl;
 
-  // 1. Download main app binary
+  // 1. Download full release zip (1 file duy nhất, chứa toàn bộ runtime)
   {
     std::lock_guard<std::mutex> lock(m_mutex);
     m_progress.state = UpdateState::DOWNLOADING;
-    m_progress.currentStep = "Đang tải bản cập nhật RomCloud...";
+    m_progress.currentStep = "Đang tải bản cập nhật đầy đủ v" + info.remoteVersion + "...";
     m_progress.bytesDownloaded = 0;
     m_progress.totalBytes = info.sizeBytes;
     m_progress.progressPct = 0.0;
@@ -673,7 +686,7 @@ void UpdateManager::runDownloadWorker(UpdateInfo info) {
   }
 
   uint64_t downloadedSize = 0;
-  if (!downloadFile(info.downloadUrl, newBinPath, &downloadedSize, true)) {
+  if (!downloadFile(zipUrl, zipPath, &downloadedSize, true)) {
     if (m_cancelRequested) {
       std::lock_guard<std::mutex> lock(m_mutex);
       m_progress.state = UpdateState::IDLE;
@@ -682,15 +695,15 @@ void UpdateManager::runDownloadWorker(UpdateInfo info) {
     }
     std::lock_guard<std::mutex> lock(m_mutex);
     m_progress.state = UpdateState::FAILED;
-    m_progress.errorMessage = "Tải tập tin RomCloud thất bại. Kiểm tra kết nối mạng!";
+    m_progress.errorMessage = "Tải bản cập nhật thất bại. Kiểm tra kết nối mạng!";
     Logger::error(m_progress.errorMessage);
     m_isRunning = false;
     return;
   }
 
-  // Verify binary size
+  // Verify zip size (full package ~50MB, không thể nhỏ hơn 1MB)
   if (downloadedSize < 1000000) {
-    unlink(newBinPath.c_str());
+    unlink(zipPath.c_str());
     std::lock_guard<std::mutex> lock(m_mutex);
     m_progress.state = UpdateState::FAILED;
     m_progress.errorMessage = "Tập tin tải về quá nhỏ hoặc không hợp lệ.";
@@ -698,123 +711,29 @@ void UpdateManager::runDownloadWorker(UpdateInfo info) {
     return;
   }
 
-  chmod(newBinPath.c_str(), 0755);
-  sync();
-
-  // 2. Replace binary
+  // 2. Install full zip (giữ dữ liệu user: data, config, iptv)
   {
     std::lock_guard<std::mutex> lock(m_mutex);
     m_progress.state = UpdateState::INSTALLING;
-    m_progress.currentStep = "Đang cài đặt và thay thế file thực thi RomCloud...";
+    m_progress.currentStep = "Đang cài đặt bản cập nhật đầy đủ (giữ dữ liệu)...";
     m_progress.progressPct = 100.0;
     m_progress.speedKBps = 0.0;
   }
 
-  bool replaced = false;
-  std::string oldBinPath = binDir + "/RomCloud.old";
-  unlink(oldBinPath.c_str());
-
-  if (rename(finalBinPath.c_str(), oldBinPath.c_str()) == 0) {
-    if (rename(newBinPath.c_str(), finalBinPath.c_str()) == 0) {
-      chmod(finalBinPath.c_str(), 0755);
-      unlink(oldBinPath.c_str());
-      replaced = true;
-      Logger::info("Binary replaced successfully");
-    } else {
-      rename(oldBinPath.c_str(), finalBinPath.c_str());
-    }
+  if (!installFullZip(zipPath)) {
+    unlink(zipPath.c_str());
+    std::lock_guard<std::mutex> lock(m_mutex);
+    if (m_progress.errorMessage.empty())
+      m_progress.errorMessage = "Cài đặt bản cập nhật thất bại.";
+    m_progress.state = UpdateState::FAILED;
+    Logger::error(m_progress.errorMessage);
+    m_isRunning = false;
+    return;
   }
-
-  if (!replaced) {
-    // FAT32 workaround - create install script
-    std::string scriptPath = binDir + "/ota_install.sh";
-    FILE* script = fopen(scriptPath.c_str(), "w");
-    if (script) {
-      fprintf(script, "#!/bin/sh\n");
-      fprintf(script, "mv -f '%s' '%s' 2>/dev/null; ", newBinPath.c_str(), finalBinPath.c_str());
-      fprintf(script, "chmod +x '%s'; ", finalBinPath.c_str());
-      fprintf(script, "rm -f '%s'\n", scriptPath.c_str());
-      fclose(script);
-      chmod(scriptPath.c_str(), 0755);
-    }
-    Logger::info("Binary replacement deferred to next boot");
-  }
-
-  sync();
-
-  // 3. Download and update official app icon
-  if (!info.iconUrl.empty()) {
-    std::string appRoot = AppConfig::instance().getAppRoot();
-    std::string newIconPath = appRoot + "/icon.png.new";
-    std::string finalIconPath = appRoot + "/icon.png";
-    std::string appIconPath = appRoot + "/assets/apps_icons/APP.png";
-    std::string assetsIconPath = appRoot + "/assets/icon.png";
-
-    {
-      std::lock_guard<std::mutex> lock(m_mutex);
-      m_progress.state = UpdateState::INSTALLING;
-      m_progress.currentStep = "Đang cập nhật biểu tượng ứng dụng...";
-    }
-
-    uint64_t iconSize = 0;
-    if (downloadFile(info.iconUrl, newIconPath, &iconSize, false) && iconSize > 1000) {
-      chmod(newIconPath.c_str(), 0644);
-      unlink(finalIconPath.c_str());
-      if (rename(newIconPath.c_str(), finalIconPath.c_str()) == 0) {
-        std::ifstream src(finalIconPath, std::ios::binary);
-        if (src) {
-          std::ofstream dst1(appIconPath, std::ios::binary | std::ios::trunc);
-          if (dst1) dst1 << src.rdbuf();
-          src.clear();
-          src.seekg(0, std::ios::beg);
-          std::ofstream dst2(assetsIconPath, std::ios::binary | std::ios::trunc);
-          if (dst2) dst2 << src.rdbuf();
-        }
-        Logger::info("App icon updated successfully via OTA (" + std::to_string(iconSize) + " bytes)");
-      } else {
-        // FAT32 deferred: keep newIconPath so launch.sh can copy it
-        Logger::info("Icon rename deferred to launch.sh");
-      }
-    } else {
-      unlink(newIconPath.c_str());
-      Logger::warn("Failed to download or verify app icon");
-    }
-  }
-
-  // 4. Check and install dependencies (mpv, codecs)
-  if (!downloadAndInstallDependencies(info)) {
-    Logger::warn("Some dependencies may be missing - app may not work fully");
-  }
-
-  // 5. Check and install OS-specific bundle if available
-  if (!info.osBundleUrl.empty()) {
-    std::string appRoot = AppConfig::instance().getAppRoot();
-    std::string osBundlePath = appRoot + "/os_bundle.zip";
-
-    {
-      std::lock_guard<std::mutex> lock(m_mutex);
-      m_progress.state = UpdateState::DOWNLOADING_DEPS;
-      m_progress.currentStep = "Đang tải gói cấu hình " + info.osType + "...";
-      m_progress.bytesDownloaded = 0;
-      m_progress.totalBytes = 0;
-      m_progress.progressPct = 0.0;
-      m_progress.speedKBps = 0.0;
-    }
-
-    if (downloadFile(info.osBundleUrl, osBundlePath, nullptr, true)) {
-      {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        m_progress.state = UpdateState::INSTALLING_DEPS;
-        m_progress.currentStep = "Đang cài đặt gói tối ưu " + info.osType + "...";
-        m_progress.progressPct = 100.0;
-        m_progress.speedKBps = 0.0;
-      }
-      installOsBundle(osBundlePath, info.osType);
-      unlink(osBundlePath.c_str());
-    }
-  }
+  unlink(zipPath.c_str());
 
   Logger::info("OTA update completed!");
+
 
   {
     std::lock_guard<std::mutex> lock(m_mutex);
@@ -824,6 +743,72 @@ void UpdateManager::runDownloadWorker(UpdateInfo info) {
   }
 
   m_isRunning = false;
+}
+
+// Bung full-zip đè lên appRoot, GIỮ dữ liệu user (data/config/iptv).
+// Zip layout: Apps/RomCloud/... → bung qua thư mục tạm rồi copy vào,
+// nên đúng cho cả Apps lẫn App (SpruceOS).
+bool UpdateManager::installFullZip(const std::string& zipPath) {
+  std::string appRoot = AppConfig::instance().getAppRoot();
+  std::string tmpDir = appRoot + "/.ota_tmp";
+  std::string backupDir = appRoot + "/.ota_backup";
+
+  auto setErr = [this](const std::string& msg) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_progress.errorMessage = msg;
+  };
+
+  system(("rm -rf '" + tmpDir + "' '" + backupDir + "' 2>/dev/null").c_str());
+  mkdir(tmpDir.c_str(), 0755);
+  mkdir(backupDir.c_str(), 0755);
+
+  // 1. Backup dữ liệu user (db, token, key, playlist, yêu thích)
+  system(("cp -a '" + appRoot + "/data' '" + backupDir + "/data' 2>/dev/null").c_str());
+  system(("cp -a '" + appRoot + "/config' '" + backupDir + "/config' 2>/dev/null").c_str());
+  system(("cp -a '" + appRoot + "/iptv' '" + backupDir + "/iptv' 2>/dev/null").c_str());
+
+  // 2. Bung zip vào thư mục tạm
+  int ret = system(("unzip -o '" + zipPath + "' 'Apps/RomCloud/*' -d '" + tmpDir + "' 2>/dev/null").c_str());
+  if (ret != 0) {
+    ret = system(("busybox unzip -o '" + zipPath + "' 'Apps/RomCloud/*' -d '" + tmpDir + "' 2>/dev/null").c_str());
+  }
+  std::string staged = tmpDir + "/Apps/RomCloud";
+  struct stat st;
+  if (ret != 0 || stat(staged.c_str(), &st) != 0) {
+    system(("rm -rf '" + tmpDir + "' '" + backupDir + "' 2>/dev/null").c_str());
+    setErr("Giải nén bản cập nhật thất bại.");
+    return false;
+  }
+
+  // 3. Copy đè vào app (giữ file đang chạy an toàn: unzip/cp tạo inode mới)
+  ret = system(("cp -a '" + staged + "/.' '" + appRoot + "/' 2>/dev/null").c_str());
+  system(("rm -rf '" + tmpDir + "' 2>/dev/null").c_str());
+  if (ret != 0) {
+    setErr("Chép file cập nhật thất bại (thẻ nhớ đầy?).");
+    return false;
+  }
+
+  // 4. Khôi phục dữ liệu user
+  system(("cp -a '" + backupDir + "/data/.' '" + appRoot + "/data/' 2>/dev/null").c_str());
+  system(("cp -a '" + backupDir + "/config/.' '" + appRoot + "/config/' 2>/dev/null").c_str());
+  system(("cp -a '" + backupDir + "/iptv/.' '" + appRoot + "/iptv/' 2>/dev/null").c_str());
+  system(("rm -rf '" + backupDir + "' 2>/dev/null").c_str());
+
+  // 5. Quyền thực thi
+  system(("chmod +x '" + appRoot + "/bin/'* 2>/dev/null").c_str());
+  system(("chmod +x '" + appRoot + "/scripts/'*.sh 2>/dev/null").c_str());
+  system(("chmod +x '" + appRoot + "/launch.sh' 2>/dev/null").c_str());
+  sync();
+
+  // 6. Verify binary mới
+  std::string finalBin = appRoot + "/bin/RomCloud";
+  if (stat(finalBin.c_str(), &st) != 0 || st.st_size < 1000000) {
+    setErr("File thực thi sau cập nhật không hợp lệ.");
+    return false;
+  }
+
+  Logger::info("Full-zip OTA installed successfully (" + std::to_string(st.st_size) + " bytes binary)");
+  return true;
 }
 
 bool UpdateManager::downloadAndInstallDependencies(const UpdateInfo& info) {

@@ -1313,13 +1313,24 @@ void UIManager::update() {
             showToast("Đã bật báo lỗi tự động", {34, 197, 94, 255}, 2000);
           }
         } else if (m_selectedSettingsRow == 4) {
-          // Gửi lỗi thủ công
-          showToast("Đang gửi báo cáo lỗi...", {239, 68, 68, 255}, 2000);
-          bool sent = IssueLogger::instance().sendManualReport();
-          if (sent) {
-            showToast("Đã gửi báo cáo lỗi!", {34, 197, 94, 255}, 4000);
+          // Gửi lỗi thủ công (chạy nền): toast "Đang gửi..." giữ suốt tiến
+          // trình (60s, phủ timeout curl 30s+10s), xong mới báo kết quả.
+          // Trước đây gọi blocking + toast 2s nên user không thấy tiến trình.
+          if (m_manualReportSending.load()) {
+            showToast("Đang gửi, vui lòng chờ...", {245, 158, 11, 255}, 2000);
           } else {
-            showToast("Gửi thất bại. Kiểm tra mạng.", {239, 68, 68, 255}, 4000);
+            m_manualReportSending.store(true);
+            showToast("Đang gửi báo cáo lỗi...", {0, 180, 216, 255}, 60000);
+            std::thread([this]() {
+              bool sent = IssueLogger::instance().sendManualReport();
+              m_manualReportSending.store(false);
+              if (sent) {
+                showToast("Đã gửi báo cáo lỗi!", {34, 197, 94, 255}, 4000);
+              } else {
+                showToast("Gửi thất bại. Kiểm tra mạng.", {239, 68, 68, 255},
+                          4000);
+              }
+            }).detach();
           }
         } else if (m_selectedSettingsRow == 5) {
           // Wi-Fi diagnostics
@@ -1344,6 +1355,12 @@ void UIManager::update() {
                  prog.state == UpdateState::FAILED) {
         if (input.isButtonJustPressed(Button::A)) {
           UpdateManager::instance().checkForUpdatesAsync();
+        } else if (input.isButtonJustPressed(Button::Y) &&
+                   prog.state == UpdateState::UP_TO_DATE &&
+                   !UpdateManager::instance().getLatestInfo().changelog.empty()) {
+          // Mở sub-page full changelog ngay cả khi đã là bản mới nhất
+          m_otaChangelogScrollLine = 0;
+          setState(UIState::OTA_CHANGELOG);
         }
       } else if (prog.state == UpdateState::DOWNLOADING ||
                  prog.state == UpdateState::DOWNLOADING_DEPS ||
@@ -1623,7 +1640,18 @@ void UIManager::update() {
       allChannels = IPTVManager::instance().getChannels();
     }
 
-    // Build group list
+    // Ẩn kênh đã xác định mất kết nối (ping == -1). Kênh chưa đo (-2)
+    // vẫn hiện bình thường.
+    {
+      std::vector<IPTVChannel> alive;
+      alive.reserve(allChannels.size());
+      for (const auto &ch : allChannels)
+        if (IPTVManager::instance().getCachedPing(ch.url) != -1)
+          alive.push_back(ch);
+      allChannels.swap(alive);
+    }
+
+  // Build group list
     std::vector<std::string> groups;
     groups.push_back("");
     {
@@ -1649,6 +1677,16 @@ void UIManager::update() {
 
     int channelCount = static_cast<int>(channels.size());
     int visibleItems = 8;
+
+    // List có thể co lại khi ping resolve xong (kênh chết bị ẩn) → clamp
+    if (channelCount == 0) {
+      m_selectedIPTVChannelIndex = 0;
+      m_iptvScrollOffset = 0;
+    } else if (m_selectedIPTVChannelIndex >= channelCount) {
+      m_selectedIPTVChannelIndex = channelCount - 1;
+      if (m_selectedIPTVChannelIndex < m_iptvScrollOffset)
+        m_iptvScrollOffset = m_selectedIPTVChannelIndex;
+    }
 
     // ==============================================================
     // SDL browser binh thuong (mpv blocking loop xu ly playback)
@@ -1744,6 +1782,11 @@ void UIManager::update() {
           showToast("Không thể phát video (Lỗi kết nối hoặc player)",
                     {239, 68, 68, 255}, 4000);
         }
+      } else if (channelCount == 0) {
+        // List rỗng (có thể do kênh chết bị ẩn hết) → xóa cache ping để
+        // hiện lại và đo lại từ đầu.
+        IPTVManager::instance().clearPingCache();
+        showToast("Đang đo lại kết nối các kênh...", {0, 180, 216, 255}, 2000);
       }
     } else if (input.isButtonJustPressed(Button::B)) {
       IPTVManager::instance().stop();
@@ -2882,6 +2925,10 @@ void UIManager::drawRoundedBorder(int x, int y, int w, int h, int radius,
 void UIManager::drawBadge(int x, int y, int w, int h, const std::string &text,
                           SDL_Color bg, SDL_Color fg) {
   m_ui.drawBadge(x, y, w, h, text, bg, fg);
+}
+
+void UIManager::drawDot(int cx, int cy, int r, SDL_Color color) {
+  drawRoundedRect(cx - r, cy - r, r * 2, r * 2, r, color, true);
 }
 
 void UIManager::drawIcon(const std::string &iconName, int x, int y, int w,
@@ -4297,8 +4344,13 @@ void UIManager::renderSettingsState() {
   if (m_settingsTab == 2) {
     renderOTAUpdateState();
     auto prog = UpdateManager::instance().getProgress();
-    // P6: footer với [Y] hint chỉ khi có update (mở sub-page changelog).
-    if (prog.state == UpdateState::UPDATE_AVAILABLE) {
+    // P6: footer với [Y] hint khi có update, hoặc khi đã mới nhất nhưng có
+    // release notes để xem (sub-page changelog dùng chung).
+    bool showYHint =
+        prog.state == UpdateState::UPDATE_AVAILABLE ||
+        (prog.state == UpdateState::UP_TO_DATE &&
+         !UpdateManager::instance().getLatestInfo().changelog.empty());
+    if (showYHint) {
       drawAppFooter({{UiTheme::PadBtn::A, "Tải"},
                      {UiTheme::PadBtn::Y, "Tính năng mới"},
                      {UiTheme::PadBtn::B, "Lùi"},
@@ -5258,19 +5310,68 @@ void UIManager::renderOTAUpdateState() {
     break;
   }
   case UpdateState::UP_TO_DATE: {
-    int stW = badgeWidth(UiStrings::OTA_STATUS_UP_TO_DATE, 40);
-    drawBadge(512 - stW / 2, contentBoxY + 50, stW, 40,
+    int stW = badgeWidth(UiStrings::OTA_STATUS_UP_TO_DATE, 36);
+    drawBadge(512 - stW / 2, contentBoxY + 22, stW, 36,
               UiStrings::OTA_STATUS_UP_TO_DATE, {22, 101, 52, 255},
               {34, 197, 94, 255});
-    drawText(UiStrings::OTA_MSG_UP_TO_DATE, 512, contentBoxY + 120,
-             {34, 197, 94, 255}, m_fontLarge, true);
-    drawText(UiStrings::OTA_NO_NEW_UPDATE, 512, contentBoxY + 165,
-             {170, 180, 195, 255}, m_fontSmall, true);
+    // Dòng version + ngày release (giữ pill, thêm context bản hiện tại)
+    std::string verLine =
+        std::string("v") +
+        (info.remoteVersion.empty() ? UpdateManager::instance().getCurrentVersion()
+                                    : info.remoteVersion) +
+        (info.releaseDate.empty() ? "" : std::string(" • ") + info.releaseDate);
+    drawText(verLine, 512, contentBoxY + 72, {0, 180, 216, 255}, m_fontSmall,
+             true);
 
-    int dualW = badgeDualWidth("Kiểm tra", "Quay lại", 48);
-    drawBadgeDual(512 - dualW / 2, contentBoxY + 235, dualW, 48, "A",
-                  "Kiểm tra", "B", "Quay lại", {35, 45, 60, 255},
-                  {255, 255, 255, 255});
+    // Nội dung release notes feed từ bản release (version.json/GitHub).
+    // Không có thì fallback trống (không hiện text giả).
+    std::string notes = info.changelog;
+    if (!notes.empty()) {
+      drawText(UiStrings::OTA_CHANGELOG_TITLE, cardX + 40, contentBoxY + 104,
+               {255, 255, 255, 255}, m_fontSmall);
+      std::vector<std::string> paragraphs;
+      std::string cur;
+      for (char c : notes) {
+        if (c == '\n') {
+          if (!cur.empty()) {
+            paragraphs.push_back(cur);
+            cur.clear();
+          }
+        } else {
+          cur += c;
+        }
+      }
+      if (!cur.empty())
+        paragraphs.push_back(cur);
+      if (paragraphs.empty())
+        paragraphs.push_back(notes);
+      std::vector<std::string> lines;
+      for (size_t i = 0; i < paragraphs.size(); ++i) {
+        auto w = wrapAboutText(paragraphs[i], m_fontSmall, cardW - 80);
+        for (const auto &l : w)
+          lines.push_back(l);
+        if (i + 1 < paragraphs.size())
+          lines.push_back("");
+      }
+      const int maxLines = 5;
+      const int lineGap = textHeight(m_fontSmall) + 4;
+      int noteY = contentBoxY + 130;
+      bool truncated = static_cast<int>(lines.size()) > maxLines;
+      int showN = truncated ? maxLines - 1 : static_cast<int>(lines.size());
+      for (int i = 0; i < showN; ++i) {
+        if (lines[i].empty())
+          continue;
+        drawText(std::string("• ") + lines[i], cardX + 40, noteY,
+                 {170, 180, 195, 255}, m_fontSmall);
+        noteY += lineGap;
+      }
+      if (truncated) {
+        drawText(UiStrings::OTA_VIEW_FULL_HINT, cardX + 40, noteY,
+                 {0, 180, 216, 255}, m_fontSmall);
+      }
+    } else {
+      // Fallback trống: không có notes từ release thì không hiện gì thêm.
+    }
     break;
   }
   case UpdateState::UPDATE_AVAILABLE: {
@@ -5446,10 +5547,8 @@ void UIManager::renderOTAChangelogState() {
   drawRect(cardX + padL, y, textW, 1, {51, 65, 85, 100}, true);
   y += 1 + 16;
 
-  // ─── Body: changelog (paragraph-aware wrap) hoặc fallback ───
-  std::string body = info.changelog.empty()
-                         ? std::string(UiStrings::ABOUT_NOTES_FALLBACK)
-                         : info.changelog;
+  // ─── Body: changelog feed từ release, trống thì để trống ───
+  std::string body = info.changelog;
 
   // Split body thành paragraphs (split bằng \n, bỏ qua dòng rỗng).
   // Mỗi paragraph được wrap bằng wrapAboutText (UTF-8 safe).
@@ -5780,6 +5879,19 @@ void UIManager::renderIPTVState() {
     allChannels = IPTVManager::instance().getChannels();
   }
 
+  // Ẩn kênh đã xác định mất kết nối (ping == -1). Kênh chưa đo (-2)
+  // vẫn hiện bình thường, đo xong mà chết mới ẩn dần khi lướt list.
+  size_t preFilterCount = allChannels.size();
+  {
+    std::vector<IPTVChannel> alive;
+    alive.reserve(allChannels.size());
+    for (const auto &ch : allChannels)
+      if (IPTVManager::instance().getCachedPing(ch.url) != -1)
+        alive.push_back(ch);
+    allChannels.swap(alive);
+  }
+  size_t hiddenDeadCount = preFilterCount - allChannels.size();
+
   // Build group list
   std::vector<std::string> groups;
   groups.push_back(""); // Tất cả
@@ -5805,6 +5917,16 @@ void UIManager::renderIPTVState() {
   }
   int channelCount = static_cast<int>(channels.size());
 
+  // List có thể co lại khi ping resolve xong (kênh chết bị ẩn) → clamp
+  if (channelCount == 0) {
+    m_selectedIPTVChannelIndex = 0;
+    m_iptvScrollOffset = 0;
+  } else if (m_selectedIPTVChannelIndex >= channelCount) {
+    m_selectedIPTVChannelIndex = channelCount - 1;
+    if (m_selectedIPTVChannelIndex < m_iptvScrollOffset)
+      m_iptvScrollOffset = m_selectedIPTVChannelIndex;
+  }
+
   // -----------------------------------------------------------------------
   // Group filter bar (nam ngay duoi header)
   // -----------------------------------------------------------------------
@@ -5814,10 +5936,25 @@ void UIManager::renderIPTVState() {
   drawRect(0, GROUP_BAR_Y + GROUP_BAR_H - 1, 1024, 1, {40, 48, 62, 255}, true);
 
   {
-    // Chuan A: pill full-round, do rong theo pixel (TTF_SizeUTF8), chua 200px
-    // phai cho count "2886 kênh yêu thích" (~180px) + 1 space trong
-    const int COUNT_RESERVE = 200;
-    const int VIEW_RIGHT = 1024 - COUNT_RESERVE;
+    // Cụm đếm góc phải: ● [sống] ● [chết] kênh.
+    const int DOT_R = 8;
+    const int DOT_GAP = 8;
+    std::string aliveText = std::to_string(channelCount);
+    std::string deadText;
+    if (hiddenDeadCount > 0)
+      deadText = std::to_string(hiddenDeadCount);
+    const std::string unitText = "kênh";
+    int aliveW = textWidth(aliveText, m_fontSmall);
+    int unitW = textWidth(unitText, m_fontSmall);
+    int countW = DOT_R * 2 + DOT_GAP + aliveW;
+    int deadW = 0;
+    if (!deadText.empty())
+      deadW = DOT_GAP * 2 + DOT_R * 2 + DOT_GAP +
+              textWidth(deadText, m_fontSmall);
+    countW += deadW + DOT_GAP + unitW;
+    const int COUNT_RIGHT = 1000;
+    const int COUNT_GAP = 16;
+    const int VIEW_RIGHT = COUNT_RIGHT - countW - COUNT_GAP;
     int gx = 8 - m_iptvGroupBarOffset;
     const int gH = UiTheme::PILL_H;
     const int gY = GROUP_BAR_Y + (GROUP_BAR_H - gH) / 2;
@@ -5836,8 +5973,8 @@ void UIManager::renderIPTVState() {
         gx += gW + UiTheme::PILL_GAP;
         continue;
       }
-      // Stop if after viewport (tru vung count phai)
-      if (gx > VIEW_RIGHT)
+      // Stop nếu pill lấn vào vùng đếm góc phải (so theo MÉP PHẢI pill)
+      if (gx + gW > VIEW_RIGHT)
         break;
 
       bool isActiveG = (g == m_iptvSelectedGroup);
@@ -5847,14 +5984,25 @@ void UIManager::renderIPTVState() {
       gx += gW + UiTheme::PILL_GAP;
     }
 
-    // Count badge ben phai
+    // Cụm đếm góc phải: chấm xanh + sống, chấm đỏ + chết
     if (true) {
-      std::string countText =
-          std::to_string(channelCount) +
-          (m_iptvShowFavoritesOnly ? " kênh yêu thích" : " kênh");
       int th = m_fontSmall ? TTF_FontHeight(m_fontSmall) : 16;
-      drawTextRight(countText, 1000, GROUP_BAR_Y + (GROUP_BAR_H - th) / 2,
-                    UiTheme::TEXT_SUB, m_fontSmall);
+      int cy = GROUP_BAR_Y + GROUP_BAR_H / 2;
+      int textY = GROUP_BAR_Y + (GROUP_BAR_H - th) / 2;
+      int dx = COUNT_RIGHT - countW;
+      drawDot(dx + DOT_R, cy, DOT_R, {34, 197, 94, 255});
+      dx += DOT_R * 2 + DOT_GAP;
+      drawText(aliveText, dx, textY, UiTheme::TEXT_SUB, m_fontSmall);
+      dx += aliveW;
+      if (!deadText.empty()) {
+        dx += DOT_GAP * 2;
+        drawDot(dx + DOT_R, cy, DOT_R, {248, 113, 113, 255});
+        dx += DOT_R * 2 + DOT_GAP;
+        drawText(deadText, dx, textY, UiTheme::TEXT_SUB, m_fontSmall);
+        dx += textWidth(deadText, m_fontSmall);
+      }
+      dx += DOT_GAP;
+      drawText(unitText, dx, textY, UiTheme::TEXT_SUB, m_fontSmall);
     }
   }
 
@@ -5879,6 +6027,11 @@ void UIManager::renderIPTVState() {
     } else if (!m_iptvSelectedGroup.empty()) {
       drawText("Không có kênh trong nhóm \"" + m_iptvSelectedGroup + "\"", 512,
                midY, {150, 160, 175, 255}, m_fontMedium, true);
+    } else if (hiddenDeadCount > 0 && preFilterCount > 0) {
+      drawText("Các kênh đều mất kết nối.", 512, midY - 16,
+               {248, 113, 113, 255}, m_fontMedium, true);
+      drawText("Kiểm tra Wi-Fi rồi bấm [A] để đo lại", 512, midY + 14,
+               {100, 110, 125, 255}, m_fontSmall, true);
     } else {
       drawText(UiStrings::IPTV_NO_CHANNELS, 512, midY - 16,
                {150, 160, 175, 255}, m_fontMedium, true);
@@ -5946,7 +6099,7 @@ void UIManager::renderIPTVState() {
             truncateToWidth(channels[i].group, m_fontSmall, GRP_MAX_W);
         drawText(grp, GRP_X, badgeCY, UiTheme::TEXT_SUB, m_fontSmall);
       }
-      // Ping badge (thay ten file m3u): hien toc do ket noi kenh
+      // Ping badge: hien toc do ket noi kenh
       int pingMs = IPTVManager::instance().getCachedPing(channels[i].url);
       std::string pingText;
       SDL_Color pingBg, pingFg;

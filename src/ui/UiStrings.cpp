@@ -376,6 +376,7 @@ const char *OTA_BTN_RESTART_NOW = "[A] Khởi động lại ngay";
 const char *OTA_MSG_FAILED = "TẢI THẤT BẠI";
 const char *OTA_ERR_NETWORK = "Lỗi mạng. Kiểm tra Wi-Fi.";
 const char *OTA_BTNS_RETRY_BACK = "[A] Thử lại  •  [B] Quay lại";
+const char *OTA_VIEW_FULL_HINT = "... (Nhấn [Y] xem đầy đủ)";
 
 // --- 24. SETTINGS ---
 const char *BACKUP_EXPORT_DESC = "Xuất sao lưu";

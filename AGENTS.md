@@ -1,6 +1,6 @@
 # RomCloud Development Guidelines for AI Agents
 
-All AI agents working on this codebase must adhere strictly to the established architectural decisions and verified hardware behaviors documented in [.agents/rules/app_conventions_and_standards.md](file://.agents/rules/app_conventions_and_standards.md).
+All AI agents working on this codebase must adhere strictly to the established architectural decisions and verified hardware behaviors documented in [.agents/rules/app_conventions_and_standards.md](file://.agents/rules/app_conventions_and_standards.md) and the OTA release rules in [.agents/rules/release_ota.md](file://.agents/rules/release_ota.md).
 
 ## Critical Directives (DO NOT RE-TEST OR BREAK):
 1. **Vietnamese Unicode Support is Complete:** The system font (`regular.ttf`) fully supports Vietnamese diacritics. Never write test scripts to verify font or suspect font rendering for Vietnamese text.

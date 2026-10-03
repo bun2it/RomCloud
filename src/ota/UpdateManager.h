@@ -7,7 +7,7 @@
 
 namespace RomCloud {
 
-constexpr const char* APP_VERSION = "2.3.0";
+constexpr const char* APP_VERSION = "2.3.1";
 #ifndef GIT_COMMIT_HASH
 #define GIT_COMMIT_HASH "unknown"
 #endif
@@ -31,6 +31,7 @@ enum class UpdateState {
 struct UpdateInfo {
     std::string remoteVersion;
     std::string downloadUrl;
+    std::string fullZipUrl;       // Full single-zip OTA (RomCloud-vX.Y.Z.zip)
     std::string iconUrl;          // Official app icon URL
     std::string bundleUrl;        // mpv/codecs bundle
     std::string osBundleUrl;      // OS-specific dependencies
@@ -98,6 +99,7 @@ private:
     std::thread m_workerThread;
 
     void runDownloadWorker(UpdateInfo info);
+    bool installFullZip(const std::string& zipPath);
     bool downloadAndInstallDependencies(const UpdateInfo& info);
     bool downloadFile(const std::string& url, const std::string& destPath, uint64_t* outSize = nullptr, bool trackProgress = false);
     bool installMpvsBundle(const std::string& zipPath);

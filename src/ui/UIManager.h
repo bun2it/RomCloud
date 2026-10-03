@@ -456,6 +456,8 @@ private:
                        SDL_Color bodyBg, SDL_Color titleBg, int titleH);
   void drawBadge(int x, int y, int w, int h, const std::string &text,
                  SDL_Color bg, SDL_Color fg);
+  // Chấm tròn đặc (vẽ bằng rounded-rect bán kính = r)
+  void drawDot(int cx, int cy, int r, SDL_Color color);
   void drawIcon(const std::string &iconName, int x, int y, int w, int h);
   void drawPlayerIcon(const std::string &iconName, int x, int y, int w, int h);
   void drawButtonIcon(const std::string &button, int x, int y, int size);
@@ -553,6 +555,10 @@ private:
   BackgroundTask m_thumbTask;
   std::atomic<bool> m_needLibraryRefresh{false};
   bool isIndexing() const { return m_indexTask.isRunning(); }
+
+  // Gửi báo cáo lỗi thủ công chạy nền: true = đang gửi (chặn bấm lặp),
+  // toast "Đang gửi..." giữ suốt tiến trình, xong mới báo kết quả.
+  std::atomic<bool> m_manualReportSending{false};
 
   // P1-2: realtime stream telemetry from GET http://127.0.0.1:8090/api/status.
   // Polled moi 2s khi UIState=GAME_CAST, render moi frame. atomic de tranh

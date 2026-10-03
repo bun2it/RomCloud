@@ -376,6 +376,7 @@ extern const char *OTA_BTN_RESTART_NOW;
 extern const char *OTA_MSG_FAILED;
 extern const char *OTA_ERR_NETWORK;
 extern const char *OTA_BTNS_RETRY_BACK;
+extern const char *OTA_VIEW_FULL_HINT;
 
 // --- 24. SETTINGS ---
 extern const char *BACKUP_EXPORT_DESC;
