@@ -53,13 +53,11 @@ if [ -f bin/gamecast_d ]; then
 fi
 
 # Copy YouTube support (python3 + yt-dlp)
+# yt-dlp-glibc (38MB) chi dong trong goi Full; goi Lite se tu tai qua
+# mpv_bundle.zip khi phat YouTube lan dau (UpdateManager::checkAndInstallDependencies).
 if [ -f bin/yt-dlp ]; then
     cp bin/yt-dlp "$STAGING_DIR/Apps/RomCloud/bin/"
     chmod +x "$STAGING_DIR/Apps/RomCloud/bin/yt-dlp"
-fi
-if [ -f bin/yt-dlp-glibc ]; then
-    cp bin/yt-dlp-glibc "$STAGING_DIR/Apps/RomCloud/bin/"
-    chmod +x "$STAGING_DIR/Apps/RomCloud/bin/yt-dlp-glibc"
 fi
 if [ -d scripts ]; then
     cp -r scripts/* "$STAGING_DIR/Apps/RomCloud/scripts/"
@@ -110,6 +108,10 @@ cd "$SCRIPT_DIR"
 if [ -f bin/mpv ]; then
     cp bin/mpv "$STAGING_DIR/Apps/RomCloud/bin/"
     chmod +x "$STAGING_DIR/Apps/RomCloud/bin/mpv"
+fi
+if [ -f bin/yt-dlp-glibc ]; then
+    cp bin/yt-dlp-glibc "$STAGING_DIR/Apps/RomCloud/bin/"
+    chmod +x "$STAGING_DIR/Apps/RomCloud/bin/yt-dlp-glibc"
 fi
 if [ -d lib ]; then
     cp -P lib/*.so* "$STAGING_DIR/Apps/RomCloud/lib/" 2>/dev/null || true
