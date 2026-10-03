@@ -1092,137 +1092,7 @@ static std::string escapeJsonString(const std::string& input) {
     return output;
 }
 
-static std::string sanitizeAssText(const std::string& input) {
-    std::string output;
-    for (char c : input) {
-        if (c == '{') output += '(';
-        else if (c == '}') output += ')';
-        else if (c == '\\') output += '/';
-        else output += c;
-    }
-    return output;
-}
-
 // (removed) sendMpvIpcOverSocket — uy thac MpvPlayer::sendCmd.
-
-static std::string buildChannelListAss(
-    const std::vector<IPTVChannel>& channels,
-    size_t selectedIndex,
-    size_t currentPlayingIndex,
-    int screenW,
-    int screenH,
-    int videoH,
-    const std::string& statusMessage = ""
-) {
-    if (channels.empty()) return "";
-
-    int panelH = 360;
-    int panelY = screenH - panelH;
-
-    std::ostringstream ss;
-    // ASS v4 header (minimal, compatible with mpv 0.32)
-    ss << "[Script Info]\nTitle: IPTV Channel List\n\n";
-    ss << "[V4+ Styles]\n";
-    ss << "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n";
-    ss << "Style: Header," << "Arial,20,&H00FFD700,&H00FFD700,&H00000000,&H00000000,1,0,0,1,1,0,2,20,20,10,1\n";
-    ss << "Style: Counter," << "Arial,16,&H00AAAAAA,&H00AAAAAA,&H00000000,&H00000000,0,0,0,1,1,0,3,20,20,10,1\n";
-    ss << "Style: Item," << "Arial,18,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,0,0,0,1,1,0,2,20,20,10,1\n";
-    ss << "Style: ItemSel," << "Arial,18,&H00FFFFFF,&H00FFFFFF,&H00FFD700,&H00000000,1,0,0,1,1,0,2,20,20,10,1\n";
-    ss << "Style: Group," << "Arial,15,&H00AAAAAA,&H00AAAAAA,&H00000000,&H00000000,0,0,0,1,1,0,2,300,20,10,1\n";
-    ss << "Style: Badge," << "Arial,14,&H0000FF00,&H0000FF00,&H00000000,&H00000000,1,0,0,1,1,0,3,20,20,10,1\n";
-    ss << "Style: Footer," << "Arial,15,&H00888888,&H00888888,&H00000000,&H00000000,0,0,0,1,1,0,2,20,20,10,1\n";
-    ss << "\n[Events]\n";
-
-    // Draw solid dark background box at bottom panel
-    ss << "Dialogue: 0," << panelY/10.0 << ":00:00.00," << (panelY+panelH)/10.0 << ":00:00.00,";
-    ss << "Background,,0,0,0,,";
-    ss << "{\\an7\\pos(0," << panelY << ")\\p1\\1c&H181410&\\1a&HFF&\\bord0\\shad0}";
-    ss << "m 0 0 l " << screenW << " 0 l " << screenW << " " << panelH << " l 0 " << panelH << "{\\p0}\n";
-
-    // Accent gold line
-    ss << "Dialogue: 0," << panelY/10.0 << ":00:00.00," << (panelY+1)/10.0 << ":00:00.00,";
-    ss << "Accent,,0,0,0,,";
-    ss << "{\\an7\\pos(0," << panelY << ")\\p1\\1c&HFFD700&\\1a&H99&\\bord0\\shad0}";
-    ss << "m 0 0 l " << screenW << " 0 l " << screenW << " 2 l 0 2{\\p0}\n";
-
-    // Header: "XEM TV"
-    ss << "Dialogue: 0," << panelY/10.0 << ":00:00.50," << (panelY+40)/10.0 << ":00:00.00,";
-    ss << "Header,,0,0,0,,";
-    ss << "{\\an7\\pos(20," << (panelY + 8) << ")}XEM TV";
-    if (!statusMessage.empty()) {
-        ss << "  {\\fs14\\c&H00D7FF&}" << sanitizeAssText(statusMessage);
-    }
-    ss << "\n";
-
-    // Channel counter
-    ss << "Dialogue: 0," << panelY/10.0 << ":00:00.50," << (panelY+40)/10.0 << ":00:00.00,";
-    ss << "Counter,,0,0,0,,";
-    ss << "{\\an9\\pos(" << (screenW - 20) << "," << (panelY + 10) << ")}" << channels.size() << " kênh";
-
-
-    int visibleCount = (panelH >= 260) ? 5 : 3;
-    int half = visibleCount / 2;
-    int startIdx = (int)selectedIndex - half;
-    if (startIdx + visibleCount > (int)channels.size()) {
-        startIdx = (int)channels.size() - visibleCount;
-    }
-    if (startIdx < 0) startIdx = 0;
-    int endIdx = std::min((int)channels.size(), startIdx + visibleCount);
-
-    int contentStartY = panelY + 36;
-    int availableH = (panelH - 56);
-    int itemH = std::max(34, availableH / visibleCount);
-
-    for (int i = startIdx; i < endIdx; ++i) {
-        int rowY = contentStartY + (i - startIdx) * itemH;
-        bool isSel = (i == (int)selectedIndex);
-        bool isPlay = (i == (int)currentPlayingIndex);
-        std::string chanName = truncateUtf8Chars(sanitizeAssText(channels[i].name), 24);
-        std::string groupName = sanitizeAssText(channels[i].group);
-        if (groupName.empty()) groupName = "Truyền hình";
-        groupName = truncateUtf8Chars(groupName, 14);
-
-        char idxBuf[8];
-        snprintf(idxBuf, sizeof(idxBuf), "%02d", i + 1);
-
-        std::string style = isSel ? "ItemSel" : "Item";
-
-        // Selection highlight bar
-        if (isSel) {
-            ss << "Dialogue: 0," << rowY/10.0 << ":00:00.00," << (rowY+itemH-4)/10.0 << ":00:00.00,";
-            ss << "Back,,0,0,0,,";
-            ss << "{\\an7\\pos(12," << rowY << ")\\p1\\1c&H251B12&\\1a&H99&\\bord1.5\\3c&HFFD700&\\shad0}";
-            ss << "m 0 0 l " << (screenW - 24) << " 0 l " << (screenW - 24) << " " << (itemH - 4) << " l 0 " << (itemH - 4) << "{\\p0}\n";
-        }
-
-        // Index + name
-        ss << "Dialogue: 0," << rowY/10.0 << ":00:00.00," << (rowY+itemH)/10.0 << ":00:00.00,";
-        ss << style << ",,0,0,0,,";
-        ss << "{\\an7\\pos(22," << (rowY + 6) << ")}{\\c&HFFD700&}" << idxBuf << "  {\\c" << (isSel ? "&HFFFFFF&" : "&HE2E2E2&") << "}" << chanName << "\n";
-
-        // Group
-        ss << "Dialogue: 0," << rowY/10.0 << ":00:00.00," << (rowY+itemH)/10.0 << ":00:00.00,";
-        ss << "Group,,0,0,0,,";
-        ss << "{\\an7\\pos(" << (screenW / 2 + 10) << "," << (rowY + 7) << ")}" << groupName << "\n";
-
-        // Playing badge
-        if (isPlay) {
-            ss << "Dialogue: 0," << rowY/10.0 << ":00:00.00," << (rowY+28)/10.0 << ":00:00.00,";
-            ss << "Badge,,0,0,0,,";
-            ss << "{\\an9\\pos(" << (screenW - 100) << "," << (rowY + 5) << ")}";
-            ss << (isSel ? "Đang Xem" : "Đang Xem");
-            ss << "\n";
-        }
-    }
-
-    // Footer
-    ss << "Dialogue: 0," << (screenH-22)/10.0 << ":00:00.00," << screenH/10.0 << ":00:00.00,";
-    ss << "Footer,,0,0,0,,";
-    ss << "{\\an7\\pos(20," << (screenH - 18) << ")}";
-    ss << "Up/Down: Chọn kênh  |  [A]: Chuyển kênh  |  [SELECT]: Ẩn/Hiện  |  [B]: Thoát\n";
-
-    return ss.str();
-}
 
 // ─────────────────────────────────────────────
 // IPTV Non-Blocking Playback
@@ -1464,7 +1334,6 @@ void IPTVManager::showIPTVChannelOSD(
     SDL_Color gold  = {0, 180, 216, 255};
     SDL_Color gray  = {170, 180, 195, 255};
     SDL_Color dim   = {130, 140, 155, 255};
-    SDL_Color green = {34, 197, 94, 255};
 
     auto fillCircle = [&](int cx, int cy, int rad, uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
         for (int yy = cy - rad; yy <= cy + rad; yy++) {

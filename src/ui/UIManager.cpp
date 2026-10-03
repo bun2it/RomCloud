@@ -990,7 +990,7 @@ void UIManager::update() {
       } else if (input.isButtonJustPressed(Button::A)) {
         VkAction act = VirtualKeyboard::pressA(
             m_searchVk,
-            [this](const char *m) {
+            [this](const char *) {
               showToast(m_searchVk.telexMode ? "Chế độ: TELEX"
                                              : "Chế độ: TIẾNG ANH (US)",
                         {0, 180, 216, 255}, 1200);
@@ -1819,7 +1819,7 @@ void UIManager::update() {
       } else if (input.isButtonJustPressed(Button::A)) {
         VkAction act = VirtualKeyboard::pressA(
             m_iptvVk,
-            [this](const char *m) {
+            [this](const char *) {
               showToast(m_iptvVk.telexMode ? "Chế độ: TELEX"
                                            : "Chế độ: TIẾNG ANH (US)",
                         {0, 180, 255, 255}, 1200);
@@ -2330,7 +2330,7 @@ void UIManager::update() {
     } else if (input.isButtonJustPressed(Button::A)) {
       VkAction act = VirtualKeyboard::pressA(
           m_ytVk,
-          [this](const char *m) {
+          [this](const char *) {
             showToast(m_ytVk.telexMode ? "Chế độ: TELEX"
                                        : "Chế độ: TIẾNG ANH (US)",
                       UiTheme::ACCENT_GREEN, 1200);
@@ -5862,7 +5862,6 @@ void UIManager::renderIPTVState() {
   // Channel list
   // -----------------------------------------------------------------------
   const int LIST_TOP = GROUP_BAR_Y + GROUP_BAR_H + 2;
-  const int FOOTER_H = UiTheme::FOOTER_H;
   const int LIST_BOTTOM = UiTheme::FOOTER_Y;
   const int LIST_H = LIST_BOTTOM - LIST_TOP;
   const int itemH = 64; // 2 dong: ten kenh + "- ten file"
@@ -6409,197 +6408,6 @@ static std::string formatViews(const std::string &raw) {
 }
 
 static std::mutex s_ytStreamMutex;
-
-static std::string decodeJsonText(const std::string &raw) {
-  std::string out;
-  out.reserve(raw.size());
-  for (size_t i = 0; i < raw.size(); ++i) {
-    if (raw[i] == '\\' && i + 1 < raw.size()) {
-      char next = raw[i + 1];
-      if (next == '\"') {
-        out += '\"';
-        i++;
-      } else if (next == '\\') {
-        out += '\\';
-        i++;
-      } else if (next == '/') {
-        out += '/';
-        i++;
-      } else if (next == 'n' || next == 'r' || next == 't') {
-        out += ' ';
-        i++;
-      } else if (next == 'u' && i + 5 < raw.size()) {
-        std::string hex = raw.substr(i + 2, 4);
-        try {
-          unsigned long code = std::stoul(hex, nullptr, 16);
-          if (code == 0x0026)
-            out += '&';
-          else if (code == 0x0027)
-            out += '\'';
-          else if (code == 0x0022)
-            out += '\"';
-          else if (code < 128)
-            out += static_cast<char>(code);
-          else {
-            if (code < 0x800) {
-              out += static_cast<char>(0xC0 | (code >> 6));
-              out += static_cast<char>(0x80 | (code & 0x3F));
-            } else {
-              out += static_cast<char>(0xE0 | (code >> 12));
-              out += static_cast<char>(0x80 | ((code >> 6) & 0x3F));
-              out += static_cast<char>(0x80 | (code & 0x3F));
-            }
-          }
-          i += 5;
-        } catch (...) {
-          out += raw[i];
-        }
-      } else {
-        out += next;
-        i++;
-      }
-    } else if (raw[i] == '|') {
-      out += '-';
-    } else {
-      out += raw[i];
-    }
-  }
-  return out;
-}
-
-static std::string extractField(const std::string &block,
-                                const std::string &startKey,
-                                const std::string &valKey) {
-  size_t sPos = block.find(startKey);
-  if (sPos == std::string::npos)
-    return "";
-  size_t vPos = block.find(valKey, sPos);
-  if (vPos == std::string::npos || vPos > sPos + 400)
-    return "";
-  size_t quoteStart = block.find('\"', vPos + valKey.length());
-  if (quoteStart == std::string::npos)
-    return "";
-  size_t quoteEnd = quoteStart + 1;
-  while (quoteEnd < block.length()) {
-    if (block[quoteEnd] == '\"' && block[quoteEnd - 1] != '\\')
-      break;
-    quoteEnd++;
-  }
-  if (quoteEnd >= block.length())
-    return "";
-  return block.substr(quoteStart + 1, quoteEnd - quoteStart - 1);
-}
-
-static std::vector<std::string>
-parseInnertubeSearchResponse(const std::string &json) {
-  std::vector<std::string> results;
-  size_t searchPos = 0;
-
-  while (true) {
-    size_t p1 = json.find("\"videoWithContextRenderer\":", searchPos);
-    size_t p2 = json.find("\"videoRenderer\":", searchPos);
-    size_t matchPos = std::string::npos;
-
-    if (p1 != std::string::npos && (p2 == std::string::npos || p1 < p2)) {
-      matchPos = p1;
-    } else if (p2 != std::string::npos) {
-      matchPos = p2;
-    } else {
-      break;
-    }
-
-    size_t bracePos = json.find('{', matchPos);
-    if (bracePos == std::string::npos)
-      break;
-    searchPos = bracePos + 1;
-
-    // Find end of this item block (next renderer or max 35000 chars)
-    size_t nextP1 = json.find("\"videoWithContextRenderer\":", searchPos);
-    size_t nextP2 = json.find("\"videoRenderer\":", searchPos);
-    size_t nextItem = std::min(nextP1, nextP2);
-    size_t blockEnd = (nextItem != std::string::npos)
-                          ? nextItem
-                          : std::min(json.length(), searchPos + 35000);
-    std::string block = json.substr(searchPos, blockEnd - searchPos);
-
-    std::string vid;
-    // Extract video ID: either from thumbnail URL or "videoId"
-    size_t imgPos = block.find("i.ytimg.com/vi/");
-    if (imgPos != std::string::npos) {
-      size_t slashPos = block.find('/', imgPos + 15);
-      if (slashPos != std::string::npos && slashPos - (imgPos + 15) == 11) {
-        vid = block.substr(imgPos + 15, 11);
-      }
-    }
-    if (vid.empty()) {
-      vid = extractField(block, "\"videoId\"", ":");
-    }
-    if (vid.empty() || vid.length() != 11)
-      continue;
-
-    // Title: headline or title
-    std::string title =
-        decodeJsonText(extractField(block, "\"headline\"", "\"text\""));
-    if (title.empty())
-      title =
-          decodeJsonText(extractField(block, "\"headline\"", "\"content\""));
-    if (title.empty())
-      title = decodeJsonText(extractField(block, "\"title\"", "\"text\""));
-    if (title.empty())
-      title = decodeJsonText(extractField(block, "\"title\"", "\"content\""));
-    if (title.empty())
-      continue;
-
-    // Channel / Uploader
-    std::string channel =
-        decodeJsonText(extractField(block, "\"shortBylineText\"", "\"text\""));
-    if (channel.empty())
-      channel =
-          decodeJsonText(extractField(block, "\"longBylineText\"", "\"text\""));
-    if (channel.empty())
-      channel =
-          decodeJsonText(extractField(block, "\"ownerText\"", "\"text\""));
-    if (channel.empty())
-      channel = "YouTube";
-
-    // Duration: lengthText or thumbnailOverlayTimeStatusRenderer
-    std::string duration =
-        extractField(block, "\"lengthText\"", "\"simpleText\"");
-    if (duration.empty())
-      duration = extractField(block, "\"lengthText\"", "\"text\"");
-    if (duration.empty())
-      duration = extractField(block, "\"thumbnailOverlayTimeStatusRenderer\"",
-                              "\"text\"");
-    if (duration.empty())
-      duration = "--:--";
-
-    // Views
-    std::string views = decodeJsonText(
-        extractField(block, "\"shortViewCountText\"", "\"simpleText\""));
-    if (views.empty())
-      views = decodeJsonText(
-          extractField(block, "\"shortViewCountText\"", "\"text\""));
-    if (views.empty())
-      views = decodeJsonText(
-          extractField(block, "\"viewCountText\"", "\"simpleText\""));
-    if (views.empty())
-      views =
-          decodeJsonText(extractField(block, "\"viewCountText\"", "\"text\""));
-
-    bool dup = false;
-    for (const auto &item : results) {
-      if (item.compare(0, 11, vid) == 0) {
-        dup = true;
-        break;
-      }
-    }
-    if (!dup) {
-      results.push_back(vid + "|" + title + "|" + duration + "|" + channel +
-                        "|" + views);
-    }
-  }
-  return results;
-}
 
 void UIManager::loadYouTubeHistory() {
   if (!m_ytSearchHistory.empty())
@@ -7174,35 +6982,6 @@ wrapUtf8TwoLines(const std::string &text, size_t maxCharsPerLine) {
   }
 
   return {trimUtf8(l1), trimUtf8(l2)};
-}
-
-static int getBatteryLevel() {
-  static uint32_t lastCheck = 0;
-  static int cachedLevel = 100;
-  uint32_t now = SDL_GetTicks();
-  if (now - lastCheck > 10000 || lastCheck == 0) {
-    lastCheck = now;
-    FILE *f = fopen("/sys/class/power_supply/battery/capacity", "r");
-    if (f) {
-      int cap = 100;
-      if (fscanf(f, "%d", &cap) == 1 && cap >= 0 && cap <= 100)
-        cachedLevel = cap;
-      fclose(f);
-    }
-  }
-  return cachedLevel;
-}
-
-static std::string getCurrentTimeString() {
-  time_t now = time(nullptr);
-  struct tm *t = localtime(&now);
-  char buf[16];
-  if (t) {
-    strftime(buf, sizeof(buf), "%H:%M", t);
-  } else {
-    strcpy(buf, "12:00");
-  }
-  return std::string(buf);
 }
 
 // ============================================================================
@@ -8877,7 +8656,7 @@ void UIManager::renderYouTubeHomeState() {
 
 // (Footer ở trên đã được dim khi modal mở → modal vẽ footer riêng)
 
-void UIManager::renderYouTubeHomeContentRow(int contentTop, int contentH) {
+void UIManager::renderYouTubeHomeContentRow(int contentTop, int /*contentH*/) {
   // 5 rows/page, list vertical, thumb trái 16:9 + info phải
   const int itemsPerPage = 5;
   int totalResults = static_cast<int>(m_ytSearchResults.size());
