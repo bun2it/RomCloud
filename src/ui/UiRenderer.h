@@ -35,6 +35,10 @@ public:
                          SDL_Color color, bool filled);
     void drawRoundedBorder(int x, int y, int w, int h, int radius,
                            SDL_Color color, int thickness);
+    void drawRoundedTopBar(int x, int y, int w, int h, int radius,
+                           SDL_Color color);
+    void drawModalDialog(int x, int y, int w, int h, int radius,
+                         SDL_Color bodyBg, SDL_Color titleBg, int titleH);
     void drawBadge(int x, int y, int w, int h, const std::string& text,
                    SDL_Color bg, SDL_Color fg);
     void drawIcon(const std::string& iconName, int x, int y, int w, int h);
@@ -47,6 +51,10 @@ public:
     int textWidth(const std::string& text, TTF_Font* font);
     std::string truncateToWidth(const std::string& text, TTF_Font* font, int maxPx);
     int pillWidth(const std::string& text, TTF_Font* font = nullptr);
+    // Rong badge/button do theo pixel (w=0 -> tu do). Tra ve w sau clamp.
+    int badgeWidth(const std::string& text, int h, TTF_Font* font = nullptr);
+    int buttonWidth(const std::string& label, TTF_Font* font = nullptr);
+    int badgeDualWidth(const std::string& label1, const std::string& label2, int h);
 
     // ---- widget ----
     void drawPill(int x, int y, int w, int h, const std::string& text,
@@ -80,6 +88,8 @@ public:
     void drawCard(int x, int y, int w, int h);
     void drawFocusRow(int x, int y, int w, int h);
     void drawAppHeader(const std::string& title, const std::string& sub = "");
+    // Cum status phai header kieu stock: [wifi] [% pin + icon pin] [gio]
+    void drawHeaderStatus();
     void drawPadIcon(UiTheme::PadBtn btn, int x, int y, int size);
     void drawAppFooter(const std::vector<UiTheme::FooterHint>& hints);
     void beginModalDim();

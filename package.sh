@@ -34,6 +34,10 @@ cp -f iconsel.png "$STAGING_DIR/Apps/RomCloud/iconsel.png" 2>/dev/null || cp ico
 cp -f icontop.png "$STAGING_DIR/Apps/RomCloud/icontop.png" 2>/dev/null || cp icon.png "$STAGING_DIR/Apps/RomCloud/icontop.png"
 cp launch.sh "$STAGING_DIR/Apps/RomCloud/"
 cp bin/RomCloud "$STAGING_DIR/Apps/RomCloud/bin/"
+if [ -f bin/gamecast_d ]; then
+    cp bin/gamecast_d "$STAGING_DIR/Apps/RomCloud/bin/"
+    chmod +x "$STAGING_DIR/Apps/RomCloud/bin/gamecast_d"
+fi
 
 # Copy YouTube support (python3 + yt-dlp)
 if [ -f bin/yt-dlp ]; then
@@ -58,6 +62,11 @@ cp assets/button_icons/*.png "$STAGING_DIR/Apps/RomCloud/assets/button_icons/" 2
 cp config/settings.json "$STAGING_DIR/Apps/RomCloud/config/"
 if [ -d config ]; then
     cp -f config/*.conf "$STAGING_DIR/Apps/RomCloud/config/" 2>/dev/null || true
+    # P0-5: YouTube Data API v3 key (chmod 600 for privacy)
+    if [ -f config/youtube_api.key ]; then
+        cp -f config/youtube_api.key "$STAGING_DIR/Apps/RomCloud/config/"
+        chmod 600 "$STAGING_DIR/Apps/RomCloud/config/youtube_api.key"
+    fi
 fi
 cp -f iptv/*.m3u iptv/*.m3u8 "$STAGING_DIR/Apps/RomCloud/iptv/" 2>/dev/null || true
 cp -f iptv/sources.txt "$STAGING_DIR/Apps/RomCloud/iptv/" 2>/dev/null || true
@@ -99,7 +108,7 @@ make_zip "$DIST_DIR/$ZIP_NAME" Apps
 
 # Create mpv_bundle.zip for OTA update delivery
 cd "$STAGING_DIR/Apps/RomCloud"
-make_zip "$DIST_DIR/mpv_bundle.zip" bin/mpv lib bin/yt-dlp bin/yt-dlp-glibc scripts assets/player_icons assets/apps_icons/YOUTUBE.png
+make_zip "$DIST_DIR/mpv_bundle.zip" bin/mpv lib bin/yt-dlp bin/yt-dlp-glibc scripts config/youtube_api.key assets/player_icons assets/apps_icons/YOUTUBE.png
 cd "$SCRIPT_DIR"
 rm -rf "$STAGING_DIR"
 

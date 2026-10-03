@@ -1,0 +1,12 @@
+name = "romcloud-issue-relay"
+main = "src/index.ts"
+compatibility_date = "2024-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+WORKER_VERSION = "1.0.0"
+APP_NAME = "RomCloud"
+
+[[kv_namespaces]]
+binding = "ISSUES_KV"
+id = "6c0aab5de6f847aab7b8d7d3666f4347"

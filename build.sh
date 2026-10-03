@@ -22,12 +22,17 @@ fi
 echo "=== Compiling RomCloud for TrimUI Brick Pro (aarch64-linux-gnu.2.33) ==="
 mkdir -p bin
 
+# Detect git commit hash for build-id tagging in debug.log
+GIT_SHA="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
+echo "Build commit: $GIT_SHA"
+
 $ZIG c++ \
     -target aarch64-linux-gnu.2.33 \
     -std=c++17 \
     -O3 \
     -Wall -Wextra \
     -Wno-error=date-time \
+    -DGIT_COMMIT_HASH=\"$GIT_SHA\" \
     -Isrc \
     -Isysroot/include \
     -Isysroot/include/SDL2 \
@@ -35,12 +40,14 @@ $ZIG c++ \
     src/app/Application.cpp \
     src/ui/UIManager.cpp \
     src/ui/UiRenderer.cpp \
+    src/ui/UiStrings.cpp \
     src/ui/ExplorerSync.cpp \
     src/ui/ExplorerInput.cpp \
     src/ui/ExplorerRender.cpp \
     src/ui/ExplorerRenderKb.cpp \
     src/ui/DialogManager.cpp \
     src/ui/CoverManager.cpp \
+    src/ui/SearchInputModal.cpp \
     src/ui/BoxartScraper.cpp \
     src/ui/QrRenderer.cpp \
     src/ui/qrcodegen.cpp \
@@ -48,6 +55,7 @@ $ZIG c++ \
     src/network/WebServer.cpp \
     src/auth/AuthManager.cpp \
     src/sync/DriveSyncEngine.cpp \
+    src/sync/OneDriveSync.cpp \
     src/download/DownloadManager.cpp \
     src/ota/UpdateManager.cpp \
     src/input/InputManager.cpp \
@@ -55,6 +63,7 @@ $ZIG c++ \
     src/platform/PlatformInfo.cpp \
     src/logging/Logger.cpp \
     src/logging/IssueLogger.cpp \
+    src/diagnostics/DeviceIdentity.cpp \
     src/iptv/IPTVManager.cpp \
     src/media/MpvPlayer.cpp \
     src/config/AppConfig.cpp \
@@ -65,6 +74,7 @@ $ZIG c++ \
     src/rom/RomDetector.cpp \
     src/rom/RomOrganizer.cpp \
     src/localsend/LocalSendManager.cpp \
+    src/cast/CastManager.cpp \
     -Lsysroot/lib \
     -lSDL2 \
     -lSDL2_image \
@@ -81,3 +91,20 @@ $ZIG c++ \
 echo "=== Build Successful: bin/RomCloud ==="
 ls -lh bin/RomCloud
 file bin/RomCloud
+
+echo "=== Compiling GameCast Daemon (gamecast_d) ==="
+$ZIG c++ \
+    -target aarch64-linux-gnu.2.33 \
+    -std=c++17 \
+    -O3 \
+    -Wall -Wextra \
+    -Isrc \
+    src/cast/toojpeg.cpp \
+    src/cast/gamecast_d.cpp \
+    -lpthread \
+    -o bin/gamecast_d
+
+echo "=== Build Successful: bin/gamecast_d ==="
+ls -lh bin/gamecast_d
+file bin/gamecast_d
+

@@ -21,6 +21,8 @@ else
     exit 1
 fi
 
+trap 'rm -rf /tmp/_MEI* /tmp/yt_cache 2>/dev/null' EXIT INT TERM
+
 PER_PAGE=6
 
 case "$1" in
@@ -33,6 +35,14 @@ case "$1" in
             exit 1
         fi
 
+        # Prefer lightweight python innertube search to avoid yt-dlp OOM
+        if [ -x "/mnt/SDCARD/System/bin/python3" ] && [ -f "${BINDIR}/scripts/youtube_search.py" ]; then
+            LD_LIBRARY_PATH=/mnt/SDCARD/System/lib:$LD_LIBRARY_PATH \
+            SSL_CERT_FILE=/mnt/SDCARD/System/lib/python3.11/site-packages/pip/_vendor/certifi/cacert.pem \
+            /mnt/SDCARD/System/bin/python3 "${BINDIR}/scripts/youtube_search.py" smart "$QUERY" "$PER_PAGE"
+            exit 0
+        fi
+
         TOTAL=$(( PAGE * PER_PAGE ))
         START=$(( (PAGE - 1) * PER_PAGE + 1 ))
         END=$(( PAGE * PER_PAGE ))
@@ -40,7 +50,7 @@ case "$1" in
         # Clean stale PyInstaller temp folders to prevent decompression errors
         rm -rf /tmp/_MEI* 2>/dev/null
 
-        # Lean query: minimal flags, only fetch metadata (flat-playlist is critical for speed)
+        # Lean query: minimal flags, only fetch metadata
         "$YTDLP" \
             --flat-playlist \
             --no-warnings \
@@ -54,23 +64,22 @@ case "$1" in
         ;;
     url)
         VIDEO_ID="$2"
-        QUALITY="${3:-auto}"
+        QUALITY="${3:-720}"
         if [ -z "$VIDEO_ID" ]; then
             echo "ERROR:NOSTREAM no video id" >&2
             exit 1
         fi
 
-        # Clean stale PyInstaller temp folders to prevent decompression errors
+        # Clean stale PyInstaller temp folders to reclaim tmpfs RAM
         rm -rf /tmp/_MEI* 2>/dev/null
 
-        FORMAT="18/22/best[height<=720]/best"
+        FORMAT="22/best[height<=720]/best"
         case "$QUALITY" in
-            720) FORMAT="22/best[height<=720]/best" ;;
             360) FORMAT="18/best[height<=360]" ;;
-            *)   FORMAT="18/22/best[height<=720]/best" ;;
+            *)   FORMAT="22/best[height<=720]/best" ;;
         esac
 
-        # Fast direct stream URL via Android client
+        # Fast direct stream URL via Android client (bypasses JS decipherer, ~2s)
         RAW_URLS=$("$YTDLP" -g \
             --cache-dir /tmp/yt_cache \
             --no-warnings \
@@ -92,8 +101,8 @@ case "$1" in
             exit 0
         fi
 
-        # Fallback to general best stream
-        RAW_URLS=$("$YTDLP" -g --socket-timeout 10 -f "$FORMAT" "https://www.youtube.com/watch?v=${VIDEO_ID}" 2>/dev/null)
+        # Fallback with multi-client
+        RAW_URLS=$("$YTDLP" -g --socket-timeout 8 --no-warnings --no-check-certificates --extractor-args "youtube:player_client=android,ios,web" -f "$FORMAT" "https://www.youtube.com/watch?v=${VIDEO_ID}" 2>/dev/null)
         V_URL=$(echo "$RAW_URLS" | sed -n '1p')
         A_URL=$(echo "$RAW_URLS" | sed -n '2p')
 

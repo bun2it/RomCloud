@@ -198,6 +198,11 @@ public:
     // Get channel by index
     IPTVChannel* getChannel(size_t index);
 
+    // Ping cache lookup (URL -> ms; -2=chua do, -1=mat ket noi, >=0=ms)
+    int getCachedPing(const std::string &url);
+    void clearPingCache();
+    void prefetchPings(const std::vector<std::string> &urls);
+
     // Create default playlist
     void createDefaultPlaylist(const std::string& filepath);
 
@@ -206,13 +211,17 @@ public:
     bool ensureMediaPlayerAvailable();
 
     int getLastPlayingIndex() const { return m_lastPlayingIndex; }
-    bool playYouTubeVideo(const std::string& videoId, const std::string& initialUrl, const std::string& quality = "360");
+    bool playYouTubeVideo(const std::string& videoId, const std::string& initialUrl, const std::string& quality = "720");
     bool playYouTubeUrl(const std::string& url);
     bool switchYouTubeQuality(const std::string& videoId, const std::string& targetQuality);
     void showOverlayIcon(const std::string& iconName, uint32_t durationMs = 1400);
     bool sendMpvIpcCommand(const std::string& cmd, std::string* response = nullptr, const std::string& sockPath = "");
     bool isYouTubePlaying() const { return m_isPlaying && m_currentChannel == "YouTube"; }
     bool stop();
+
+    // IPTV video overlay (channel info + duration bar) — show/hide API
+    void showIPTVVideoFooter(bool isPaused);
+    void hideIPTVVideoFooter();
 
     // IPTV playback — blocking loop (mpv controls via IPC, SDL idle)
     bool playChannel(const IPTVChannel& channel, size_t initialIndex = 0, const std::vector<IPTVChannel>& customList = {});
@@ -294,6 +303,10 @@ private:
     std::mutex m_prefetchMutex;
     // Khởi động tiến trình mpv mới cho URL đã resolve (dùng khi restart đổi kênh)
     pid_t spawnMpvForUrl(const std::string& url);
+
+    // Ping cache cho channel list (key=URL, value=ms; -1=lỗi)
+    std::unordered_map<std::string, int> m_pingCache;
+    std::unordered_set<std::string> m_pingInFlight;
 };
 
 } // namespace RomCloud

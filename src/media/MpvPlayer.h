@@ -56,6 +56,8 @@ private:
     std::string m_sockPath = "/tmp/mpv_iptv.sock";
     int m_sock = -1;
     unsigned m_overlayExpireMs = 0;
+    std::string m_lastLogPath;  // path to mpv stderr file (auto-forwarded to debug.log on stop)
+    void forwardMpvLogToDebug(); // doc file + forward tung dong vao Logger + unlink
 };
 
 } // namespace RomCloud

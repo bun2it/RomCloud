@@ -14,6 +14,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <deque>
+#include "../network/JsonHelper.h"
 
 namespace RomCloud {
 
@@ -239,12 +240,84 @@ bool DownloadManager::startDownload(const GameRecord& game, const SystemRecord& 
     return true;
 }
 
+static bool headLooksHtml(const std::string& fpath) {
+    FILE* f = fopen(fpath.c_str(), "rb");
+    if (!f) return false;
+    char buf[512] = {0};
+    size_t n = fread(buf, 1, sizeof(buf)-1, f);
+    fclose(f);
+    size_t i = 0;
+    while (i < n && (buf[i]==' '||buf[i]=='\t'||buf[i]=='\r'||buf[i]=='\n')) i++;
+    if (i+4 > n || buf[i] != '<') return false;
+    std::string head(buf+i, std::min<size_t>(64, n-i));
+    std::transform(head.begin(), head.end(), head.begin(), ::tolower);
+    return head.rfind("<!doctype html",0)==0 || head.rfind("<html",0)==0;
+}
+
+static std::string extractJsonField(const std::string& body, const std::string& key) {
+    return JsonHelper::extractString(body, key);
+}
+
+static size_t dlHeaderFn(char* buf, size_t size, size_t n, void* ud) {
+    size_t total = size * n;
+    auto* pp = static_cast<std::pair<std::string*, std::string*>*>(ud);
+    std::string line(buf, total);
+    std::string low = line;
+    std::transform(low.begin(), low.end(), low.begin(), ::tolower);
+    if (low.rfind("content-type:", 0) == 0) {
+        std::string v = line.size() > 13 ? line.substr(13) : "";
+        while (!v.empty() && (v.front()==' '||v.front()=='\t')) v.erase(0,1);
+        while (!v.empty() && (v.back()=='\r'||v.back()=='\n'||v.back()==' ')) v.pop_back();
+        *pp->first = v;
+    } else if (low.rfind("set-cookie:", 0) == 0) {
+        std::string v = line.size() > 11 ? line.substr(11) : "";
+        while (!v.empty() && (v.front()==' '||v.front()=='\t')) v.erase(0,1);
+        while (!v.empty() && (v.back()=='\r'||v.back()=='\n')) v.pop_back();
+        if (!pp->second->empty()) *pp->second += "; ";
+        size_t sc = v.find(';');
+        *pp->second += (sc == std::string::npos ? v : v.substr(0, sc));
+    }
+    return total;
+}
+
 void DownloadManager::runDownloadWorker() {
     std::string token = AuthManager::instance().getValidAccessToken();
     std::string url;
-    if (!token.empty()) {
-        // Authenticated: use Drive API
-        url = "https://www.googleapis.com/drive/v3/files/" + m_activeGame.cloudFileId + "?alt=media";
+    bool isOneDrive = m_activeGame.cloudFileId.rfind("od1|", 0) == 0;
+    std::string odShareId, odItemId;
+    if (isOneDrive) {
+        // OneDrive: cloudFileId = "od1|<shareToken>|<itemId>". Resolve fresh downloadUrl at download time.
+        size_t p1 = m_activeGame.cloudFileId.find('|');
+        size_t p2 = m_activeGame.cloudFileId.find('|', p1 + 1);
+        if (p1 != std::string::npos && p2 != std::string::npos) {
+            odShareId = m_activeGame.cloudFileId.substr(p1 + 1, p2 - p1 - 1);
+            odItemId = m_activeGame.cloudFileId.substr(p2 + 1);
+        }
+        if (odShareId.empty() || odItemId.empty()) {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            m_progress.state = DownloadState::FAILED;
+            m_progress.errorMessage = "Thieu thong tin file OneDrive. Hay dong bo lai.";
+            Logger::error(m_progress.errorMessage);
+            m_isRunning = false;
+            return;
+        }
+        std::string metaUrl = "https://api.onedrive.com/v1.0/shares/" + odShareId + "/driveItem/items/" + odItemId + "?select=id,name,size,@microsoft.graph.downloadUrl";
+        HttpResponse meta = HttpClient::instance().get(metaUrl, {"User-Agent: Mozilla/5.0"}, 20);
+        std::string dl = extractJsonField(meta.body, "@microsoft.graph.downloadUrl");
+        if (dl.empty()) dl = extractJsonField(meta.body, "downloadUrl");
+        if (dl.empty()) {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            m_progress.state = DownloadState::FAILED;
+            m_progress.errorMessage = "Khong lay duoc link tai OneDrive (HTTP " + std::to_string(meta.statusCode) + "). Hay dong bo lai.";
+            Logger::error(m_progress.errorMessage);
+            m_isRunning = false;
+            return;
+        }
+        url = dl;
+        Logger::info("OneDrive downloadUrl resolved for " + m_activeGame.filename);
+    } else if (!token.empty()) {
+        // Authenticated: use Drive API with abuse acknowledgement (bypass 100MB virus-scan page officially)
+        url = "https://www.googleapis.com/drive/v3/files/" + m_activeGame.cloudFileId + "?alt=media&acknowledgeAbuse=true";
     } else if (!m_activeGame.cloudFileId.empty()) {
         // Public folder: use uc endpoint with confirm bypass
         url = "https://drive.google.com/uc?export=download&confirm=t&id=" + m_activeGame.cloudFileId;
@@ -308,6 +381,12 @@ void DownloadManager::runDownloadWorker() {
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 15);
     curl_easy_setopt(curl, CURLOPT_LOW_SPEED_LIMIT, 1024L); // 1 KB/s limit
     curl_easy_setopt(curl, CURLOPT_LOW_SPEED_TIME, 30L);    // 30 seconds
+    std::string respContentType;
+    std::string respSetCookie;
+    auto headerPair = std::make_pair(&respContentType, &respSetCookie);
+    curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, dlHeaderFn);
+    curl_easy_setopt(curl, CURLOPT_HEADERDATA, &headerPair);
+    curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
     curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
 
     CURLcode res = curl_easy_perform(curl);
@@ -352,8 +431,15 @@ void DownloadManager::runDownloadWorker() {
                 isHtml = (htmlContent.find("<!DOCTYPE") != std::string::npos ||
                           htmlContent.find("<html") != std::string::npos ||
                           htmlContent.find("virus scan") != std::string::npos ||
+                          htmlContent.find("Virus scan") != std::string::npos ||
                           htmlContent.find("Download anyway") != std::string::npos ||
-                          htmlContent.find("drive.usercontent.google.com") != std::string::npos);
+                          htmlContent.find("download anyway") != std::string::npos ||
+                          htmlContent.find("drive.usercontent.google.com") != std::string::npos ||
+                          htmlContent.find("download_warning") != std::string::npos ||
+                          htmlContent.find("confirm=") != std::string::npos ||
+                          htmlContent.find("uuid=") != std::string::npos ||
+                          htmlContent.find("too large") != std::string::npos ||
+                          htmlContent.find("Too large") != std::string::npos);
             }
             if (isHtml) {
                 Logger::info("Detected Drive virus-scan warning page. Extracting bypass form tokens...");
@@ -400,6 +486,12 @@ void DownloadManager::runDownloadWorker() {
                 if (!curl2) { fclose(fp2); m_isRunning = false; return; }
                 curl_easy_setopt(curl2, CURLOPT_URL, bypassUrl.c_str());
                 curl_easy_setopt(curl2, CURLOPT_COOKIEFILE, "");
+                struct curl_slist* c2headers = nullptr;
+                if (!respSetCookie.empty()) {
+                    std::string ck = "Cookie: " + respSetCookie;
+                    c2headers = curl_slist_append(c2headers, ck.c_str());
+                    curl_easy_setopt(curl2, CURLOPT_HTTPHEADER, c2headers);
+                }
                 curl_easy_setopt(curl2, CURLOPT_USERAGENT, "Mozilla/5.0 (Windows NT 10.0; Win64; x64)");
                 curl_easy_setopt(curl2, CURLOPT_WRITEFUNCTION, fwrite);
                 curl_easy_setopt(curl2, CURLOPT_WRITEDATA, fp2);
@@ -414,6 +506,7 @@ void DownloadManager::runDownloadWorker() {
                 curl_easy_setopt(curl2, CURLOPT_LOW_SPEED_TIME, 30L);
                 res = curl_easy_perform(curl2);
                 curl_easy_getinfo(curl2, CURLINFO_RESPONSE_CODE, &httpCode);
+                if (c2headers) curl_slist_free_all(c2headers);
                 curl_easy_cleanup(curl2);
                 fclose(fp2);
                 Logger::info("Retry download complete: HTTP " + std::to_string(httpCode));
@@ -421,6 +514,41 @@ void DownloadManager::runDownloadWorker() {
         }
     }
     // --- end virus scan bypass ---
+
+    // --- Post-download validation: reject HTML error pages saved as ROM ---
+    {
+        struct stat vst;
+        if (stat(m_tempFilePath.c_str(), &vst) == 0 && vst.st_size > 0) {
+            bool looksHtml = headLooksHtml(m_tempFilePath);
+            std::string ctLow = respContentType;
+            std::transform(ctLow.begin(), ctLow.end(), ctLow.begin(), ::tolower);
+            bool ctHtml = ctLow.find("text/html") != std::string::npos;
+            // OneDrive downloadUrl never returns HTML for a valid file; any HTML = dead link.
+            // Drive: small HTML while expecting a big ROM = virus-scan page that bypass failed to handle.
+            bool expectBig = m_activeGame.sizeBytes > 256 * 1024;
+            long gotSize = (long)vst.st_size;
+            if (looksHtml || ctHtml) {
+                bool reject = looksHtml && (ctHtml || (expectBig && gotSize < 256 * 1024));
+                if (!reject && ctHtml && !looksHtml) reject = expectBig; // header says html but head unreadable -> be strict for big files
+                if (reject) {
+                    FileSystemManager::instance().removeFile(m_tempFilePath);
+                    std::lock_guard<std::mutex> lock(m_mutex);
+                    m_progress.state = DownloadState::FAILED;
+                    bool od = m_activeGame.cloudFileId.rfind("od1|", 0) == 0;
+                    m_progress.errorMessage = od ? "Link OneDrive het han. Hay dong bo lai."
+                        : "Drive chan quet virus file nay. Hay thu lai hoac dung link OneDrive.";
+                    Logger::error(m_progress.errorMessage);
+                    m_isRunning = false;
+                    return;
+                }
+            }
+            // Size sanity: downloaded far less than indexed while expecting a real ROM
+            if (expectBig && gotSize > 0 && (uint64_t)gotSize + 1024 < m_activeGame.sizeBytes / 2 && m_activeGame.sizeBytes > 1024*1024) {
+                Logger::warn("Download size mismatch: got " + std::to_string(gotSize) + " expected ~" + std::to_string(m_activeGame.sizeBytes));
+            }
+        }
+    }
+    // --- end validation ---
 
     if (res != CURLE_OK || httpCode != 200) {
         FileSystemManager::instance().removeFile(m_tempFilePath);

@@ -9,6 +9,7 @@
 #include "DialogManager.h"
 #include "../common/BackgroundTask.h"
 #include "VirtualKeyboard.h"
+#include "SearchInputModal.h"
 #include "FileListView.h"
 #include "../fileexplorer/FileExplorer.h"
 #include <SDL2/SDL.h>
@@ -18,6 +19,12 @@
 #include <utility>
 #include <unordered_map>
 #include <atomic>
+#include <mutex>
+#include <condition_variable>
+#include <thread>
+#include <queue>
+#include <deque>
+#include <array>
 
 namespace RomCloud {
 
@@ -33,11 +40,14 @@ enum class UIState {
   SETTINGS,
   DIAGNOSTICS,
   OTA_UPDATE,
+  // P6: Full changelog sub-page từ Cập nhật tab → Y → xem "Tính năng mới".
+  OTA_CHANGELOG,
   REVERSE_SYNC,
   IPTV_PLAYLIST_SELECT, // Chon playlist truoc khi xem kenh
   IPTV_LIST,
   IPTV_SEARCH,
-  YOUTUBE_SEARCH,
+  YOUTUBE_HOME,         // P0-6: Home — search input + pills + content area
+  YOUTUBE_SEARCH,       // Legacy YOUTUBE_SEARCH state (still rendered for back-compat)
   YOUTUBE_RESULTS,
   LOCALSEND_HOME,       // Trang chính LocalSend: devices + pending + send queue
   LOCALSEND_INCOMING,   // Modal duyệt file gửi đến (A=đồng ý, B=từ chối)
@@ -46,6 +56,7 @@ enum class UIState {
   LOCALSEND_GAME_PICKER, // Chọn game LOCAL từ DB để gửi (thay vì raw file picker)
   LOCALSEND_PROGRESS,   // Xem progress upload/download
   FILE_EXPLORER,      // Explorer 2-pane: m_expL/m_expR + clipboard chung m_expClip
+  GAME_CAST,          // GameCast TV & Laptop streaming
   EXIT_REQUESTED
 };
 
@@ -182,6 +193,8 @@ private:
   // Group filter bar (Loi 2 fix)
   std::string m_iptvSelectedGroup;   // "" = Tat ca
   int m_iptvGroupBarOffset = 0;      // scroll ngang cua group bar
+  void centerIptvGroupBar(const std::vector<std::string> &groups,
+                           const std::string &selected);
   int m_activePlaylistIndex = -1;    // -1 = tat ca playlists
 
   // IPTV Search & Virtual Keyboard State
@@ -193,11 +206,33 @@ private:
   // YouTube Search State (keyboard unified on VkState)
   VkState m_ytVk;
   std::string m_ytLastSearchQuery;
-  std::vector<std::string> m_ytSearchResults;       // current page results (up to 6)
-  std::vector<std::string> m_ytAllCachedResults;    // cache of all fetched results for current query
+  std::string m_ytKeyboardQuery; // Only text typed from keyboard
+
+  // YouTube result item (pre-computed fields for fast render)
+  struct YtItem {
+    enum class Type { Video, Channel };
+    Type type = Type::Video;
+    std::string id;
+    std::string title;       // raw title (for search/re-search)
+    std::string titleL1;    // pre-truncated line 1 (fontSmall, ~700px)
+    std::string titleL2;    // pre-truncated line 2
+    std::string channel;     // pre-truncated channel (~320px)
+    std::string viewsStr;   // pre-formatted "1.2M views"
+    std::string durationStr;// pre-formatted "12:34"
+    bool hasTitleL2 = false;
+
+    // Channel-specific fields (only used when type == Channel)
+    std::string channelId;       // @handle hoặc UCxxxx (cho re-search latest)
+    std::string subscribersStr;  // pre-formatted "1.2M subscribers"
+    std::string videoCountStr;   // pre-formatted "523 videos"
+  };
+  std::vector<std::string> m_ytSearchResults;       // raw pipe-delimited (backing store)
+  std::vector<std::string> m_ytAllCachedResults;    // raw pipe-delimited (backing store)
+  std::vector<YtItem> m_ytItems;                    // pre-computed view of m_ytSearchResults
+  std::vector<YtItem> m_ytAllItems;                 // pre-computed view of m_ytAllCachedResults
   int m_ytSearchSelectedIndex = 0;
   int m_ytSearchScrollOffset = 0;
-  int m_ytCurrentPage = 1;           // current page (1-based, 6 results/page)
+  int m_ytCurrentPage = 1;           // current page (1-based, 5 results/page)
   std::string m_ytErrorMessage;
   std::atomic<bool> m_ytIsSearching{false};
   std::atomic<bool> m_ytSearchFinished{false};
@@ -208,8 +243,85 @@ private:
   std::vector<std::string> m_ytSearchHistory;
   int m_ytSelectedTagIndex = 0;
   bool m_ytFocusInTags = false;
+  int m_ytSearchFocus = 2; // 1 = History pills, 2 = Virtual keyboard
+  int m_ytHistoryRow = 0;  // 0 = Row 3, 1 = Row 4
+  int m_ytHistoryCol = 0;  // index within that row
+
+  // P0-3: YouTube category filter (9 categories, horizontal scroll)
+  // P0-6: feedQuery thay thế suffix — query đầy đủ sẽ được smart_search
+  // khi user chọn pill (không cần input). Empty feedQuery = dùng user input
+  // (pill chỉ đóng vai trò category filter trên top of user query).
+  struct Category {
+    const char *id;        // "all", "music", ...
+    const char *label;     // "Tất cả", "Âm nhạc", ...
+    const char *feedQuery; // auto-feed query khi pick pill (e.g. "nhạc việt")
+  };
+  static const std::array<Category, 9> kYtCategories;
+  int m_ytSelectedCategory = 0;
+  int m_ytCategoryScrollOffset = 0;  // horizontal scroll offset (px)
+
+  // P0-6: YouTube HOME state (search input + pills + content)
+  // m_ytSearchModalOpen: when true, render SearchInputModal over HOME.
+  // m_ytViewMode: false = row list (5 rows/page), true = grid 3x2 (6 cards/page).
+  // m_ytHasSearched: true after first category auto-feed search has results.
+  bool m_ytSearchModalOpen = false;
+  bool m_ytViewMode = false; // false = row, true = grid
+  bool m_ytHomeHasResults = false;
+  int m_ytHomeContentSelected = 0;
+  int m_ytHomeContentScrollOffset = 0;
+  int m_ytHomePage = 1;
+  int m_ytHomeFocus = 1;          // 0=search box, 1=pills, 2=content
+  int m_ytHomeRow = 1;            // 0=search, 1=tag, 2=thumbnail row 1, 3=thumbnail row 2
+  int m_ytHomeCol = 0;            // 0..2 for thumbnail rows
+  bool m_ytHomeLoadedThisEnter = false;
+  struct YtMatchedChannel {
+    bool matched = false;
+    std::string name;
+    std::string subscribers;
+    std::string videoCount;
+    std::string avatarUrl;
+  };
+  YtMatchedChannel m_ytMatchedChannel;
+  bool m_ytInChannelView = false;
+  std::vector<std::string> m_ytChannelAllVideos;
+  SearchInputModal::Config m_ytHomeModalCfg;
+  void openYouTubeHomeModal();
+  void closeYouTubeHomeModal();
+  void runYouTubeHomeSearch(const std::string &query);
+  void toggleYouTubeViewMode();
+  void renderYouTubeHomeState();
+  void renderYouTubeHomeContentRow(int contentTop, int contentH);
+  void renderYouTubeHomeContentGrid(int contentTop, int contentH);
+  void renderYouTubeHomeChannelLayout(int contentTop, int contentH);
+  // ── Chuẩn hoá layout video (áp dụng cho MỌI màn có thumbnail) ──────
+  // 1) drawYtStandardThumb: chỉ vẽ ẢNH thumbnail thuần (không banner, không
+  //    pill duration). Fallback nền tối khi ảnh chưa decode xong.
+  //    scaledThumb=true chỉ dùng cho màn Results (RenderCopy bằng toạ độ
+  //    đã scale của PlatformInfo, khác 3 màn HOME).
+  void drawYtStandardThumb(int tx, int ty, int tw, int th,
+                           const std::string &vid, bool selected,
+                           bool scaledThumb);
+  // 2) drawYtStandardMeta: dòng 1 = tên video (TEXT_MAIN), dòng 2 =
+  //    "duration - lượt xem" (TEXT_SUB), cả hai canh trái. lineStep do
+  //    caller tính để vừa khối info.
+  void drawYtStandardMeta(int x, int y, int maxW, int lineStep,
+                          const YtItem &item);
+  std::string currentCategoryFeedQuery() const;
+  void loadYouTubeViewMode();
+  void saveYouTubeViewMode();
+  void renderYouTubeHomeModalOverlay();
+
   void loadYouTubeHistory();
   void saveYouTubeHistory(const std::string& query);
+  struct YtHistoryPill {
+    int index = 0;
+    std::string text;
+    int w = 0;
+  };
+  void getYouTubeHistoryPills(std::vector<YtHistoryPill> &row3,
+                              std::vector<YtHistoryPill> &row4);
+  YtItem buildYtItemFromPipe(const std::string &raw);
+  void rebuildYtItems();
 
 
   // System Selection State
@@ -229,9 +341,25 @@ private:
   // Settings State
   int m_selectedSettingsRow = 0;
   int m_settingsScrollOffset = 0;
+  // Settings tabs: 0=CHUNG (default - danh sách cài đặt), 1=CẬP NHẬT (OTA).
+  // Auto-switch sang tab 1 khi vào Settings với isUpdateAvailable()==true
+  // để badge "NEW" trên icon Cài đặt (menu chính) dẫn thẳng tới OTA.
+  int m_settingsTab = 0;
 
   // Diagnostics scroll state
   int m_diagnosticsScrollOffset = 0;
+  // Info tabs: 0=GIOI THIEU (default), 1=HE THONG
+  int m_infoTab = 0;
+  int m_lastInfoTab = -1; // detect tab transition for About auto-scroll reset
+  // About tab auto-scroll for "THƯ NGỎ" letter cell.
+  // m_aboutAutoScrollY: pixel offset (float for smooth sub-line motion).
+  // m_aboutLastTickMs: SDL_GetTicks() snapshot from previous renderAboutTab
+  // call, used to compute dt. Reset together on tab entry / exit.
+  float m_aboutAutoScrollY = 0.0f;
+  uint32_t m_aboutLastTickMs = 0;
+
+  // P6: OTA Changelog sub-page scroll (manual, line-based). Reset on entry.
+  int m_otaChangelogScrollLine = 0;
 
   // Search state
   std::vector<GameRecord> m_searchResults;
@@ -271,13 +399,18 @@ private:
   void renderDownloadOverlay();
   void renderSettingsState();
   void renderDiagnosticsState();
+  void renderAboutTab(int contentTop);
+  std::vector<std::string> wrapAboutText(const std::string &text, TTF_Font *font, int maxPx);
   void renderOTAUpdateState();
+  void renderOTAChangelogState();
   void renderReverseSyncState();
   void renderIPTVPlaylistSelectState();
   void renderIPTVState();
   void renderIPTVSearchState();
   void renderYouTubeSearchState();
   void renderYouTubeResultsState();
+  void renderGameCastState();
+  bool m_castNativeRes = false;
 
   // LocalSend P2P
   void renderLocalSendHome();
@@ -298,6 +431,7 @@ private:
   void playYouTubeVideo(const std::string& videoId);
   void startThumbnailDownloads(const std::vector<std::string>& videoIds);
   void clearThumbnailCache();
+  void applyYouTubeSearchResults(std::vector<std::string> results);
   void renderUploadOverlay();
   void renderToast();
 
@@ -313,6 +447,10 @@ private:
                        bool filled = true);
   void drawRoundedBorder(int x, int y, int w, int h, int radius,
                          SDL_Color color, int thickness = 1);
+  void drawRoundedTopBar(int x, int y, int w, int h, int radius,
+                         SDL_Color color);
+  void drawModalDialog(int x, int y, int w, int h, int radius,
+                       SDL_Color bodyBg, SDL_Color titleBg, int titleH);
   void drawBadge(int x, int y, int w, int h, const std::string &text,
                  SDL_Color bg, SDL_Color fg);
   void drawIcon(const std::string &iconName, int x, int y, int w, int h);
@@ -326,6 +464,9 @@ private:
   std::string truncateToWidth(const std::string &text, TTF_Font *font, int maxPx);
   // Rong pill fit chu theo pixel (kep MIN/MAX)
   int pillWidth(const std::string &text, TTF_Font *font);
+  int badgeWidth(const std::string &text, int h);
+  int buttonWidth(const std::string &label);
+  int badgeDualWidth(const std::string &label1, const std::string &label2, int h);
   // Chip/button/badge tron mem (phuong an A: pill full-round h/2)
   void drawPill(int x, int y, int w, int h, const std::string &text, bool active, TTF_Font *font = nullptr);
   // Button hanh dong (OK/Huy/Xoa...) radius BTN
@@ -359,6 +500,7 @@ private:
   void drawCard(int x, int y, int w, int h);
   void drawFocusRow(int x, int y, int w, int h);
   void drawAppHeader(const std::string &title, const std::string &sub = "");
+  void drawHeaderStatus();
   void drawPadIcon(UiTheme::PadBtn btn, int x, int y, int size);
   void drawAppFooter(const std::vector<UiTheme::FooterHint> &hints);
   void beginModalDim();
@@ -367,17 +509,69 @@ private:
   // Icon/logo/button/grid do m_ui.images() giu; UIManager chi giu thumb YT (gioi han 24).
   ImageCache m_ytThumbCache{24};
 
+  // P0-2 YT perf: decode thumbnail off-thread.
+  // - Worker thread: IMG_Load(path) -> SDL_Surface (CPU only, no GPU)
+  // - Main thread: pop surface, SDL_CreateTextureFromSurface (GPU upload)
+  // SDL_Surface ownership: created on worker, consumed/freed by main thread.
+  std::thread m_thumbWorker;
+  std::mutex m_thumbQueueMtx;
+  std::condition_variable m_thumbCv;
+  std::deque<std::pair<std::string, std::string>> m_thumbPendingDecode; // (vid, path), priority via push_front
+  std::atomic<bool> m_thumbWorkerStop{false};
+  std::atomic<bool> m_thumbWorkerStarted{false};
+  // Surfaces ready for GPU upload (worker -> main)
+  struct ReadyThumb {
+    std::string vid;
+    SDL_Surface *surf;
+  };
+  std::mutex m_thumbReadyMtx;
+  std::queue<ReadyThumb> m_thumbReady;
+  // Vids already in queue (avoid duplicate enqueue)
+  std::unordered_set<std::string> m_thumbEnqueued;
+
   void clearTextCache();
+
+  // P0-2 thumb worker API
+  void startThumbWorker();
+  void stopThumbWorker();
+  void enqueueThumbDecode(const std::string &vid, const std::string &path,
+                          bool priority = false);
+  void drainReadyThumbs(); // call on main thread each frame
 
   // P1-1: scan/index SD chay tren BackgroundTask (thay std::thread().detach()).
   BackgroundTask m_indexTask;
   // Media tasks: search YT/TT rieng (tranh wait-block UI khi chuyen man hinh),
   // resolve (stream URL) + thumb (tai thumbnail) dung chung.
   BackgroundTask m_ytSearchTask;
+  std::mutex m_ytSearchMutex;
+  std::vector<std::string> m_ytPendingSearchResults;
+  std::atomic<bool> m_ytSearchDataReady{false};
   BackgroundTask m_resolveTask;
   BackgroundTask m_thumbTask;
   std::atomic<bool> m_needLibraryRefresh{false};
   bool isIndexing() const { return m_indexTask.isRunning(); }
+
+  // P1-2: realtime stream telemetry from GET http://127.0.0.1:8090/api/status.
+  // Polled moi 2s khi UIState=GAME_CAST, render moi frame. atomic de tranh
+  // race voi HTTP fetch thread.
+  struct CastStats {
+    std::atomic<int> fps{0};
+    std::atomic<int> viewers{0};
+    std::atomic<bool> downscale{false};
+    std::atomic<bool> valid{false}; // true sau khi fetch thanh cong it nhat 1 lan
+  } m_castStats;
+  uint32_t m_lastCastStatsPoll = 0;
+
+  // Settings Tab: Cache cleaner & Wi-Fi diagnostics
+  uint64_t calculateCacheSizeBytes();
+  std::string getCacheSizeFormatted();
+  uint64_t cleanCache();
+  void runWifiDiagnostics();
+
+  std::string m_cacheSizeFormatted;
+  std::string m_wifiDiagStatus = "Chưa kiểm tra";
+  SDL_Color m_wifiDiagColor = {148, 163, 184, 255};
+  std::atomic<bool> m_wifiDiagRunning{false};
 
 public:
   // Public API cho background worker threads (LocalSend, IPTV, etc.)

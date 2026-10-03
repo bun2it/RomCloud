@@ -1,0 +1,19 @@
+{
+  "name": "romcloud-issue-relay",
+  "version": "1.0.0",
+  "description": "Cloudflare Worker to relay bug reports from RomCloud app to GitHub Issues",
+  "main": "src/index.ts",
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "deploy:production": "wrangler deploy --env production",
+    "dev": "wrangler dev",
+    "tail": "wrangler tail",
+    "test": "echo \"No tests configured\""
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241127.0",
+    "wrangler": "^3.0.0",
+    "typescript": "^5.0.0"
+  },
+  "private": true
+}

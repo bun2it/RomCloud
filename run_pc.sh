@@ -18,6 +18,8 @@ fi
 echo "=== Starting RomCloud PC Simulator [1024x768] ==="
 if [ -f "bin/RomCloud.exe" ]; then
     ./bin/RomCloud.exe ./pc_data
+elif [ -f "bin/RomCloud_mac" ]; then
+    ./bin/RomCloud_mac ./pc_data
 else
     ./bin/RomCloud ./pc_data
 fi

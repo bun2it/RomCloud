@@ -151,9 +151,10 @@ void InputManager::update() {
                     case SDL_CONTROLLER_BUTTON_LEFTSHOULDER:  setBtn(Button::L1, down); break;
                     case SDL_CONTROLLER_BUTTON_RIGHTSHOULDER: setBtn(Button::R1, down); break;
                     case SDL_CONTROLLER_BUTTON_START:      setBtn(Button::START, down); break;
-                    // Brick: nut giua vat ly (options) bao BACK, nut trai ngoai bao GUIDE -> dao cho dung y muon
-                    case SDL_CONTROLLER_BUTTON_BACK:       setBtn(Button::MENU, down); break;
-                    case SDL_CONTROLLER_BUTTON_GUIDE:      setBtn(Button::SELECT, down); break;
+                    // Brick chin buttons (order L to R: MENU - SELECT - START)
+                    // nut trai = GUIDE (MENU), nut giua = BACK (SELECT), nut phai = START
+                    case SDL_CONTROLLER_BUTTON_BACK:       setBtn(Button::SELECT, down); break;
+                    case SDL_CONTROLLER_BUTTON_GUIDE:      setBtn(Button::MENU, down); break;
                     case SDL_CONTROLLER_BUTTON_MISC1:
                     case SDL_CONTROLLER_BUTTON_TOUCHPAD:
                         setBtn(Button::PLAY, down); break;
@@ -215,10 +216,11 @@ void InputManager::update() {
                         case 3: setBtn(Button::X, down); break; // Top X
                         case 4: setBtn(Button::L1, down); break;
                         case 5: setBtn(Button::R1, down); break;
-                        // Brick fallback: nut giua vat ly = 6 (MENU=xoa), nut trai ngoai = 8 (SELECT=exit)
-                        case 6: setBtn(Button::MENU, down); break;
+                        // Brick fallback (order L to R: MENU - SELECT - START):
+                        // nut trai = 8 (MENU), nut giua = 6 (SELECT), nut phai = 7 (START)
+                        case 6: setBtn(Button::SELECT, down); break;
                         case 7: setBtn(Button::START, down); break;
-                        case 8: setBtn(Button::SELECT, down); break;
+                        case 8: setBtn(Button::MENU, down); break;
                         default: break;
                     }
                 }

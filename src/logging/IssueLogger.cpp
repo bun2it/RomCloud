@@ -4,14 +4,23 @@
 #include "../logging/Logger.h"
 #include "../database/DatabaseManager.h"
 #include "../ota/UpdateManager.h"
+#include "../diagnostics/DeviceIdentity.h"
 
 #include <curl/curl.h>
 #include <sys/utsname.h>
 #include <time.h>
 #include <sstream>
 #include <iomanip>
+#include <regex>
+#include <mutex>
+#include <fstream>
+
+// Worker relay endpoint
+constexpr const char* WORKER_ENDPOINT = "https://romcloud-issue-relay.bun2it.workers.dev";
 
 namespace RomCloud {
+
+static std::mutex g_curlMutex;
 
 IssueLogger& IssueLogger::instance() {
     static IssueLogger instance;
@@ -21,41 +30,24 @@ IssueLogger& IssueLogger::instance() {
 IssueLogger::IssueLogger()
     : m_enabled(false), m_issueCount(0) {
 
-    // Check if GitHub integration is enabled
-    m_githubToken = DatabaseManager::instance().getSetting("github_token", "");
-    m_repoOwner = "bun2it";
-    m_repoName = "RomCloud";
+    // Check if reporting is enabled in settings
+    std::string enabled = DatabaseManager::instance().getSetting("issue_reporting_enabled", "false");
+    m_enabled = (enabled == "true");
 
-    if (!m_githubToken.empty()) {
-        m_enabled = true;
-        Logger::info("IssueLogger: GitHub integration enabled");
+    if (m_enabled) {
+        Logger::info("IssueLogger: Issue reporting enabled (using Worker relay)");
     } else {
-        // Try to get token from config file
-        std::string configPath = AppConfig::instance().getConfigDir() + "/github_token";
-        FILE* f = fopen(configPath.c_str(), "r");
-        if (f) {
-            char token[256] = {0};
-            if (fgets(token, sizeof(token), f)) {
-                m_githubToken = token;
-                // Remove trailing newline
-                if (!m_githubToken.empty() && m_githubToken.back() == '\n') {
-                    m_githubToken.pop_back();
-                }
-                if (!m_githubToken.empty()) {
-                    m_enabled = true;
-                    Logger::info("IssueLogger: GitHub token loaded from config");
-                }
-            }
-            fclose(f);
-        }
-    }
-
-    if (!m_enabled) {
-        Logger::warn("IssueLogger: GitHub integration disabled (no token found)");
+        Logger::debug("IssueLogger: Issue reporting disabled");
     }
 }
 
 IssueLogger::~IssueLogger() {
+}
+
+void IssueLogger::setEnabled(bool enabled) {
+    m_enabled = enabled;
+    DatabaseManager::instance().setSetting("issue_reporting_enabled", enabled ? "true" : "false");
+    Logger::info(std::string("IssueLogger: Reporting ") + (enabled ? "enabled" : "disabled"));
 }
 
 bool IssueLogger::isEnabled() const {
@@ -66,95 +58,97 @@ int IssueLogger::getRecentIssuesCount() const {
     return m_issueCount;
 }
 
-std::string IssueLogger::escapeMarkdown(const std::string& text) {
-    std::string result;
-    for (char c : text) {
-        switch (c) {
-            case '\\': result += "\\\\"; break;
-            case '`': result += "\\`"; break;
-            case '*': result += "\\*"; break;
-            case '_': result += "\\_"; break;
-            case '#': result += "\\#"; break;
-            case '+': result += "\\+"; break;
-            case '-': result += "\\-"; break;
-            case '.': result += "\\."; break;
-            case '!': result += "\\!"; break;
-            case '[': result += "\\["; break;
-            case ']': result += "\\]"; break;
-            case '(': result += "\\("; break;
-            case ')': result += "\\)"; break;
-            default: result += c; break;
-        }
-    }
-    return result;
+// Filter sensitive data from text
+std::string IssueLogger::filterSensitiveData(const std::string& text) {
+    if (text.empty()) return text;
+
+    std::string filtered = text;
+
+    // Token patterns
+    filtered = std::regex_replace(filtered, std::regex("ghp_[a-zA-Z0-9]{36}"), "[GITHUB_TOKEN]");
+    filtered = std::regex_replace(filtered, std::regex("github_pat_[a-zA-Z0-9_]{80,}"), "[GITHUB_TOKEN]");
+
+    // Password/API key patterns
+    filtered = std::regex_replace(filtered, std::regex(R"(password["\s:=]+[^\s,}]+)"), "password=[REDACTED]");
+    filtered = std::regex_replace(filtered, std::regex(R"(api[_-]?key["\s:=]+[^\s,}]+)"), "api_key=[REDACTED]");
+    filtered = std::regex_replace(filtered, std::regex(R"(secret["\s:=]+[^\s,}]+)"), "secret=[REDACTED]");
+
+    // IP addresses (internal ranges)
+    filtered = std::regex_replace(filtered, std::regex(R"(\b10\.\d{1,3}\.\d{1,3}\.\d{1,3}\b)"), "[PRIVATE_IP]");
+    filtered = std::regex_replace(filtered, std::regex(R"(\b192\.168\.\d{1,3}\.\d{1,3}\b)"), "[PRIVATE_IP]");
+    filtered = std::regex_replace(filtered, std::regex(R"(\b172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}\b)"), "[PRIVATE_IP]");
+
+    // MAC addresses
+    filtered = std::regex_replace(filtered, std::regex("([0-9a-fA-F]{2}[:-]){5}[0-9a-fA-F]{2}"), "[MAC]");
+
+    // Email addresses
+    filtered = std::regex_replace(filtered, std::regex("[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}"), "[EMAIL]");
+
+    // File paths (user home directories)
+    filtered = std::regex_replace(filtered, std::regex(R"(/home/[a-zA-Z0-9_]+/)"), "/home/[user]/");
+    filtered = std::regex_replace(filtered, std::regex(R"(/Users/[a-zA-Z0-9_.]+/)"), "/Users/[user]/");
+    filtered = std::regex_replace(filtered, std::regex(R"(C:\\Users\\[a-zA-Z0-9_.]+\\)"), "C:\\Users\\[user]\\");
+
+    // Long hex strings (likely raw hardware IDs)
+    filtered = std::regex_replace(filtered, std::regex(R"(\b[a-fA-F0-9]{16,}\b)"), "[HW_ID]");
+
+    return filtered;
 }
 
 std::string IssueLogger::getDeviceInfo() {
     std::ostringstream oss;
     auto diag = PlatformInfo::instance().getDiagnostics();
+    auto deviceId = DeviceIdentity::instance().getDeviceId();
 
     oss << "- **App Version:** v" << APP_VERSION << "\n";
+    oss << "- **Device ID:** " << deviceId << "\n";
+    oss << "- **Hardware ID Source:** " << DeviceIdentity::instance().getIdSource() << "\n";
     oss << "- **Device:** " << diag.socName << "\n";
     oss << "- **OS:** " << diag.osName << " " << diag.kernelRelease << "\n";
     oss << "- **Display:** " << diag.displayResolution << "\n";
     oss << "- **RAM:** " << diag.freeRam << " / " << diag.totalRam << "\n";
-    oss << "- **Storage:** " << diag.sdFreeSpace << " / " << diag.sdTotalSpace << "\n";
+    oss << "- **Storage:** " << diag.freeRam << " / " << diag.totalSpace << "\n";
     oss << "- **Network:** " << diag.networkStatus;
     if (diag.ipAddress != "N/A") {
-        oss << " (IP: " << diag.ipAddress << ")";
+        oss << " (IP: [REDACTED_IP])";  // Always redact IP in reports
     }
     oss << "\n";
 
     return oss.str();
 }
 
-bool IssueLogger::createGitHubIssue(const IssueInfo& issue) {
-    if (!m_enabled || m_githubToken.empty()) {
-        Logger::warn("IssueLogger: Cannot create issue - GitHub integration disabled");
-        return false;
-    }
+bool IssueLogger::sendToWorker(const std::string& payload) {
+    std::lock_guard<std::mutex> lock(g_curlMutex);
 
     CURL* curl = curl_easy_init();
     if (!curl) return false;
 
-    std::string url = "https://api.github.com/repos/" + m_repoOwner + "/" + m_repoName + "/issues";
-
-    // Build JSON payload
-    std::string json = "{";
-    json += "\"title\":\"" + escapeMarkdown(issue.title) + "\",";
-    json += "\"body\":\"" + escapeMarkdown(issue.body) + "\",";
-    json += "\"labels\":[";
-    std::string labelList = issue.labels;
-    size_t pos = 0;
-    bool first = true;
-    while ((pos = labelList.find(',')) != std::string::npos) {
-        std::string label = labelList.substr(0, pos);
-        if (!first) json += ",";
-        json += "\"" + escapeMarkdown(label) + "\"";
-        first = false;
-        labelList = labelList.substr(pos + 1);
-    }
-    if (!labelList.empty()) {
-        if (!first) json += ",";
-        json += "\"" + escapeMarkdown(labelList) + "\"";
-    }
-    json += "]}";
+    std::string url = std::string(WORKER_ENDPOINT) + "/report";
 
     struct curl_slist* headers = nullptr;
-    headers = curl_slist_append(headers, ("Authorization: token " + m_githubToken).c_str());
-    headers = curl_slist_append(headers, "Accept: application/vnd.github.v3+json");
     headers = curl_slist_append(headers, "Content-Type: application/json");
-    headers = curl_slist_append(headers, "User-Agent: RomCloud-IssueLogger/1.0");
+    headers = curl_slist_append(headers, "Accept: application/json");
+    // Cloudflare reject request không có User-Agent (error 1010). Issue v1.0 worker trên .dev.
+    const std::string userAgent = std::string("User-Agent: RomCloud/") + APP_VERSION;
+    headers = curl_slist_append(headers, userAgent.c_str());
 
     curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
     curl_easy_setopt(curl, CURLOPT_POST, 1L);
-    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, json.c_str());
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, payload.c_str());
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, +[](void* ptr, size_t size, size_t nmemb, void* stream) -> size_t {
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);  // Disable for TrimUI (limited certs)
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
+    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 10L);
+    curl_easy_setopt(curl, CURLOPT_FAILONERROR, 0L);
+
+    // Response buffer
+    std::string response;
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, +[](void* ptr, size_t size, size_t nmemb, std::string* stream) -> size_t {
+        stream->append((char*)ptr, size * nmemb);
         return size * nmemb;
     });
-    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
-    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 15L);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
 
     CURLcode res = curl_easy_perform(curl);
     long httpCode = 0;
@@ -162,48 +156,118 @@ bool IssueLogger::createGitHubIssue(const IssueInfo& issue) {
     curl_easy_cleanup(curl);
     curl_slist_free_all(headers);
 
-    if (res == CURLE_OK && (httpCode == 201 || httpCode == 200)) {
-        m_issueCount++;
-        Logger::info("IssueLogger: Created GitHub issue: " + issue.title);
-        return true;
+    if (res == CURLE_OK) {
+        Logger::debug("IssueLogger: Worker HTTP " + std::to_string(httpCode) + ", response: " + response);
+        if (httpCode == 200 && response.find("\"success\":true") != std::string::npos) {
+            Logger::debug("IssueLogger: Report sent via Worker");
+            return true;
+        }
+        Logger::warn("IssueLogger: Worker returned HTTP " + std::to_string(httpCode));
+    } else {
+        Logger::error("IssueLogger: Worker request failed: " + std::string(curl_easy_strerror(res)));
     }
 
-    Logger::error("IssueLogger: Failed to create issue (HTTP " + std::to_string(httpCode) + ")");
     return false;
+}
+
+// Escape string for JSON
+std::string escapeJsonString(const std::string& input) {
+    std::string result;
+    result.reserve(input.size());
+    for (char c : input) {
+        switch (c) {
+            case '\\': result += "\\\\"; break;
+            case '"': result += "\\\""; break;
+            case '\n': result += "\\n"; break;
+            case '\r': result += "\\r"; break;
+            case '\t': result += "\\t"; break;
+            case '\b': result += "\\b"; break;
+            case '\f': result += "\\f"; break;
+            default:
+                if (c >= 0 && c < 32) {
+                    result += "\\u";
+                    char buf[8];
+                    snprintf(buf, sizeof(buf), "%04x", (unsigned char)c);
+                    result += buf;
+                } else {
+                    result += c;
+                }
+                break;
+        }
+    }
+    return result;
+}
+
+bool IssueLogger::createGitHubIssue(const IssueInfo& issue) {
+    // m_enabled đã được check tại mỗi caller (logError, logCrash);
+    // sendManualReport CỐ Ý bypass để cho phép user gửi kể cả khi auto-reporting OFF.
+    // Xem comment trong sendManualReport().
+
+    // Build JSON payload for Worker - simple format
+    // Worker reject errorMessage > 5000 chars (validatePayload trong worker/src/index.ts).
+    // Truncate thêm 1 lần nữa để safe (recentLogs UTF-8 có thể nở 2-4× khi escape).
+    std::ostringstream json;
+    std::string errorMessage = filterSensitiveData(issue.body);
+    if (errorMessage.size() > 4900) {
+        errorMessage.resize(4900);
+        errorMessage += "\n\n... [truncated to fit 5000-char Worker limit]";
+    }
+    json << "{";
+    json << "\"deviceId\":\"" << DeviceIdentity::instance().getDeviceId() << "\",";
+    json << "\"version\":\"" << APP_VERSION << "\",";
+    json << "\"errorType\":\"" << escapeJsonString(filterSensitiveData(issue.title)) << "\",";
+    json << "\"errorMessage\":\"" << escapeJsonString(errorMessage) << "\",";
+    json << "\"timestamp\":\"" << getCurrentTimestamp() << "\"";
+    json << "}";
+
+    Logger::debug("IssueLogger: Sending payload: " + json.str());
+
+    bool success = sendToWorker(json.str());
+
+    if (success) {
+        m_issueCount++;
+    }
+
+    return success;
+}
+
+std::string IssueLogger::getCurrentTimestamp() {
+    time_t now = time(nullptr);
+    char buf[64];
+    strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%SZ", gmtime(&now));
+    return std::string(buf);
 }
 
 bool IssueLogger::logError(const std::string& errorType,
                            const std::string& errorMessage,
                            const std::string& stackTrace,
                            const std::string& context) {
+    if (!m_enabled) {
+        return false;
+    }
+
     IssueInfo issue;
-    issue.title = "[Auto-Report] " + errorType + ": " +
-                  (errorMessage.length() > 50 ? errorMessage.substr(0, 47) + "..." : errorMessage);
-    issue.labels = "auto-reported,bug";
+    issue.title = errorType;
 
     std::ostringstream body;
-    body << "## Lỗi được tự động báo cáo từ thiết bị người dùng\n\n";
-    body << "### Mô tả lỗi\n";
-    body << "```\n" << errorMessage << "\n```\n\n";
+    body << "### Error Message\n";
+    body << filterSensitiveData(errorMessage) << "\n\n";
 
     if (!stackTrace.empty()) {
         body << "### Stack Trace\n";
-        body << "```\n" << stackTrace << "\n```\n\n";
+        body << "```\n" << filterSensitiveData(stackTrace) << "\n```\n\n";
     }
 
     if (!context.empty()) {
-        body << "### Ngữ cảnh\n";
-        body << context << "\n\n";
+        body << "### Context\n";
+        body << filterSensitiveData(context) << "\n\n";
     }
 
-    body << "### Thông tin thiết bị\n";
+    body << "### Device Info\n";
     body << getDeviceInfo();
 
-    body << "---\n";
-    body << "*⚠️ Đây là báo cáo tự động từ RomCloud v" << APP_VERSION << "*\n";
-
     issue.body = body.str();
-    issue.version = APP_VERSION;
+    issue.labels = "auto-reported,bug";
 
     return createGitHubIssue(issue);
 }
@@ -211,29 +275,62 @@ bool IssueLogger::logError(const std::string& errorType,
 bool IssueLogger::logCrash(const std::string& crashInfo,
                            const std::string& stackTrace,
                            const std::string& deviceInfo) {
+    if (!m_enabled) {
+        return false;
+    }
+
     IssueInfo issue;
-    issue.title = "[CRASH] " +
-                  (crashInfo.length() > 60 ? crashInfo.substr(0, 57) + "..." : crashInfo);
-    issue.labels = "auto-reported,crash,critical";
+    issue.title = "[CRASH] " + crashInfo;
 
     std::ostringstream body;
-    body << "## 🔴 RomCloud Crash Report\n\n";
     body << "### Crash Info\n";
-    body << "```\n" << crashInfo << "\n```\n\n";
+    body << "```\n" << filterSensitiveData(crashInfo) << "\n```\n\n";
 
     if (!stackTrace.empty()) {
         body << "### Stack Trace\n";
-        body << "```\n" << stackTrace << "\n```\n\n";
+        body << "```\n" << filterSensitiveData(stackTrace) << "\n```\n\n";
     }
 
-    body << "### Thông tin thiết bị\n";
+    body << "### Device Info\n";
     body << getDeviceInfo();
 
-    body << "---\n";
-    body << "*⚠️ Đây là báo cáo crash tự động từ RomCloud*\n";
+    issue.body = body.str();
+    issue.labels = "auto-reported,crash,critical";
+
+    return createGitHubIssue(issue);
+}
+
+bool IssueLogger::sendManualReport() {
+    // Always allow manual reports regardless of m_enabled (caller enforces for logError/logCrash)
+    // Read recent log file
+    std::string logPath = AppConfig::instance().getDebugLogPath();
+    std::ifstream logFile(logPath);
+    std::string recentLogs;
+
+    if (logFile.is_open()) {
+        // Worker reject errorMessage > 5000 chars. Reserve budget:
+        //   recentLogs (~3KB) + device info header (~600) + markdown wrapper (~200) ≈ 3.8KB
+        //   → đọc 3KB logs an toàn dưới 5000-char limit (UTF-8 có thể nở 2-4×).
+        logFile.seekg(0, std::ios::end);
+        size_t fileSize = logFile.tellg();
+        size_t readSize = std::min(fileSize, (size_t)3072); // 3KB (an toàn cho UTF-8)
+        logFile.seekg(fileSize - readSize);
+        recentLogs.assign((std::istreambuf_iterator<char>(logFile)),
+                          std::istreambuf_iterator<char>());
+        logFile.close();
+    }
+
+    IssueInfo issue;
+    issue.title = "[Manual] User submitted report";
+    issue.labels = "manual-report,user-feedback";
+
+    std::ostringstream body;
+    body << "### User Manual Report\n";
+    body << "```\n" << filterSensitiveData(recentLogs) << "\n```\n\n";
+    body << "### Device Info\n";
+    body << getDeviceInfo();
 
     issue.body = body.str();
-    issue.version = APP_VERSION;
 
     return createGitHubIssue(issue);
 }

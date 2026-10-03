@@ -16,6 +16,7 @@
 #include "../sync/UploadManager.h"
 #include "../ui/BoxartScraper.h"
 #include "HttpClient.h"
+#include "../sync/OneDriveSync.h"
 
 
 #include <algorithm>
@@ -159,41 +160,102 @@ WebServer::~WebServer() { stop(); }
 bool WebServer::start(int port) {
   if (m_running)
     return true;
-  m_port = port;
 
-  m_serverFd = socket(AF_INET, SOCK_STREAM, 0);
-  if (m_serverFd < 0) {
-    Logger::error("WebServer: Failed to create socket.");
-    return false;
+  // Safe portal port pool: 8888, 8889, 8890, 8081, 8082, 8085, 9000, 9999.
+  // NEVER use 8080 (held by stock SFTPGo) or 8090 (held by GameCast daemon).
+  const int candidates[] = {port, 8888, 8889, 8890, 8081, 8082, 8085, 9000, 9999};
+  int tried[12] = {0};
+  for (int cand : candidates) {
+    if (cand <= 0 || cand > 65535 || cand == 8080 || cand == 8090)
+      continue;
+    bool dup = false;
+    for (int t : tried) {
+      if (t == cand) { dup = true; break; }
+    }
+    if (dup)
+      continue;
+    for (int &t : tried) {
+      if (t == 0) { t = cand; break; }
+    }
+
+    m_serverFd = socket(AF_INET, SOCK_STREAM, 0);
+    if (m_serverFd < 0) {
+      Logger::error("WebServer: Failed to create socket.");
+      return false;
+    }
+
+    int opt = 1;
+    setsockopt(m_serverFd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+
+    struct sockaddr_in address;
+    std::memset(&address, 0, sizeof(address));
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = INADDR_ANY;
+    address.sin_port = htons(cand);
+
+    if (bind(m_serverFd, (struct sockaddr *)&address, sizeof(address)) < 0) {
+      Logger::error("WebServer: Port " + std::to_string(cand) +
+                    " busy; trying next safe port...");
+      close(m_serverFd);
+      m_serverFd = -1;
+      continue;
+    }
+
+    if (listen(m_serverFd, 10) < 0) {
+      Logger::error("WebServer: Listen failed on port " +
+                    std::to_string(cand));
+      close(m_serverFd);
+      m_serverFd = -1;
+      continue;
+    }
+
+    m_port = cand;
+    m_running = true;
+    m_thread = std::thread(&WebServer::serverLoop, this);
+    if (cand != port) {
+      Logger::info("WebServer: Portal started on port " +
+                   std::to_string(m_port) + " (fallback, requested " +
+                   std::to_string(port) + " was busy)");
+    } else {
+      Logger::info("WebServer: Portal started on port " +
+                   std::to_string(m_port));
+    }
+    return true;
   }
 
-  int opt = 1;
-  setsockopt(m_serverFd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+  Logger::error("WebServer: All candidate ports busy, portal disabled.");
+  return false;
+}
 
-  struct sockaddr_in address;
-  std::memset(&address, 0, sizeof(address));
-  address.sin_family = AF_INET;
-  address.sin_addr.s_addr = INADDR_ANY;
-  address.sin_port = htons(m_port);
+int WebServer::cycleNextPort() {
+  static const int kPool[] = {8888, 8889, 8890, 8081, 8082, 8085, 9000, 9999};
+  constexpr size_t kPoolSize = sizeof(kPool) / sizeof(kPool[0]);
 
-  if (bind(m_serverFd, (struct sockaddr *)&address, sizeof(address)) < 0) {
-    Logger::error("WebServer: Bind failed on port " + std::to_string(m_port));
-    close(m_serverFd);
-    m_serverFd = -1;
-    return false;
+  int curPort = m_port;
+  int nextTarget = kPool[0];
+  for (size_t i = 0; i < kPoolSize; i++) {
+    if (kPool[i] == curPort) {
+      nextTarget = kPool[(i + 1) % kPoolSize];
+      break;
+    }
   }
 
-  if (listen(m_serverFd, 10) < 0) {
-    Logger::error("WebServer: Listen failed.");
-    close(m_serverFd);
-    m_serverFd = -1;
-    return false;
-  }
+  stop();
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
-  m_running = true;
-  m_thread = std::thread(&WebServer::serverLoop, this);
-  Logger::info("WebServer: Portal started on port " + std::to_string(m_port));
-  return true;
+  if (!start(nextTarget)) {
+    Logger::error("WebServer: Failed to cycle to port " + std::to_string(nextTarget));
+  }
+  return m_port;
+}
+
+std::string WebServer::getPortalUrl() const {
+  if (!m_running)
+    return "";
+  std::string ip = PlatformInfo::instance().getIpAddress("wlan0");
+  if (ip.empty() || ip == "Disconnected")
+    ip = "192.168.1.164";
+  return "http://" + ip + ":" + std::to_string(m_port);
 }
 
 void WebServer::stop() {
@@ -3336,17 +3398,51 @@ void WebServer::handleClient(int clientFd) {
         "Connection: close\r\n\r\n" +
         body;
     send(clientFd, res.c_str(), res.length(), 0);
+  } else if (method == "GET" && (path == "/cast" || path == "/stream")) {
+    std::string ip = PlatformInfo::instance().getIpAddress();
+    std::string target = "http://" + ip + ":8090" + path;
+    std::string res = "HTTP/1.1 302 Found\r\nLocation: " + target + "\r\nConnection: close\r\n\r\n";
+    send(clientFd, res.c_str(), res.length(), 0);
+    return;
   } else if (method == "GET" &&
              (path == "/debug.log" || path == "/api/debug_log")) {
+    // Ho tro query ?lines=N de tail N dong cuoi (browser preview)
+    int tailLines = 0;
+    if (!queryString.empty()) {
+      auto eq = queryString.find("lines=");
+      if (eq != std::string::npos) {
+        try { tailLines = std::stoi(queryString.substr(eq + 6)); } catch (...) {}
+      }
+    }
+
     std::string logPath = AppConfig::instance().getDebugLogPath();
     std::ifstream file(logPath, std::ios::binary);
     std::string content;
     if (file.is_open()) {
-      content.assign((std::istreambuf_iterator<char>(file)),
-                     std::istreambuf_iterator<char>());
-      file.close();
+      if (tailLines > 0) {
+        // Tail N dong: doc het -> dem newline nguoc tu cuoi
+        content.assign((std::istreambuf_iterator<char>(file)),
+                       std::istreambuf_iterator<char>());
+        file.close();
+        int newlines = 0;
+        long cutAt = -1;
+        for (long i = (long)content.size() - 1; i >= 0; --i) {
+          if (content[i] == '\n') {
+            newlines++;
+            if (newlines > tailLines) { cutAt = i + 1; break; }
+          }
+        }
+        if (cutAt >= 0) content = content.substr(cutAt);
+        // prepend note
+        content = "[RomCloud tail " + std::to_string(tailLines) +
+                  " lines from " + logPath + "]\n" + content;
+      } else {
+        content.assign((std::istreambuf_iterator<char>(file)),
+                       std::istreambuf_iterator<char>());
+        file.close();
+      }
     } else {
-      content = "Chua co loi nao duoc ghi nhan trong debug.log.";
+      content = "Chua co loi nao duoc ghi nhan trong debug.log. Log path: " + logPath;
     }
     std::string res =
         "HTTP/1.1 200 OK\r\n"
@@ -4388,7 +4484,15 @@ void WebServer::handleClient(int clientFd) {
 
     Logger::info("User linked Google Drive folder via Web Portal: " + driveUrl +
                  " (Extracted Folder ID: " + folderId + ")");
-    AuthManager::instance().linkPublicFolder(folderId, driveUrl);
+    if (oneDriveIsShareLink(driveUrl)) {
+      DatabaseManager::instance().setSetting("cloud_provider", "onedrive");
+      DatabaseManager::instance().setSetting("onedrive_share_url", driveUrl);
+      AuthManager::instance().linkPublicFolder("onedrive", driveUrl);
+      Logger::info("User linked OneDrive share via Web Portal: " + driveUrl);
+    } else {
+      DatabaseManager::instance().setSetting("cloud_provider", "drive");
+      AuthManager::instance().linkPublicFolder(folderId, driveUrl);
+    }
     DriveSyncEngine::instance().startSync();
 
     std::string body =

@@ -8,6 +8,7 @@
 #include <cstring>
 #include <sys/stat.h>
 #include <cstdio>
+#include <fstream>
 
 #ifndef _WIN32
 #include <unistd.h>
@@ -164,6 +165,13 @@ bool MpvPlayer::play(const std::string& url,
     unlink(m_sockPath.c_str());
     FILE* fw = fopen("/tmp/stay_awake", "w");
     if (fw) { fputs("1\n", fw); fclose(fw); }
+    // Xac dinh file redirect: uu tien caller phi, neu khong thi auto-gen /tmp/mpv_<ts>.log
+    // Muc dich: stop() se forward vao debug.log chinh voi category MPV.
+    std::string actualLogFile = logFile;
+    if (actualLogFile.empty()) {
+        actualLogFile = "/tmp/mpv_" + std::to_string(SDL_GetTicks()) + ".log";
+    }
+    m_lastLogPath = actualLogFile;
     pid_t pid = fork();
     if (pid != 0) {
         if (pid < 0) return false;
@@ -171,8 +179,9 @@ bool MpvPlayer::play(const std::string& url,
         return waitForSocket(2500);
     }
     setpgid(0, 0);
-    if (!logFile.empty()) {
-        int fd = open(logFile.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    // Child: redirect stdout+stderr vao file de capture mpv verbose output
+    {
+        int fd = open(actualLogFile.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
         if (fd >= 0) { dup2(fd, STDOUT_FILENO); dup2(fd, STDERR_FILENO); close(fd); }
     }
     std::string libP = appRoot + "/lib:" + sdRoot + "/Emu/MEDIA/lib64:" +
@@ -216,11 +225,35 @@ bool MpvPlayer::stop() {
             waitpid(m_pid, &status, 0);
         }
         m_pid = -1;
+        // Forward MPV stderr file vao debug.log (gom 1 file duy nhat) sau khi da reap
+        forwardMpvLogToDebug();
     }
     unlink(m_sockPath.c_str());
     unlink("/tmp/stay_awake");
     m_overlayExpireMs = 0;
     return true;
+}
+
+// Doc file stderr cua mpv, moi dong dump vao Logger voi cat=MPV, prefix [stderr].
+// Sau do unlink file de /tmp khong bi day. Gioi han dong dai 256 de khong spam debug.log.
+void MpvPlayer::forwardMpvLogToDebug() {
+    if (m_lastLogPath.empty()) return;
+    std::ifstream f(m_lastLogPath);
+    if (f.is_open()) {
+        std::string line;
+        int n = 0;
+        while (std::getline(f, line)) {
+            if (line.empty()) continue;
+            // Trim trailing CR
+            while (!line.empty() && (line.back() == '\r' || line.back() == '\n')) line.pop_back();
+            if (line.empty()) continue;
+            if (line.size() > 240) line = line.substr(0, 237) + "...";
+            RC_LOG_INFO(MPV, "[" + std::to_string(++n) + "] " + line);
+        }
+        f.close();
+    }
+    unlink(m_lastLogPath.c_str());
+    m_lastLogPath.clear();
 }
 #else
 // Windows PC Simulator Stubs

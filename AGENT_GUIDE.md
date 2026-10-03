@@ -207,6 +207,12 @@ Khi user báo lỗi từ app, issue body sẽ có format:
 - File: `/mnt/SDCARD/Apps/RomCloud/config/github_token`
 - Hoặc set trong database: `screenscraper_user`, `github_token`
 
+### Issue Relay (Remote Logging)
+- Xem chi tiết: [docs/ISSUE_RELAY.md](docs/ISSUE_RELAY.md)
+- Worker endpoint: `https://romcloud-issue-relay.bun2it.workers.dev`
+- Logs repo: `bun2it/Romcloud_Logs` (private)
+- Device ID: Format `RC-xxxxxxxx` (SHA-256 hash, never raw hardware IDs)
+
 ---
 
 ## 🚀 Checklist khi fix Issue
@@ -230,6 +236,8 @@ Khi user báo lỗi từ app, issue body sẽ có format:
 - RomCloud Repo: https://github.com/bun2it/RomCloud
 - Releases: https://github.com/bun2it/RomCloud/releases
 - Issues: https://github.com/bun2it/RomCloud/issues
+- RomCloud Logs (private): https://github.com/bun2it/Romcloud_Logs
+- Issue Relay Worker: https://romcloud-issue-relay.bun2it.workers.dev
 
 ---
 

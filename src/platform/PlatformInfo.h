@@ -28,6 +28,8 @@ struct SystemDiagnostics {
     std::string socName;
     std::string totalRam;
     std::string freeRam;
+    std::string totalSpace;    // Storage total
+    std::string freeSpace;     // Storage free
     std::string displayResolution;
     std::string sdlVersion;
     std::string sqliteVersion;

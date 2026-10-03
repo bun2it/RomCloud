@@ -1,17 +1,17 @@
 {
-  "version": "2.2.0",
-  "release_date": "2026-09-30",
+  "version": "2.3.0",
+  "release_date": "2026-10-02",
   "target_os": "ALL",
   "icon_url": "https://raw.githubusercontent.com/bun2it/RomCloud/main/icon.png",
-  "binary_url": "https://github.com/bun2it/RomCloud/releases/download/v2.2.0/RomCloud",
-  "bundle_url": "https://github.com/bun2it/RomCloud/releases/download/v2.2.0/mpv_bundle.zip",
-  "STOCK_PS_bundle_url": "https://github.com/bun2it/RomCloud/releases/download/v2.2.0/bundle-STOCK_PS.zip",
-  "NEXTUI_bundle_url": "https://github.com/bun2it/RomCloud/releases/download/v2.2.0/bundle-NEXTUI.zip",
-  "SPRUCE_OS_bundle_url": "https://github.com/bun2it/RomCloud/releases/download/v2.2.0/bundle-SPRUCE_OS.zip",
+  "binary_url": "https://github.com/bun2it/RomCloud/releases/download/v2.3.0/RomCloud",
+  "bundle_url": "https://github.com/bun2it/RomCloud/releases/download/v2.3.0/mpv_bundle.zip",
+  "STOCK_PS_bundle_url": "https://github.com/bun2it/RomCloud/releases/download/v2.3.0/bundle-STOCK_PS.zip",
+  "NEXTUI_bundle_url": "https://github.com/bun2it/RomCloud/releases/download/v2.3.0/bundle-NEXTUI.zip",
+  "SPRUCE_OS_bundle_url": "https://github.com/bun2it/RomCloud/releases/download/v2.3.0/bundle-SPRUCE_OS.zip",
   "os_versions": {
-    "STOCK_PS": "2.2.0",
-    "NEXTUI": "2.2.0",
-    "SPRUCE_OS": "2.2.0"
+    "STOCK_PS": "2.3.0",
+    "NEXTUI": "2.3.0",
+    "SPRUCE_OS": "2.3.0"
   },
-  "changelog": "v2.2.0: Nâng cấp LocalSend v2 (hỗ trợ HTTPS/TLS, nhận tín hiệu hủy từ máy đích), Borderless UI cho Tiến trình truyền & Chọn ROM, tối ưu File Explorer"
+  "changelog": "v2.3.0: Tìm kiếm YouTube nhanh hơn gấp 10 lần (~0.6s thay vì ~6-10s) cho các truy vấn phổ biến, vẫn giữ tìm kiếm thường làm phương án dự phòng."
 }

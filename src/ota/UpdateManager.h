@@ -7,7 +7,10 @@
 
 namespace RomCloud {
 
-constexpr const char* APP_VERSION = "2.2.0";
+constexpr const char* APP_VERSION = "2.2";
+#ifndef GIT_COMMIT_HASH
+#define GIT_COMMIT_HASH "unknown"
+#endif
 constexpr const char* GITHUB_REPO = "bun2it/RomCloud";
 constexpr const char* VERSION_MANIFEST_URL = "https://raw.githubusercontent.com/bun2it/RomCloud/main/version.json";
 

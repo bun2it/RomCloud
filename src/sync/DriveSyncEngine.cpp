@@ -2,6 +2,7 @@
 #include "../network/HttpClient.h"
 #include "../network/JsonHelper.h"
 #include "../auth/AuthManager.h"
+#include "OneDriveSync.h"
 #include "../logging/Logger.h"
 #include <algorithm>
 #include <chrono>
@@ -746,6 +747,25 @@ void DriveSyncEngine::runSyncWorker() {
             size_t endPos = publicFolderId.find_first_of("?/#& ");
             if (endPos != std::string::npos) publicFolderId = publicFolderId.substr(0, endPos);
         }
+    }
+
+    std::string provider = DatabaseManager::instance().getSetting("cloud_provider", "drive");
+    std::string odShare = DatabaseManager::instance().getSetting("onedrive_share_url", "");
+    if (provider == "onedrive" || oneDriveIsShareLink(publicFolderId) || oneDriveIsShareLink(DatabaseManager::instance().getSetting("drive_folder_url", ""))) {
+        std::string share = !odShare.empty() ? odShare : DatabaseManager::instance().getSetting("drive_folder_url", "");
+        if (share.empty()) share = publicFolderId;
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            m_progress.status = SyncStatus::DISCOVERING_FOLDERS;
+        }
+        int n = oneDriveSyncShare(share);
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            if (n < 0) { m_progress.status = SyncStatus::ERROR_OCCURRED; m_progress.errorMessage = "OneDrive share khong truy cap duoc. Kiem tra quyen Anyone with the link."; }
+            else { m_progress.status = SyncStatus::COMPLETED; m_progress.cloudGamesFound = n; m_progress.newGamesIndexed = n; }
+        }
+        m_isRunning = false;
+        return;
     }
 
     if (!publicFolderId.empty()) {

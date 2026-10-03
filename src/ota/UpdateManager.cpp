@@ -368,6 +368,22 @@ std::vector<DependencyInfo> UpdateManager::getMissingDependencies() {
     Logger::info("Dependency missing: youtube_search.sh at " + ytScript);
   }
 
+  // P0-3: Check YouTube smart search Python script (channel-aware)
+  std::string ytPyScript = appRoot + "/scripts/youtube_search.py";
+  if (access(ytPyScript.c_str(), R_OK) != 0) {
+    DependencyInfo pyDep = {"youtube_search.py", ytPyScript, "", true};
+    missing.push_back(pyDep);
+    Logger::info("Dependency missing: youtube_search.py at " + ytPyScript);
+  }
+
+  // P0-5: YouTube Data API v3 key — OPTIONAL (fallback to yt-dlp exists).
+  // Soft-warn only; do not block install.
+  std::string ytApiKey = appRoot + "/config/youtube_api.key";
+  if (access(ytApiKey.c_str(), R_OK) != 0) {
+    Logger::info("Optional: youtube_api.key missing at " + ytApiKey +
+                 " — smart_search will use slower yt-dlp fallback (~6-10s).");
+  }
+
   // Check YouTube app icon
   std::string ytIcon = appRoot + "/assets/apps_icons/YOUTUBE.png";
   if (access(ytIcon.c_str(), R_OK) != 0) {

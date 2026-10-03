@@ -275,8 +275,10 @@ SystemDiagnostics PlatformInfo::getDiagnostics() {
 
     diag.sdMountPoint = "/mnt/SDCARD";
     auto space = FileSystemManager::instance().getDiskSpace(AppConfig::instance().getAppRoot());
-    diag.sdTotalSpace = FileSystemManager::instance().formatBytes(space.totalBytes);
-    diag.sdFreeSpace = FileSystemManager::instance().formatBytes(space.availableBytes);
+    diag.totalSpace = FileSystemManager::instance().formatBytes(space.totalBytes);
+    diag.freeSpace = FileSystemManager::instance().formatBytes(space.availableBytes);
+    diag.sdTotalSpace = diag.totalSpace;
+    diag.sdFreeSpace = diag.freeSpace;
 
     int numJoysticks = SDL_NumJoysticks();
     if (numJoysticks > 0) {

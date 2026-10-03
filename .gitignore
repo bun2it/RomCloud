@@ -12,3 +12,4 @@ bin/*.exe
 pc_data/
 .claude/
 .romcloud/
+config/youtube_api.key

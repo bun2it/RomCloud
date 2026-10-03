@@ -42,7 +42,7 @@ case "$OS_NAME" in
         EXTRA_LIBS="-L$MSYS2_PREFIX/lib -lmingw32 -lSDL2main -lSDL2 -mconsole -lSDL2_image -lSDL2_ttf -lsqlite3 -lcurl -lssl -lcrypto -lws2_32 -lwinmm -lgdi32 -luser32 -lshell32 -lpthread -lm"
         ;;
     Darwin*)
-        OUTPUT_BIN="bin/RomCloud"
+        OUTPUT_BIN="bin/RomCloud_mac"
         if [ -d "/opt/homebrew/include" ]; then
             EXTRA_CFLAGS="-I/opt/homebrew/include -I/opt/homebrew/include/SDL2"
             EXTRA_LIBS="-L/opt/homebrew/lib"
@@ -81,6 +81,7 @@ $CXX_CMD -std=c++17 -O2 -Wall -Wextra \
     src/network/WebServer.cpp \
     src/auth/AuthManager.cpp \
     src/sync/DriveSyncEngine.cpp \
+    src/sync/OneDriveSync.cpp \
     src/download/DownloadManager.cpp \
     src/ota/UpdateManager.cpp \
     src/input/InputManager.cpp \
@@ -88,6 +89,7 @@ $CXX_CMD -std=c++17 -O2 -Wall -Wextra \
     src/platform/PlatformInfo.cpp \
     src/logging/Logger.cpp \
     src/logging/IssueLogger.cpp \
+    src/diagnostics/DeviceIdentity.cpp \
     src/iptv/IPTVManager.cpp \
     src/media/MpvPlayer.cpp \
     src/config/AppConfig.cpp \
@@ -98,6 +100,7 @@ $CXX_CMD -std=c++17 -O2 -Wall -Wextra \
     src/rom/RomDetector.cpp \
     src/rom/RomOrganizer.cpp \
     src/localsend/LocalSendManager.cpp \
+    src/cast/CastManager.cpp \
     src/ui/ExplorerSync.cpp \
     $EXTRA_LIBS \
     -o "$OUTPUT_BIN"

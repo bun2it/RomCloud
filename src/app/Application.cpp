@@ -3,11 +3,13 @@
 #include "../config/AppConfig.h"
 #include "../database/DatabaseManager.h"
 #include "../database/RomIndexer.h"
+#include "../diagnostics/DeviceIdentity.h"
 #include "../download/DownloadManager.h"
 #include "../filesystem/FileSystemManager.h"
 #include "../input/InputManager.h"
 #include "../localsend/LocalSendManager.h"
 #include "../logging/Logger.h"
+#include "../logging/IssueLogger.h"
 #include "../network/HttpClient.h"
 #include "../network/WebServer.h"
 #include "../ota/UpdateManager.h"
@@ -36,8 +38,22 @@
 namespace RomCloud {
 
 static void signalHandler(int signum) {
-  Logger::info("Caught signal " + std::to_string(signum) +
-               ", requesting clean shutdown...");
+  std::string sigName;
+  switch (signum) {
+    case SIGSEGV: sigName = "SIGSEGV (Segmentation Fault)"; break;
+    case SIGABRT: sigName = "SIGABRT (Abort)"; break;
+    case SIGFPE:  sigName = "SIGFPE (Floating Point Exception)"; break;
+    case SIGILL:  sigName = "SIGILL (Illegal Instruction)"; break;
+    case SIGBUS:  sigName = "SIGBUS (Bus Error)"; break;
+    default:      sigName = "Signal " + std::to_string(signum); break;
+  }
+
+  Logger::error("CRASH: " + sigName + " caught, attempting to report...");
+
+  // Send crash report if enabled
+  IssueLogger::instance().logCrash(sigName, "");
+
+  Logger::info("Crash report sent, requesting shutdown...");
   Application::instance().requestExit();
 }
 
@@ -132,29 +148,20 @@ bool Application::init(int argc, char *argv[]) {
     return false;
   }
 
-  Logger::instance().init(AppConfig::instance().getDebugLogPath());
+  // Logger::init() - just opens file + stores version/commit. Caller will dump header.
+  Logger::instance().init(AppConfig::instance().getDebugLogPath(),
+                          APP_VERSION, GIT_COMMIT_HASH);
 
-  auto now = std::chrono::system_clock::now();
-  auto in_time_t = std::chrono::system_clock::to_time_t(now);
-  std::stringstream timeSs;
-  timeSs << std::put_time(std::localtime(&in_time_t), "%Y-%m-%d %H:%M:%S");
+  // Initialize Device Identity (for diagnostics and issue reporting)
+  std::string deviceId = DeviceIdentity::instance().getDeviceId();
+  std::string idSource = DeviceIdentity::instance().getIdSource();
+  Logger::instance().header("Device ID: " + deviceId + " (source: " + idSource + ")");
 
-  auto diag = PlatformInfo::instance().getDiagnostics();
-
-  Logger::instance().header(
-      "======================================================================");
-  Logger::instance().header("[" + timeSs.str() + "] [DEBUG LOG] RomCloud v" +
-                            std::string(APP_VERSION) + " Session Started");
-  Logger::instance().header("Device: " + diag.socName + " (" + diag.osName +
-                            " " + diag.kernelRelease +
-                            ") | Screen: " + diag.displayResolution);
-  Logger::instance().header(
-      "RAM: " + diag.freeRam + " / " + diag.totalRam +
-      " | App Root: " + AppConfig::instance().getAppRoot());
-  Logger::instance().header("Log Location: " +
-                            AppConfig::instance().getDebugLogPath());
-  Logger::instance().header(
-      "======================================================================");
+  // Now safe to dump session header (PlatformInfo may now log via Logger::info).
+  Logger::instance().logSessionHeader();
+  Logger::info(LogCategory::DIAG,
+              "Screen: " + PlatformInfo::instance().getDiagnostics().displayResolution +
+              " | App Root: " + AppConfig::instance().getAppRoot());
 
   // Ensure official app icon is synchronized to all launcher icons
   std::string appRoot = AppConfig::instance().getAppRoot();
@@ -253,13 +260,24 @@ bool Application::init(int argc, char *argv[]) {
 
   // Initialize Network, OAuth, Sync & Download
   HttpClient::instance().init();
-  WebServer::instance().start(8080);
 
   // Initialize Database
   if (!DatabaseManager::instance().init(
           AppConfig::instance().getDatabasePath())) {
     Logger::error("Failed to initialize SQLite database");
     return false;
+  }
+
+  // Portal: load configured port from database or default to 8888
+  int savedPort = 8888;
+  std::string pStr = DatabaseManager::instance().getSetting("web_portal_port", "8888");
+  try { savedPort = std::stoi(pStr); } catch (...) { savedPort = 8888; }
+  if (!WebServer::instance().start(savedPort)) {
+    Logger::error("WebServer: portal unavailable (all safe ports busy).");
+  } else {
+    // Keep DB in sync with active port
+    DatabaseManager::instance().setSetting("web_portal_port",
+                                           std::to_string(WebServer::instance().getPort()));
   }
 
   AuthManager::instance().init();
@@ -320,9 +338,11 @@ void Application::run() {
     // MENU thoat app toan cuc — nhung bo qua khi dang o FILE_EXPLORER
     // (MENU giua trong Explorer dung de xoa 2-step, SELECT trai de thoat Explorer).
     // Check state TRUOC roi moi doc phim: tranh double-consume latch MENU cua Explorer.
-    if (UIManager::instance().getState() != UIState::FILE_EXPLORER &&
+    // Brick: BACK vat ly = MENU -> chi thoat khi o MENU chinh; cac man khac de back
+    // bang B (khong thoat app).
+    if (UIManager::instance().getState() == UIState::MENU &&
         InputManager::instance().isButtonJustPressed(Button::MENU)) {
-      Logger::info("Menu button pressed, exiting cleanly...");
+      Logger::error("Menu button pressed at MAIN MENU, exiting cleanly...");
       m_running = false;
       break;
     }

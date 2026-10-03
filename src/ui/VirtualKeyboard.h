@@ -128,7 +128,7 @@ public:
             case 0: s.shift = !s.shift; return VkAction::None;
             case 1:
                 s.telexMode = !s.telexMode;
-                toast(s.telexMode ? "Che do: TELEX" : "Che do: TIENG ANH (US)");
+                toast(s.telexMode ? "Chế độ: TELEX" : "Chế độ: TIẾNG ANH (US)");
                 return VkAction::None;
             case 2: typeSpace(s); return VkAction::None;
             case 3: TelexHelper::popUtf8(s.query); return VkAction::None;

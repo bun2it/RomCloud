@@ -16,8 +16,8 @@ fi
 # Clean up any leftover temporary files from prior sessions
 rm -f /tmp/romcloud_*.tmp 2>/dev/null
 
-# Ensure port 8080 is freed if previous instance did not exit cleanly
-fuser -k 8080/tcp 2>/dev/null || true
+# RomCloud now auto-falls back to 8082/8081/... if 8080 is held by SFTPGo.
+# Do NOT kill 8080 here: that would take down TrimUI's built-in SFTPGo.
 
 # Ensure config.json uses only icontop to prevent dual stacked icons in TrimUI launcher
 if [ -f "./config.json" ]; then

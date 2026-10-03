@@ -47,13 +47,17 @@ bool UIManager::handleExplorerKeyboardFor(FileExplorer& ex) {
     if (input.isButtonJustPressed(Button::DOWN)) { VirtualKeyboard::move(vk, 1, 0); return true; }
     if (input.isButtonJustPressed(Button::LEFT)) { VirtualKeyboard::move(vk, 0, -1); return true; }
     if (input.isButtonJustPressed(Button::RIGHT)) { VirtualKeyboard::move(vk, 0, 1); return true; }
-    if (input.isButtonJustPressed(Button::X)) { VirtualKeyboard::backspace(vk); return true; }
-    if (input.isButtonJustPressed(Button::Y)) { vk.shift = !vk.shift; return true; }
-    if (input.isButtonJustPressed(Button::R1)) { vk.telexMode = !vk.telexMode; return true; }
-    if (input.isButtonJustPressed(Button::START) || input.isButtonJustPressed(Button::SELECT)) {
-        bool wantCommit = input.isButtonJustPressed(Button::START);
-        if (wantCommit) { ex.commitKeyboard(); }
-        else ex.cancelKeyboard();
+    if (input.isButtonJustPressed(Button::X)) { VirtualKeyboard::typeSpace(vk); return true; }
+    if (input.isButtonJustPressed(Button::Y)) { VirtualKeyboard::backspace(vk); return true; }
+    if (input.isButtonJustPressed(Button::L1)) { vk.shift = !vk.shift; return true; }
+    if (input.isButtonJustPressed(Button::R1)) {
+        vk.telexMode = !vk.telexMode;
+        showToast(vk.telexMode ? "Chế độ: TELEX" : "Chế độ: TIẾNG ANH (US)",
+                  {0, 180, 255, 255}, 1200);
+        return true;
+    }
+    if (input.isButtonJustPressed(Button::START)) {
+        ex.commitKeyboard();
         syncExplorerDialogs();
         return true;
     }
@@ -62,7 +66,10 @@ bool UIManager::handleExplorerKeyboardFor(FileExplorer& ex) {
             char ch = VirtualKeyboard::charAt(vk);
             if (ch) VirtualKeyboard::typeChar(vk, ch);
         } else {
-            VkAction act = VirtualKeyboard::pressA(vk, [](const char*) {});
+            VkAction act = VirtualKeyboard::pressA(vk, [this, &vk](const char*) {
+                showToast(vk.telexMode ? "Chế độ: TELEX" : "Chế độ: TIẾNG ANH (US)",
+                          {0, 180, 255, 255}, 1200);
+            }, false);
             if (act == VkAction::Commit) {
                 ex.commitKeyboard();
                 syncExplorerDialogs();
@@ -163,13 +170,13 @@ bool UIManager::handleExplorerBrowser() {
         }
         return true;
     }
-    // PLAY (phai) + START: tao thu muc moi o pane active, mac dinh "New Folder"
+    // START (phai): tao thu muc moi o pane active, mac dinh "New Folder"
     if (input.isButtonJustPressed(Button::PLAY) ||
         input.isButtonJustPressed(Button::START)) {
         A.beginCreateFolder();
         return true;
     }
-    // MENU (giua): xoa 2-step — step1 arm + mo confirm do, step2 A xac nhan / B huy
+    // MENU (trai): xoa 2-step — step1 arm + mo confirm do, step2 A xac nhan / B huy
     if (input.isButtonJustPressed(Button::MENU)) {
         const ExplorerEntry* e = A.current();
         if (e && !m_dialogs.confirm.visible) {
@@ -179,7 +186,7 @@ bool UIManager::handleExplorerBrowser() {
         }
         return true;
     }
-    // SELECT (trai): thoat explorer ve MENU
+    // SELECT (giua) / B: thoat explorer ve MENU
     if (input.isButtonJustPressed(Button::SELECT)) return false;
     return true;
 }

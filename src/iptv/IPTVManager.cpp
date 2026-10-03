@@ -1281,20 +1281,17 @@ static std::string fetchYouTubeStreamUrl(const std::string& videoId, const std::
     return streamUrl;
 }
 
-// iptvDbg: log chẩn đoán riêng (Logger chỉ ghi WARN/ERROR ra disk,
-// INFO bị lọc nên không thấy gì khi debug chuyển kênh).
+// iptvDbg: ghi qua Logger chuẩn (gộp vào debug.log chính với category IPTV).
+// Trước đây ghi /tmp/iptv_debug.log riêng; giờ gộp 1 file để dễ debug.
 static void iptvDbg(const std::string& msg) {
-    FILE* f = fopen("/tmp/iptv_debug.log", "a");
-    if (!f) return;
-    fprintf(f, "[%u] %s\n", SDL_GetTicks(), msg.c_str());
-    fclose(f);
+    RC_LOG_INFO(IPTV, msg);
 }
 
 // spawnMpvForUrl: P1-3 uy thac MpvPlayer (giu API cu cho switch kênh).
 pid_t IPTVManager::spawnMpvForUrl(const std::string& url) {
     if (url.empty()) return -1;
     MpvPlayer& p = MpvPlayer::instance();
-    if (!p.play(url, {"--video-align-y=-1", "--video-align-x=0",
+    if (!p.play(url, {"--video-align-y=0", "--video-align-x=0",
                       "--demuxer-max-bytes=32M", "--demuxer-readahead-secs=8"},
                 "/tmp/mpv_iptv.sock"))
         return -1;
@@ -1529,7 +1526,7 @@ void IPTVManager::showIPTVChannelOSD(
         }
     }
 
-    blitText(s_fontSmall, "Up/Down: Chọn  |  A: Chuyển kênh  |  SELECT: Ẩn/Hiện  |  B: Thoát",
+    blitText(s_fontSmall, "Lên/Xuống: Chọn  |  A: Xem  |  SELECT: Ẩn/Hiện OSD  |  B: Thoát",
              dim, 20, CH - 24, 255);
 
     // Write to raw file
@@ -1545,7 +1542,9 @@ void IPTVManager::showIPTVChannelOSD(
 
     std::string reply;
     bool ok = sendMpvIpcCommand(cmd, &reply, "/tmp/mpv_iptv.sock");
-    { FILE* f = fopen("/tmp/osd_debug.log", "a"); if (f) { fprintf(f, "overlay-add list3: ok=%d surf=(%dx%d)@(0,%d)\n", ok, CW, CH, OY); fclose(f); } }
+    RC_LOG_INFO(OSD, "overlay-add list3: ok=" + std::to_string(ok) +
+                       " surf=" + std::to_string(CW) + "x" + std::to_string(CH) +
+                       " @ (0," + std::to_string(OY) + ")");
 }
 
 // playChannel: blocking. Forks mpv and handles all playback controls + channel list OSD
@@ -1586,7 +1585,7 @@ bool IPTVManager::playChannel(const IPTVChannel& channel, size_t initialIndex, c
 
     // P1-3: fork qua MpvPlayer (giu flag OSD/list kenh cu).
     if (!MpvPlayer::instance().play(url, {
-            "--video-align-y=-1", "--video-align-x=0",
+            "--video-align-y=0", "--video-align-x=0",
             "--vd-lavc-fast", "--vd-lavc-skiploopfilter=nonref",
             "--vd-lavc-framedrop=nonref", "--sws-scaler=fast-bilinear",
             "--dscale=bilinear", "--scale=bilinear",
@@ -1617,9 +1616,9 @@ bool IPTVManager::playChannel(const IPTVChannel& channel, size_t initialIndex, c
         MpvPlayer::instance().waitForSocket(2000);
 
         // Blocking control loop
-        // List hien ngay tu khi bat kenh: video dinh mep tren, list 3 dong o dai den duoi
-        channelListVisible = true;
-        showIPTVChannelOSD(m_iptvChannelList, (int)m_iptvSelectedIndex, "", 0);
+        // Video phat o center; hien ten kenh 2.5s dau
+        channelListVisible = false;
+        sendMpvIpcCommand("{\"command\":[\"show-text\",\"" + escapeJsonString(channel.name) + "\",2500]}", nullptr, "/tmp/mpv_iptv.sock");
         while (m_isPlaying && MpvPlayer::instance().isPlaying()) {
             if (MpvPlayer::instance().pollExited()) break;
 
@@ -1653,25 +1652,20 @@ bool IPTVManager::playChannel(const IPTVChannel& channel, size_t initialIndex, c
                             bool okSw = switchIPTVChannelByIndex(idx);
                             iptvDbg("BTN A switch done ok=" + std::string(okSw ? "1" : "0") +
                                     " total=" + std::to_string(SDL_GetTicks() - ta) + "ms");
-                            if (okSw) {
-                                // BO showIPTVChannelOSD ngay sau switch: video vua restart
-                                // can ~600ms de mpv chay frame dau, OSD cu dang hien se
-                                // bi dep de ghi lai -> man hinh toi den, nguoi dung tuong
-                                // A chua an nen bam A lan 2. Bo ve -> tranh giac "2 lan A".
-                                iptvDbg("MPV restart ok, skip OSD redraw");
-                            }
-                        } else {
-                            sendMpvIpcCommand("{\"command\":[\"show-text\",\"Đang xem kênh này\",1200]}", nullptr, "/tmp/mpv_iptv.sock");
                         }
                     }
+                    // Chon kenh xong: an OSD va tra video ve lai giua man hinh (auto center)
+                    channelListVisible = false;
+                    sendMpvIpcCommand("{\"command\":[\"overlay-remove\",1]}", nullptr, "/tmp/mpv_iptv.sock");
+                    sendMpvIpcCommand("{\"command\":[\"set_property\",\"video-align-y\",0]}", nullptr, "/tmp/mpv_iptv.sock");
                 } else {
                     isPaused = !isPaused;
                     sendMpvIpcCommand("{\"command\":[\"cycle\",\"pause\"]}", nullptr, "/tmp/mpv_iptv.sock");
                     showOverlayIcon(isPaused ? "pause" : "play", 1500);
-                sendMpvIpcCommand(
-                    isPaused ? "{\"command\":[\"show-text\",\"{\\\\an2\\\\fs44\\\\bord2\\\\b1}❚❚  TẠM DỪNG\", 1500]}"
-                             : "{\"command\":[\"show-text\",\"{\\\\an2\\\\fs44\\\\bord2\\\\b1}▶  ĐANG PHÁT\", 1500]}",
-                    nullptr, "/tmp/mpv_iptv.sock");
+                    sendMpvIpcCommand(
+                        isPaused ? "{\"command\":[\"show-text\",\"{\\\\an2\\\\fs44\\\\bord2\\\\b1}❚❚  TẠM DỪNG\", 1500]}"
+                                 : "{\"command\":[\"show-text\",\"{\\\\an2\\\\fs44\\\\bord2\\\\b1}▶  ĐANG PHÁT\", 1500]}",
+                        nullptr, "/tmp/mpv_iptv.sock");
                 }
 
             // LEFT: Seek -10s
@@ -1708,24 +1702,26 @@ bool IPTVManager::playChannel(const IPTVChannel& channel, size_t initialIndex, c
                     sendMpvIpcCommand("{\"command\":[\"show-text\",\"{\\\\an2\\\\fs44\\\\bord2\\\\b1}▶▶  +60s\", 1400]}", nullptr, "/tmp/mpv_iptv.sock");
                 }
 
-            // UP: Chuyen highlight khi list hien, Volume +5 khi list an
+            // UP: Chuyen highlight khi list hien (hoac tu mo OSD day video len tren)
             } else if (input.isButtonJustPressed(Button::UP)) {
-                if (channelListVisible && !m_iptvChannelList.empty()) {
+                if (!channelListVisible) {
+                    channelListVisible = true;
+                    sendMpvIpcCommand("{\"command\":[\"set_property\",\"video-align-y\",-1]}", nullptr, "/tmp/mpv_iptv.sock");
+                }
+                if (!m_iptvChannelList.empty()) {
                     m_iptvSelectedIndex = (m_iptvSelectedIndex > 0) ? m_iptvSelectedIndex - 1 : m_iptvChannelList.size() - 1;
                     showIPTVChannelOSD(m_iptvChannelList, (int)m_iptvSelectedIndex, "", 0);
-                } else {
-                    sendMpvIpcCommand("{\"command\":[\"add\",\"volume\",5]}", nullptr, "/tmp/mpv_iptv.sock");
-                    sendMpvIpcCommand("{\"command\":[\"show-text\",\"{\\\\an5\\\\fs70\\\\bord3\\\\b1}▲  Âm lượng +5%\", 1200]}", nullptr, "/tmp/mpv_iptv.sock");
                 }
 
-            // DOWN: Chuyen highlight khi list hien, Volume -5 khi list an
+            // DOWN: Chuyen highlight khi list hien (hoac tu mo OSD day video len tren)
             } else if (input.isButtonJustPressed(Button::DOWN)) {
-                if (channelListVisible && !m_iptvChannelList.empty()) {
+                if (!channelListVisible) {
+                    channelListVisible = true;
+                    sendMpvIpcCommand("{\"command\":[\"set_property\",\"video-align-y\",-1]}", nullptr, "/tmp/mpv_iptv.sock");
+                }
+                if (!m_iptvChannelList.empty()) {
                     m_iptvSelectedIndex = (m_iptvSelectedIndex + 1 < m_iptvChannelList.size()) ? m_iptvSelectedIndex + 1 : 0;
                     showIPTVChannelOSD(m_iptvChannelList, (int)m_iptvSelectedIndex, "", 0);
-                } else {
-                    sendMpvIpcCommand("{\"command\":[\"add\",\"volume\",-5]}", nullptr, "/tmp/mpv_iptv.sock");
-                    sendMpvIpcCommand("{\"command\":[\"show-text\",\"{\\\\an5\\\\fs70\\\\bord3\\\\b1}▼  Âm lượng -5%\", 1200]}", nullptr, "/tmp/mpv_iptv.sock");
                 }
 
             // X: Aspect ratio
@@ -1743,13 +1739,15 @@ bool IPTVManager::playChannel(const IPTVChannel& channel, size_t initialIndex, c
                 sendMpvIpcCommand("{\"command\":[\"cycle-values\",\"speed\",\"1.0\",\"1.25\",\"1.5\",\"0.75\"]}", nullptr, "/tmp/mpv_iptv.sock");
                 sendMpvIpcCommand("{\"command\":[\"show-text\",\"{\\\\an5\\\\fs80\\\\bord3\\\\b1}Tốc độ phát\", 1400]}", nullptr, "/tmp/mpv_iptv.sock");
 
-            // SELECT: Toggle channel list OSD
+            // SELECT: Toggle channel list OSD (day video len tren / dua ve center)
             } else if (input.isButtonJustPressed(Button::SELECT)) {
                 channelListVisible = !channelListVisible;
                 if (channelListVisible) {
+                    sendMpvIpcCommand("{\"command\":[\"set_property\",\"video-align-y\",-1]}", nullptr, "/tmp/mpv_iptv.sock");
                     showIPTVChannelOSD(m_iptvChannelList, (int)m_iptvSelectedIndex, "", 0);
                 } else {
                     sendMpvIpcCommand("{\"command\":[\"overlay-remove\",1]}", nullptr, "/tmp/mpv_iptv.sock");
+                    sendMpvIpcCommand("{\"command\":[\"set_property\",\"video-align-y\",0]}", nullptr, "/tmp/mpv_iptv.sock");
                 }
             }
 
@@ -1823,7 +1821,7 @@ bool IPTVManager::switchYouTubeQuality(const std::string& videoId, const std::st
 }
 
 bool IPTVManager::playYouTubeUrl(const std::string& url) {
-    return playYouTubeVideo("", url, "360");
+    return playYouTubeVideo("", url, "720");
 }
 
 bool IPTVManager::playYouTubeVideo(const std::string& videoId, const std::string& initialUrl, const std::string& quality) {
@@ -1846,9 +1844,10 @@ bool IPTVManager::playYouTubeVideo(const std::string& videoId, const std::string
     { size_t pp = initialUrl.find('|');
       if (pp != std::string::npos) { videoUrl = initialUrl.substr(0, pp); audioUrl = initialUrl.substr(pp + 1); } }
     std::vector<std::string> ytExtra = {
+        "--vd-lavc-fast",
         "--vd-lavc-skiploopfilter=nonref", "--vd-lavc-framedrop=nonref",
         "--sws-scaler=fast-bilinear", "--dscale=bilinear", "--scale=bilinear",
-        "--framedrop=vo", "--demuxer-max-bytes=16M", "--demuxer-readahead-secs=8",
+        "--framedrop=vo", "--demuxer-max-bytes=24M", "--demuxer-readahead-secs=8",
         "--audio-buffer=0.5", "--osd-level=1", "--osd-font-size=48",
         "--osd-align-x=center", "--osd-align-y=center", "--osd-color=#FFFFFF",
         "--osd-border-color=#10141E", "--osd-border-size=3", "--osd-duration=1400" };
@@ -1864,7 +1863,7 @@ bool IPTVManager::playYouTubeVideo(const std::string& videoId, const std::string
         m_isPlaying = true;
         m_currentChannel = "YouTube";
         uint32_t playStartTime = SDL_GetTicks();
-        std::string currentQuality = quality.empty() ? "360" : quality;
+        std::string currentQuality = quality.empty() ? "720" : quality;
         bool isPaused = false;
         m_overlayExpireTime = 0;
         Logger::info("YouTube player started with PID: " + std::to_string(pid));
@@ -2021,6 +2020,67 @@ void IPTVManager::createDefaultPlaylist(const std::string& filepath) {
 
     file.close();
     Logger::info("Created default playlist: " + filepath);
+}
+
+static std::mutex s_pingMutex;
+
+int IPTVManager::getCachedPing(const std::string &url) {
+    std::lock_guard<std::mutex> lk(s_pingMutex);
+    auto it = m_pingCache.find(url);
+    if (it != m_pingCache.end()) return it->second;
+    if (m_pingInFlight.count(url)) return -2;
+    return -2;
+}
+
+void IPTVManager::clearPingCache() {
+    std::lock_guard<std::mutex> lk(s_pingMutex);
+    m_pingCache.clear();
+    m_pingInFlight.clear();
+}
+
+void IPTVManager::prefetchPings(const std::vector<std::string> &urls) {
+    std::vector<std::string> toFetch;
+    {
+        std::lock_guard<std::mutex> lk(s_pingMutex);
+        for (const auto &url : urls) {
+            if (url.empty() || m_pingCache.count(url) || m_pingInFlight.count(url))
+                continue;
+            m_pingInFlight.insert(url);
+            toFetch.push_back(url);
+        }
+    }
+    if (toFetch.empty()) return;
+
+    std::thread([this, toFetch]() {
+        for (const auto &url : toFetch) {
+            uint32_t t0 = SDL_GetTicks();
+            std::string cmd = "curl -k -s -L -I -m 2 -o /dev/null -w \"%{http_code}\" \"" + url + "\" 2>/dev/null";
+            FILE *fp = popen(cmd.c_str(), "r");
+            int code = 0;
+            if (fp) {
+                char buf[32];
+                if (fgets(buf, sizeof(buf), fp)) code = atoi(buf);
+                pclose(fp);
+            }
+            uint32_t t1 = SDL_GetTicks();
+            int ms = (code >= 200 && code < 400) ? static_cast<int>(t1 - t0) : -1;
+            {
+                std::lock_guard<std::mutex> lk(s_pingMutex);
+                m_pingCache[url] = ms;
+                m_pingInFlight.erase(url);
+            }
+        }
+    }).detach();
+}
+
+void IPTVManager::showIPTVVideoFooter(bool isPaused) {
+    std::string text = isPaused ? "❚❚  TẠM DỪNG" : "▶  ĐANG PHÁT";
+    if (!m_currentChannel.empty()) text = m_currentChannel + "  •  " + text;
+    sendMpvIpcCommand("{\"command\":[\"show-text\",\"{\\\\an2\\\\fs40\\\\bord2\\\\b1}" + text + "\", 2000]}", nullptr, "/tmp/mpv_iptv.sock");
+}
+
+void IPTVManager::hideIPTVVideoFooter() {
+    sendMpvIpcCommand("{\"command\":[\"show-text\",\"\", 0]}", nullptr, "/tmp/mpv_iptv.sock");
 }
 
 } // namespace RomCloud

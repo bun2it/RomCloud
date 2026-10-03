@@ -7,9 +7,15 @@
 #include <cmath>
 #include <cstdio>
 
+#include <ctime>
+#include <string>
+
 #include "../platform/PlatformInfo.h"
 
 namespace RomCloud {
+
+static void splitBadgePrefix(const std::string &text, std::string &btn,
+                             std::string &label);
 
 void UiRenderer::bind(SDL_Renderer *r, TTF_Font *small, TTF_Font *medium,
                       TTF_Font *large, const std::string &assetsDir) {
@@ -228,35 +234,49 @@ void UiRenderer::drawRoundedBorder(int x, int y, int w, int h, int radius,
   }
 }
 
+void UiRenderer::drawRoundedTopBar(int x, int y, int w, int h, int radius,
+                                   SDL_Color color) {
+  if (!m_r)
+    return;
+  if (radius <= 0 || h <= radius * 2) {
+    drawRect(x, y, w, h, color, true);
+    return;
+  }
+  // Top strip follows the dialog's top corners: rect body below the curve
+  // + rounded cap on top, so no square corners stick out.
+  drawRect(x, y + radius, w, h - radius, color, true);
+  drawRoundedRect(x, y, w, radius * 2, radius, color, true);
+  // Clip the bottom half of the cap back to a straight edge.
+  drawRect(x, y + radius, w, radius, color, true);
+}
+
+void UiRenderer::drawModalDialog(int x, int y, int w, int h, int radius,
+                                 SDL_Color bodyBg, SDL_Color titleBg,
+                                 int titleH) {
+  if (titleH < 0)
+    titleH = 0;
+  if (titleH > h)
+    titleH = h;
+  drawRoundedRect(x, y, w, h, radius, bodyBg, true);
+  if (titleH > 0)
+    drawRoundedTopBar(x, y, w, titleH, radius, titleBg);
+  drawRoundedBorder(x, y, w, h, radius, UiTheme::CARD_BORDER, 1);
+}
+
 void UiRenderer::drawBadge(int x, int y, int w, int h, const std::string &text,
                            SDL_Color bg, SDL_Color fg) {
+  if (w <= 0)
+    w = badgeWidth(text, h, m_fSmall);
   int rad = h / 2;
   drawRoundedRect(x, y, w, h, rad, bg, true);
-  std::string btn, label = text;
-  if (!text.empty() && text[0] == '[') {
-    size_t end = text.find(']');
-    if (end != std::string::npos && end >= 2 && end <= 9) {
-      btn = text.substr(1, end - 1);
-      label = text.substr(end + 1);
-      while (!label.empty() && label[0] == ' ')
-        label.erase(0, 1);
-      std::string up = btn;
-      for (char &c : up)
-        c = (char)toupper((unsigned char)c);
-      if (up == "OK")
-        btn = "A";
-      else if (up == "D-PAD" || up == "D-PAD]")
-        btn = "DPAD";
-      else
-        btn = up;
-    }
-  }
+  std::string btn, label;
+  splitBadgePrefix(text, btn, label);
   if (!btn.empty() && btn != "LEN" && m_fSmall) {
-    int iconSize = h - 10;
+    int iconSize = h - 12;
     if (iconSize < 16)
       iconSize = 16;
-    if (iconSize > 32)
-      iconSize = 32;
+    if (iconSize > 28)
+      iconSize = 28;
     int lw = textWidth(label, m_fSmall);
     int gap = lw > 0 ? 6 : 0;
     int totalW = iconSize + gap + lw;
@@ -264,13 +284,15 @@ void UiRenderer::drawBadge(int x, int y, int w, int h, const std::string &text,
     int centerY = y + h / 2;
     drawButtonIcon(btn, sx, centerY - iconSize / 2, iconSize);
     if (lw > 0) {
-      int th = TTF_FontHeight(m_fSmall);
-      drawText(label, sx + iconSize + gap, centerY - th / 2, fg, m_fSmall);
+      std::string disp = truncateToWidth(label, m_fSmall, w - 24);
+      drawText(disp, sx + iconSize + gap, textYCentered(y, h, m_fSmall), fg, m_fSmall);
     }
     return;
   }
   int th = m_fSmall ? TTF_FontHeight(m_fSmall) : 16;
-  drawText(text, x + w / 2, y + (h - th) / 2, fg, m_fSmall, true);
+  std::string disp = m_fSmall ? truncateToWidth(text, m_fSmall, w - 24) : text;
+  (void)th;
+  drawText(disp, x + w / 2, textYCentered(y, h, m_fSmall), fg, m_fSmall, true);
 }
 
 static void blitFit(SDL_Renderer *r, SDL_Texture *tex, int sx, int sy, int sw,
@@ -395,18 +417,20 @@ void UiRenderer::drawButtonIcon(const std::string &button, int x, int y,
       {"R1", "r1.png"},
       {"L2", "l2.png"},
       {"R2", "r2.png"},
-      {"PLAY", "start_icon.png"},
-      {"START", "start_icon.png"},
-      {"SELECT", "view.png"},
-      {"MENU", "options.png"},
-      {"HOME", "options.png"},
-      {"VIEW", "view.png"},
+      {"PLAY", "START.png"},
+      {"START", "START.png"},
+      {"SELECT", "SELECT.png"},
+      {"MENU", "MENU.png"},
+      {"HOME", "MENU.png"},
+      {"VIEW", "SELECT.png"},
       {"BACK", "back_icon.png"},
       {"DPAD", "dpad.png"},
       {"UP", "up.png"},
       {"DOWN", "down.png"},
       {"LEFT", "left.png"},
       {"RIGHT", "right.png"},
+      {"UPDOWN", "vertical.png"},
+      {"L1R1", "horizontal.png"},
   };
   auto it = kMap.find(button);
   std::string iconFile = (it != kMap.end()) ? it->second : "";
@@ -438,17 +462,17 @@ void UiRenderer::drawButtonIcon(const std::string &button, int x, int y,
     SDL_Rect dst = {x + (size - dw) / 2, y + (size - dh) / 2, dw, dh};
     SDL_RenderCopy(m_r, tex, nullptr, &dst);
   } else {
-    SDL_Color bg = {60, 60, 60, 255};
+    SDL_Color bg = UiTheme::PILL_BG;
     if (button == "A")
-      bg = {16, 150, 60, 255};
+      bg = UiTheme::ACCENT_GREEN;
     else if (button == "B")
-      bg = {200, 30, 30, 255};
+      bg = UiTheme::ACCENT_RED;
     else if (button == "X")
-      bg = {30, 90, 200, 255};
+      bg = UiTheme::ACCENT_BLUE;
     else if (button == "Y")
-      bg = {200, 180, 20, 255};
+      bg = UiTheme::ACCENT_GOLD;
     drawRoundedRect(x, y, size, size, size / 4, bg, true);
-    drawText(button, x + 4, y + 4, {255, 255, 255, 255}, m_fSmall);
+    drawText(button, x + 4, textYCentered(y, size, m_fSmall), {255, 255, 255, 255}, m_fSmall);
   }
 }
 
@@ -499,6 +523,75 @@ int UiRenderer::pillWidth(const std::string &text, TTF_Font *font) {
   return w;
 }
 
+// Tach prefix "[X] " cua badge -> (btn, label). Tra btn rong neu khong co.
+static void splitBadgePrefix(const std::string &text, std::string &btn,
+                             std::string &label) {
+  btn.clear();
+  label = text;
+  if (text.empty() || text[0] != '[')
+    return;
+  size_t end = text.find(']');
+  if (end == std::string::npos || end < 2 || end > 9)
+    return;
+  std::string raw = text.substr(1, end - 1);
+  label = text.substr(end + 1);
+  while (!label.empty() && label[0] == ' ')
+    label.erase(0, 1);
+  std::string up = raw;
+  for (char &c : up)
+    c = (char)toupper((unsigned char)c);
+  if (up == "OK")
+    btn = "A";
+  else if (up == "D-PAD" || up == "D-PAD]")
+    btn = "DPAD";
+  else
+    btn = up;
+}
+
+int UiRenderer::badgeWidth(const std::string &text, int h, TTF_Font *font) {
+  TTF_Font *f = font ? font : m_fSmall;
+  std::string btn, label;
+  splitBadgePrefix(text, btn, label);
+  int contentW = 0;
+  if (!btn.empty() && btn != "LEN" && f) {
+    int iconSize = h - 12;
+    if (iconSize < 16)
+      iconSize = 16;
+    if (iconSize > 28)
+      iconSize = 28;
+    int lw = textWidth(label, f);
+    contentW = iconSize + (lw > 0 ? 6 + lw : 0);
+  } else {
+    contentW = textWidth(text, f);
+  }
+  int w = contentW + 24;  // pad 12 moi ben
+  if (w < 48)
+    w = 48;
+  return w;
+}
+
+int UiRenderer::buttonWidth(const std::string &label, TTF_Font *font) {
+  TTF_Font *f = font ? font : m_fSmall;
+  int w = textWidth(label, f) + 32;  // pad 16 moi ben + border
+  if (w < UiTheme::BTN_MIN_W)
+    w = UiTheme::BTN_MIN_W;
+  return w;
+}
+
+int UiRenderer::badgeDualWidth(const std::string &label1,
+                               const std::string &label2, int h) {
+  TTF_Font *f = m_fSmall;
+  int iconSize = h - 12;
+  if (iconSize < 16)
+    iconSize = 16;
+  if (iconSize > 32)
+    iconSize = 32;
+  int total = iconSize + 6 + textWidth(label1, f) +
+              textWidth("  -  ", f) + iconSize + 6 +
+              textWidth(label2, f);
+  return total + 24;
+}
+
 void UiRenderer::drawPill(int x, int y, int w, int h, const std::string &text,
                           bool active, TTF_Font *font) {
   TTF_Font *f = font ? font : m_fSmall;
@@ -513,14 +606,15 @@ void UiRenderer::drawPill(int x, int y, int w, int h, const std::string &text,
     return;
   SDL_Color fg = active ? UiTheme::TEXT_MAIN : UiTheme::PILL_TEXT_DIM;
   std::string disp = truncateToWidth(text, f, w - UiTheme::PILL_PAD_X * 2);
-  int th = TTF_FontHeight(f);
-  drawText(disp, x + w / 2, y + (h - th) / 2, fg, f, true);
+  drawText(disp, x + w / 2, textYCentered(y, h, f), fg, f, true);
 }
 
 void UiRenderer::drawButton(int x, int y, int w, int h,
                             const std::string &label, bool focused,
                             bool danger) {
-  if (w < UiTheme::BTN_MIN_W)
+  if (w <= 0)
+    w = buttonWidth(label, m_fSmall);
+  else if (w < UiTheme::BTN_MIN_W)
     w = UiTheme::BTN_MIN_W;
   SDL_Color bg;
   if (danger && focused)
@@ -537,8 +631,7 @@ void UiRenderer::drawButton(int x, int y, int w, int h,
   if (!m_fSmall)
     return;
   std::string disp = truncateToWidth(label, m_fSmall, w - 24);
-  int th = TTF_FontHeight(m_fSmall);
-  drawText(disp, x + w / 2, y + (h - th) / 2, UiTheme::TEXT_MAIN, m_fSmall,
+  drawText(disp, x + w / 2, textYCentered(y, h, m_fSmall), UiTheme::TEXT_MAIN, m_fSmall,
            true);
 }
 
@@ -555,8 +648,12 @@ void UiRenderer::drawRow(int x, int y, int w, int h, bool focused, bool dim) {
 }
 
 int UiRenderer::textYCentered(int y, int h, TTF_Font *font) {
-  int th = font ? TTF_FontHeight(font) : 16;
-  return y + (h - th) / 2;
+  if (!font) return y + h / 2 - 8;
+  // Can giua quang hoc theo khoi glyph (ascent+|descent|) thay vi FontHeight
+  // (FontHeight cong them lineGap -> chia doi lech len 1-2px, lo ro voi dau TV).
+  int lineH = TTF_FontAscent(font) - TTF_FontDescent(font);
+  if (lineH <= 0) lineH = TTF_FontHeight(font);
+  return y + (h - lineH) / 2;
 }
 
 void UiRenderer::drawRowMainSub(int x, int y, int h, const std::string &main,
@@ -636,6 +733,8 @@ void UiRenderer::drawBadgeDual(int x, int y, int w, int h,
                                const std::string &btn2,
                                const std::string &label2, SDL_Color bg,
                                SDL_Color fg) {
+  if (w <= 0)
+    w = badgeDualWidth(label1, label2, h);
   int rad = h / 2;
   drawRoundedRect(x, y, w, h, rad, bg, true);
   if (!m_fSmall)
@@ -760,14 +859,170 @@ void UiRenderer::drawFocusRow(int x, int y, int w, int h) {
   drawRoundedRect(x, y, w, h, UiTheme::RADIUS_ROW, UiTheme::FOCUS_BG, true);
 }
 
+void UiRenderer::drawHeaderStatus() {
+  if (!m_r)
+    return;
+  // Pin: Brick dung axp2202-battery, fallback battery
+  int pct = -1;
+  bool charging = false;
+  const char *capPaths[] = {
+      "/sys/class/power_supply/axp2202-battery/capacity",
+      "/sys/class/power_supply/battery/capacity",
+  };
+  for (auto p : capPaths) {
+    FILE *f = fopen(p, "r");
+    if (f) {
+      int v = -1;
+      if (fscanf(f, "%d", &v) == 1 && v >= 0 && v <= 100)
+        pct = v;
+      fclose(f);
+      if (pct >= 0)
+        break;
+    }
+  }
+  const char *stPaths[] = {
+      "/sys/class/power_supply/axp2202-battery/status",
+      "/sys/class/power_supply/battery/status",
+  };
+  for (auto p : stPaths) {
+    FILE *f = fopen(p, "r");
+    if (f) {
+      char s[32] = {0};
+      if (fgets(s, sizeof(s), f)) {
+        if (std::string(s).find("Charg") != std::string::npos)
+          charging = true;
+      }
+      fclose(f);
+      break;
+    }
+  }
+  if (pct < 0)
+    pct = 100;
+
+  // Wifi: doc signal dBm qua `iw wlan0 link`, map 5 nac stock
+  // >-50:5, >-60:4, >-67:3, >-75:2, connected:1, mat mang:off
+  // Cache 5s de khong spawn process moi frame
+  static uint32_t lastWifiCheck = 0;
+  static bool cachedLinked = false;
+  static int cachedLevel = 0;
+  uint32_t ticks = SDL_GetTicks();
+  bool linked = cachedLinked;
+  int level = cachedLevel;
+  if (ticks - lastWifiCheck > 5000 || lastWifiCheck == 0) {
+    lastWifiCheck = ticks;
+    linked = false;
+    level = 0;
+    FILE *pf = popen("iw wlan0 link 2>/dev/null | grep -i signal | head -1", "r");
+    if (pf) {
+      char line[128] = {0};
+      if (fgets(line, sizeof(line), pf)) {
+        int dbm = 0;
+        if (sscanf(line, "%*[^0-9-]%d", &dbm) == 1) {
+          linked = true;
+          if (dbm >= -50)
+            level = 5;
+          else if (dbm >= -60)
+            level = 4;
+          else if (dbm >= -67)
+            level = 3;
+          else if (dbm >= -75)
+            level = 2;
+          else
+            level = 1;
+        }
+      }
+      pclose(pf);
+    }
+    if (!linked) {
+      // fallback: operstate up = co wifi nhung khong do duoc dBm
+      FILE *of = fopen("/sys/class/net/wlan0/operstate", "r");
+      if (of) {
+        char s[16] = {0};
+        if (fgets(s, sizeof(s), of) && std::string(s).find("up") != std::string::npos) {
+          linked = true;
+          level = 3;
+        }
+        fclose(of);
+      }
+    }
+    cachedLinked = linked;
+    cachedLevel = level;
+  }
+
+  // Gio he thong HH:MM
+  char tbuf[16] = "12:00";
+  time_t now = time(nullptr);
+  struct tm *t = localtime(&now);
+  if (t)
+    strftime(tbuf, sizeof(tbuf), "%H:%M", t);
+
+  // Layout phai -> trai, can giua doc trong HEADER_H=64
+  int cy = UiTheme::HEADER_H / 2;
+  int x = UiTheme::APP_W - 24;
+  SDL_Color fg = {190, 215, 228, 255};
+
+  // Gio
+  if (m_fSmall) {
+    int tw = textWidth(tbuf, m_fSmall);
+    drawText(tbuf, x - tw, textYCentered(0, UiTheme::HEADER_H, m_fSmall), fg, m_fSmall);
+    x -= tw + 14;
+  }
+  // Icon pin stock theo muc + % ben trai
+  std::string battIcon = "hdr_batt_100";
+  if (pct <= 5)
+    battIcon = "hdr_batt_0";
+  else if (pct <= 30)
+    battIcon = "hdr_batt_25";
+  else if (pct <= 60)
+    battIcon = "hdr_batt_50";
+  else if (pct <= 85)
+    battIcon = "hdr_batt_75";
+  int bw = 30, bh = 30;
+  drawIcon(battIcon, x - bw, cy - bh / 2, bw, bh);
+  x -= bw + 6;
+  if (charging)
+    drawIcon("hdr_charging", x - 14, cy - 14, 14, 28), x -= 14 + 6;
+  if (m_fSmall) {
+    std::string pctStr = std::to_string(pct) + "%";
+    int tw = textWidth(pctStr, m_fSmall);
+    drawText(pctStr, x - tw, textYCentered(0, UiTheme::HEADER_H, m_fSmall), fg, m_fSmall);
+    x -= tw + 14;
+  }
+  // Icon wifi stock
+  std::string wifiIcon = "hdr_wifi_off";
+  if (linked)
+    wifiIcon = "hdr_wifi_" + std::to_string(level < 1 ? 1 : level);
+  drawIcon(wifiIcon, x - 28, cy - 14, 28, 28);
+}
+
 void UiRenderer::drawAppHeader(const std::string &title,
                                const std::string &sub) {
+  drawRect(0, 0, UiTheme::APP_W, UiTheme::HEADER_H, UiTheme::FOOTER_BG, true);
+  drawRect(0, UiTheme::HEADER_H - 1, UiTheme::APP_W, 1, UiTheme::FOOTER_LINE,
+           true);
   if (!m_fLarge)
     return;
-  drawText(title, 32, 22, UiTheme::TEXT_MAIN, m_fLarge);
-  if (!sub.empty() && m_fSmall)
-    drawText(sub, 34, 22 + TTF_FontHeight(m_fLarge) + 2, UiTheme::TEXT_DIM,
-             m_fSmall);
+  // Chua ~280px phai cho cum status [wifi][% pin][gio]
+  const int statusReserve = 300;
+  if (sub.empty()) {
+    std::string t = truncateToWidth(title, m_fLarge, UiTheme::APP_W - 24 - statusReserve);
+    drawText(t, 24, textYCentered(0, UiTheme::HEADER_H, m_fLarge),
+             UiTheme::ACCENT_CYAN, m_fLarge);
+  } else {
+    int titleH = TTF_FontAscent(m_fLarge) - TTF_FontDescent(m_fLarge);
+    int subH = (m_fSmall ? (TTF_FontAscent(m_fSmall) - TTF_FontDescent(m_fSmall)) : 14);
+    if (titleH <= 0) titleH = TTF_FontHeight(m_fLarge);
+    if (subH <= 0) subH = 14;
+    const int gap = 4;
+    int block = titleH + gap + subH;
+    int startY = (UiTheme::HEADER_H - block) / 2;
+    std::string t2 = truncateToWidth(title, m_fLarge, UiTheme::APP_W - 24 - statusReserve);
+    drawText(t2, 24, startY, UiTheme::ACCENT_CYAN, m_fLarge);
+    if (!sub.empty() && m_fSmall)
+      drawText(truncateToWidth(sub, m_fSmall, UiTheme::APP_W - 24 - statusReserve),
+               24, startY + titleH + gap, UiTheme::TEXT_DIM, m_fSmall);
+  }
+  drawHeaderStatus();
 }
 
 void UiRenderer::drawPadIcon(UiTheme::PadBtn btn, int x, int y, int size) {
@@ -885,6 +1140,12 @@ void UiRenderer::drawAppFooter(const std::vector<UiTheme::FooterHint> &hints) {
     case PB::R2:
       s = "R2";
       break;
+    case PB::L1R1:
+      s = "L1R1";
+      break;
+    case PB::UPDOWN:
+      s = "UPDOWN";
+      break;
     case PB::PLAY:
       s = "PLAY";
       break;
@@ -926,6 +1187,32 @@ void UiRenderer::drawVirtualKeyboard(const VkState &vk, int x, int y, int cellW,
     return;
   TTF_Font *fKey = m_fLarge ? m_fLarge : m_fMedium;
   TTF_Font *fAct = m_fMedium ? m_fMedium : m_fSmall;
+
+  // Load stock keyboard textures if available
+  std::string stockDir = m_assetsDir + "/stock_keyboard";
+  std::string sysDir = "/usr/trimui/res/skin";
+  auto loadKeyTex = [&](const std::string &fn) -> SDL_Texture * {
+    std::string p = stockDir + "/" + fn;
+    SDL_Texture *t = getOrLoadImage("skb/" + fn, p);
+    if (!t)
+      t = getOrLoadImage("sys/" + fn, sysDir + "/" + fn);
+    return t;
+  };
+  SDL_Texture *texBtn01Sel = loadKeyTex("bg-button-01-selected.png");
+  SDL_Texture *texBtn01Unsel = loadKeyTex("bg-button-01-unselect.png");
+  SDL_Texture *texBtn02Sel = loadKeyTex("bg-button-02-selected.png");
+  SDL_Texture *texBtn02Unsel = loadKeyTex("bg-button-02-unselect.png");
+  SDL_Texture *texTipL = loadKeyTex("button-tips-L.png");
+  SDL_Texture *texTipR = loadKeyTex("button-tips-R.png");
+  SDL_Texture *texTipX = loadKeyTex("button-tips-X.png");
+  SDL_Texture *texTipY = loadKeyTex("button-tips-Y.png");
+  SDL_Texture *texTipStart = loadKeyTex("button-tips-START.png");
+  SDL_Texture *texShift = loadKeyTex("ic-shift.png");
+  SDL_Texture *texShiftAct = loadKeyTex("ic-shift-active.png");
+  SDL_Texture *texSpace = loadKeyTex("ic-space.png");
+  SDL_Texture *texDelete = loadKeyTex("ic-delete.png");
+  SDL_Texture *texOK = loadKeyTex("ic-OK.png");
+
   auto rectFill = [&](int cx, int cy, int w, int h, SDL_Color c) {
     if (rounded)
       drawRoundedRect(cx, cy, w, h, UiTheme::RADIUS_ROW, c, true);
@@ -945,6 +1232,7 @@ void UiRenderer::drawVirtualKeyboard(const VkState &vk, int x, int y, int cellW,
     keyEdge = {30, 41, 59, 255};
     keyFg = {203, 213, 225, 255};
   }
+
   for (int r = 0; r < 4; r++) {
     for (int c = 0; c < 10; c++) {
       int cx = x + c * (cellW + gapX);
@@ -956,65 +1244,180 @@ void UiRenderer::drawVirtualKeyboard(const VkState &vk, int x, int y, int cellW,
       char ch = VirtualKeyboard::charAt(t);
       char buf[2] = {ch ? ch : ' ', '\0'};
       if (sel) {
-        rectFill(cx, cy, cellW, cellH, accent);
-        rectEdge(cx, cy, cellW, cellH, accentEdge, 2);
+        if (texBtn01Sel) {
+          SDL_Rect dst = {cx, cy, cellW, cellH};
+          SDL_RenderCopy(m_r, texBtn01Sel, nullptr, &dst);
+        } else {
+          rectFill(cx, cy, cellW, cellH, accent);
+          rectEdge(cx, cy, cellW, cellH, accentEdge, 2);
+        }
         if (fKey)
           drawText(std::string(buf), cx + cellW / 2,
                    cy + (cellH - textHeight(fKey)) / 2, selFg, fKey, true);
       } else {
-        rectFill(cx, cy, cellW, cellH, keyBg);
-        rectEdge(cx, cy, cellW, cellH, keyEdge, 1);
+        if (texBtn01Unsel) {
+          SDL_Rect dst = {cx, cy, cellW, cellH};
+          SDL_RenderCopy(m_r, texBtn01Unsel, nullptr, &dst);
+        } else {
+          rectFill(cx, cy, cellW, cellH, keyBg);
+          rectEdge(cx, cy, cellW, cellH, keyEdge, 1);
+        }
         if (fKey)
           drawText(std::string(buf), cx + cellW / 2,
                    cy + (cellH - textHeight(fKey)) / 2, keyFg, fKey, true);
       }
     }
   }
+
   int totalW = 10 * cellW + 9 * gapX;
   int actW = (totalW - 4 * gapX) / 5;
   int actY = y + 4 * (cellH + gapY);
-  static const char *actBtns[5] = {"L1", "R1", "X", "Y", "START"};
+  SDL_Texture *actTips[5] = {texTipL, texTipR, texTipX, texTipY, texTipStart};
+
   for (int i = 0; i < 5; i++) {
     int cx = x + i * (actW + gapX);
     bool sel =
         (vk.row == 4) && (actionStride == 2 ? (vk.col / 2) == i : vk.col == i);
     std::string label =
         (actionLabels && actionLabels[i]) ? actionLabels[i] : "";
+
+    if (texBtn02Sel && texBtn02Unsel) {
+      SDL_Rect dst = {cx, actY, actW, cellH};
+      SDL_RenderCopy(m_r, sel ? texBtn02Sel : texBtn02Unsel, nullptr, &dst);
+    } else {
+      rectFill(cx, actY, actW, cellH, sel ? accent : keyBg);
+      rectEdge(cx, actY, actW, cellH, sel ? accentEdge : keyEdge, sel ? 2 : 1);
+    }
+
     if (withIcons) {
-      int iconSz = 30, kgap = 8;
-      int lw = (fAct && !label.empty()) ? textWidth(label, fAct) : 0;
-      int totW = iconSz + kgap + lw;
-      int kxc = cx + (actW - totW) / 2;
-      int kyc = actY + (cellH - 30) / 2;
-      int kth = fAct ? textHeight(fAct) : 0;
-      if (sel) {
-        rectFill(cx, actY, actW, cellH, accent);
-        rectEdge(cx, actY, actW, cellH, accentEdge, 2);
-        drawButtonIcon(actBtns[i], kxc, kyc, iconSz);
-        if (fAct)
-          drawText(label, kxc + iconSz + kgap, kyc + (30 - kth) / 2, selFg,
-                   fAct);
-      } else {
-        rectFill(cx, actY, actW, cellH, keyBg);
-        rectEdge(cx, actY, actW, cellH, keyEdge, 1);
-        drawButtonIcon(actBtns[i], kxc, kyc, iconSz);
-        if (fAct)
-          drawText(label, kxc + iconSz + kgap, kyc + (30 - kth) / 2, keyFg,
-                   fAct);
+      SDL_Texture *tipTex = actTips[i];
+      int tipW = 0, tipH = 0;
+      if (tipTex) {
+        int tw = 0, th = 0;
+        SDL_QueryTexture(tipTex, nullptr, nullptr, &tw, &th);
+        if (th > 0) {
+          tipH = std::min(cellH - 14, 26);
+          tipW = (tw * tipH) / th;
+        }
+      }
+
+      bool showSubIcon = (actW >= 90);
+
+      if (i == 0) {
+        // L1 / Shift
+        SDL_Texture *shTex = showSubIcon
+            ? (vk.shift ? (texShiftAct ? texShiftAct : texShift) : texShift)
+            : nullptr;
+        int shW = 24, shH = 24;
+        std::string lbl = vk.shift ? "ABC" : "abc";
+        int lw = fAct ? textWidth(lbl, fAct) : 0;
+        int contentW = (tipW ? tipW + 6 : 0) + (shTex ? shW + 6 : 0) + lw;
+        int curX = cx + (actW - contentW) / 2;
+        if (tipTex && tipW > 0) {
+          SDL_Rect td = {curX, actY + (cellH - tipH) / 2, tipW, tipH};
+          SDL_RenderCopy(m_r, tipTex, nullptr, &td);
+          curX += tipW + 6;
+        }
+        if (shTex) {
+          SDL_Rect sd = {curX, actY + (cellH - shH) / 2, shW, shH};
+          SDL_RenderCopy(m_r, shTex, nullptr, &sd);
+          curX += shW + 6;
+        }
+        if (fAct) {
+          SDL_Color tc =
+              sel ? selFg
+                  : (vk.shift ? SDL_Color{0, 180, 255, 255} : keyFg);
+          drawText(lbl, curX, textYCentered(actY, cellH, fAct), tc, fAct);
+        }
+      } else if (i == 1) {
+        // R1 / TELEX
+        std::string lbl = vk.telexMode ? "TELEX" : "US";
+        int lw = fAct ? textWidth(lbl, fAct) : 0;
+        int contentW = (tipW ? tipW + 8 : 0) + lw;
+        int curX = cx + (actW - contentW) / 2;
+        if (tipTex && tipW > 0) {
+          SDL_Rect td = {curX, actY + (cellH - tipH) / 2, tipW, tipH};
+          SDL_RenderCopy(m_r, tipTex, nullptr, &td);
+          curX += tipW + 8;
+        }
+        if (fAct) {
+          SDL_Color c = vk.telexMode ? SDL_Color{0, 180, 255, 255}
+                                     : SDL_Color{148, 163, 184, 255};
+          if (sel)
+            c = selFg;
+          drawText(lbl, curX, textYCentered(actY, cellH, fAct), c, fAct);
+        }
+      } else if (i == 2) {
+        // X / Cách
+        SDL_Texture *spTex = showSubIcon ? texSpace : nullptr;
+        int spW = 24, spH = 24;
+        std::string lbl = (actionLabels && actionLabels[i]) ? actionLabels[i] : "Cách";
+        int lw = fAct ? textWidth(lbl, fAct) : 0;
+        int contentW = (tipW ? tipW + 6 : 0) + (spTex ? spW + 6 : 0) + lw;
+        int curX = cx + (actW - contentW) / 2;
+        if (tipTex && tipW > 0) {
+          SDL_Rect td = {curX, actY + (cellH - tipH) / 2, tipW, tipH};
+          SDL_RenderCopy(m_r, tipTex, nullptr, &td);
+          curX += tipW + 6;
+        }
+        if (spTex) {
+          SDL_Rect sd = {curX, actY + (cellH - spH) / 2, spW, spH};
+          SDL_RenderCopy(m_r, spTex, nullptr, &sd);
+          curX += spW + 6;
+        }
+        if (fAct) {
+          drawText(lbl, curX, textYCentered(actY, cellH, fAct),
+                   sel ? selFg : keyFg, fAct);
+        }
+      } else if (i == 3) {
+        // Y / Xóa
+        SDL_Texture *delTex = showSubIcon ? texDelete : nullptr;
+        int delW = 24, delH = 24;
+        std::string lbl = (actionLabels && actionLabels[i]) ? actionLabels[i] : "Xóa";
+        int lw = fAct ? textWidth(lbl, fAct) : 0;
+        int contentW = (tipW ? tipW + 6 : 0) + (delTex ? delW + 6 : 0) + lw;
+        int curX = cx + (actW - contentW) / 2;
+        if (tipTex && tipW > 0) {
+          SDL_Rect td = {curX, actY + (cellH - tipH) / 2, tipW, tipH};
+          SDL_RenderCopy(m_r, tipTex, nullptr, &td);
+          curX += tipW + 6;
+        }
+        if (delTex) {
+          SDL_Rect sd = {curX, actY + (cellH - delH) / 2, delW, delH};
+          SDL_RenderCopy(m_r, delTex, nullptr, &sd);
+          curX += delW + 6;
+        }
+        if (fAct) {
+          drawText(lbl, curX, textYCentered(actY, cellH, fAct),
+                   sel ? selFg : keyFg, fAct);
+        }
+      } else if (i == 4) {
+        // START / Tìm / Xong
+        SDL_Texture *okTex = showSubIcon ? texOK : nullptr;
+        int okW = 34, okH = 20;
+        std::string lbl = (actionLabels && actionLabels[i]) ? actionLabels[i] : "Tìm";
+        int lw = fAct ? textWidth(lbl, fAct) : 0;
+        int contentW = (tipW ? tipW + 6 : 0) + (okTex ? okW + 6 : 0) + lw;
+        int curX = cx + (actW - contentW) / 2;
+        if (tipTex && tipW > 0) {
+          SDL_Rect td = {curX, actY + (cellH - tipH) / 2, tipW, tipH};
+          SDL_RenderCopy(m_r, tipTex, nullptr, &td);
+          curX += tipW + 6;
+        }
+        if (okTex) {
+          SDL_Rect sd = {curX, actY + (cellH - okH) / 2, okW, okH};
+          SDL_RenderCopy(m_r, okTex, nullptr, &sd);
+          curX += okW + 6;
+        }
+        if (fAct) {
+          drawText(lbl, curX, textYCentered(actY, cellH, fAct),
+                   sel ? selFg : SDL_Color{0, 180, 255, 255}, fAct);
+        }
       }
     } else {
-      SDL_Color bg = sel ? accent : keyBg;
-      if (i == 3)
-        bg = sel ? SDL_Color{22, 163, 74, 255} : SDL_Color{20, 83, 45, 255};
-      if (i == 4)
-        bg = sel ? SDL_Color{220, 38, 38, 255} : SDL_Color{69, 10, 10, 255};
-      if (i == 0 && vk.shift && !sel)
-        bg = SDL_Color{29, 78, 216, 255};
-      rectFill(cx, actY, actW, cellH, bg);
-      rectEdge(cx, actY, actW, cellH, sel ? accentEdge : keyEdge, sel ? 2 : 1);
       if (fAct)
         drawText(label, cx + actW / 2, actY + (cellH - textHeight(fAct)) / 2,
-                 selFg, fAct, true);
+                 sel ? selFg : keyFg, fAct, true);
     }
   }
 }
