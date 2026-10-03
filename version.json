@@ -1,6 +1,6 @@
 {
   "version": "2.3.0",
-  "release_date": "2026-10-02",
+  "release_date": "2026-10-03",
   "target_os": "ALL",
   "icon_url": "https://raw.githubusercontent.com/bun2it/RomCloud/main/icon.png",
   "binary_url": "https://github.com/bun2it/RomCloud/releases/download/v2.3.0/RomCloud",
@@ -13,5 +13,5 @@
     "NEXTUI": "2.3.0",
     "SPRUCE_OS": "2.3.0"
   },
-  "changelog": "v2.3.0: Tìm kiếm YouTube nhanh hơn gấp 10 lần (~0.6s thay vì ~6-10s) cho các truy vấn phổ biến, vẫn giữ tìm kiếm thường làm phương án dự phòng."
+  "changelog": "v2.3.0: Giao dien row-view (5 hang/trang) chuan 720p. Remake YouTube: tach giai ma anh khoi render, phat 720p co tieng. Web Server cong 8081, QR donate dong qua Google Drive. Moi: GameCast truyen man hinh len PC qua mang noi bo."
 }
