@@ -7,6 +7,7 @@
 #include "../input/InputManager.h"
 #include "../platform/PlatformInfo.h"
 #include <SDL2/SDL_ttf.h>
+#include <SDL2/SDL_image.h>
 #include <dirent.h>
 #include <unistd.h>
 #include <fcntl.h>
@@ -53,7 +54,7 @@ static std::string truncateUtf8Chars(const std::string &s, size_t maxChars) {
     return s.substr(0, cutPos) + "..";
 }
 // Font OSD/sub mpv: dung chung MpvPlayer::resolveOsdFont
-// (uu tien NotoSans-Regular full TV, fallback font.ttf cu).
+// (uu tien NotoSans-Regular full TV, fallback font he thong).
 inline std::string resolveOsdFont(const std::string &appRoot) {
     return MpvPlayer::resolveOsdFont(appRoot);
 }
@@ -1421,6 +1422,191 @@ void IPTVManager::hideIPTVChannelOSD() {
     // Remove all overlays (0 and 1)
     sendMpvIpcCommand("{\"command\":[\"overlay-remove\",0]}\n", &reply, "/tmp/mpv_iptv.sock");
     sendMpvIpcCommand("{\"command\":[\"overlay-remove\",1]}\n", &reply, "/tmp/mpv_iptv.sock");
+    hideIPTVPlaybackFooter();
+}
+
+void IPTVManager::showIPTVPlaybackFooter(bool isPaused) {
+    // Footer chuẩn app (giống drawAppFooter/drawFooterHintsCentered):
+    // nền FOOTER_BG + kẻ FOOTER_LINE, icon nút thật, hints canh giữa.
+    // Hints khớp control loop playChannel: A pause/resume, B/MENU thoát,
+    // SELECT ẩn/hiện list kênh, UP/DOWN mở list + đổi highlight.
+    const int CW = 1024;
+    const int CH = 53;
+    const int OY = 715;  // UiTheme::FOOTER_Y
+    const int STRIDE = CW * 4;
+    const int ICON_SIZE = 26;  // UiTheme::FOOTER_ICON
+    const int GAP = 8;         // UiTheme::FOOTER_GAP
+    const int HINT_GAP = 28;   // UiTheme::FOOTER_HINT_GAP
+    std::vector<uint8_t> canvas(STRIDE * CH, 0);
+
+    auto fillRect = [&](int x, int y, int w, int h, uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
+        if (x < 0) { w += x; x = 0; }
+        if (y < 0) { h += y; y = 0; }
+        if (x + w > CW) w = CW - x;
+        if (y + h > CH) h = CH - y;
+        if (w <= 0 || h <= 0) return;
+        for (int yy = y; yy < y + h; yy++)
+            for (int xx = x; xx < x + w; xx++) {
+                size_t i = size_t(yy) * STRIDE + xx * 4;
+                canvas[i+0] = b; canvas[i+1] = g; canvas[i+2] = r; canvas[i+3] = a;
+            }
+    };
+
+    // Open font
+    std::string appRoot = AppConfig::instance().getAppRoot();
+    if (appRoot.empty()) appRoot = "/mnt/SDCARD/Apps/RomCloud";
+    std::string fontPath = resolveOsdFont(appRoot);
+    static TTF_Font* s_fontFooter = nullptr;
+    if (!s_fontFooter) {
+        if (TTF_Init() == -1) return;
+        s_fontFooter = TTF_OpenFont(fontPath.c_str(), 22);
+        if (!s_fontFooter) return;
+    }
+
+    auto textWidthPx = [&](const std::string& text) -> int {
+        if (text.empty() || !s_fontFooter) return 0;
+        int w = 0, h = 0;
+        if (TTF_SizeUTF8(s_fontFooter, text.c_str(), &w, &h) != 0) return 0;
+        return w;
+    };
+
+    auto blitText = [&](TTF_Font* font, const std::string& text, SDL_Color color,
+                        int x, int y) {
+        if (text.empty() || !font) return;
+        SDL_Surface* s = TTF_RenderUTF8_Blended(font, text.c_str(), color);
+        if (!s) return;
+        SDL_LockSurface(s);
+        for (int yy = 0; yy < s->h; yy++) {
+            if (y + yy < 0 || y + yy >= CH) continue;
+            for (int xx = 0; xx < s->w; xx++) {
+                if (x + xx < 0 || x + xx >= CW) continue;
+                uint32_t px = ((uint32_t*)s->pixels)[yy * (s->pitch / 4) + xx];
+                uint8_t a = (px >> 24) & 0xFF;
+                if (a < 16) continue;
+                size_t i = size_t(y + yy) * STRIDE + (x + xx) * 4;
+                uint8_t sr = (px >> 16) & 0xFF, sg = (px >> 8) & 0xFF, sb = px & 0xFF;
+                uint16_t aa = (uint16_t)a;
+                uint16_t inv = 255 - aa;
+                canvas[i+0] = (uint8_t)((sb * aa + canvas[i+0] * inv) / 255);
+                canvas[i+1] = (uint8_t)((sg * aa + canvas[i+1] * inv) / 255);
+                canvas[i+2] = (uint8_t)((sr * aa + canvas[i+2] * inv) / 255);
+                if (canvas[i+3] < a) canvas[i+3] = a;
+            }
+        }
+        SDL_UnlockSurface(s);
+        SDL_FreeSurface(s);
+    };
+
+    // Blit icon nút chuẩn (assets/button_icons/*, icon chuyên biệt
+    // SELECT.png / vertical.png — cấm icon generic legacy).
+    auto blitIcon = [&](const std::string& iconFile, int x, int y, int size) -> bool {
+        std::string p = appRoot + "/assets/button_icons/" + iconFile;
+        SDL_Surface* surf = IMG_Load(p.c_str());
+        if (!surf) return false;
+        bool ok = false;
+        if (surf->w > 0 && surf->h > 0) {
+            float scale = (float)size / (float)std::max(surf->w, surf->h);
+            int dw = (int)(surf->w * scale);
+            int dh = (int)(surf->h * scale);
+            if (dw <= 0) dw = 1;
+            if (dh <= 0) dh = 1;
+            int dx0 = x + (size - dw) / 2;
+            int dy0 = y + (size - dh) / 2;
+            SDL_LockSurface(surf);
+            for (int dy = 0; dy < dh; dy++) {
+                int sy = dy * surf->h / dh;
+                int cy = dy0 + dy;
+                if (cy < 0 || cy >= CH) continue;
+                for (int dx = 0; dx < dw; dx++) {
+                    int sx = dx * surf->w / dw;
+                    int cx = dx0 + dx;
+                    if (cx < 0 || cx >= CW) continue;
+                    Uint8 sr = 255, sg = 255, sb = 255, sa = 255;
+                    Uint32 px = 0;
+                    if (surf->format->BytesPerPixel == 4) {
+                        px = ((Uint32*)surf->pixels)[sy * (surf->pitch / 4) + sx];
+                        SDL_GetRGBA(px, surf->format, &sr, &sg, &sb, &sa);
+                    } else if (surf->format->BytesPerPixel == 3) {
+                        Uint8* pp = (Uint8*)surf->pixels + sy * surf->pitch + sx * 3;
+                        Uint32 tmp = (Uint32)pp[0] | ((Uint32)pp[1] << 8) | ((Uint32)pp[2] << 16);
+                        SDL_GetRGB(tmp, surf->format, &sr, &sg, &sb);
+                        sa = 255;
+                    } else {
+                        continue;
+                    }
+                    if (sa < 16) continue;
+                    size_t i = size_t(cy) * STRIDE + cx * 4;
+                    uint16_t aa = (uint16_t)sa;
+                    uint16_t inv = 255 - aa;
+                    canvas[i+0] = (uint8_t)((sb * aa + canvas[i+0] * inv) / 255);
+                    canvas[i+1] = (uint8_t)((sg * aa + canvas[i+1] * inv) / 255);
+                    canvas[i+2] = (uint8_t)((sr * aa + canvas[i+2] * inv) / 255);
+                    if (canvas[i+3] < sa) canvas[i+3] = sa;
+                }
+            }
+            SDL_UnlockSurface(surf);
+            ok = true;
+        }
+        SDL_FreeSurface(surf);
+        return ok;
+    };
+
+    // Nền + kẻ ngăn cách chuẩn (UiTheme::FOOTER_BG / FOOTER_LINE).
+    // drawAppFooter tự vẽ 2 lớp này — footer mpv overlay phải vẽ tay y hệt.
+    fillRect(0, 0, CW, CH, 18, 22, 30, 255);
+    fillRect(0, 0, CW, 1, 40, 48, 62, 255);
+
+    // Thứ tự SELECT trước START theo Chin Buttons Standard (ở đây không có START).
+    struct Hint { const char* btn; const char* icon; std::string label; };
+    std::vector<Hint> hints = {
+        {"A",      "a.png",        isPaused ? "Phát" : "Tạm dừng"},
+        {"B",      "b.png",        "Thoát"},
+        {"SELECT", "SELECT.png",   "Kênh"},
+        {"UPDOWN", "vertical.png", "Chọn"},
+    };
+    SDL_Color labelColor = {200, 210, 225, 255};  // UiTheme::TEXT_DIM
+
+    // Đo tổng rộng rồi canh giữa — y hệt drawFooterHintsCentered.
+    int totalW = 0;
+    for (size_t k = 0; k < hints.size(); ++k) {
+        totalW += ICON_SIZE + GAP + textWidthPx(hints[k].label);
+        if (k + 1 < hints.size()) totalW += HINT_GAP;
+    }
+    int xPos = (CW - totalW) / 2;
+    if (xPos < 8) xPos = 8;
+    int centerY = CH / 2;
+    int th = TTF_FontHeight(s_fontFooter);
+    for (size_t k = 0; k < hints.size(); ++k) {
+        int iconY = centerY - ICON_SIZE / 2;
+        if (!blitIcon(hints[k].icon, xPos, iconY, ICON_SIZE)) {
+            // Fallback khi thiếu PNG: vẽ tên nút dạng text để không mất hint.
+            std::string fb = std::string("[") + hints[k].btn + "]";
+            blitText(s_fontFooter, fb, labelColor, xPos, centerY - th / 2);
+        }
+        xPos += ICON_SIZE + GAP;
+        blitText(s_fontFooter, hints[k].label, labelColor, xPos, centerY - th / 2);
+        xPos += textWidthPx(hints[k].label);
+        if (k + 1 < hints.size()) xPos += HINT_GAP;
+    }
+
+    // Write to raw file
+    FILE* fp = fopen("/tmp/osd_footer.raw", "wb");
+    if (!fp) return;
+    fwrite(canvas.data(), 1, canvas.size(), fp);
+    fclose(fp);
+
+    // Send to mpv as overlay ID 2 (persistent footer)
+    char cmd[256];
+    snprintf(cmd, sizeof(cmd),
+        "{\"command\":[\"overlay-add\",2,0,%d,\"/tmp/osd_footer.raw\",0,\"bgra\",%d,%d,%d]}\n",
+        OY, CW, CH, STRIDE);
+    std::string reply;
+    sendMpvIpcCommand(cmd, &reply, "/tmp/mpv_iptv.sock");
+}
+
+void IPTVManager::hideIPTVPlaybackFooter() {
+    std::string reply;
+    sendMpvIpcCommand("{\"command\":[\"overlay-remove\",2]}\n", &reply, "/tmp/mpv_iptv.sock");
 }
 
 // playChannel: blocking. Forks mpv and handles all playback controls + channel list OSD
@@ -1483,6 +1669,9 @@ bool IPTVManager::playChannel(const IPTVChannel& channel, size_t initialIndex, c
         bool isPaused = false;
         bool channelListVisible = false;
         m_overlayExpireTime = 0;
+
+        // Hiện footer bar khi bắt đầu phát
+        showIPTVPlaybackFooter(isPaused);
         Logger::info("IPTV: mpv started with PID: " + std::to_string(pid));
 
         SDL_PumpEvents();
@@ -1582,6 +1771,7 @@ bool IPTVManager::playChannel(const IPTVChannel& channel, size_t initialIndex, c
             } else if (input.isButtonJustPressed(Button::UP)) {
                 if (!channelListVisible) {
                     channelListVisible = true;
+                    hideIPTVPlaybackFooter();  // Ẩn footer khi hiện OSD
                     sendMpvIpcCommand("{\"command\":[\"set_property\",\"video-align-y\",-1]}", nullptr, "/tmp/mpv_iptv.sock");
                 }
                 if (!m_iptvChannelList.empty()) {
@@ -1593,6 +1783,7 @@ bool IPTVManager::playChannel(const IPTVChannel& channel, size_t initialIndex, c
             } else if (input.isButtonJustPressed(Button::DOWN)) {
                 if (!channelListVisible) {
                     channelListVisible = true;
+                    hideIPTVPlaybackFooter();  // Ẩn footer khi hiện OSD
                     sendMpvIpcCommand("{\"command\":[\"set_property\",\"video-align-y\",-1]}", nullptr, "/tmp/mpv_iptv.sock");
                 }
                 if (!m_iptvChannelList.empty()) {
@@ -1619,11 +1810,13 @@ bool IPTVManager::playChannel(const IPTVChannel& channel, size_t initialIndex, c
             } else if (input.isButtonJustPressed(Button::SELECT)) {
                 channelListVisible = !channelListVisible;
                 if (channelListVisible) {
+                    hideIPTVPlaybackFooter();  // Ẩn footer khi hiện OSD
                     sendMpvIpcCommand("{\"command\":[\"set_property\",\"video-align-y\",-1]}", nullptr, "/tmp/mpv_iptv.sock");
                     showIPTVChannelOSD(m_iptvChannelList, (int)m_iptvSelectedIndex, "", 0);
                 } else {
                     sendMpvIpcCommand("{\"command\":[\"overlay-remove\",1]}", nullptr, "/tmp/mpv_iptv.sock");
                     sendMpvIpcCommand("{\"command\":[\"set_property\",\"video-align-y\",0]}", nullptr, "/tmp/mpv_iptv.sock");
+                    showIPTVPlaybackFooter(isPaused);  // Hiện lại footer
                 }
             }
 
