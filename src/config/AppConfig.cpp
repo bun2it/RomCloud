@@ -152,7 +152,7 @@ std::string AppConfig::getFontPath() const {
   }
 
   // Ưu tiên NotoSans-Regular của app (full TV 1ea0-1ef9, 197KB),
-  // sau đó tới font hệ thống TrimUI, font app cũ để cuối.
+  // sau đó tới font hệ thống TrimUI.
   const std::string fonts[] = {
       getFontsDir() + "/NotoSans-Regular.ttf",
       "/mnt/SDCARD/Apps/RomCloud/assets/fonts/NotoSans-Regular.ttf",
@@ -160,9 +160,6 @@ std::string AppConfig::getFontPath() const {
       "/usr/trimui/res/full.ttf",
       "/usr/trimui/res/regular.ttf",
       "/mnt/SDCARD/Themes/TRIMUI YaHei/msyh.ttf",
-      getFontsDir() + "/NotoSansTC.ttf",
-      getFontsDir() + "/font.ttf",
-      "/mnt/SDCARD/Apps/RomCloud/assets/fonts/font.ttf",
       "/system/media/fonts/TrimUI.ttf"};
 
   for (const auto &f : fonts) {

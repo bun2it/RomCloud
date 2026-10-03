@@ -117,10 +117,7 @@ bool UIManager::init(SDL_Window *window, SDL_Renderer *renderer) {
       "/usr/trimui/res/full.ttf",
       "/usr/trimui/res/regular.ttf",
       "/mnt/SDCARD/Themes/TRIMUI YaHei/msyh.ttf",
-      "/mnt/SDCARD/Apps/RomCloud/assets/fonts/NotoSansTC.ttf",
-      fontPath.c_str(),
-      "/mnt/SDCARD/Apps/RomCloud/assets/fonts/font.ttf",
-      "assets/fonts/font.ttf"};
+      fontPath.c_str()};
 
   for (const char *path : fallbackFonts) {
     if (!m_fontTitle)

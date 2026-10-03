@@ -24,6 +24,7 @@ mkdir -p "$STAGING_DIR/Apps/RomCloud/assets/icons"
 mkdir -p "$STAGING_DIR/Apps/RomCloud/assets/apps_icons"
 mkdir -p "$STAGING_DIR/Apps/RomCloud/assets/player_icons"
 mkdir -p "$STAGING_DIR/Apps/RomCloud/assets/button_icons"
+mkdir -p "$STAGING_DIR/Apps/RomCloud/assets/stock_keyboard"
 mkdir -p "$STAGING_DIR/Apps/RomCloud/config"
 mkdir -p "$STAGING_DIR/Apps/RomCloud/iptv"
 
@@ -53,8 +54,8 @@ if [ -d scripts ]; then
     chmod +x "$STAGING_DIR/Apps/RomCloud/scripts/"*.sh 2>/dev/null || true
 fi
 
-cp assets/fonts/font.ttf "$STAGING_DIR/Apps/RomCloud/assets/fonts/"
-cp assets/fonts/NotoSans-Regular.ttf "$STAGING_DIR/Apps/RomCloud/assets/fonts/" 2>/dev/null || true
+cp assets/fonts/NotoSans-Regular.ttf "$STAGING_DIR/Apps/RomCloud/assets/fonts/"
+cp -r assets/stock_keyboard/* "$STAGING_DIR/Apps/RomCloud/assets/stock_keyboard/"
 cp assets/icons/*.png "$STAGING_DIR/Apps/RomCloud/assets/icons/"
 cp assets/apps_icons/*.png "$STAGING_DIR/Apps/RomCloud/assets/apps_icons/" 2>/dev/null || true
 cp -r assets/player_icons/* "$STAGING_DIR/Apps/RomCloud/assets/player_icons/" 2>/dev/null || true

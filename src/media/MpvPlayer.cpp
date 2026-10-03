@@ -39,7 +39,7 @@ std::string MpvPlayer::findBinary(const std::string& appRoot,
 std::string MpvPlayer::resolveOsdFont(const std::string& appRoot) {
     const std::string noto = appRoot + "/assets/fonts/NotoSans-Regular.ttf";
     if (access(noto.c_str(), R_OK) == 0) return noto;
-    return appRoot + "/assets/fonts/font.ttf";
+    return "/usr/trimui/res/full.ttf";
 }
 
 #ifndef _WIN32
