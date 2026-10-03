@@ -9,6 +9,7 @@ scratch/
 dist/
 *.zip
 bin/*.exe
+bin/*.debug
 pc_data/
 .claude/
 .romcloud/

@@ -22,6 +22,13 @@ fi
 echo "=== Compiling RomCloud for TrimUI Brick Pro (aarch64-linux-gnu.2.33) ==="
 mkdir -p bin
 
+# Release mode: RELEASE=1 ./build.sh
+#   - Build nhu dev (giu debug info), copy ban debug sang bin/*.debug,
+#   - roi strip binary chinh bang `zig objcopy --strip-all` (nhe ~5-8MB).
+#   - Mac dinh (dev) GIU NGUYEN debug info de debug crash.
+#   - bin/*.debug da co trong .gitignore, khong lot vao git/zip.
+RELEASE="${RELEASE:-0}"
+
 # Detect git commit hash for build-id tagging in debug.log
 GIT_SHA="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
 echo "Build commit: $GIT_SHA"
@@ -92,6 +99,15 @@ echo "=== Build Successful: bin/RomCloud ==="
 ls -lh bin/RomCloud
 file bin/RomCloud
 
+if [ "$RELEASE" = "1" ]; then
+    echo "=== Release mode: keeping debug copy + stripping ==="
+    cp bin/RomCloud bin/RomCloud.debug
+    "$ZIG" objcopy --strip-all bin/RomCloud bin/RomCloud.stripped
+    mv bin/RomCloud.stripped bin/RomCloud
+    ls -lh bin/RomCloud bin/RomCloud.debug
+    file bin/RomCloud
+fi
+
 echo "=== Compiling GameCast Daemon (gamecast_d) ==="
 $ZIG c++ \
     -target aarch64-linux-gnu.2.33 \
@@ -107,4 +123,12 @@ $ZIG c++ \
 echo "=== Build Successful: bin/gamecast_d ==="
 ls -lh bin/gamecast_d
 file bin/gamecast_d
+
+if [ "$RELEASE" = "1" ]; then
+    cp bin/gamecast_d bin/gamecast_d.debug
+    "$ZIG" objcopy --strip-all bin/gamecast_d bin/gamecast_d.stripped
+    mv bin/gamecast_d.stripped bin/gamecast_d
+    ls -lh bin/gamecast_d bin/gamecast_d.debug
+    file bin/gamecast_d
+fi
 

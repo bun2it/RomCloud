@@ -15,6 +15,18 @@ DIST_DIR="$SCRIPT_DIR/dist"
 STAGING_DIR="$DIST_DIR/staging"
 ZIP_NAME="RomCloud-v${VERSION}.zip"
 
+# Release gate: zip phat hanh nen dong tu binary STRIPPED (RELEASE=1 ./build.sh).
+# Chi canh bao, khong tu build lai de tranh doi behavior bat ngo.
+if [ -f bin/RomCloud ]; then
+    if file bin/RomCloud | grep -q "not stripped"; then
+        echo "WARNING: bin/RomCloud is NOT stripped (dev build)." >&2
+        echo "WARNING: run RELEASE=1 ./build.sh before packaging a release." >&2
+    fi
+else
+    echo "ERROR: bin/RomCloud not found. Run ./build.sh first." >&2
+    exit 1
+fi
+
 rm -rf "$STAGING_DIR"
 mkdir -p "$STAGING_DIR/Apps/RomCloud/bin"
 mkdir -p "$STAGING_DIR/Apps/RomCloud/lib"
