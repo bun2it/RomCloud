@@ -197,6 +197,9 @@ private:
                            const std::string &selected);
   int m_activePlaylistIndex = -1;    // -1 = tat ca playlists
 
+  // IPTV OSD visibility (true = OSD đang hiện, false = footer hiện)
+  bool m_iptvOsdVisible = false;
+
   // IPTV Search & Virtual Keyboard State
   std::vector<IPTVChannel> m_iptvSearchResults;
   int m_iptvSearchSelectedIndex = 0;

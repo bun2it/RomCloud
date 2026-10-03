@@ -1547,6 +1547,13 @@ void IPTVManager::showIPTVChannelOSD(
                        " @ (0," + std::to_string(OY) + ")");
 }
 
+void IPTVManager::hideIPTVChannelOSD() {
+    std::string reply;
+    // Remove all overlays (0 and 1)
+    sendMpvIpcCommand("{\"command\":[\"overlay-remove\",0]}\n", &reply, "/tmp/mpv_iptv.sock");
+    sendMpvIpcCommand("{\"command\":[\"overlay-remove\",1]}\n", &reply, "/tmp/mpv_iptv.sock");
+}
+
 // playChannel: blocking. Forks mpv and handles all playback controls + channel list OSD
 // in the same process. This is the same pattern as playYouTubeVideo.
 bool IPTVManager::playChannel(const IPTVChannel& channel, size_t initialIndex, const std::vector<IPTVChannel>& customList) {

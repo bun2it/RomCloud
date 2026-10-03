@@ -12,6 +12,7 @@
 #include "../filesystem/FileSystemManager.h"
 #include "../input/InputManager.h"
 #include "../iptv/IPTVManager.h"
+#include "../media/MpvPlayer.h"
 #include "../localsend/LocalSendManager.h"
 #include "../logging/IssueLogger.h"
 #include "../logging/Logger.h"
@@ -1570,6 +1571,42 @@ void UIManager::update() {
   }
 
   case UIState::IPTV_LIST: {
+    // Nếu đang phát: xử lý playback controls thay vì list navigation
+    if (IPTVManager::instance().isIPTVPlaying()) {
+      if (input.isButtonJustPressed(Button::A)) {
+        // Play/Pause toggle
+        MpvPlayer::instance().cyclePause();
+      } else if (input.isButtonJustPressed(Button::B)) {
+        // Stop and return to list
+        IPTVManager::instance().stop();
+        m_iptvOsdVisible = false;
+        m_selectedIPTVChannelIndex = 0;
+        m_iptvScrollOffset = 0;
+      } else if (input.isButtonJustPressed(Button::SELECT)) {
+        // Toggle OSD channel selector
+        m_iptvOsdVisible = !m_iptvOsdVisible;
+        if (m_iptvOsdVisible) {
+          // Hiện OSD với danh sách kênh
+          IPTVManager::instance().showIPTVChannelOSD(
+              IPTVManager::instance().getChannels(),
+              m_selectedIPTVChannelIndex,
+              m_iptvSelectedGroup, 0);
+        } else {
+          // Ẩn OSD
+          IPTVManager::instance().hideIPTVChannelOSD();
+        }
+      } else if (input.isButtonJustPressed(Button::UP)) {
+        // Volume up
+        IPTVManager::instance().sendMpvIpcCommand(
+            "{\"command\":[\"add\",\"volume\",5]}\n");
+      } else if (input.isButtonJustPressed(Button::DOWN)) {
+        // Volume down
+        IPTVManager::instance().sendMpvIpcCommand(
+            "{\"command\":[\"add\",\"volume\",-5]}\n");
+      }
+      break;  // Đang phát, không xử lý list navigation
+    }
+
     // ------- Build filtered channel list -------
     std::vector<IPTVChannel> allChannels;
     if (m_iptvShowFavoritesOnly) {
@@ -5655,14 +5692,24 @@ void UIManager::centerIptvGroupBar(const std::vector<std::string> &groups,
 }
 
 void UIManager::renderIPTVState() {
-  // Khi mpv dang phat: SDL khong render gi het.
-  // mpv so huu toan bo framebuffer. Channel list hien qua mpv OSD
-  // (showIPTVChannelOSD). Khong co conflict framebuffer, khong co flicker.
-  if (IPTVManager::instance().isIPTVPlaying())
-    return;
+  // Khi mpv đang phát + OSD đang hiện: mpv/mpv OSD chiếm framebuffer
+  if (IPTVManager::instance().isIPTVPlaying() && m_iptvOsdVisible)
+    return;  // Để OSD xử lý
 
-  // Layout: toan man hinh khi chua phat (isIPTVPlaying() == true da return o
-  // tren roi)
+  // Khi mpv đang phát + OSD đang ẩn: Vẽ footer overlay cho playback
+  if (IPTVManager::instance().isIPTVPlaying() && !m_iptvOsdVisible) {
+    // Vẽ footer bar chuẩn cho trạng thái playback
+    drawAppFooter({
+        {UiTheme::PadBtn::A, "Phát/Tạm dừng"},
+        {UiTheme::PadBtn::B, "Thoát"},
+        {UiTheme::PadBtn::SELECT, "Chọn kênh"},
+        {UiTheme::PadBtn::DPAD, "Âm lượng"}
+    });
+    return;
+  }
+
+  // Layout: toàn màn hình khi chưa phát (isIPTVPlaying() == false đã return ở
+  // trên rồi)
   const int SCREEN_H = 768;
   const int UI_TOP = 0;
   const int UI_H = SCREEN_H;

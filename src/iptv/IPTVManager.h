@@ -231,6 +231,7 @@ public:
                             int selectedIndex,
                             const std::string& groupName = "",
                             int durationMs = 4000);
+    void hideIPTVChannelOSD();
     bool isIPTVPlaying() const;
 
     // Status
