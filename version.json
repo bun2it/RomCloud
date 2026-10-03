@@ -1,13 +1,14 @@
 {
-  "version": "2.3.1",
+  "version": "2.3.2",
   "release_date": "2026-10-04",
   "target_os": "ALL",
   "icon_url": "https://raw.githubusercontent.com/bun2it/RomCloud/main/icon.png",
-  "full_zip_url": "https://github.com/bun2it/RomCloud/releases/download/v2.3.1/RomCloud-v2.3.1.zip",
+  "binary_url": "https://github.com/bun2it/RomCloud/releases/download/v2.3.2/RomCloud",
+  "full_zip_url": "https://github.com/bun2it/RomCloud/releases/download/v2.3.2/RomCloud-v2.3.2.zip",
   "os_versions": {
-    "STOCK_PS": "2.3.1",
-    "NEXTUI": "2.3.1",
-    "SPRUCE_OS": "2.3.1"
+    "STOCK_PS": "2.3.2",
+    "NEXTUI": "2.3.2",
+    "SPRUCE_OS": "2.3.2"
   },
   "changelog": "bugs fix"
 }

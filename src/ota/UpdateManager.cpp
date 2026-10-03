@@ -667,6 +667,63 @@ void UpdateManager::cancelUpdate() {
 // DOWNLOAD WORKER
 // ============================================================================
 
+bool UpdateManager::repairIfBroken() {
+  std::string appRoot = AppConfig::instance().getAppRoot();
+  const char* needRead[] = {
+    "assets/button_icons/SELECT.png",
+    "assets/button_icons/MENU.png",
+    "assets/button_icons/START.png",
+    "scripts/youtube_search.py",
+    "assets/apps_icons/YOUTUBE.png",
+  };
+  const char* needExec[] = {
+    "scripts/youtube_search.sh",
+    "bin/mpv",
+  };
+  bool missing = false;
+  for (const char* rel : needRead) {
+    if (access((appRoot + "/" + rel).c_str(), R_OK) != 0) {
+      Logger::warn(std::string("OTA repair: missing ") + rel);
+      missing = true;
+    }
+  }
+  for (const char* rel : needExec) {
+    if (access((appRoot + "/" + rel).c_str(), X_OK) != 0) {
+      Logger::warn(std::string("OTA repair: missing ") + rel);
+      missing = true;
+    }
+  }
+  // yt-dlp: 1 trong 2 bản là đủ
+  if (access((appRoot + "/bin/yt-dlp").c_str(), X_OK) != 0 &&
+      access((appRoot + "/bin/yt-dlp-glibc").c_str(), X_OK) != 0) {
+    Logger::warn("OTA repair: missing bin/yt-dlp");
+    missing = true;
+  }
+  if (!missing)
+    return false;
+
+  Logger::warn("OTA repair: runtime files missing, auto full-zip repair v" +
+               std::string(APP_VERSION));
+  UpdateInfo info;
+  info.remoteVersion = APP_VERSION;
+  info.fullZipUrl = "https://github.com/" + std::string(GITHUB_REPO) +
+                    "/releases/download/v" + std::string(APP_VERSION) +
+                    "/RomCloud-v" + std::string(APP_VERSION) + ".zip";
+  m_repairActive = true;
+  if (!startUpdate(info)) {
+    m_repairActive = false;
+    return false;
+  }
+  return true;
+}
+
+void UpdateManager::notifyRepairDone(bool ok) {
+  if (!m_repairActive.exchange(false))
+    return;
+  if (m_onRepairCompleted)
+    m_onRepairCompleted(ok);
+}
+
 void UpdateManager::runDownloadWorker(UpdateInfo info) {
   Logger::info("Starting full-zip OTA update: v" + info.remoteVersion);
 
@@ -691,6 +748,7 @@ void UpdateManager::runDownloadWorker(UpdateInfo info) {
       std::lock_guard<std::mutex> lock(m_mutex);
       m_progress.state = UpdateState::IDLE;
       m_isRunning = false;
+      notifyRepairDone(false);
       return;
     }
     std::lock_guard<std::mutex> lock(m_mutex);
@@ -698,6 +756,7 @@ void UpdateManager::runDownloadWorker(UpdateInfo info) {
     m_progress.errorMessage = "Tải bản cập nhật thất bại. Kiểm tra kết nối mạng!";
     Logger::error(m_progress.errorMessage);
     m_isRunning = false;
+    notifyRepairDone(false);
     return;
   }
 
@@ -708,6 +767,7 @@ void UpdateManager::runDownloadWorker(UpdateInfo info) {
     m_progress.state = UpdateState::FAILED;
     m_progress.errorMessage = "Tập tin tải về quá nhỏ hoặc không hợp lệ.";
     m_isRunning = false;
+    notifyRepairDone(false);
     return;
   }
 
@@ -728,6 +788,7 @@ void UpdateManager::runDownloadWorker(UpdateInfo info) {
     m_progress.state = UpdateState::FAILED;
     Logger::error(m_progress.errorMessage);
     m_isRunning = false;
+    notifyRepairDone(false);
     return;
   }
   unlink(zipPath.c_str());
@@ -743,6 +804,7 @@ void UpdateManager::runDownloadWorker(UpdateInfo info) {
   }
 
   m_isRunning = false;
+  notifyRepairDone(true);
 }
 
 // Bung full-zip đè lên appRoot, GIỮ dữ liệu user (data/config/iptv).

@@ -151,8 +151,26 @@ bool UIManager::init(SDL_Window *window, SDL_Renderer *renderer) {
           showToast(std::string(UiStrings::TOAST_NEW_OTA_PREFIX) +
                         info.remoteVersion + "!",
                     {34, 197, 94, 255}, 6000);
+        } else if (UpdateManager::instance().repairIfBroken()) {
+          // Máy lên đời bằng OTA binary-only đời cũ, thiếu file runtime
+          // (YouTube/script/icon) → tự vá full-zip ngay, không cần bấm gì.
+          showToast("Phát hiện thiếu file, tự tải bổ sung...",
+                    {245, 158, 11, 255}, 6000);
         }
       });
+
+  // Tự vá xong → báo + tự khởi động lại để nhận binary mới.
+  UpdateManager::instance().setOnRepairCompleted([this](bool ok) {
+    if (ok) {
+      showToast("Đã tự sửa xong! Khởi động lại...", {34, 197, 94, 255},
+                5000);
+      std::this_thread::sleep_for(std::chrono::seconds(3));
+      Application::instance().requestRestart();
+    } else {
+      showToast("Tự sửa thất bại. Vào Cập nhật thử lại.", {239, 68, 68, 255},
+                5000);
+    }
+  });
 
   // LocalSend: wire callback từ background thread (HTTP) sang UI state.
   // Modal overlay toàn màn hình — switch sang LOCALSEND_INCOMING bất kể

@@ -10,10 +10,14 @@ Mọi agent làm release BẮT BUỘC tuân thủ các quy tắc dưới đây.
 
 - Mỗi version chỉ upload **1 asset**: `RomCloud-vX.Y.Z.zip` (full package do
   `package.sh` sinh ra, chứa `Apps/RomCloud/...` đầy đủ).
-- **CẤM** upload thêm: binary rời (`RomCloud`), `icon.png` rời,
-  `RomCloud-Lite-Installer.zip`, `mpv_bundle.zip`, `bundle-*.zip`,
-  `RomCloud-Install-To-Apps.zip`, hay bất kỳ file linh tinh nào khác —
-  trừ khi user yêu cầu rõ ràng.
+- **CẤM** upload thêm: `RomCloud-Lite-Installer.zip`, `mpv_bundle.zip`,
+  `bundle-*.zip`, `RomCloud-Install-To-Apps.zip`, hay bất kỳ file linh tinh
+  nào khác — trừ khi user yêu cầu rõ ràng.
+- **Ngoại lệ duy nhất (đã duyệt cho v2.3.2):** asset binary cầu `RomCloud`
+  kèm `binary_url` trong `version.json`, để máy đời cũ (code OTA chỉ biết
+  tải binary) bước qua được rồi tự vá full-zip khi boot
+  (`UpdateManager::repairIfBroken`). Từ version sau cầu này thì quay lại
+  1 zip, không duy trì.
 - `dist/` local cũng chỉ giữ zip của version hiện tại, xóa các zip version
   cũ để tránh upload nhầm.
 

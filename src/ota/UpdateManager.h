@@ -7,7 +7,7 @@
 
 namespace RomCloud {
 
-constexpr const char* APP_VERSION = "2.3.1";
+constexpr const char* APP_VERSION = "2.3.2";
 #ifndef GIT_COMMIT_HASH
 #define GIT_COMMIT_HASH "unknown"
 #endif
@@ -75,6 +75,14 @@ public:
     bool startUpdate(const UpdateInfo& info);
     void cancelUpdate();
 
+    // Tự vá khi boot: nếu thiếu file runtime quan trọng (máy lên đời bằng
+    // OTA binary-only đời cũ) thì tự tải full-zip bản hiện tại và cài.
+    // Trả về true nếu đã bắt đầu quá trình vá.
+    bool repairIfBroken();
+    void setOnRepairCompleted(std::function<void(bool)> cb) {
+      m_onRepairCompleted = std::move(cb);
+    }
+
     // Dependency management
     bool checkAndInstallDependencies();
     std::vector<DependencyInfo> getMissingDependencies();
@@ -97,9 +105,12 @@ private:
     UpdateInfo m_latestInfo;
     UpdateProgress m_progress;
     std::thread m_workerThread;
+    std::atomic<bool> m_repairActive{false};
+    std::function<void(bool)> m_onRepairCompleted;
 
     void runDownloadWorker(UpdateInfo info);
     bool installFullZip(const std::string& zipPath);
+    void notifyRepairDone(bool ok);
     bool downloadAndInstallDependencies(const UpdateInfo& info);
     bool downloadFile(const std::string& url, const std::string& destPath, uint64_t* outSize = nullptr, bool trackProgress = false);
     bool installMpvsBundle(const std::string& zipPath);
