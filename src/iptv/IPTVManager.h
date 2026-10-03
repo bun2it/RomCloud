@@ -232,6 +232,9 @@ public:
                             const std::string& groupName = "",
                             int durationMs = 4000);
     void hideIPTVChannelOSD();
+    // Footer bar cho playback (persistent button hints)
+    void showIPTVPlaybackFooter(bool isPaused);
+    void hideIPTVPlaybackFooter();
     bool isIPTVPlaying() const;
 
     // Status
