@@ -32,6 +32,7 @@ mkdir -p "$STAGING_DIR/Apps/RomCloud/bin"
 mkdir -p "$STAGING_DIR/Apps/RomCloud/lib"
 mkdir -p "$STAGING_DIR/Apps/RomCloud/scripts"
 mkdir -p "$STAGING_DIR/Apps/RomCloud/assets/fonts"
+mkdir -p "$STAGING_DIR/Apps/RomCloud/assets/sounds"
 mkdir -p "$STAGING_DIR/Apps/RomCloud/assets/icons"
 mkdir -p "$STAGING_DIR/Apps/RomCloud/assets/apps_icons"
 mkdir -p "$STAGING_DIR/Apps/RomCloud/assets/player_icons"
@@ -70,6 +71,12 @@ if [ -d scripts ]; then
 fi
 
 cp assets/fonts/NotoSans-Regular.ttf "$STAGING_DIR/Apps/RomCloud/assets/fonts/"
+# Font so dong ho (Rajdhani) + font flip-clock Fliqlo (gluqlo) — thieu la
+# mat so fullscreen (rule single-zip v2.3.0: moi runtime doi phai co trong zip)
+cp assets/fonts/Rajdhani-Bold.ttf "$STAGING_DIR/Apps/RomCloud/assets/fonts/"
+cp assets/fonts/gluqlo.ttf "$STAGING_DIR/Apps/RomCloud/assets/fonts/"
+# Chuong bao thuc (ClockStore beepStart qua aplay)
+cp assets/sounds/alarm.wav "$STAGING_DIR/Apps/RomCloud/assets/sounds/"
 cp assets/vn_wards.json "$STAGING_DIR/Apps/RomCloud/assets/" 2>/dev/null || true
 cp assets/traffic_cams.json "$STAGING_DIR/Apps/RomCloud/assets/" 2>/dev/null || true
 mkdir -p "$STAGING_DIR/Apps/RomCloud/assets/weather_icons"
