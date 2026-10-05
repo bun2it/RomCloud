@@ -197,23 +197,34 @@ bool UpdateManager::checkForUpdatesSync(UpdateInfo &outInfo) {
     relDate = JsonHelper::extractString(mResp.body, "release_date");
   }
 
-  // 2. Fallback to GitHub Releases API if manifest was empty
-  if (remoteVer.empty()) {
-    Logger::info("Checking GitHub Releases API as fallback...");
+  // 2. GitHub Releases API: fallback version khi manifest rỗng, và LUÔN
+  // auto-feed release notes từ release body (ưu tiên hơn changelog tĩnh
+  // trong version.json — sửa release trên git là máy tự thấy chữ mới).
+  {
+    bool needVersion = remoteVer.empty();
+    if (needVersion) {
+      Logger::info("Checking GitHub Releases API as fallback...");
+    }
     std::string apiEndpoint = "https://api.github.com/repos/" +
                               std::string(GITHUB_REPO) + "/releases/latest";
     HttpResponse resp = HttpClient::instance().get(apiEndpoint, headers);
     if (resp.success && !resp.body.empty() && resp.statusCode == 200) {
-      std::string tag = JsonHelper::extractString(resp.body, "tag_name");
-      if (!tag.empty()) {
-        remoteVer = tag;
-        if (remoteVer.front() == 'v' || remoteVer.front() == 'V') {
-          remoteVer.erase(0, 1);
-        }
-        changelog = JsonHelper::extractString(resp.body, "body");
-        relDate = JsonHelper::extractString(resp.body, "published_at");
-        if (relDate.length() >= 10)
-          relDate = relDate.substr(0, 10);
+      std::string apiBody = JsonHelper::extractString(resp.body, "body");
+      if (!apiBody.empty()) {
+        changelog = apiBody;
+      }
+      if (needVersion) {
+        std::string tag = JsonHelper::extractString(resp.body, "tag_name");
+        if (!tag.empty()) {
+          remoteVer = tag;
+          if (remoteVer.front() == 'v' || remoteVer.front() == 'V') {
+            remoteVer.erase(0, 1);
+          }
+          if (relDate.empty()) {
+            relDate = JsonHelper::extractString(resp.body, "published_at");
+            if (relDate.length() >= 10)
+              relDate = relDate.substr(0, 10);
+          }
 
         // Get download URLs from release assets
         auto assets = JsonHelper::extractArrayObjects(resp.body, "assets");
@@ -241,6 +252,7 @@ bool UpdateManager::checkForUpdatesSync(UpdateInfo &outInfo) {
         if (binUrl.empty()) {
           binUrl = "https://github.com/" + std::string(GITHUB_REPO) +
                    "/releases/download/v" + remoteVer + "/RomCloud";
+        }
         }
       }
     }

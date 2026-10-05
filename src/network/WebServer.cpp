@@ -1,6 +1,7 @@
 #include "WebServer.h"
 #include "../app/Application.h"
 #include "../auth/AuthManager.h"
+#include "../calendar/CalManager.h"
 #include "../config/AppConfig.h"
 #include "../database/DatabaseManager.h"
 #include "../database/RomIndexer.h"
@@ -1018,6 +1019,7 @@ std::string WebServer::buildHtmlResponse() {
       <button class="tab-btn" onclick="switchTab('tab-storage')">☁️ Đồng bộ &amp; Thẻ nhớ</button>
       <button class="tab-btn" onclick="switchTab('tab-iptv')">📺 IPTV</button>
       <button class="tab-btn" onclick="switchTab('tab-ota')" id="nav-tab-ota">🚀 Cập nhật OTA <span class="badge" id="ota-nav-badge" style="display: none; background: #ef4444; color: #fff; margin-left: 4px; padding: 2px 6px; border-radius: 8px; font-size: 10px;">NEW</span></button>
+      <button class="tab-btn" onclick="switchTab('tab-cal')">📅 Lịch phone</button>
     </div>
 
     <!-- TAB 1: ROM MANAGER -->
@@ -1795,6 +1797,44 @@ std::string WebServer::buildHtmlResponse() {
     </div>
   </div>
 
+    <div id="tab-cal" class="tab-content">
+      <div class="card" style="max-width: 720px; margin: 0 auto;">
+        <h3>📅 Lịch phone → Brick</h3>
+        <p style="font-size: 12.5px; color: var(--text-muted); line-height: 1.6; margin-bottom: 14px;">
+          Dán <b>link ICS bí mật</b> (Google Calendar: Cài đặt → Tích hợp → Địa chỉ bí mật iCal;
+          iCloud: app Lịch → chia sẻ → link công khai) — Brick tự tải và refresh mỗi ngày.
+          Hoặc dán nội dung <b>.ics</b> / thêm việc lẻ bên dưới.
+        </p>
+        <div style="display: flex; gap: 8px; margin-bottom: 10px;">
+          <input type="text" id="cal-url-name" placeholder="Tên (vd Lịch Google)" style="flex: 0 0 180px; padding: 8px 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: #fff; font-size: 12px;">
+          <input type="text" id="cal-url" placeholder="https://.../basic.ics" style="flex: 1; padding: 8px 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: #fff; font-size: 12px;">
+          <button class="btn btn-primary" onclick="calAddUrl()">Thêm link</button>
+        </div>
+        <div style="margin-bottom: 10px;">
+          <label style="font-size: 11.5px; color: var(--text-dim); display: block; margin-bottom: 4px;">Dán nội dung file .ics:</label>
+          <textarea id="cal-ics" rows="3" placeholder="BEGIN:VCALENDAR..." style="width: 100%; padding: 8px 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: #fff; font-size: 11px; font-family: monospace;"></textarea>
+          <div style="display: flex; gap: 8px; margin-top: 6px;">
+            <input type="text" id="cal-ics-name" placeholder="Tên nguồn" style="flex: 0 0 180px; padding: 8px 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: #fff; font-size: 12px;">
+            <button class="btn btn-secondary" onclick="calImport()">Nhập ICS</button>
+            <button class="btn btn-secondary" onclick="calRefresh()">🔄 Refresh link</button>
+          </div>
+        </div>
+        <div style="display: flex; gap: 8px; margin-bottom: 14px; align-items: end;">
+          <div><label style="font-size: 11px; color: var(--text-dim); display: block; margin-bottom: 3px;">Ngày</label>
+          <input type="date" id="cal-m-date" style="padding: 7px 8px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: #fff; font-size: 12px;"></div>
+          <div><label style="font-size: 11px; color: var(--text-dim); display: block; margin-bottom: 3px;">Giờ (trống = cả ngày)</label>
+          <input type="time" id="cal-m-time" style="padding: 7px 8px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: #fff; font-size: 12px;"></div>
+          <div style="flex: 1;"><label style="font-size: 11px; color: var(--text-dim); display: block; margin-bottom: 3px;">Việc</label>
+          <input type="text" id="cal-m-title" placeholder="Tiêu đề" style="width: 100%; padding: 8px 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: #fff; font-size: 12px;"></div>
+          <button class="btn btn-primary" onclick="calAddManual()">＋ Thêm</button>
+        </div>
+        <h4 style="font-size: 13px; margin: 10px 0 6px;">Nguồn lịch</h4>
+        <div id="cal-sources" style="font-size: 12px; display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px;"></div>
+        <h4 style="font-size: 13px; margin: 10px 0 6px;">Sự kiện sắp tới</h4>
+        <div id="cal-events" style="font-size: 12px; display: flex; flex-direction: column; gap: 6px; max-height: 260px; overflow-y: auto;"></div>
+      </div>
+    </div>
+
   <!-- FLOATING ACTIVE UPLOAD CARD -->
   <div id="active-upload-floating">
     <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6px;">
@@ -1925,6 +1965,10 @@ std::string WebServer::buildHtmlResponse() {
       }
       if (tabId === 'tab-iptv' && typeof loadIptvSources === 'function') {
         loadIptvSources();
+      }
+      if (tabId === 'tab-cal' && typeof loadCalSources === 'function') {
+        loadCalSources();
+        loadCalEvents();
       }
     }
 
@@ -3322,6 +3366,100 @@ std::string WebServer::buildHtmlResponse() {
           }
         }, 1000);
       } catch (e) {}
+    }
+
+    async function postForm(path, params) {
+      const body = new URLSearchParams(params).toString();
+      const res = await fetch(path, { method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body });
+      return await res.json();
+    }
+    function escHtml(s) {
+      return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+    function fmtTs(ts) {
+      const d = new Date(ts * 1000);
+      const p = (n) => String(n).padStart(2, '0');
+      return `${p(d.getDate())}/${p(d.getMonth() + 1)} ${p(d.getHours())}:${p(d.getMinutes())}`;
+    }
+    async function loadCalSources() {
+      try {
+        const res = await fetch('/api/cal/sources');
+        const data = await res.json();
+        const box = document.getElementById('cal-sources');
+        if (!data.sources || !data.sources.length) {
+          box.innerHTML = '<span style="color: var(--text-dim);">Chưa có nguồn nào.</span>';
+        } else {
+          box.innerHTML = data.sources.map(s =>
+            `<div style="display: flex; gap: 8px; align-items: center; background: var(--card-alt); border-radius: 6px; padding: 6px 10px;">
+               <span style="flex: 1;">📅 <b>${escHtml(s.name)}</b></span>
+               <button class="btn btn-secondary" style="padding: 3px 10px; font-size: 11px;" onclick="calDelSource(${s.id})">Xóa</button>
+             </div>`).join('');
+        }
+      } catch (e) {}
+    }
+    async function loadCalEvents() {
+      try {
+        const now = Math.floor(Date.now() / 1000);
+        const res = await fetch(`/api/cal/events?from=${now - 86400}&to=${now + 60 * 86400}`);
+        const data = await res.json();
+        const box = document.getElementById('cal-events');
+        if (!data.events || !data.events.length) {
+          box.innerHTML = '<span style="color: var(--text-dim);">Chưa có sự kiện nào.</span>';
+        } else {
+          box.innerHTML = data.events.slice(0, 60).map(e =>
+            `<div style="display: flex; gap: 8px; align-items: center; background: var(--card-alt); border-radius: 6px; padding: 6px 10px;">
+               <span style="color: var(--accent); font-size: 11px; white-space: nowrap;">${fmtTs(e.start)}</span>
+               <span style="flex: 1;">${escHtml(e.title)} <span style="color: var(--text-dim); font-size: 10px;">(${escHtml(e.source)})</span></span>
+               <button class="btn btn-secondary" style="padding: 3px 10px; font-size: 11px;" onclick="calToggleRemind(${e.id}, ${e.remind ? 0 : 1})">${e.remind ? '🔕 Tắt báo' : '🔔 Báo'}</button>
+               <button class="btn btn-secondary" style="padding: 3px 10px; font-size: 11px;" onclick="calDelEvent(${e.id})">Xóa</button>
+             </div>`).join('');
+        }
+      } catch (e) {}
+    }
+    async function calAddUrl() {
+      const name = document.getElementById('cal-url-name').value.trim();
+      const url = document.getElementById('cal-url').value.trim();
+      if (!url) { showToast('Chưa nhập link ICS'); return; }
+      const d = await postForm('/api/cal/add_url', { name, url });
+      showToast(d.success ? 'Đã thêm + tải lịch!' : ('Lỗi: ' + (d.error || 'không rõ')));
+      loadCalSources(); loadCalEvents();
+    }
+    async function calImport() {
+      const name = document.getElementById('cal-ics-name').value.trim();
+      const ics = document.getElementById('cal-ics').value;
+      if (!ics.trim()) { showToast('Chưa dán nội dung ICS'); return; }
+      const d = await postForm('/api/cal/import', { name, ics });
+      showToast(d.success ? `Đã nhập ${d.count} sự kiện!` : ('Lỗi: ' + (d.error || 'không rõ')));
+      loadCalSources(); loadCalEvents();
+    }
+    async function calAddManual() {
+      const date = document.getElementById('cal-m-date').value;
+      const time = document.getElementById('cal-m-time').value;
+      const title = document.getElementById('cal-m-title').value.trim();
+      if (!date || !title) { showToast('Thiếu ngày/tiêu đề'); return; }
+      const d = await postForm('/api/cal/add_manual', { date, time, title });
+      showToast(d.success ? 'Đã thêm!' : 'Lỗi thêm việc');
+      loadCalEvents();
+    }
+    async function calDelSource(id) {
+      if (!confirm('Xóa nguồn lịch này (kèm toàn bộ sự kiện của nó)?')) return;
+      await postForm('/api/cal/del_source', { id: String(id) });
+      loadCalSources(); loadCalEvents();
+    }
+    async function calDelEvent(id) {
+      await postForm('/api/cal/del_event', { id: String(id) });
+      loadCalEvents();
+    }
+    async function calToggleRemind(id, on) {
+      await postForm('/api/cal/remind', { id: String(id), remind: String(on) });
+      loadCalEvents();
+    }
+    async function calRefresh() {
+      const d = await postForm('/api/cal/refresh', {});
+      showToast(`Đã refresh ${d.refreshed || 0} nguồn!`);
+      loadCalEvents();
     }
   </script>
 </body>
@@ -5012,8 +5150,7 @@ void WebServer::handleClient(int clientFd) {
     }
   } else if ((method == "GET" && (path == "/api/iptv/delete" ||
                                   fullPath.find("/api/iptv/delete") == 0)) ||
-             (method == "POST" && path == "/api/iptv/delete")) {
-    // Delete IPTV source file
+             (method == "POST" && path == "/api/iptv/delete")) {    // Delete IPTV source file
     std::string file;
     if (method == "GET") {
       file = extractQueryParam(queryString, "file");
@@ -5056,6 +5193,146 @@ void WebServer::handleClient(int clientFd) {
                         "\r\nConnection: close\r\n\r\n" + json;
       send(clientFd, res.c_str(), res.length(), 0);
     }
+  // ---------------- Lịch phone (CalManager) ----------------
+  } else if (method == "GET" && path == "/api/cal/sources") {
+    CalManager::instance().ensureTables();
+    std::string json = "{\"sources\":[";
+    bool first = true;
+    for (const auto& s : CalManager::instance().sources()) {
+      if (!first) json += ",";
+      first = false;
+      json += "{\"id\":" + std::to_string(s.id) + ",\"name\":\"" +
+              escapeJson(s.name) + "\",\"url\":\"" + escapeJson(s.url) + "\"}";
+    }
+    json += "]}";
+    std::string res = "HTTP/1.1 200 OK\r\nContent-Type: application/json; "
+                      "charset=UTF-8\r\nAccess-Control-Allow-Origin: "
+                      "*\r\nContent-Length: " +
+                      std::to_string(json.length()) +
+                      "\r\nConnection: close\r\n\r\n" + json;
+    send(clientFd, res.c_str(), res.length(), 0);
+  } else if (method == "GET" && fullPath.find("/api/cal/events") == 0) {
+    CalManager::instance().ensureTables();
+    int64_t from = 0, to = 0;
+    try {
+      from = std::stoll(extractQueryParam(queryString, "from"));
+      to = std::stoll(extractQueryParam(queryString, "to"));
+    } catch (...) {}
+    if (to <= 0) to = from + 60LL * 86400;
+    std::string json = "{\"events\":[";
+    bool first = true;
+    for (const auto& e : CalManager::instance().eventsForRange(from, to)) {
+      if (!first) json += ",";
+      first = false;
+      json += "{\"id\":" + std::to_string(e.id) + ",\"title\":\"" +
+              escapeJson(e.title) + "\",\"start\":" + std::to_string(e.startTs) +
+              ",\"end\":" + std::to_string(e.endTs) + ",\"source\":\"" +
+              escapeJson(e.source) + "\",\"remind\":" + (e.remind ? "1" : "0") + "}";
+    }
+    json += "]}";
+    std::string res = "HTTP/1.1 200 OK\r\nContent-Type: application/json; "
+                      "charset=UTF-8\r\nAccess-Control-Allow-Origin: "
+                      "*\r\nContent-Length: " +
+                      std::to_string(json.length()) +
+                      "\r\nConnection: close\r\n\r\n" + json;
+    send(clientFd, res.c_str(), res.length(), 0);
+  } else if (method == "POST" && path == "/api/cal/add_url") {
+    CalManager::instance().ensureTables();
+    std::string name = extractPostParam(postBody, "name");
+    std::string url = extractPostParam(postBody, "url");
+    if (url.rfind("webcal://", 0) == 0) url = "https://" + url.substr(9);
+    std::string json;
+    if (url.empty()) {
+      json = "{\"success\":false,\"error\":\"Chưa nhập link ICS\"}";
+    } else {
+      if (name.empty()) name = "Lịch phone";
+      int64_t id = CalManager::instance().addUrlSource(name, url);
+      CalManager::instance().refreshStale();
+      json = "{\"success\":true,\"id\":" + std::to_string(id) + "}";
+    }
+    std::string res = "HTTP/1.1 200 OK\r\nContent-Type: application/json; "
+                      "charset=UTF-8\r\nAccess-Control-Allow-Origin: "
+                      "*\r\nContent-Length: " +
+                      std::to_string(json.length()) +
+                      "\r\nConnection: close\r\n\r\n" + json;
+    send(clientFd, res.c_str(), res.length(), 0);
+  } else if (method == "POST" && path == "/api/cal/import") {
+    CalManager::instance().ensureTables();
+    std::string name = extractPostParam(postBody, "name");
+    std::string ics = extractPostParam(postBody, "ics");
+    std::string json;
+    if (ics.empty()) {
+      json = "{\"success\":false,\"error\":\"Chưa dán nội dung ICS\"}";
+    } else {
+      if (name.empty()) name = "Lịch nhập tay";
+      int n = CalManager::instance().importIcsText(ics, name);
+      json = "{\"success\":" + std::string(n >= 0 ? "true" : "false") +
+             ",\"count\":" + std::to_string(n >= 0 ? n : 0) + "}";
+    }
+    std::string res = "HTTP/1.1 200 OK\r\nContent-Type: application/json; "
+                      "charset=UTF-8\r\nAccess-Control-Allow-Origin: "
+                      "*\r\nContent-Length: " +
+                      std::to_string(json.length()) +
+                      "\r\nConnection: close\r\n\r\n" + json;
+    send(clientFd, res.c_str(), res.length(), 0);
+  } else if (method == "POST" && path == "/api/cal/add_manual") {
+    CalManager::instance().ensureTables();
+    std::string date = extractPostParam(postBody, "date");
+    std::string time = extractPostParam(postBody, "time");
+    std::string title = extractPostParam(postBody, "title");
+    int64_t id = CalManager::instance().addManual(date, time, title);
+    std::string json = "{\"success\":" + std::string(id >= 0 ? "true" : "false") + "}";
+    std::string res = "HTTP/1.1 200 OK\r\nContent-Type: application/json; "
+                      "charset=UTF-8\r\nAccess-Control-Allow-Origin: "
+                      "*\r\nContent-Length: " +
+                      std::to_string(json.length()) +
+                      "\r\nConnection: close\r\n\r\n" + json;
+    send(clientFd, res.c_str(), res.length(), 0);
+  } else if (method == "POST" && path == "/api/cal/del_source") {
+    int64_t id = -1;
+    try { id = std::stoll(extractPostParam(postBody, "id")); } catch (...) {}
+    bool ok = CalManager::instance().deleteSource(id);
+    std::string json = "{\"success\":" + std::string(ok ? "true" : "false") + "}";
+    std::string res = "HTTP/1.1 200 OK\r\nContent-Type: application/json; "
+                      "charset=UTF-8\r\nAccess-Control-Allow-Origin: "
+                      "*\r\nContent-Length: " +
+                      std::to_string(json.length()) +
+                      "\r\nConnection: close\r\n\r\n" + json;
+    send(clientFd, res.c_str(), res.length(), 0);
+  } else if (method == "POST" && path == "/api/cal/del_event") {
+    int64_t id = -1;
+    try { id = std::stoll(extractPostParam(postBody, "id")); } catch (...) {}
+    bool ok = CalManager::instance().deleteEvent(id);
+    std::string json = "{\"success\":" + std::string(ok ? "true" : "false") + "}";
+    std::string res = "HTTP/1.1 200 OK\r\nContent-Type: application/json; "
+                      "charset=UTF-8\r\nAccess-Control-Allow-Origin: "
+                      "*\r\nContent-Length: " +
+                      std::to_string(json.length()) +
+                      "\r\nConnection: close\r\n\r\n" + json;
+    send(clientFd, res.c_str(), res.length(), 0);
+  } else if (method == "POST" && path == "/api/cal/remind") {
+    int64_t id = -1;
+    bool on = false;
+    try { id = std::stoll(extractPostParam(postBody, "id")); } catch (...) {}
+    on = extractPostParam(postBody, "remind") == "1";
+    bool ok = CalManager::instance().setRemind(id, on);
+    std::string json = "{\"success\":" + std::string(ok ? "true" : "false") + "}";
+    std::string res = "HTTP/1.1 200 OK\r\nContent-Type: application/json; "
+                      "charset=UTF-8\r\nAccess-Control-Allow-Origin: "
+                      "*\r\nContent-Length: " +
+                      std::to_string(json.length()) +
+                      "\r\nConnection: close\r\n\r\n" + json;
+    send(clientFd, res.c_str(), res.length(), 0);
+  } else if (method == "POST" && path == "/api/cal/refresh") {
+    CalManager::instance().ensureTables();
+    int n = CalManager::instance().refreshAll();
+    std::string json = "{\"success\":true,\"refreshed\":" + std::to_string(n) + "}";
+    std::string res = "HTTP/1.1 200 OK\r\nContent-Type: application/json; "
+                      "charset=UTF-8\r\nAccess-Control-Allow-Origin: "
+                      "*\r\nContent-Length: " +
+                      std::to_string(json.length()) +
+                      "\r\nConnection: close\r\n\r\n" + json;
+    send(clientFd, res.c_str(), res.length(), 0);
   } else {
     std::string notFound = "HTTP/1.1 404 Not Found\r\nContent-Length: "
                            "0\r\nConnection: close\r\n\r\n";

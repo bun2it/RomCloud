@@ -1140,4 +1140,22 @@ bool DatabaseManager::rollbackTransaction() {
     return executeSimpleQuery("ROLLBACK;");
 }
 
+bool DatabaseManager::exec(const std::string& sql) {
+    return executeSimpleQuery(sql.c_str());
+}
+
+bool DatabaseManager::query(const std::string& sql,
+                            const std::function<void(sqlite3_stmt* st)>& row) {
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
+    if (!m_db) return false;
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2(m_db, sql.c_str(), -1, &stmt, nullptr) != SQLITE_OK)
+        return false;
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        if (row) row(stmt);
+    }
+    sqlite3_finalize(stmt);
+    return true;
+}
+
 } // namespace RomCloud

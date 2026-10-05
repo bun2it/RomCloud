@@ -19,6 +19,10 @@ inline constexpr SDL_Color CARD_BG     = {15, 23, 42, 200};   // panel alpha ~20
 inline constexpr SDL_Color CARD_SOLID  = {15, 23, 42, 255};   // khi cần nền đặc
 inline constexpr SDL_Color CARD_BORDER = {51, 65, 85, 255};
 inline constexpr SDL_Color FOCUS_BG    = {37, 99, 235, 255};  // #2563EB
+// Selection highlight: FOCUS_BG trong suốt 25% (alpha 191) + blend.
+// Mọi ô chọn (list/menu rows, cells) dùng drawHighlight(), hình chữ nhật
+// highlight căn giữa dọc theo row/khối chứa nó.
+inline constexpr SDL_Color FOCUS_BG_SOFT = {30, 58, 138, 191};
 inline constexpr SDL_Color FOCUS_ALT   = {249, 115, 34, 255}; // #F97322
 inline constexpr SDL_Color FOCUS_GLOW  = {96, 165, 250, 255};
 inline constexpr SDL_Color TEXT_MAIN   = {255, 255, 255, 255};

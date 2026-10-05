@@ -1,5 +1,7 @@
 #include "Application.h"
 #include "../auth/AuthManager.h"
+#include "../calendar/CalManager.h"
+#include "../clock/ClockStore.h"
 #include "../config/AppConfig.h"
 #include "../database/DatabaseManager.h"
 #include "../database/RomIndexer.h"
@@ -66,7 +68,7 @@ void Application::requestExit() { m_running = false; }
 
 bool Application::initSDL() {
   if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER | SDL_INIT_JOYSTICK |
-               SDL_INIT_EVENTS) < 0) {
+               SDL_INIT_EVENTS | SDL_INIT_AUDIO) < 0) {
     Logger::error(std::string("SDL_Init failed: ") + SDL_GetError());
     return false;
   }
@@ -267,6 +269,7 @@ bool Application::init(int argc, char *argv[]) {
     Logger::error("Failed to initialize SQLite database");
     return false;
   }
+  CalManager::instance().ensureTables();
 
   // Portal: load configured port from database or default to 8888
   int savedPort = 8888;
@@ -288,6 +291,10 @@ bool Application::init(int argc, char *argv[]) {
   if (!initSDL()) {
     return false;
   }
+
+  // Brick: driver ALSA mặc định DAC volume = 0 -> câm toàn bộ (báo thức,
+  // mpv/IPTV/YouTube). Mở lại khi boot; mỗi lần beep cũng tự mở lại.
+  ensureAlarmVolume();
 
   if (!InputManager::instance().init()) {
     Logger::error("InputManager initialization failed");

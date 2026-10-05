@@ -152,7 +152,7 @@ bool IPTVManager::loadPlaylists(const std::string& directory) {
         if (it != m_sourcesMeta.end() && !it->second.name.empty()) {
             sourceName = it->second.name;
         } else {
-            if (filename == "default.m3u")      sourceName = "Mac dinh";
+            if (filename == "default.m3u")      sourceName = "Mặc định";
             else if (filename == "vietnam.m3u") sourceName = "Việt Nam";
             else {
                 sourceName = filename;
@@ -1158,6 +1158,107 @@ static void iptvDbg(const std::string& msg) {
     RC_LOG_INFO(IPTV, msg);
 }
 
+// ---------------------------------------------------------------------------
+// YouTube OSD 3 vùng (giống app YouTube) — CHỈ UI, không đụng phát/search.
+// Top bar (overlay id 1): tên video + chất lượng.
+// Bottom bar (overlay id 2): thanh tiến trình + giờ + gợi ý nút.
+// Giữa màn hình tái dùng showOverlayIcon/show-text có sẵn.
+// Icon tương lai (aspect/cc/speed/quality) chỉ cần thêm file png,
+// không sửa logic.
+// ---------------------------------------------------------------------------
+static TTF_Font* ytOsdFont(const std::string& appRoot, int px, TTF_Font* &slot) {
+    if (slot) return slot;
+    if (TTF_Init() == -1) return nullptr;
+    slot = TTF_OpenFont(MpvPlayer::resolveOsdFont(appRoot).c_str(), px);
+    return slot;
+}
+
+static std::string ytTruncUtf8(TTF_Font* font, const std::string& s, int maxPx) {
+    if (!font || s.empty()) return s;
+    std::string out;
+    size_t i = 0;
+    while (i < s.size()) {
+        unsigned char c = (unsigned char)s[i];
+        size_t len = 1;
+        if ((c & 0x80) == 0) len = 1;
+        else if ((c & 0xE0) == 0xC0) len = 2;
+        else if ((c & 0xF0) == 0xE0) len = 3;
+        else if ((c & 0xF8) == 0xF0) len = 4;
+        else { i++; continue; }
+        std::string trial = out + s.substr(i, len);
+        int w = 0, h = 0;
+        if (TTF_SizeUTF8(font, trial.c_str(), &w, &h) != 0) break;
+        if (w > maxPx) break;
+        out = trial;
+        i += len;
+    }
+    return out;
+}
+
+static void ytFillRect(std::vector<uint8_t>& cv, int CW, int CH,
+                       int x, int y, int w, int h,
+                       uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
+    if (x < 0) { w += x; x = 0; }
+    if (y < 0) { h += y; y = 0; }
+    if (x + w > CW) w = CW - x;
+    if (y + h > CH) h = CH - y;
+    if (w <= 0 || h <= 0) return;
+    int stride = CW * 4;
+    for (int yy = y; yy < y + h; yy++)
+        for (int xx = x; xx < x + w; xx++) {
+            size_t i = size_t(yy) * stride + xx * 4;
+            cv[i+0] = b; cv[i+1] = g; cv[i+2] = r; cv[i+3] = a;
+        }
+}
+
+static void ytFillCircle(std::vector<uint8_t>& cv, int CW, int CH,
+                         int cx, int cy, int rad,
+                         uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
+    for (int yy = cy - rad; yy <= cy + rad; yy++)
+        for (int xx = cx - rad; xx <= cx + rad; xx++) {
+            int dx = xx - cx, dy = yy - cy;
+            if (dx * dx + dy * dy > rad * rad) continue;
+            if (xx < 0 || yy < 0 || xx >= CW || yy >= CH) continue;
+            size_t i = size_t(yy) * (CW * 4) + xx * 4;
+            cv[i+0] = b; cv[i+1] = g; cv[i+2] = r; cv[i+3] = a;
+        }
+}
+
+static void ytBlitText(std::vector<uint8_t>& cv, int CW, int CH, TTF_Font* font,
+                       const std::string& text, SDL_Color color, int x, int y) {
+    if (text.empty() || !font) return;
+    SDL_Surface* s = TTF_RenderUTF8_Blended(font, text.c_str(), color);
+    if (!s) return;
+    int stride = CW * 4;
+    SDL_LockSurface(s);
+    for (int yy = 0; yy < s->h; yy++) {
+        if (y + yy < 0 || y + yy >= CH) continue;
+        for (int xx = 0; xx < s->w; xx++) {
+            if (x + xx < 0 || x + xx >= CW) continue;
+            uint32_t px = ((uint32_t*)s->pixels)[yy * (s->pitch / 4) + xx];
+            uint8_t a = (px >> 24) & 0xFF;
+            if (a < 16) continue;
+            size_t i = size_t(y + yy) * stride + (x + xx) * 4;
+            uint8_t sr = (px >> 16) & 0xFF, sg = (px >> 8) & 0xFF, sb = px & 0xFF;
+            uint16_t aa = a, inv = 255 - aa;
+            cv[i+0] = (uint8_t)((sb * aa + cv[i+0] * inv) / 255);
+            cv[i+1] = (uint8_t)((sg * aa + cv[i+1] * inv) / 255);
+            cv[i+2] = (uint8_t)((sr * aa + cv[i+2] * inv) / 255);
+            if (cv[i+3] < a) cv[i+3] = a;
+        }
+    }
+    SDL_UnlockSurface(s);
+    SDL_FreeSurface(s);
+}
+
+static std::string ytFmtTime(double sec) {
+    if (sec < 0) sec = 0;
+    long s = (long)sec;
+    char buf[16];
+    snprintf(buf, sizeof(buf), "%ld:%02ld", s / 60, s % 60);
+    return buf;
+}
+
 // spawnMpvForUrl: P1-3 uy thac MpvPlayer (giu API cu cho switch kênh).
 pid_t IPTVManager::spawnMpvForUrl(const std::string& url) {
     if (url.empty()) return -1;
@@ -1893,7 +1994,133 @@ bool IPTVManager::playYouTubeUrl(const std::string& url) {
     return playYouTubeVideo("", url, "720");
 }
 
-bool IPTVManager::playYouTubeVideo(const std::string& videoId, const std::string& initialUrl, const std::string& quality) {
+double IPTVManager::ytTimePos() {    std::string resp;
+    if (!sendMpvIpcCommand("{\"command\":[\"get_property\",\"time-pos\"]}", &resp))
+        return -1;
+    size_t p = resp.find("\"data\":");
+    if (p == std::string::npos || p + 7 >= resp.size()) return -1;
+    if (resp[p + 7] == 'n') return -1; // null
+    return atof(resp.c_str() + p + 7);
+}
+
+double IPTVManager::ytDuration() {    if (m_ytDuration >= 0) return m_ytDuration;
+    std::string resp;
+    if (sendMpvIpcCommand("{\"command\":[\"get_property\",\"duration\"]}", &resp)) {
+        size_t p = resp.find("\"data\":");
+        if (p != std::string::npos && p + 7 < resp.size() && resp[p + 7] != 'n')
+            m_ytDuration = atof(resp.c_str() + p + 7);
+    }
+    return m_ytDuration;
+}
+
+double IPTVManager::ytCacheAhead() {
+    // Số giây video đã load sẵn phía trước (xám buffer sau thanh đỏ)
+    std::string resp;
+    if (!sendMpvIpcCommand("{\"command\":[\"get_property\",\"demuxer-cache-time\"]}", &resp))
+        return -1;
+    size_t p = resp.find("\"data\":");
+    if (p == std::string::npos || p + 7 >= resp.size()) return -1;
+    if (resp[p + 7] == 'n') return -1;
+    return atof(resp.c_str() + p + 7);
+}
+
+void IPTVManager::showYouTubeOSD() {
+    std::string appRoot = AppConfig::instance().getAppRoot();
+    if (appRoot.empty()) appRoot = "/mnt/SDCARD/Apps/RomCloud";
+    static TTF_Font* s_fTitle = nullptr;
+    static TTF_Font* s_fBar = nullptr;
+    TTF_Font* fTitle = ytOsdFont(appRoot, 24, s_fTitle);
+    TTF_Font* fBar = ytOsdFont(appRoot, 22, s_fBar);
+
+    double cur = ytTimePos();
+    double dur = ytDuration();
+    double cached = ytCacheAhead();
+
+    // --- Top bar 1024x64: tên video + chất lượng ---
+    {
+        const int CW = 1024, CH = 64, STRIDE = CW * 4;
+        std::vector<uint8_t> cv(STRIDE * CH, 0);
+        ytFillRect(cv, CW, CH, 0, 0, CW, CH, 0, 0, 0, 140);
+        std::string title = m_ytTitle.empty() ? "YouTube" : m_ytTitle;
+        ytBlitText(cv, CW, CH, fTitle, ytTruncUtf8(fTitle, title, 780),
+                   {255, 255, 255, 255}, 24, 18);
+        std::string q = m_ytQuality + "p";
+        int qw = 0, qh = 0;
+        if (fBar && TTF_SizeUTF8(fBar, q.c_str(), &qw, &qh) == 0)
+            ytBlitText(cv, CW, CH, fBar, q, {0, 180, 216, 255}, 1000 - qw, 20);
+        FILE* fp = fopen("/tmp/yt_osd_top.raw", "wb");
+        if (fp) { fwrite(cv.data(), 1, cv.size(), fp); fclose(fp); }
+        char cmd[256];
+        snprintf(cmd, sizeof(cmd),
+            "{\"command\":[\"overlay-add\",1,0,0,\"/tmp/yt_osd_top.raw\",0,\"bgra\",%d,%d,%d]}\n",
+            CW, CH, STRIDE);
+        sendMpvIpcCommand(cmd);
+    }
+
+    // --- Bottom bar 1024x120 @y=648: tiến trình + giờ + gợi ý nút ---
+    {
+        const int CW = 1024, CH = 120, OY = 648, STRIDE = CW * 4;
+        std::vector<uint8_t> cv(STRIDE * CH, 0);
+        ytFillRect(cv, CW, CH, 0, 0, CW, CH, 0, 0, 0, 140);
+        double frac = (dur > 0 && cur >= 0) ? cur / dur : 0;
+        if (frac < 0) frac = 0;
+        if (frac > 1) frac = 1;
+        const int barX = 24, barW = 976, barY = 18, barH = 8;
+        ytFillRect(cv, CW, CH, barX, barY, barW, barH, 90, 90, 90, 255);
+        // Lớp xám: mức video đã load sẵn (giống YouTube)
+        double bufFrac = (dur > 0 && cur >= 0 && cached > 0)
+            ? (cur + cached) / dur : frac;
+        if (bufFrac < 0) bufFrac = 0;
+        if (bufFrac > 1) bufFrac = 1;
+        int bufW = (int)(barW * bufFrac);
+        if (bufW > 0)
+            ytFillRect(cv, CW, CH, barX, barY, bufW, barH, 170, 170, 170, 255);
+        int fillW = (int)(barW * frac);
+        if (fillW > 0)
+            ytFillRect(cv, CW, CH, barX, barY, fillW, barH, 255, 0, 0, 255);
+        ytFillCircle(cv, CW, CH, barX + fillW, barY + barH / 2, 7,
+                     255, 255, 255, 255);
+        std::string t = ytFmtTime(cur) + " / " + (dur >= 0 ? ytFmtTime(dur) : "--:--");
+        ytBlitText(cv, CW, CH, fBar, t, {255, 255, 255, 255}, 24, 42);
+        std::string hints = "A: Tạm dừng   \u2190 \u2192 +-10s   L1/R1 +-60s   B: Thoát";
+        int hintW = 0, hintH = 0;
+        if (fBar && TTF_SizeUTF8(fBar, hints.c_str(), &hintW, &hintH) == 0)
+            ytBlitText(cv, CW, CH, fBar, hints,
+                       {170, 180, 195, 255}, (CW - hintW) / 2, 76);
+        FILE* fp = fopen("/tmp/yt_osd_bot.raw", "wb");
+        if (fp) { fwrite(cv.data(), 1, cv.size(), fp); fclose(fp); }
+        char cmd[256];
+        snprintf(cmd, sizeof(cmd),
+            "{\"command\":[\"overlay-add\",2,0,%d,\"/tmp/yt_osd_bot.raw\",0,\"bgra\",%d,%d,%d]}\n",
+            OY, CW, CH, STRIDE);
+        sendMpvIpcCommand(cmd);
+    }
+
+    m_ytOsdOn = true;
+    m_ytOsdExpire = SDL_GetTicks() + 3000;
+    m_ytOsdLastRefresh = SDL_GetTicks();
+}
+
+void IPTVManager::hideYouTubeOSD() {
+    if (!m_ytOsdOn) return;
+    m_ytOsdOn = false;
+    sendMpvIpcCommand("{\"command\":[\"overlay-remove\",1]}");
+    sendMpvIpcCommand("{\"command\":[\"overlay-remove\",2]}");
+}
+
+void IPTVManager::flashCenter(const std::string& icon, const std::string& textCmd) {
+    // Icon PNG nếu user đã thêm file (decode lúc flash); chưa có thì chữ.
+    std::string appRoot = AppConfig::instance().getAppRoot();
+    if (appRoot.empty()) appRoot = "/mnt/SDCARD/Apps/RomCloud";
+    if (!icon.empty() &&
+        access((appRoot + "/assets/player_icons/" + icon + ".png").c_str(), R_OK) == 0) {
+        showOverlayIcon(icon, 1400);
+        return;
+    }
+    sendMpvIpcCommand(textCmd);
+}
+
+bool IPTVManager::playYouTubeVideo(const std::string& videoId, const std::string& initialUrl, const std::string& quality, const std::string& title) {
     stop();
 
     if (initialUrl.empty()) {
@@ -1931,6 +2158,12 @@ bool IPTVManager::playYouTubeVideo(const std::string& videoId, const std::string
     pid_t pid = MpvPlayer::instance().pid();
         m_isPlaying = true;
         m_currentChannel = "YouTube";
+        // YouTube OSD (UI-only): giữ tiêu đề + reset trạng thái thanh điều khiển
+        m_ytTitle = title;
+        m_ytQuality = quality.empty() ? "720" : quality;
+        m_ytDuration = -1.0;
+        m_ytOsdOn = false;
+        m_ytOsdExpire = 0;
         uint32_t playStartTime = SDL_GetTicks();
         std::string currentQuality = quality.empty() ? "720" : quality;
         bool isPaused = false;
@@ -1962,45 +2195,68 @@ bool IPTVManager::playYouTubeVideo(const std::string& videoId, const std::string
                     sendMpvIpcCommand(isPaused
                         ? "{\"command\":[\"show-text\",\"{\\\\an2\\\\fs44\\\\bord2\\\\b1}❚❚  TẠM DỪNG\", 1400]}"
                         : "{\"command\":[\"show-text\",\"{\\\\an2\\\\fs44\\\\bord2\\\\b1}▶  ĐANG PHÁT\", 1400]}");
+                    showYouTubeOSD();
                 } else if (input.isButtonJustPressed(Button::RIGHT)) {
                     sendMpvIpcCommand("{\"command\":[\"seek\",10,\"relative\"]}");
                     showOverlayIcon("forward", 1200);
                     sendMpvIpcCommand("{\"command\":[\"show-text\",\"{\\\\an2\\\\fs44\\\\bord2\\\\b1}▶▶  +10s\", 1200]}");
+                    showYouTubeOSD();
                 } else if (input.isButtonJustPressed(Button::LEFT)) {
                     sendMpvIpcCommand("{\"command\":[\"seek\",-10,\"relative\"]}");
                     showOverlayIcon("rewind", 1200);
                     sendMpvIpcCommand("{\"command\":[\"show-text\",\"{\\\\an2\\\\fs44\\\\bord2\\\\b1}◀◀  -10s\", 1200]}");
+                    showYouTubeOSD();
                 } else if (input.isButtonJustPressed(Button::UP)) {
                     sendMpvIpcCommand("{\"command\":[\"add\",\"volume\",5]}");
+                    showOverlayIcon("vol_up", 1200);
                     sendMpvIpcCommand("{\"command\":[\"show-text\",\"{\\\\an5\\\\fs70\\\\bord3\\\\b1}▲  Âm lượng +5%\", 1200]}");
+                    showYouTubeOSD();
                 } else if (input.isButtonJustPressed(Button::DOWN)) {
                     sendMpvIpcCommand("{\"command\":[\"add\",\"volume\",-5]}");
+                    showOverlayIcon("vol_down", 1200);
                     sendMpvIpcCommand("{\"command\":[\"show-text\",\"{\\\\an5\\\\fs70\\\\bord3\\\\b1}▼  Âm lượng -5%\", 1200]}");
+                    showYouTubeOSD();
                 } else if (input.isButtonJustPressed(Button::R1)) {
                     sendMpvIpcCommand("{\"command\":[\"seek\",60,\"relative\"]}");
                     showOverlayIcon("forward", 1400);
                     sendMpvIpcCommand("{\"command\":[\"show-text\",\"{\\\\an2\\\\fs44\\\\bord2\\\\b1}▶▶  +60s\", 1400]}");
+                    showYouTubeOSD();
                 } else if (input.isButtonJustPressed(Button::L1)) {
                     sendMpvIpcCommand("{\"command\":[\"seek\",-60,\"relative\"]}");
                     showOverlayIcon("rewind", 1400);
                     sendMpvIpcCommand("{\"command\":[\"show-text\",\"{\\\\an2\\\\fs44\\\\bord2\\\\b1}◀◀  -60s\", 1400]}");
+                    showYouTubeOSD();
                 } else if (input.isButtonJustPressed(Button::X)) {
                     sendMpvIpcCommand("{\"command\":[\"cycle-values\",\"video-aspect-override\",\"16:9\",\"4:3\",\"-1\"]}");
-                    sendMpvIpcCommand("{\"command\":[\"show-text\",\"{\\\\an5\\\\fs75\\\\bord3\\\\b1}Tỉ lệ màn hình\", 1400]}");
+                    flashCenter("aspect", "{\"command\":[\"show-text\",\"{\\\\an5\\\\fs75\\\\bord3\\\\b1}Tỉ lệ màn hình\", 1400]}");
+                    showYouTubeOSD();
                 } else if (input.isButtonJustPressed(Button::Y)) {
                     sendMpvIpcCommand("{\"command\":[\"cycle\",\"sub\"]}");
-                    sendMpvIpcCommand("{\"command\":[\"show-text\",\"{\\\\an5\\\\fs75\\\\bord3\\\\b1}Phụ đề (CC)\", 1400]}");
+                    flashCenter("cc", "{\"command\":[\"show-text\",\"{\\\\an5\\\\fs75\\\\bord3\\\\b1}Phụ đề (CC)\", 1400]}");
+                    showYouTubeOSD();
                 } else if (input.isButtonJustPressed(Button::START)) {
                     sendMpvIpcCommand("{\"command\":[\"cycle-values\",\"speed\",\"1.0\",\"1.25\",\"1.5\",\"0.75\"]}");
-                    sendMpvIpcCommand("{\"command\":[\"show-text\",\"{\\\\an5\\\\fs80\\\\bord3\\\\b1}Tốc độ phát\", 1400]}");
+                    flashCenter("speed", "{\"command\":[\"show-text\",\"{\\\\an5\\\\fs80\\\\bord3\\\\b1}Tốc độ phát\", 1400]}");
+                    showYouTubeOSD();
                 } else if (input.isButtonJustPressed(Button::SELECT)) {
                     if (!videoId.empty()) {
                         std::string nextQ = (currentQuality == "720") ? "360" : "720";
+                        showOverlayIcon("quality", 1400);
                         sendMpvIpcCommand("{\"command\":[\"show-text\",\"{\\\\an5\\\\fs75\\\\bord3\\\\b1}Đổi chất lượng: " + nextQ + "p...\", 1400]}");
                         if (switchYouTubeQuality(videoId, nextQ)) {
                             currentQuality = nextQ;
+                            m_ytQuality = currentQuality;
                         }
                     }
+                }
+            }
+            // YouTube OSD tick (UI-only): tu an sau 3s, ve lai tien trinh 1s/lan
+            if (m_ytOsdOn) {
+                uint32_t nowOsd = SDL_GetTicks();
+                if (nowOsd >= m_ytOsdExpire) {
+                    hideYouTubeOSD();
+                } else if (nowOsd - m_ytOsdLastRefresh >= 1000) {
+                    showYouTubeOSD();
                 }
             }
             SDL_Delay(35);
@@ -2010,6 +2266,7 @@ bool IPTVManager::playYouTubeVideo(const std::string& videoId, const std::string
             sendMpvIpcCommand("{\"command\":[\"overlay-remove\",0]}");
             m_overlayExpireTime = 0;
         }
+        hideYouTubeOSD();
 
         unlink("/tmp/stay_awake");
         unlink("/tmp/mpv_youtube.sock");
@@ -2108,38 +2365,65 @@ void IPTVManager::clearPingCache() {
 }
 
 void IPTVManager::prefetchPings(const std::vector<std::string> &urls) {
-    std::vector<std::string> toFetch;
     {
         std::lock_guard<std::mutex> lk(s_pingMutex);
+        // Lọc URL chưa đo; hàng đợi chỉ giữ cửa sổ mới nhất (ghi đè).
+        m_pingPending.clear();
         for (const auto &url : urls) {
             if (url.empty() || m_pingCache.count(url) || m_pingInFlight.count(url))
                 continue;
-            m_pingInFlight.insert(url);
-            toFetch.push_back(url);
+            m_pingPending.push_back(url);
         }
+        if (m_pingPending.empty())
+            return;
+        if (m_pingWorkerActive.load())
+            return; // worker đang chạy sẽ lấy hàng đợi mới khi xong batch
+        m_pingWorkerActive.store(true);
     }
-    if (toFetch.empty()) return;
 
-    std::thread([this, toFetch]() {
-        for (const auto &url : toFetch) {
-            uint32_t t0 = SDL_GetTicks();
-            std::string cmd = "curl -k -s -L -I -m 2 -o /dev/null -w \"%{http_code}\" \"" + url + "\" 2>/dev/null";
-            FILE *fp = popen(cmd.c_str(), "r");
-            int code = 0;
-            if (fp) {
-                char buf[32];
-                if (fgets(buf, sizeof(buf), fp)) code = atoi(buf);
-                pclose(fp);
+    try {
+        std::thread([this]() {
+            for (;;) {
+                std::vector<std::string> batch;
+                {
+                    std::lock_guard<std::mutex> lk(s_pingMutex);
+                    if (m_pingPending.empty()) {
+                        m_pingWorkerActive.store(false);
+                        return;
+                    }
+                    batch = std::move(m_pingPending);
+                    m_pingPending.clear();
+                    for (const auto &u : batch)
+                        m_pingInFlight.insert(u);
+                }
+                for (const auto &url : batch) {
+                    uint32_t t0 = SDL_GetTicks();
+                    std::string cmd = "curl -k -s -L -I -m 2 -o /dev/null -w \"%{http_code}\" \"" + url + "\" 2>/dev/null";
+                    FILE *fp = popen(cmd.c_str(), "r");
+                    int code = 0;
+                    if (fp) {
+                        char buf[32];
+                        if (fgets(buf, sizeof(buf), fp)) code = atoi(buf);
+                        pclose(fp);
+                    }
+                    uint32_t t1 = SDL_GetTicks();
+                    int ms = (code >= 200 && code < 400) ? static_cast<int>(t1 - t0) : -1;
+                    {
+                        std::lock_guard<std::mutex> lk(s_pingMutex);
+                        m_pingCache[url] = ms;
+                        m_pingInFlight.erase(url);
+                    }
+                }
             }
-            uint32_t t1 = SDL_GetTicks();
-            int ms = (code >= 200 && code < 400) ? static_cast<int>(t1 - t0) : -1;
-            {
-                std::lock_guard<std::mutex> lk(s_pingMutex);
-                m_pingCache[url] = ms;
-                m_pingInFlight.erase(url);
-            }
-        }
-    }).detach();
+        }).detach();
+    } catch (const std::exception &e) {
+        // Hết tài nguyên tạo thread: trả lại hàng đợi, log, không crash.
+        std::lock_guard<std::mutex> lk(s_pingMutex);
+        m_pingPending.clear();
+        m_pingInFlight.clear();
+        m_pingWorkerActive.store(false);
+        Logger::warn(std::string("prefetchPings: cannot spawn worker: ") + e.what());
+    }
 }
 
 void IPTVManager::showIPTVVideoFooter(bool isPaused) {

@@ -12,6 +12,8 @@
 #include "SearchInputModal.h"
 #include "FileListView.h"
 #include "../fileexplorer/FileExplorer.h"
+#include "../weather/WeatherManager.h"
+#include "../calendar/CalManager.h"
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_ttf.h>
 #include <string>
@@ -26,6 +28,7 @@
 #include <queue>
 #include <deque>
 #include <array>
+#include <set>
 
 namespace RomCloud {
 
@@ -57,6 +60,10 @@ enum class UIState {
   LOCALSEND_GAME_PICKER, // Chọn game LOCAL từ DB để gửi (thay vì raw file picker)
   LOCALSEND_PROGRESS,   // Xem progress upload/download
   FILE_EXPLORER,      // Explorer 2-pane: m_expL/m_expR + clipboard chung m_expClip
+  DEST_PICKER,        // Chọn thư mục đích cho Sao chép / Chuyển đi / Bung tới...
+  TEXT_VIEWER,        // Xem nội dung file text từ File Explorer
+  WEATHER,            // Thời tiết & Lịch (+ tab Đồng hồ, Camera)
+  CLOCK_ALARM,        // Modal báo thức kêu (briefing)
   GAME_CAST,          // GameCast TV & Laptop streaming
   EXIT_REQUESTED
 };
@@ -74,6 +81,9 @@ public:
 
   UIState getState() const { return m_currentState; }
   void setState(UIState state);
+  // B = lùi về trang trước: stack lưu lịch sử setState (trừ EXIT).
+  // goBack() false = hết lịch sử (caller tự quyết, VD home thì thoát app).
+  bool goBack();
 
 private:
   UIManager() = default;
@@ -82,12 +92,21 @@ private:
   SDL_Renderer *m_renderer = nullptr;
   UiRenderer m_ui;
   TTF_Font *m_fontTitle = nullptr;
+  TTF_Font *m_fontHuge = nullptr; // giờ khổ lớn (card Đồng hồ)
+  TTF_Font *m_fontClock = nullptr; // số đồng hồ: Rajdhani Bold (OFL)
+  TTF_Font *m_fontClockSm = nullptr; // giờ thế giới (Rajdhani 60)
+  TTF_Font *m_fontClockFs = nullptr; // fullscreen (Rajdhani 260)
+  TTF_Font *m_fontClockMd = nullptr; // thẻ lật fullscreen (Rajdhani 200)
+  TTF_Font *m_fontFlip = nullptr; // số flip clock (Fliqlo, ISC)
   TTF_Font *m_fontLarge = nullptr;
   TTF_Font *m_fontMedium = nullptr;
   TTF_Font *m_fontSmall = nullptr;
 
   UIState m_currentState = UIState::MENU;
+  std::vector<UIState> m_stateHistory; // stack cho B = back
+  bool m_suppressPush = false;         // goBack() set để không push ngược
   int m_selectedMenuIndex = 0;
+  uint32_t m_exitArmedMs = 0; // B lần 1 ở launcher: arm, B lần 2 trong 3s = thoát
 
   // Menu items as grid icons
   struct GridMenuItem {
@@ -162,6 +181,158 @@ private:
   // 1-pane FileExplorer dùng chọn thư mục nhận file (LOCALSEND_FOLDER & LOCALSEND_INCOMING)
   FileExplorer m_expPicker;
   int m_expPickerScroll = 0;
+  // Tiêu đề picker (mặc định nhận file LocalSend; đổi khi bung tới thư mục)
+  std::string m_expPickerTitle = "CHỌN THƯ MỤC NHẬN FILE";
+
+  // Popup menu file explorer (A trên file): Xem / Sao chép / Chuyển đi /
+  // Xóa / Bung tại đây / Bung tới thư mục... (Xem chỉ file text, 2 mục
+  // bung chỉ file nén).
+  bool m_expMenuOpen = false;
+  int m_expMenuSel = 0;
+  std::vector<std::string> m_expMenuItems;
+  std::string m_expMenuFile;
+  // Cache lễ quan trọng (tính 1 lần/ngày, không quét 400 ngày mỗi frame)
+  int m_holDayKey = -1;
+  std::string m_holText;
+  std::string m_holDate; // dd/MM của lễ đang cache (vẽ trước tên)
+  // Text viewer: file đang xem + dòng đã wrap + scroll
+  std::string m_textViewPath;
+  std::vector<std::string> m_textViewLines;
+  int m_textViewScroll = 0;
+  // Cache texture ngày âm scale 75% (rebuild khi đổi tháng)
+  int m_lunarCacheY = 0, m_lunarCacheM = 0;
+  std::vector<SDL_Texture *> m_lunarTex;
+
+  // Đồng hồ (tab 1 trang Thời tiết): world clock + báo thức + pomodoro.
+  // Mọi giờ tính từ đồng hồ máy Brick (localtime), không NTP.
+  int m_clkSel = 0;          // chọn báo thức trong list
+  int m_clkFocus = 0;        // focus khối: 0 = giờ thế giới, 1 = báo thức, 2 = pomodoro
+  int m_citySel = 0;         // con trỏ thành phố trong khối giờ thế giới
+  bool m_clkFullscreen = false; // toàn màn hình: chỉ đồng hồ, B quay về
+  int m_clkFsStyle = 0; // style fullscreen: 0=thẻ lật (flip), 1=phẳng, 2=qlocktwo
+  // Trạng thái lật từng thẻ HH MM SS (theo mẫu FlipCard tham khảo).
+  struct FsDigit {
+    std::string cur;   // số đang hiện (static)
+    std::string prev;  // số cũ (khi đang lật)
+    bool ani = false;  // đang lật hay không
+    float prog = 0.0f; // tiến trình 0..1
+  };
+  FsDigit m_fsD[3];
+  uint32_t m_fsLastMs = 0; // tick frame trước (tính dt)
+  uint32_t m_clkFsMsgUntil = 0; // hiện gợi ý/tên kiểu tới mốc này (ms)
+  std::string m_clkFsMsg;
+  void clkBlockRect(int idx, int &x, int &y, int &w, int &h);
+  void clkFocusMove(int dx, int dy);
+  // Popup báo thức: card 2 cột (giờ 24h HH:MM | 3 chế độ).
+  // ◀▶ đi qua HH → MM → chế độ (vòng lại), ▲▼ đổi giá trị tại chỗ.
+  // A lưu (=OK), B hủy (=Cancel).
+  bool m_apOpen = false;
+  int m_apPart = 0; // 0 = khối giờ, 1 = khối chế độ
+  int m_apCol = 0;
+  int m_apH = 7, m_apM = 0, m_apMode = 0; // giờ 24h: 0-23
+  int m_apEditIdx = -1;      // -1 = thêm mới
+  // Picker đổi thành phố giờ thế giới tại ô m_citySel: A mở/chốt, B hủy.
+  bool m_cityPickOpen = false;
+  int m_cityPickSel = 0;
+  int m_cityPickScroll = 0;
+  bool m_pomoRun = false;    // pomodoro đang chạy
+  bool m_pomoWork = true;    // true = 25 làm, false = 5 nghỉ
+  uint32_t m_pomoEndMs = 0;  // SDL ticks lúc hết phase
+  uint32_t m_pomoLeftMs = 25 * 60 * 1000; // còn lại khi pause
+  // Modal báo thức kêu
+  bool m_alarmRing = false;
+  std::string m_alarmTitle;
+  std::vector<std::string> m_alarmLines;
+  int m_alarmSnoozeMin = -1; // hoãn tới phút trong ngày, -1 = không
+  int m_alarmSnoozeDay = -1; // yyyymmdd của lần hoãn
+  int m_alarmFiredKey = -1;  // yyyymmdd*1440+phút đã kêu (chống lặp)
+  std::set<int64_t> m_evFired; // id sự kiện lịch đã nhắc (chống lặp)
+  int m_evFiredDayKey = -1;  // reset set trên khi sang ngày
+  uint32_t m_lastClockPoll = 0;
+  void renderClock(int contentTop, int contentH);
+  void renderQlockTwoStyle(struct tm* lt);  // Style 3: QlockTwo Vietnamese
+  bool handleClockInput();
+  void fireAlarm(const std::string& title, const std::vector<std::string>& lines, int mode);
+  void pollClock();
+  void renderAlarmRing();
+  bool handleAlarmRingInput();
+  void renderAlarmPopup();
+  bool handleAlarmPopupInput();
+  void openAlarmPopup(int editIdx);
+  void openCityPicker();
+  void renderCityPicker();
+  bool handleCityPickerInput();
+  void renderClockFullscreen();
+  void drawFlipCardBg(int x, int y, int w, int h);
+  void cycleClkFsStyle(int dir); // L1/R1 đổi style fullscreen, lưu setting
+
+  // Focus điều hướng không gian (DPAD): 0=now, 1=forecast, 2=lịch,
+  // 3=clock, 4=notes. Trong lịch: con trỏ ngày (rollover đổi tháng).
+  int m_wxFocus = 2;
+  int m_calSelY = 0, m_calSelM = 0, m_calSelD = 0;
+  // Ghi chú lịch (tab Thời tiết): con trỏ chọn việc + cache dòng đang hiện.
+  int m_noteSel = 0;
+  std::vector<CalEvent> m_noteVis;
+  bool m_notesDay = false; // true = ghi chú lọc theo ngày con trỏ
+  void wxFocusMove(int dx, int dy);
+  void wxBlockRect(int idx, int &x, int &y, int &w, int &h);
+  // Tab trang: 0 = Thời tiết & Lịch, 1 = Đồng hồ, 2 = Camera, 3 = Thị trường
+  int m_wxTab = 0;
+  int m_wxMode = 0;
+  int m_wxProvSel = 0, m_wxWardSel = 0, m_wxCandSel = 0;
+  int m_wxCalY = 2026, m_wxCalM = 1;
+  int m_wxTaskKind = 0;
+  bool m_wxFetching = false;
+  uint32_t m_wxEnterMs = 0;  // lúc vào trang: sync DELAY sau 1.5s để vào mượt
+  bool m_wxAutoSync = false;
+  BackgroundTask m_wxTask;
+  std::vector<WxGeoCand> m_wxCands;
+  std::mutex m_wxCandsMutex;
+  void openWeather();
+  void renderWeather();
+  void renderWxPicker(int contentTop, int contentH);
+  bool handleWeatherInput();
+  void drawWxIcon(const std::string &kind, int cx, int cy, int s);
+  // Camera giao thông (tab 1 trang thời tiết)
+  size_t m_camSel = 0;
+  int m_camScroll = 0;
+  bool m_camView = false;      // false=list, true=xem ảnh
+  bool m_camPaused = false;
+  bool m_camFetching = false;
+  uint32_t m_camLastRefresh = 0;
+  int64_t m_camDecodedMtime = 0;
+  SDL_Texture *m_camTex = nullptr;
+  BackgroundTask m_camTask;
+  // Tìm camera theo tên đường (SELECT mở modal, START xóa lọc)
+  VkState m_camVk;
+  std::vector<std::string> m_camHist;
+  SearchInputModal::Config m_camModalCfg;
+  bool m_camModalOpen = false;
+  bool m_camModalInit = false;
+  std::vector<size_t> m_camFilter; // rỗng = không lọc text
+  bool m_camFavOnly = false;     // Y: chỉ hiện kênh yêu thích (giống IPTV)
+  std::vector<size_t> m_camVisIdx; // cache hiển thị = text ∩ fav
+  bool m_camVisDirty = true;
+  size_t camVisCount() const;
+  size_t camVisToReal(size_t pos) const;
+  void rebuildCamVis();
+  void renderTraffic();
+  bool handleTrafficInput();
+  void restartCamView();
+  void applyCamFilter(const std::string &query);
+  // Thị trường (tab 3): xăng/dầu/vàng/USD live, 1 card 2x2.
+  BackgroundTask m_mkTask;
+  bool m_mkFetching = false;
+  uint32_t m_mkLastMs = 0;
+  void renderMarket(int contentTop, int contentH);
+  bool handleMarketInput();
+  void startMarketFetch();
+  void pollMarket();
+  // Picker đích dùng chung (DEST_PICKER): 0=không, 1=Sao chép, 2=Chuyển đi,
+  // 3=Bung tới thư mục. Mọi thao tác đều qua picker + confirm mới chạy.
+  int m_pickerPendingOp = 0;
+  std::string m_pickerPendingSrc;
+  bool m_pickerPendingIsDir = false;
 
   void renderFileExplorer();
   void renderExplorerKeyboard();
@@ -172,6 +343,20 @@ private:
   bool handleFolderPickerInput();
   bool handleExplorerBrowser();
   void syncExplorerDialogs();
+  // Action dùng chung cho phím tắt (Y/X/MENU) và popup menu (A trên file)
+  void expCopyCurrent();
+  void expMoveCurrent();
+  void expDeleteCurrent();
+  void openDestPicker(int op, const std::string& title);
+  void openExpMenu();
+  void runExpMenuAction(int idx);
+  bool handleExpMenuInput();
+  void renderExpMenu();
+  // Text viewer
+  static bool isTextFile(const std::string& path);
+  void openTextViewer(const std::string& path);
+  void renderTextViewer();
+  bool handleTextViewerInput();
   std::string suggestNewFolderName(const std::string& parentPath);
 
   // LocalSend: Apps picker (/mnt/SDCARD/Apps/ drill-down)
@@ -244,6 +429,7 @@ private:
   std::atomic<bool> m_ytVideoReady{false};
   std::string m_ytPendingStreamUrl;
   std::string m_ytPendingVideoId;
+  std::string m_ytPendingVideoTitle; // tiêu đề cho OSD top bar (UI-only)
   std::vector<std::string> m_ytSearchHistory;
   int m_ytSelectedTagIndex = 0;
   bool m_ytFocusInTags = false;
@@ -443,6 +629,9 @@ private:
   // Primitive drawing
   void drawText(const std::string &text, int x, int y, SDL_Color color,
                 TTF_Font *font, bool centered = false);
+  void drawFlipDigits(const std::string &newText, const std::string &oldText,
+                      float t01, int x, int y, int w, int h, TTF_Font *font,
+                      SDL_Color color);
   void drawRect(int x, int y, int w, int h, SDL_Color color,
                 bool filled = true);
   void drawBorder(int x, int y, int w, int h, SDL_Color color,
@@ -505,6 +694,9 @@ private:
   void drawAppBackground();
   void drawCard(int x, int y, int w, int h);
   void drawFocusRow(int x, int y, int w, int h);
+  // Ô highlight chọn: FOCUS_BG_SOFT (trong suốt 25%) + blend cục bộ.
+  // Truyền đúng rect đã căn giữa dọc theo row/khối (rule highlight).
+  void drawHighlight(int x, int y, int w, int h);
   void drawAppHeader(const std::string &title, const std::string &sub = "");
   void drawHeaderStatus();
   void drawPadIcon(UiTheme::PadBtn btn, int x, int y, int size);

@@ -41,7 +41,7 @@ Thiết bị TrimUI Brick sở hữu màn hình tỉ lệ 4:3 với độ phân 
 ## 3. Màu sắc & Design System (`UiTheme`)
 
 Sử dụng trực tiếp các hằng số màu tập trung trong `UiTheme`. Không hardcode màu RGB ngẫu nhiên khi đã có hằng số chuẩn:
-- **Tập trung / Highlight:** `UiTheme::FOCUS_BG` `{30, 58, 138, 255}`, viền `UiTheme::FOCUS_GLOW` `{59, 130, 246, 255}`.
+- **Tập trung / Highlight:** `UiTheme::FOCUS_BG_SOFT` `{30, 58, 138, 191}` (trong suốt 25%) + blend cục bộ, viền `UiTheme::FOCUS_GLOW` `{59, 130, 246, 255}`. Chi tiết xem §9.7.
 - **Card / Hộp:** `UiTheme::CARD_SOLID` `{18, 24, 34, 255}`, viền `UiTheme::CARD_BORDER` `{38, 48, 64, 255}`.
 - **Hàng / Row:** `UiTheme::ROW_BG` `{22, 28, 38, 255}`.
 - **Văn bản:** `UiTheme::TEXT_MAIN` `{255, 255, 255, 255}`, `UiTheme::TEXT_SUB` `{148, 163, 184, 255}`, `UiTheme::TEXT_DIM` `{100, 116, 139, 255}`.
@@ -115,3 +115,181 @@ Mọi màn hình và tính năng phải tuân thủ chuẩn điều khiển vậ
    adb push bin/gamecast_d /mnt/SDCARD/Apps/RomCloud/bin/gamecast_d
    adb shell "chmod +x /mnt/SDCARD/Apps/RomCloud/bin/RomCloud /mnt/SDCARD/Apps/RomCloud/bin/gamecast_d && sync"
    ```
+
+---
+
+## 9. Chuẩn căn Layout / Padding / Spacing (BẮT BUỘC)
+
+Mọi màn hình mới/sửa đều tuân thủ token trong `src/ui/UiTheme.h`
+(Single Source of Truth). Cấm hardcode số lẻ tẻ khi đã có token.
+
+### 9.1. Khung màn hình (1024x768, 4:3)
+- `APP_W = 1024`, `APP_H = 768`.
+- Header: `HEADER_H = 64` (Y 0..64), vẽ bằng `drawAppHeader()` — gồm bar
+  nền, line separator, tiêu đề cyan + cụm Wi-Fi/pin/giờ bên phải.
+- Footer: `FOOTER_Y = 715`, `FOOTER_H = 53`, vẽ bằng `drawAppFooter()`
+  (tự vẽ nền + line, cấm vẽ rect đè).
+- Vùng content: Y = 64..715. Card full nội dung bắt đầu `contentTop = 124`,
+  cách footer 16px (`contentH = 715 - contentTop - 16`).
+
+### 9.2. Card & lề
+- Lề ngoài card: **24px** hai bên (`x = 24`, rộng `1024 - 48`).
+- 2 cột: trái `x = 24`, phải `x = 600` (rộng 400), gap giữa 16px.
+- Bo góc: card `RADIUS_CARD = 12`, hàng `RADIUS_ROW = 10`,
+  nút `RADIUS_BTN = 10`, modal `RADIUS_MODAL = 16`.
+- Borderless là hướng thiết kế: card/panel mới KHÔNG vẽ viền
+  (`drawRoundedBorder`) trừ khi user yêu cầu giữ; chỉ giữ nền khối
+  để phân vùng.
+
+### 9.3. Padding trong khối
+- Tiêu đề khối: cách trái **20-28px**, cách đỉnh khối **12-18px**.
+- Dòng nội dung: cách trái **20px** (dot trang trí ở **x+28**, chữ ở **x+42**).
+- Dòng phải (số lượng, mã): right-align, cách mép phải card **20px**.
+- Khoảng cách footer hints: `FOOTER_GAP = 8`, giữa các hint
+  `FOOTER_HINT_GAP = 28`.
+
+### 9.4. Spacing dòng & hàng
+- Hàng list chuẩn: **44-48px** (text small), text cách nhau **26px** trong
+  list đặc, tiêu đề cách dòng nội dung **28-34px**.
+- Lịch tháng: `cellH = 34`, header ngày cách lưới **28-30px**,
+  chấm sự kiện r=4 (đỏ) dưới số, dot hôm nay r=14-17 (cyan) sau số.
+- Không để hàng cuối đè footer: tính `visibleRows` từ chiều cao còn lại,
+  clamp scroll, scrollbar khi tràn.
+
+### 9.5. Font (NotoSans-Regular, đã full Unicode Việt)
+- Title 42 / Large 36 / Medium 30 / Small 24. Tiêu đề trang = Large cyan,
+  tiêu đề khối = Medium trắng, nội dung = Small, chú thích = Small xám.
+- Cấm `substr()` cắt chuỗi có dấu — luôn dùng
+  `truncateToWidth(text, font, maxWidthPx)`.
+- OSD phủ lên video (mpv overlay): chữ tiếng Việt CÓ dấu bình thường;
+  hint dùng ký tự đã verify trong font (← → có; ◀ ▶ ❚ không có trong
+  NotoSans — chỉ dùng qua mpv show-text có fontconfig fallback).
+
+### 9.6. Quy tắc phủ mờ & popup
+- Popup/modal phải `beginModalDim()` + `drawModalDialog()`, nút A chọn,
+  B đóng, có hint `A Chọn • B Đóng` trong hộp.
+- Toast là kênh báo trạng thái duy nhất (màu: xanh thành công,
+  đỏ lỗi, vàng đang xử lý), không dùng dialog cho thông báo thường.
+
+### 9.7. Highlight chọn (selection)
+- Mọi ô chọn (list/menu rows, cells, radio rows) dùng `drawHighlight()`
+  hoặc `drawFocusRow()`/`drawRow(focused)` — KHÔNG `drawRect` đặc.
+- Màu fill `UiTheme::FOCUS_BG_SOFT` `{30, 58, 138, 191}` = trong suốt 25%,
+  vẽ kèm `SDL_BLENDMODE_BLEND` cục bộ (bật trước, trả lại sau draw).
+- Hình chữ nhật highlight phải **căn giữa dọc** theo row/khối chứa nó:
+  slot cao H, highlight cao h → `y = rowY + (H - h) / 2`
+  (VD row 46/highlight 40 → +3; row 34/highlight 32 → +1).
+
+---
+
+## 10. Hệ phân cấp Layout (nguyên tắc viewport > card > khối > cột/hàng)
+
+Mô hình duy nhất cho mọi trang, từ ngoài vào trong:
+
+```
+Màn hình 1024x768
+├── Header global (0..64) + Footer global (715..768) — drawAppHeader/drawAppFooter
+└── Viewport: x 24..1000 (lề 24), y 124..699 (trên cách tab/title-zone 20px,
+    dưới cách footer 16px). Trang không tab cũng giữ y=124 cho đồng nhất.
+    └── Card (nền khối, borderless mặc định)
+        └── Khối (section, CÓ hoặc KHÔNG nền/viền — dev quyết từng chỗ)
+            └── Cột / Hàng nội dung
+```
+
+### 10.1. Padding (mép ngoài → vào trong)
+- Viewport → Card: lề trái/phải **24px** (card x=24, rộng 976).
+- Card → Khối/nội dung: padding trái/phải **20-28px** (chuẩn 24),
+  padding trên **12-18px** (chuẩn: tiêu đề khối +12, nội dung đầu +16).
+- Card → đáy viewport: **16px**. Khối cuối → đáy card: **12-16px**.
+
+### 10.2. Khoảng cách GIỮA các khối (block gap)
+- Hai khối dọc trong cùng card/viewport: **12px** (VD: clock card →
+  notes card, ảnh camera → list).
+- Hai card cột cạnh nhau: gap **16px** (VD: trái x=24 w=560,
+  phải x=600 w=400).
+- Tab pills → content: **20px** (pills Y 72..104, content Y 124).
+
+### 10.3. Cột trong khối (column gap)
+- 2 cột trong card/viewport: gap **16px** (tổng rộng chia theo tỉ lệ
+  rồi trừ gap, VD 560/400).
+- 4 cột dự báo / 7 cột lịch: chia đều `(rộng - 2*pad) / n`, không gap
+  thêm (căn giữa từng ô).
+- Cột icon + cột chữ: icon 24-36px, gap icon→chữ **12-16px**;
+  chữ→số right-align: số cách mép phải khối **20px**.
+
+### 10.4. Hàng trong khối (row gap / line step)
+- Hàng chạm (list chọn): cao **44-48px**, KHÔNG gap (liền khối,
+  highlight full-width trừ lề 8px mỗi bên).
+- Hàng info (ngày/icon/số, ghi chú): step **26px** (chữ small 24px + 2).
+- Hàng lịch: `cellH = 34`, header ngày cách lưới **28px**.
+- Tiêu đề khối → hàng đầu: **28-34px**. Hàng text thường → hàng tiếp:
+  **4-6px** nếu cùng nhóm, **12px** nếu khác nhóm.
+
+### 10.5. Quy tắc tràn (overflow)
+- List dài: tính `visible` từ chiều cao còn lại, clamp scroll, vẽ scrollbar
+  khi tràn. Không bao giờ để hàng cuối đè footer (giữ đáy 16px).
+- Card co giãn theo nội dung thì neo 1 đầu (top HOẶC bottom), đầu còn lại
+  tự do — cấm căn giữa khoảng trống khiến icon/text "trôi" xa top.
+- Text dài: truncate về max width (`truncateToWidth`), không wrap trừ
+  trang đọc (text viewer / changelog).
+
+---
+
+## 11. Nguyên tắc audit Layout (checklist mọi màn)
+
+### 11.1. Thứ tự audit
+1. **Khung trước, chi tiết sau:** 1024x768, header 64, footer 53,
+   content 124..699, lề card 24, đáy cách footer 16.
+2. **Neo (chống trôi):** mỗi khối phải neo 1 đầu (top HOẶC đáy).
+   Khối căn giữa khoảng trống còn lại là bug tiềm ẩn — nội dung nhảy
+   khi data đổi (tháng 4/6 hàng, có/không mạng, fetch xong/chưa).
+   Test 2 cực đoan: nội dung cao nhất và thấp nhất.
+3. **Gap (đo bằng tọa độ code, không đo mắt):** block→block 12,
+   cột→cột 16, tiêu đề→nội dung 28-34, text→text 26.
+4. **Chồng lấn:** đáy khối A so đỉnh khối B — âm là đè. Kiểm tra lại
+   sau mỗi lần đổi font size/icon size (textHeight đổi làm vỡ spacing).
+5. **Tràn:** visibleRows tính từ chiều cao còn lại, clamp scroll,
+   hàng cuối không đè footer. Text dấu luôn `truncateToWidth`.
+6. **Nhất quán cross-screen:** cùng pattern ở các màn phải giống số.
+7. **Thiết bị thật:** audit code bắt ~70%, còn lại xem trên máy
+   (font render, icon thật, mạng chậm).
+
+### 11.2. Quy tắc vertical-center
+Center **có điều kiện**, không mặc định:
+- **Center khi:** khối cao CỐ ĐỊNH + nội dung cao CỐ ĐỊNH
+  (giờ trong card clock, trạng thái rỗng, chữ cạnh icon, số trong ô).
+- **Neo khi:** nội dung co giãn (lưới tháng, list, có/không mạng).
+- Gọn: **cố định + cố định thì center, còn lại neo.**
+
+---
+
+## 12. Nguyên tắc Navigation (B lui + DPAD không gian)
+
+### 12.1. Nút B = lùi 1 cấp (back-stack)
+- Mọi `setState()` (trừ EXIT, trừ lặp liên tiếp) push trang hiện tại vào
+  stack (tối đa 30, `UIManager::m_stateHistory`).
+- `goBack()` pop trang gần nhất (bỏ trùng/EXIT) và đi qua `setState`
+  bình thường (giữ side-effect), có cờ `m_suppressPush` chống push ngược.
+- Modal/keyboard/popup đóng trước (ở yên trang), rồi B tiếp mới lùi trang.
+- Trang home của từng khu vực B thoát app; lưới launcher B không làm gì
+  (về trang trước qua stack nếu có).
+- Cấm B nhảy cố định về 1 trang (VD picker B về thẳng LocalSend) —
+  phải `goBack()` để về đúng nơi đã vào.
+
+### 12.2. DPAD điều hướng không gian (card > khối > content)
+- Trang nhiều khối: DPAD di chuyển focus theo HƯỚNG HÌNH HỌC, không theo
+  thứ tự tab cứng. Thuật toán: từ tâm khối hiện tại, xét các khối có tâm
+  nằm trong nửa mặt phẳng hướng bấm (dung sai 1/3 kích thước); cùng hàng
+  /cột phải GIAO NHAU VÙNG (card ngắn vẫn qua được card dài bên cạnh);
+  chấm `score = kc_chính + 2*kc_phụ`, chọn nhỏ nhất.
+  (Cấm chặn bằng khoảng cách tâm cứng như `abs > 200` — sai khi card
+  co giãn chiều cao.)
+- Trong khối có list: lên/xuống/trái/phải duyệt content (ngày, hàng,
+  báo thức); tới biên khối thì nhảy sang khối liền kề gần nhất cùng hướng.
+- Khối focus KHÔNG viền — chỉ nền sáng hơn một chút
+  (VD `{30,38,54}` so với `{22,28,38}`). Rect nav và rect render phải
+  chung 1 nguồn (card co giãn thì nav tính lại theo).
+  Hàng/con trỏ trong khối: nền highlight + chữ trắng.
+- Hành động (A/Y/X/START) theo khối đang focus, footer đổi hint theo focus.
+- Rect khối hardcode phải khớp code render (`wxBlockRect`/`clkBlockRect`) —
+  đổi layout render thì đổi rect nav cùng lúc.

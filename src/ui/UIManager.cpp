@@ -85,6 +85,7 @@ static std::string ytAvatarHash(const std::string &s) {
 void UIManager::initGridMenu() {
   m_gridMenuItems = {
       {"games", "THƯ VIỆN GAME", "GAMES.png", "Danh sách ROM"},
+      {"weather", "OFFICEGO", "OFFICEGO.png", "Thời tiết & Lịch"},
       {"iptv", "XEM TV", "TV.png", "Kênh TV online"},
       {"youtube", "YOUTUBE", "YOUTUBE.png", "YouTube"},
       {"localsend", "LOCAL SEND", "LOCALSEND.png", "Chia se P2P trong LAN"},
@@ -92,8 +93,7 @@ void UIManager::initGridMenu() {
       {"explorer", "FILE EXPLORER", "FOLDER.png", "Duyet file SD"},
       {"upload", "TẢI LÊN", "UPLOAD.png", "Upload lên Drive"},
       {"settings", "CÀI ĐẶT", "SETTINGS.png", "Cấu hình"},
-      {"info", "THÔNG TIN", "INFO.png", "Thông tin hệ thống"},
-      {"exit", "THOÁT", "EXIT.png", "Thoát ứng dụng"}};
+      {"info", "THÔNG TIN", "INFO.png", "Thông tin hệ thống"}};
 }
 
 bool UIManager::init(SDL_Window *window, SDL_Renderer *renderer) {
@@ -122,21 +122,59 @@ bool UIManager::init(SDL_Window *window, SDL_Renderer *renderer) {
   for (const char *path : fallbackFonts) {
     if (!m_fontTitle)
       m_fontTitle = TTF_OpenFont(path, 42);
+    if (!m_fontHuge)
+      m_fontHuge = TTF_OpenFont(path, 100);
     if (!m_fontLarge)
       m_fontLarge = TTF_OpenFont(path, 36);
     if (!m_fontMedium)
       m_fontMedium = TTF_OpenFont(path, 30);
     if (!m_fontSmall)
       m_fontSmall = TTF_OpenFont(path, 24);
-    if (m_fontTitle && m_fontLarge && m_fontMedium && m_fontSmall) {
+    if (m_fontTitle && m_fontHuge && m_fontLarge && m_fontMedium && m_fontSmall) {
       Logger::info(std::string("Loaded TTF font from: ") + path +
-                   " (Sizes: 42, 36, 30, 24)");
+                   " (Sizes: 42, 100, 36, 30, 24)");
       break;
     }
   }
 
   if (!m_fontLarge || !m_fontMedium || !m_fontSmall) {
     Logger::warn("Could not load desired font point sizes.");
+  }
+
+  // Font số đồng hồ: Rajdhani Bold (SIL OFL 1.1, xem OFL-Rajdhani.txt).
+  // Chỉ chứa số/dấu nên thiếu là bỏ qua, fallback về font hệ.
+  {
+    std::string clockPath = AppConfig::instance().getFontsDir() + "/Rajdhani-Bold.ttf";
+    m_fontClock = TTF_OpenFont(clockPath.c_str(), 140);
+    if (!m_fontClock)
+      m_fontClock = TTF_OpenFont("assets/fonts/Rajdhani-Bold.ttf", 140);
+    {
+      std::string clockSm = AppConfig::instance().getFontsDir() + "/Rajdhani-Bold.ttf";
+      m_fontClockSm = TTF_OpenFont(clockSm.c_str(), 60);
+      if (!m_fontClockSm)
+        m_fontClockSm = TTF_OpenFont("assets/fonts/Rajdhani-Bold.ttf", 60);
+      std::string clockFs = AppConfig::instance().getFontsDir() + "/Rajdhani-Bold.ttf";
+      m_fontClockFs = TTF_OpenFont(clockFs.c_str(), 260);
+      if (!m_fontClockFs)
+        m_fontClockFs = TTF_OpenFont("assets/fonts/Rajdhani-Bold.ttf", 260);
+      std::string clockMd = AppConfig::instance().getFontsDir() + "/Rajdhani-Bold.ttf";
+      m_fontClockMd = TTF_OpenFont(clockMd.c_str(), 200);
+      if (!m_fontClockMd)
+        m_fontClockMd = TTF_OpenFont("assets/fonts/Rajdhani-Bold.ttf", 200);
+      // Font số flip clock (Fliqlo, ISC — xem gluqlo-ISC.txt). Chỉ có
+      // 0-9AMP, cặp số tabular nên không cần bù trừ số "1" hẹp.
+      std::string flipPath = AppConfig::instance().getFontsDir() + "/gluqlo.ttf";
+      m_fontFlip = TTF_OpenFont(flipPath.c_str(), 260);
+      if (!m_fontFlip)
+        m_fontFlip = TTF_OpenFont("assets/fonts/gluqlo.ttf", 260);
+    }
+    if (!m_fontClock)
+      Logger::warn("Clock font Rajdhani-Bold missing, fallback NotoSans.");
+    Logger::info(std::string("Clock fonts: flip=") +
+                 (m_fontFlip ? "ok" : "MISSING") + " clockMd=" +
+                 (m_fontClockMd ? "ok" : "MISSING") + " clock=" +
+                 (m_fontClock ? "ok" : "MISSING") + " fs=" +
+                 (m_fontClockFs ? "ok" : "MISSING"));
   }
 
   CoverManager::instance().init(m_renderer);
@@ -236,6 +274,7 @@ bool UIManager::init(SDL_Window *window, SDL_Renderer *renderer) {
 }
 
 void UIManager::shutdown() {
+  unlink("/tmp/stay_awake");
   // P0-2: stop thumb worker thread before destroying renderer
   stopThumbWorker();
   CoverManager::instance().shutdown();
@@ -248,6 +287,30 @@ void UIManager::shutdown() {
   if (m_fontTitle) {
     TTF_CloseFont(m_fontTitle);
     m_fontTitle = nullptr;
+  }
+  if (m_fontHuge) {
+    TTF_CloseFont(m_fontHuge);
+    m_fontHuge = nullptr;
+  }
+  if (m_fontClock) {
+    TTF_CloseFont(m_fontClock);
+    m_fontClock = nullptr;
+  }
+  if (m_fontClockSm) {
+    TTF_CloseFont(m_fontClockSm);
+    m_fontClockSm = nullptr;
+  }
+  if (m_fontClockFs) {
+    TTF_CloseFont(m_fontClockFs);
+    m_fontClockFs = nullptr;
+  }
+  if (m_fontClockMd) {
+    TTF_CloseFont(m_fontClockMd);
+    m_fontClockMd = nullptr;
+  }
+  if (m_fontFlip) {
+    TTF_CloseFont(m_fontFlip);
+    m_fontFlip = nullptr;
   }
   if (m_fontLarge) {
     TTF_CloseFont(m_fontLarge);
@@ -265,7 +328,29 @@ void UIManager::shutdown() {
   TTF_Quit();
 }
 
+bool UIManager::goBack() {
+  while (!m_stateHistory.empty()) {
+    UIState prev = m_stateHistory.back();
+    m_stateHistory.pop_back();
+    if (prev == m_currentState)
+      continue; // bỏ trùng, lùi tiếp
+    if (prev == UIState::EXIT_REQUESTED)
+      continue;
+    // Qua setState để giữ nguyên side-effect từng trang, nhưng không
+    // push ngược lại stack.
+    m_suppressPush = true;
+    setState(prev);
+    m_suppressPush = false;
+    Logger::error("[STATE] BACK");
+    return true;
+  }
+  return false;
+}
+
 void UIManager::setState(UIState state) {
+  // Rời launcher -> hủy arm thoát (tránh B ở trang khác rồi về bấm B thoát oan).
+  if (m_currentState == UIState::MENU && state != UIState::MENU)
+    m_exitArmedMs = 0;
   if ((m_currentState == UIState::YOUTUBE_RESULTS ||
        m_currentState == UIState::YOUTUBE_SEARCH) &&
       (state != UIState::YOUTUBE_RESULTS && state != UIState::YOUTUBE_SEARCH)) {
@@ -277,6 +362,18 @@ void UIManager::setState(UIState state) {
   }
 
   Logger::error("[STATE] SET");
+  // B = back: lưu trang hiện tại vào stack (trừ lặp liên tiếp, trừ EXIT).
+  // Giới hạn 30 để không phình RAM.
+  if (state != UIState::EXIT_REQUESTED && state != m_currentState) {
+    if (!m_suppressPush &&
+        (m_stateHistory.empty() || m_stateHistory.back() != m_currentState)) {
+      m_stateHistory.push_back(m_currentState);
+      if (m_stateHistory.size() > 30)
+        m_stateHistory.erase(m_stateHistory.begin());
+    }
+  }
+  if (state == UIState::EXIT_REQUESTED)
+    m_stateHistory.clear();
   m_currentState = state;
   InputManager::instance().reset();
   if (state == UIState::SYSTEM_SELECT) {
@@ -383,6 +480,12 @@ void UIManager::update() {
 
   // Poll Hardware FN Switch for GameCast stream toggle
   CastManager::instance().update();
+
+  // Đồng hồ: báo thức + pomodoro (poll 5s, giờ theo máy Brick)
+  pollClock();
+
+  // Thị trường: live 10 phút/lần khi đang ở tab giá
+  pollMarket();
 
   // P1-2: Poll /api/status moi 2s khi dang o man GAME_CAST va co stream chay.
   // Fetch qua detached thread de khong block UI; atomic de render doc gia tri
@@ -549,9 +652,11 @@ void UIManager::update() {
     if (!m_ytPendingStreamUrl.empty()) {
       std::string url = m_ytPendingStreamUrl;
       std::string vid = m_ytPendingVideoId;
+      std::string vtitle = m_ytPendingVideoTitle;
       m_ytPendingStreamUrl.clear();
       m_ytPendingVideoId.clear();
-      IPTVManager::instance().playYouTubeVideo(vid, url, "720");
+      m_ytPendingVideoTitle.clear();
+      IPTVManager::instance().playYouTubeVideo(vid, url, "720", vtitle);
       setState(UIState::YOUTUBE_RESULTS);
     } else {
       showToast("Không thể lấy link phát video", {239, 68, 68, 255}, 3000);
@@ -597,6 +702,8 @@ void UIManager::update() {
 
       if (selectedId == "games") {
         setState(UIState::SYSTEM_SELECT);
+      } else if (selectedId == "weather") {
+        openWeather();
       } else if (selectedId == "iptv") {
         if (IPTVManager::instance().playlistCount() == 0) {
           IPTVManager::instance().loadPlaylists();
@@ -664,8 +771,18 @@ void UIManager::update() {
         UpdateManager::instance().checkForUpdatesAsync();
       } else if (selectedId == "info") {
         setState(UIState::DIAGNOSTICS);
-      } else if (selectedId == "exit") {
+      }
+    } else if (input.isButtonJustPressed(Button::B)) {
+      // B 2 lần trong 3s để thoát app (thay nút THOÁT đã dọn).
+      // Lần 1 toast 3s, hết 3s không bấm nữa thì ở lại app.
+      uint32_t nowMs = SDL_GetTicks();
+      if (m_exitArmedMs != 0 && nowMs - m_exitArmedMs < 3000) {
+        m_exitArmedMs = 0;
         setState(UIState::EXIT_REQUESTED);
+      } else {
+        m_exitArmedMs = nowMs;
+        showToast("Bấm B thêm 1 lần nữa để thoát app", {245, 158, 11, 255},
+                  3000);
       }
     }
     break;
@@ -2723,6 +2840,26 @@ void UIManager::update() {
     break;
   }
 
+  case UIState::DEST_PICKER: {
+    handleFolderPickerInput();
+    break;
+  }
+
+  case UIState::TEXT_VIEWER: {
+    handleTextViewerInput();
+    break;
+  }
+
+  case UIState::CLOCK_ALARM: {
+    handleAlarmRingInput();
+    break;
+  }
+
+  case UIState::WEATHER: {
+    handleWeatherInput();
+    break;
+  }
+
   case UIState::LOCALSEND_SEND: {
     // Legacy: chuyển thẳng sang Game Picker (LOCALSEND_SEND giờ chỉ là
     // bước chọn device → mở game picker).
@@ -2920,6 +3057,13 @@ void UIManager::drawText(const std::string &text, int x, int y, SDL_Color color,
   m_ui.drawText(text, x, y, color, font, centered);
 }
 
+void UIManager::drawFlipDigits(const std::string &newText,
+                               const std::string &oldText, float t01, int x,
+                               int y, int w, int h, TTF_Font *font,
+                               SDL_Color color) {
+  m_ui.drawFlipDigits(newText, oldText, t01, x, y, w, h, font, color);
+}
+
 void UIManager::drawRect(int x, int y, int w, int h, SDL_Color color,
                          bool filled) {
   m_ui.drawRect(x, y, w, h, color, filled);
@@ -3067,6 +3211,21 @@ void UIManager::drawCard(int x, int y, int w, int h) {
 }
 void UIManager::drawFocusRow(int x, int y, int w, int h) {
   m_ui.drawFocusRow(x, y, w, h);
+}
+
+void UIManager::drawHighlight(int x, int y, int w, int h) {
+  if (!m_renderer || w <= 0 || h <= 0) return;
+  SDL_BlendMode prev;
+  SDL_GetRenderDrawBlendMode(m_renderer, &prev);
+  SDL_SetRenderDrawBlendMode(m_renderer, SDL_BLENDMODE_BLEND);
+  SDL_Color c = UiTheme::FOCUS_BG_SOFT;
+  SDL_SetRenderDrawColor(m_renderer, c.r, c.g, c.b, c.a);
+  SDL_Rect r = {PlatformInfo::instance().scaleX(x),
+                PlatformInfo::instance().scaleY(y),
+                PlatformInfo::instance().scaleW(w),
+                PlatformInfo::instance().scaleH(h)};
+  SDL_RenderFillRect(m_renderer, &r);
+  SDL_SetRenderDrawBlendMode(m_renderer, prev);
 }
 void UIManager::drawAppHeader(const std::string &title,
                               const std::string &sub) {
@@ -3227,6 +3386,13 @@ void UIManager::renderFooter() {
       m_currentState == UIState::LOCALSEND_PROGRESS ||
       m_currentState == UIState::FILE_EXPLORER ||
       m_currentState == UIState::GAME_CAST) {
+    return;
+  }
+
+  // WEATHER (thời tiết/đồng hồ/camera) tự vẽ footer riêng — global vẽ đè
+  // sẽ xóa hint của trang. Picker tỉnh/xã (m_wxMode != 0) không có footer
+  // riêng nên giữ global.
+  if (m_currentState == UIState::WEATHER && m_wxMode == 0) {
     return;
   }
 
@@ -3490,7 +3656,8 @@ void UIManager::renderMenuState() {
   drawAppFooter({{UiTheme::PadBtn::A, "Mở"},
                  {UiTheme::PadBtn::DPAD, "Chuyển"},
                  {UiTheme::PadBtn::SELECT, "Thông tin"},
-                 {UiTheme::PadBtn::START, "Cài đặt"}});
+                 {UiTheme::PadBtn::START, "Cài đặt"},
+                 {UiTheme::PadBtn::B, "Thoát"}});
 }
 
 void UIManager::renderSystemSelectState() {
@@ -6057,12 +6224,15 @@ void UIManager::renderIPTVState() {
                midY + 14, {100, 110, 125, 255}, m_fontSmall, true);
     }
   } else {
-    // Do ping nen cho cac kenh dang hien thi (khong chan UI, co cache)
+    // Do ping nền cho cửa sổ giới hạn: trang hiện tại + 2 trang kế
+    // (tối đa 24 kênh). Worker ping đơn (không đẻ thread mỗi frame) nên
+    // lướt list 10k kênh cũng không crash. Kênh ngoài cửa sổ đo khi tới.
     {
+      constexpr int kPingWindow = 24;
       std::vector<std::string> pingUrls;
-      pingUrls.reserve(visibleItems);
+      pingUrls.reserve(kPingWindow);
       for (int i = m_iptvScrollOffset;
-           i < channelCount && i < m_iptvScrollOffset + visibleItems; i++) {
+           i < channelCount && i < m_iptvScrollOffset + kPingWindow; i++) {
         pingUrls.push_back(channels[i].url);
       }
       IPTVManager::instance().prefetchPings(pingUrls);
@@ -6401,6 +6571,13 @@ void UIManager::render() {
                          UiTheme::BG_APP.b, 255);
   SDL_RenderClear(m_renderer);
 
+  // Fullscreen đồng hồ: chỉ số trên nền đen, bỏ mọi chrome.
+  if (m_clkFullscreen && m_currentState == UIState::WEATHER && m_wxTab == 1) {
+    renderClockFullscreen();
+    SDL_RenderPresent(m_renderer);
+    return;
+  }
+
   renderHeader();
 
   switch (m_currentState) {
@@ -6489,6 +6666,19 @@ void UIManager::render() {
   case UIState::FILE_EXPLORER:
     renderFileExplorer();
     renderConfirmDialogFromState();
+    break;
+  case UIState::DEST_PICKER:
+    renderLocalSendFolderPicker();
+    renderConfirmDialogFromState();
+    break;
+  case UIState::TEXT_VIEWER:
+    renderTextViewer();
+    break;
+  case UIState::CLOCK_ALARM:
+    renderAlarmRing();
+    break;
+  case UIState::WEATHER:
+    renderWeather();
     break;
   case UIState::GAME_CAST:
     renderGameCastState();
@@ -7050,6 +7240,19 @@ void UIManager::triggerYouTubeSearch() {
 void UIManager::playYouTubeVideo(const std::string &videoId) {
   if (videoId.empty() || m_ytIsLoadingVideo)
     return;
+
+  // Tiêu đề cho OSD top bar: tìm trong kết quả search (không đổi logic search)
+  std::string videoTitle;
+  for (const auto *vec : {&m_ytItems, &m_ytAllItems}) {
+    for (const auto &it : *vec) {
+      if (it.type == YtItem::Type::Video && it.id == videoId && !it.title.empty()) {
+        videoTitle = it.title;
+        break;
+      }
+    }
+    if (!videoTitle.empty()) break;
+  }
+  m_ytPendingVideoTitle = videoTitle;
 
   // Check if already in memory cache
   auto it = m_ytStreamUrlCache.find(videoId);
@@ -7928,7 +8131,7 @@ void UIManager::renderLocalSendFolderPicker() {
 
   drawAppBackground();
 
-  drawAppHeader("CHỌN THƯ MỤC NHẬN FILE");
+  drawAppHeader(m_expPickerTitle.c_str());
 
   uint64_t freeB = LsUtil::sdFreeBytes("/mnt/SDCARD");
   drawText("Trống: " + LsUtil::humanSize(freeB), 996, 22, {34, 197, 94, 255},
@@ -9038,35 +9241,29 @@ void UIManager::renderYouTubeHomeChannelLayout(int contentTop, int contentH) {
     }
   }
 
-  // Vòng tròn logo kênh (đường kính 104px, căn giữa card Cột 0)
-  int circleSize = 104;
-  int circleX = col1X + (col1W - circleSize) / 2;
-  int circleY = channelCardY + (channelCardH - circleSize) / 2;
-  SDL_Color circleBg =
-      isCol0Sel ? SDL_Color{0, 160, 216, 255} : SDL_Color{28, 42, 60, 255};
-  drawRoundedRect(circleX, circleY, circleSize, circleSize, circleSize / 2,
-                  circleBg, true);
-
+  // Avatar kênh gốc (vuông, không vòng tròn), x2 = 208px
+  int avSize = 208;
+  int avX = col1X + (col1W - avSize) / 2;
+  int avY = channelCardY + (channelCardH - avSize) / 2;
   if (chAvatarTex) {
-    SDL_Rect avatarDst = {circleX + 4, circleY + 4, circleSize - 8,
-                          circleSize - 8};
+    SDL_Rect avatarDst = {avX, avY, avSize, avSize};
     SDL_RenderCopy(m_renderer, chAvatarTex, nullptr, &avatarDst);
   } else {
+    SDL_Color letterBg =
+        isCol0Sel ? SDL_Color{0, 160, 216, 255} : SDL_Color{28, 42, 60, 255};
+    drawRoundedRect(avX, avY, avSize, avSize, 10, letterBg, true);
     std::string firstChar = m_ytMatchedChannel.name.empty()
                                 ? "K"
                                 : utf8FirstChar(m_ytMatchedChannel.name);
     SDL_Color textCol =
         isCol0Sel ? SDL_Color{255, 255, 255, 255} : UiTheme::ACCENT_CYAN;
-    drawText(firstChar, circleX + circleSize / 2, circleY + circleSize / 2 - 14,
+    drawText(firstChar, avX + avSize / 2, avY + avSize / 2 - 14,
              textCol, m_fontLarge, true);
   }
 
   if (isCol0Sel) {
-    drawRoundedBorder(circleX, circleY, circleSize, circleSize, circleSize / 2,
+    drawRoundedBorder(avX, avY, avSize, avSize, 10,
                       UiTheme::FOCUS_GLOW, 3);
-  } else {
-    drawRoundedBorder(circleX, circleY, circleSize, circleSize, circleSize / 2,
-                      SDL_Color{45, 65, 88, 200}, 1);
   }
 
   // Cột 1 (Bên phải): Tên kênh + Lượng subscribers + Vcount
@@ -9220,7 +9417,7 @@ void UIManager::applyYouTubeSearchResults(std::vector<std::string> results) {
       std::string avatarPath = "/tmp/yt_thumbs/ch_" + chHash + ".jpg";
       system("mkdir -p /tmp/yt_thumbs 2>/dev/null");
       std::string curlCmd =
-          "curl -sL -m 5 \"" + avatarUrl + "\" -o \"" + avatarPath + "\" &";
+          "curl -4 -k -sL -m 5 \"" + avatarUrl + "\" -o \"" + avatarPath + "\" &";
       system(curlCmd.c_str());
     }
   } else {

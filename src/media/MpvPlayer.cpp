@@ -3,6 +3,7 @@
 #include "../logging/Logger.h"
 #include "../platform/PlatformInfo.h"
 #include <SDL2/SDL.h>
+#include <SDL2/SDL_image.h>
 #include <fcntl.h>
 #include <signal.h>
 #include <cstring>
@@ -105,7 +106,40 @@ bool MpvPlayer::cyclePause(const std::string& sockOverride) {
 bool MpvPlayer::showOverlayIcon(const std::string& appRoot,
                                 const std::string& iconName, unsigned dMs,
                                 const std::string& sockOverride) {
+    // Nguồn PNG (user chỉ cần thả PNG, file y như cũ). Decode 1 lần ra
+    // cache /tmp, PNG mới hơn thì decode lại. Fallback .raw ship sẵn.
     std::string raw = appRoot + "/assets/player_icons/" + iconName + ".raw";
+    std::string png = appRoot + "/assets/player_icons/" + iconName + ".png";
+    std::string cached = "/tmp/osd_icon_" + iconName + ".raw";
+    struct stat pst, cst;
+    bool hasPng = (stat(png.c_str(), &pst) == 0);
+    bool cacheFresh = (stat(cached.c_str(), &cst) == 0 &&
+                       (!hasPng || cst.st_mtime >= pst.st_mtime));
+    if (hasPng && !cacheFresh) {
+        SDL_Surface* src = IMG_Load(png.c_str());
+        if (src) {
+            SDL_Surface* dst =
+                SDL_CreateRGBSurfaceWithFormat(0, 128, 128, 32, SDL_PIXELFORMAT_BGRA32);
+            if (dst) {
+                SDL_BlitScaled(src, nullptr, dst, nullptr);
+                // OSD flash 50% trong suốt: giảm nửa alpha toàn bộ điểm ảnh
+                SDL_LockSurface(dst);
+                uint8_t* px = (uint8_t*)dst->pixels;
+                for (int i = 3; i < 128 * 128 * 4; i += 4)
+                    px[i] = px[i] / 2;
+                SDL_UnlockSurface(dst);
+                FILE* fp = fopen(cached.c_str(), "wb");
+                if (fp) {
+                    fwrite(dst->pixels, 1, 128 * 128 * 4, fp);
+                    fclose(fp);
+                    cacheFresh = true;
+                }
+                SDL_FreeSurface(dst);
+            }
+            SDL_FreeSurface(src);
+        }
+    }
+    if (cacheFresh) raw = cached;
     if (access(raw.c_str(), R_OK) != 0) return false;
     int sw = 1024, sh = 768; float ar = 4.0f / 3.0f;
     PlatformInfo::instance().getDisplayMetrics(sw, sh, ar);

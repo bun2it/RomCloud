@@ -49,6 +49,15 @@ $ZIG c++ \
     src/ui/UiRenderer.cpp \
     src/ui/UiStrings.cpp \
     src/ui/ExplorerSync.cpp \
+    src/weather/WeatherManager.cpp \
+    src/calendar/CalManager.cpp \
+    src/ui/WeatherUI.cpp \
+    src/clock/ClockStore.cpp \
+    src/ui/ClockUI.cpp \
+    src/market/MarketManager.cpp \
+    src/ui/MarketUI.cpp \
+    src/camera/CameraManager.cpp \
+    src/ui/TrafficUI.cpp \
     src/ui/ExplorerInput.cpp \
     src/ui/ExplorerRender.cpp \
     src/ui/ExplorerRenderKb.cpp \

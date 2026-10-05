@@ -110,6 +110,168 @@ void UiRenderer::drawText(const std::string &text, int x, int y,
   SDL_RenderCopy(m_r, texture, nullptr, &dstRect);
 }
 
+void UiRenderer::drawFlipDigits(const std::string& newText,
+                                const std::string& oldText, float t01, int x,
+                                int y, int w, int h, TTF_Font* font,
+                                SDL_Color color) {
+  if (!m_r || !font || newText.empty() || w <= 0 || h <= 0)
+    return;
+  auto texOf = [&](const std::string& text, int& tw, int& th) -> SDL_Texture* {
+    char keyBuf[128];
+    uint32_t colorInt =
+        (color.r << 24) | (color.g << 16) | (color.b << 8) | color.a;
+    std::snprintf(keyBuf, sizeof(keyBuf), "%p_%08x_", (void*)font, colorInt);
+    std::string key = std::string(keyBuf) + text;
+    auto it = m_textCache.find(key);
+    if (it != m_textCache.end()) {
+      tw = it->second.w;
+      th = it->second.h;
+      it->second.lastUsed = SDL_GetTicks();
+      return it->second.texture;
+    }
+    SDL_Surface* surface = TTF_RenderUTF8_Blended(font, text.c_str(), color);
+    if (!surface)
+      return nullptr;
+    SDL_Texture* t = SDL_CreateTextureFromSurface(m_r, surface);
+    tw = surface->w;
+    th = surface->h;
+    SDL_FreeSurface(surface);
+    if (!t)
+      return nullptr;
+    if (m_textCache.size() >= 256) {
+      auto oldest = m_textCache.begin();
+      for (auto iter = m_textCache.begin(); iter != m_textCache.end(); ++iter) {
+        if (iter->second.lastUsed < oldest->second.lastUsed)
+          oldest = iter;
+      }
+      if (oldest->second.texture)
+        SDL_DestroyTexture(oldest->second.texture);
+      m_textCache.erase(oldest);
+    }
+    m_textCache[key] = {t, tw, th, SDL_GetTicks()};
+    return t;
+  };
+  int twN = 0, thN = 0;
+  SDL_Texture* texN = texOf(newText, twN, thN);
+  if (!texN || twN <= 0 || thN <= 0)
+    return;
+  int sx = PlatformInfo::instance().scaleX(x);
+  int sy = PlatformInfo::instance().scaleY(y);
+  int sw = PlatformInfo::instance().scaleW(w);
+  int sh = PlatformInfo::instance().scaleH(h);
+  int dxN = sx + (sw - twN) / 2;
+  int dyN = sy + (sh - thN) / 2;
+  // Bản lề GIỮA THẺ như gluqlo/Fliqlo (không bám theo mực glyph:
+  // bám mực khiến cánh chỉ cao vài px với font nhỏ → nhìn như không lật).
+  int midY = sy + sh / 2;
+  int twO = 0, thO = 0;
+  SDL_Texture* texO = nullptr;
+  bool anim = (t01 >= 0.0f && t01 < 1.0f && !oldText.empty() &&
+               oldText != newText);
+  int dxO = dxN, dyO = dyN;
+  if (anim) {
+    texO = texOf(oldText, twO, thO);
+    if (!texO || twO <= 0 || thO <= 0) {
+      anim = false;
+    } else {
+      dxO = sx + (sw - twO) / 2;
+      dyO = sy + (sh - thO) / 2;
+    }
+  }
+  // Nửa tĩnh trên của 1 texture (hàng trên bản lề), kẹp trong thẻ.
+  auto drawTopHalf = [&](SDL_Texture* tex, int dx, int dy, int tw, int th) {
+    int srcH = midY - dy; // số hàng texture nằm trên bản lề
+    if (srcH <= 0 || th <= 0)
+      return;
+    if (srcH > th)
+      srcH = th;
+    SDL_Rect src = {0, 0, tw, srcH};
+    SDL_Rect dst = {dx, dy, tw, srcH};
+    SDL_Rect clip = {sx, sy, sw, midY - sy};
+    SDL_RenderSetClipRect(m_r, &clip);
+    SDL_RenderCopy(m_r, tex, &src, &dst);
+    SDL_RenderSetClipRect(m_r, nullptr);
+  };
+  // Nửa tĩnh dưới của 1 texture (hàng dưới bản lề), kẹp trong thẻ.
+  auto drawBottomHalf = [&](SDL_Texture* tex, int dx, int dy, int tw, int th) {
+    int skip = midY - dy; // số hàng texture nằm trên bản lề -> bỏ qua
+    if (skip < 0)
+      skip = 0;
+    if (skip >= th)
+      return;
+    SDL_Rect src = {0, skip, tw, th - skip};
+    SDL_Rect dst = {dx, dy + skip, tw, th - skip};
+    SDL_Rect clip = {sx, midY, sw, sy + sh - midY};
+    SDL_RenderSetClipRect(m_r, &clip);
+    SDL_RenderCopy(m_r, tex, &src, &dst);
+    SDL_RenderSetClipRect(m_r, nullptr);
+  };
+  if (!anim) {
+    SDL_Rect dst = {dxN, dyN, twN, thN};
+    SDL_RenderCopy(m_r, texN, nullptr, &dst);
+  } else {
+    float t = t01 < 0.0f ? 0.0f : (t01 > 1.0f ? 1.0f : t01);
+    if (t < 0.5f) {
+      // Phase A — Gấp nửa trên xuống (gluqlo upperhalf):
+      // đáy = số cũ nguyên (giữ chỗ), mặt = số mới tĩnh đè dưới cánh cũ,
+      // cánh = NỬA TRÊN số cũ co cos(p*pi/2) về bản lề, tối dần.
+      float p = t * 2.0f;
+      drawBottomHalf(texO, dxO, dyO, twO, thO);
+      drawTopHalf(texN, dxN, dyN, twN, thN);
+      int fullH = midY - dyO;
+      if (fullH > thO)
+        fullH = thO;
+      if (fullH > 0) {
+        float scale = std::cos((float)M_PI * p / 2.0f);
+        int dstH = (int)(fullH * scale);
+        if (dstH > 0) {
+          SDL_Rect src = {0, 0, twO, fullH};
+          SDL_Rect dst = {dxO, midY - dstH, twO, dstH};
+          SDL_Rect clip = {sx, sy, sw, midY - sy};
+          Uint8 shade = (Uint8)(255 - 185 * p); // sáng -> tối
+          SDL_RenderSetClipRect(m_r, &clip);
+          SDL_SetTextureColorMod(texO, shade, shade, shade);
+          SDL_RenderCopy(m_r, texO, &src, &dst);
+          SDL_SetTextureColorMod(texO, 255, 255, 255);
+          SDL_RenderSetClipRect(m_r, nullptr);
+        }
+      }
+    } else {
+      // Phase B — Mở nửa dưới ra: mặt = số mới tĩnh, đáy cũ lót dưới
+      // (vùng chưa phủ vẫn thấy số cũ), cánh = NỬA DƯỚI số mới giãn
+      // sin(p*pi/2) từ bản lề xuống, sáng dần.
+      float p = (t - 0.5f) * 2.0f;
+      drawTopHalf(texN, dxN, dyN, twN, thN);
+      drawBottomHalf(texO, dxO, dyO, twO, thO);
+      int skip = midY - dyN;
+      if (skip < 0)
+        skip = 0;
+      int fullH = thN - skip;
+      if (fullH > 0) {
+        float eased = std::sin((float)M_PI * p / 2.0f);
+        int dstH = (int)(fullH * eased);
+        if (dstH > 0) {
+          SDL_Rect src = {0, skip, twN, fullH};
+          SDL_Rect dst = {dxN, midY, twN, dstH};
+          SDL_Rect clip = {sx, midY, sw, sy + sh - midY};
+          Uint8 shade = (Uint8)(70 + 185 * p); // tối -> sáng
+          SDL_RenderSetClipRect(m_r, &clip);
+          SDL_SetTextureColorMod(texN, shade, shade, shade);
+          SDL_RenderCopy(m_r, texN, &src, &dst);
+          SDL_SetTextureColorMod(texN, 255, 255, 255);
+          SDL_RenderSetClipRect(m_r, nullptr);
+        }
+      }
+    }
+  }
+  // Vạch chia split-flap giữa thẻ (đè lên số) như gluqlo, dày 6px.
+  SDL_SetRenderDrawColor(m_r, 0, 0, 0, 255);
+  SDL_Rect line1 = {sx, midY - 3, sw, 6};
+  SDL_RenderFillRect(m_r, &line1);
+  SDL_SetRenderDrawColor(m_r, 26, 26, 26, 255);
+  SDL_Rect line2 = {sx, midY + 3, sw, 1};
+  SDL_RenderFillRect(m_r, &line2);
+}
 void UiRenderer::drawRect(int x, int y, int w, int h, SDL_Color color,
                           bool filled) {
   if (!m_r)
@@ -408,6 +570,14 @@ void UiRenderer::drawButtonIcon(const std::string &button, int x, int y,
                                 int size) {
   if (!m_r)
     return;
+  // Icon kép: 2 icon full-size cạnh nhau, cao == iconSize (~cao chữ).
+  if (button == "L1R1" || button == "UPDOWN") {
+    std::string a = (button == "L1R1") ? "L1" : "UP";
+    std::string b = (button == "L1R1") ? "R1" : "DOWN";
+    drawButtonIcon(a, x, y, size);
+    drawButtonIcon(b, x + size + 2, y, size);
+    return;
+  }
   static const std::unordered_map<std::string, std::string> kMap = {
       {"A", "a.png"},
       {"B", "b.png"},
@@ -639,7 +809,11 @@ void UiRenderer::drawRow(int x, int y, int w, int h, bool focused, bool dim) {
   if (focused) {
     drawRoundedRect(x - 2, y - 2, w + 4, h + 4, UiTheme::RADIUS_ROW + 2,
                     UiTheme::FOCUS_GLOW, false);
-    drawRoundedRect(x, y, w, h, UiTheme::RADIUS_ROW, UiTheme::FOCUS_BG, true);
+    SDL_BlendMode prev;
+    SDL_GetRenderDrawBlendMode(m_r, &prev);
+    SDL_SetRenderDrawBlendMode(m_r, SDL_BLENDMODE_BLEND);
+    drawRoundedRect(x, y, w, h, UiTheme::RADIUS_ROW, UiTheme::FOCUS_BG_SOFT, true);
+    SDL_SetRenderDrawBlendMode(m_r, prev);
   } else {
     SDL_Color bg = dim ? UiTheme::CARD_BG : UiTheme::CARD_SOLID;
     drawRoundedRect(x, y, w, h, UiTheme::RADIUS_ROW, bg, true);
@@ -683,14 +857,20 @@ void UiRenderer::drawRowMainSub(int x, int y, int h, const std::string &main,
     drawText(s, x, ty + thM + gap, UiTheme::TEXT_SUB, fSub);
 }
 
+int UiRenderer::buttonIconWidth(const std::string& button, int size) {
+  if (button == "L1R1" || button == "UPDOWN") return 2 * size + 2;
+  return size;
+}
+
 int UiRenderer::drawFooterHint(const std::string &button,
                                const std::string &label, int x, int barY,
                                int barH, SDL_Color color, TTF_Font *font,
                                int iconSize, int gap) {
   int centerY = barY + barH / 2;
+  int iw = buttonIconWidth(button, iconSize);
   int iconY = centerY - iconSize / 2;
   drawButtonIcon(button, x, iconY, iconSize);
-  int lx = x + iconSize + gap;
+  int lx = x + iw + gap;
   int th = textHeight(font);
   int ty = centerY - th / 2;
   drawText(label, lx, ty, color, font);
@@ -705,7 +885,7 @@ void UiRenderer::drawFooterHintsCentered(
     return;
   int totalW = 0;
   for (size_t i = 0; i < hints.size(); ++i) {
-    totalW += iconSize + gap + textWidth(hints[i].second, font);
+    totalW += buttonIconWidth(hints[i].first, iconSize) + gap + textWidth(hints[i].second, font);
     if (i + 1 < hints.size())
       totalW += hintGap;
   }
@@ -828,7 +1008,7 @@ void UiRenderer::drawInlineHintsCentered(const std::string &text, int centerX,
   int totalW = 0;
   for (auto &s : segs) {
     if (s.isBtn)
-      totalW += iconSize + gap;
+      totalW += buttonIconWidth(s.s, iconSize) + gap;
     else
       totalW += textWidth(s.s, font);
   }
@@ -836,7 +1016,7 @@ void UiRenderer::drawInlineHintsCentered(const std::string &text, int centerX,
   for (auto &s : segs) {
     if (s.isBtn) {
       drawButtonIcon(s.s, x, y + (th - iconSize) / 2, iconSize);
-      x += iconSize + gap;
+      x += buttonIconWidth(s.s, iconSize) + gap;
     } else {
       drawText(s.s, x, y, color, font);
       x += textWidth(s.s, font);
@@ -856,7 +1036,12 @@ void UiRenderer::drawCard(int x, int y, int w, int h) {
 void UiRenderer::drawFocusRow(int x, int y, int w, int h) {
   drawRoundedRect(x - 2, y - 2, w + 4, h + 4, UiTheme::RADIUS_ROW + 2,
                   UiTheme::FOCUS_GLOW, false);
-  drawRoundedRect(x, y, w, h, UiTheme::RADIUS_ROW, UiTheme::FOCUS_BG, true);
+  // Fill chọn trong suốt 25% (rule highlight) — bật blend cục bộ.
+  SDL_BlendMode prev;
+  SDL_GetRenderDrawBlendMode(m_r, &prev);
+  SDL_SetRenderDrawBlendMode(m_r, SDL_BLENDMODE_BLEND);
+  drawRoundedRect(x, y, w, h, UiTheme::RADIUS_ROW, UiTheme::FOCUS_BG_SOFT, true);
+  SDL_SetRenderDrawBlendMode(m_r, prev);
 }
 
 void UiRenderer::drawHeaderStatus() {
@@ -1159,7 +1344,7 @@ void UiRenderer::drawAppFooter(const std::vector<UiTheme::FooterHint> &hints) {
   int hintGap = UiTheme::FOOTER_HINT_GAP;
   int totalW = 0;
   for (size_t k = 0; k < legacy.size(); ++k) {
-    totalW += iconSize + gap + textWidth(legacy[k].second, m_fSmall);
+    totalW += buttonIconWidth(legacy[k].first, iconSize) + gap + textWidth(legacy[k].second, m_fSmall);
     if (k + 1 < legacy.size())
       totalW += hintGap;
   }
@@ -1167,7 +1352,7 @@ void UiRenderer::drawAppFooter(const std::vector<UiTheme::FooterHint> &hints) {
     hintGap = 20;
   totalW = 0;
   for (size_t k = 0; k < legacy.size(); ++k) {
-    totalW += iconSize + gap + textWidth(legacy[k].second, m_fSmall);
+    totalW += buttonIconWidth(legacy[k].first, iconSize) + gap + textWidth(legacy[k].second, m_fSmall);
     if (k + 1 < legacy.size())
       totalW += hintGap;
   }

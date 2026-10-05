@@ -29,6 +29,15 @@ public:
     // ---- primitive co ban ----
     void drawText(const std::string& text, int x, int y, SDL_Color color,
                   TTF_Font* font, bool centered = false);
+    // Vẽ nội dung số của 1 thẻ lật, căn giữa trong rect (x,y,w,h).
+    // Kiến trúc gluqlo/Fliqlo: bản lề GIỮA THẺ (midY = y + h/2).
+    // t01 < 0: tĩnh, vẽ đầy đủ số mới. Ngược lại 0..1 là tiến trình lật
+    // (~320ms, fake-3D scale 2D): phase A (t<0.5) cánh NỬA TRÊN số cũ gập
+    // cos(p*pi/2) về bản lề; phase B cánh NỬA DƯỚI số mới mở sin(p*pi/2).
+    // Texture số cache sẵn (pre-render) nên blit mỗi frame rất rẻ.
+    void drawFlipDigits(const std::string& newText, const std::string& oldText,
+                        float t01, int x, int y, int w, int h,
+                        TTF_Font* font, SDL_Color color);
     void drawRect(int x, int y, int w, int h, SDL_Color color, bool filled);
     void drawBorder(int x, int y, int w, int h, SDL_Color color, int thickness);
     void drawRoundedRect(int x, int y, int w, int h, int radius,
@@ -44,6 +53,8 @@ public:
     void drawIcon(const std::string& iconName, int x, int y, int w, int h);
     void drawPlayerIcon(const std::string& iconName, int x, int y, int w, int h);
     void drawButtonIcon(const std::string& button, int x, int y, int size);
+    // Rộng icon theo button: L1R1/UPDOWN = 2 icon full-size cạnh nhau.
+    static int buttonIconWidth(const std::string& button, int size);
     void drawGridIcon(const std::string& iconFile, int x, int y, int w, int h);
 
     // ---- do chu ----

@@ -11,6 +11,8 @@
 #include <vector>
 
 #include "../common/BackgroundTask.h"
+#include "../archive/ArchiveEngine.h"
+#include "../config/AppConfig.h"
 #include "../filesystem/FileSystemManager.h"
 #include "../ui/DialogManager.h"
 #include "../ui/VirtualKeyboard.h"
@@ -264,6 +266,40 @@ public:
       return true;
     }
     return false;
+  }
+
+  // Bung file .zip/.rar/.7z đang chọn vào chính thư mục đang đứng.
+  // Chạy nền qua m_task → progress dialog + hủy + toast có sẵn.
+  bool extractArchiveHere() {
+    return extractArchiveTo(m_path, "");
+  }
+
+  // Bung archive (mặc định = file đang chọn) vào dstDir.
+  bool extractArchiveTo(const std::string& dstDir, const std::string& archiveOverride = "") {
+    const ExplorerEntry *e = current();
+    std::string archive = archiveOverride.empty() ? (e ? e->path : "") : archiveOverride;
+    if (archive.empty() || !ArchiveEngine::isArchive(archive))
+      return false;
+    if (archiveOverride.empty() && (!e || e->isDir))
+      return false;
+    struct stat st;
+    if (stat(archive.c_str(), &st) != 0)
+      return false;
+    std::string dst = dstDir;
+    std::string appRoot = AppConfig::instance().getAppRoot();
+    ArchiveEngine::Tool tool = ArchiveEngine::findTool(appRoot, archive);
+    if (!tool.ok) {
+      m_dialogs.toastMsg(ArchiveEngine::missingToolError());
+      return false;
+    }
+    m_task.run([tool, archive, dst](TaskProgress &prog) {
+      bool ok = ArchiveEngine::extract(tool.bin, tool.use7z, archive, dst, prog);
+      if (prog.cancel)
+        prog.error = "Cancelled";
+      else if (!ok && prog.error.empty())
+        prog.error = "Bung thất bại";
+    });
+    return true;
   }
 
   void askDelete(std::function<void(bool)> onDone = nullptr) {

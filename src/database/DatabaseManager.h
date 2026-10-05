@@ -3,6 +3,7 @@
 #include <vector>
 #include <cstdint>
 #include <mutex>
+#include <functional>
 #include <sqlite3.h>
 
 namespace RomCloud {
@@ -91,6 +92,11 @@ public:
     bool beginTransaction();
     bool commitTransaction();
     bool rollbackTransaction();
+
+    // SQL chung cho module khác (VD CalManager): chạy lệnh + đọc rows.
+    bool exec(const std::string& sql);
+    bool query(const std::string& sql,
+               const std::function<void(sqlite3_stmt* st)>& row);
 
 private:
     DatabaseManager() = default;

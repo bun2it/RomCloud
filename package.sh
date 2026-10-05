@@ -59,12 +59,21 @@ if [ -f bin/yt-dlp ]; then
     cp bin/yt-dlp "$STAGING_DIR/Apps/RomCloud/bin/"
     chmod +x "$STAGING_DIR/Apps/RomCloud/bin/yt-dlp"
 fi
+# Backend bung .zip/.rar/.7z trong File Explorer (ArchiveEngine)
+if [ -f bin/7zzs ]; then
+    cp bin/7zzs "$STAGING_DIR/Apps/RomCloud/bin/"
+    chmod +x "$STAGING_DIR/Apps/RomCloud/bin/7zzs"
+fi
 if [ -d scripts ]; then
     cp -r scripts/* "$STAGING_DIR/Apps/RomCloud/scripts/"
     chmod +x "$STAGING_DIR/Apps/RomCloud/scripts/"*.sh 2>/dev/null || true
 fi
 
 cp assets/fonts/NotoSans-Regular.ttf "$STAGING_DIR/Apps/RomCloud/assets/fonts/"
+cp assets/vn_wards.json "$STAGING_DIR/Apps/RomCloud/assets/" 2>/dev/null || true
+cp assets/traffic_cams.json "$STAGING_DIR/Apps/RomCloud/assets/" 2>/dev/null || true
+mkdir -p "$STAGING_DIR/Apps/RomCloud/assets/weather_icons"
+cp assets/weather_icons/*.png "$STAGING_DIR/Apps/RomCloud/assets/weather_icons/" 2>/dev/null || true
 cp -r assets/stock_keyboard/* "$STAGING_DIR/Apps/RomCloud/assets/stock_keyboard/"
 cp assets/icons/*.png "$STAGING_DIR/Apps/RomCloud/assets/icons/"
 cp assets/apps_icons/*.png "$STAGING_DIR/Apps/RomCloud/assets/apps_icons/" 2>/dev/null || true

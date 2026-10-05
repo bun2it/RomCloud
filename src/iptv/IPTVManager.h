@@ -1,4 +1,5 @@
 #pragma once
+#include <atomic>
 #include <string>
 #include <vector>
 #include <mutex>
@@ -211,7 +212,7 @@ public:
     bool ensureMediaPlayerAvailable();
 
     int getLastPlayingIndex() const { return m_lastPlayingIndex; }
-    bool playYouTubeVideo(const std::string& videoId, const std::string& initialUrl, const std::string& quality = "720");
+    bool playYouTubeVideo(const std::string& videoId, const std::string& initialUrl, const std::string& quality = "720", const std::string& title = "");
     bool playYouTubeUrl(const std::string& url);
     bool switchYouTubeQuality(const std::string& videoId, const std::string& targetQuality);
     void showOverlayIcon(const std::string& iconName, uint32_t durationMs = 1400);
@@ -284,6 +285,21 @@ private:
 
     bool m_isPlaying = false;
     std::string m_currentChannel;
+    // YouTube OSD (UI-only): tiêu đề video + trạng thái thanh điều khiển
+    std::string m_ytTitle;
+    std::string m_ytQuality = "720";
+    bool m_ytOsdOn = false;
+    uint32_t m_ytOsdExpire = 0;
+    uint32_t m_ytOsdLastRefresh = 0;
+    double m_ytDuration = -1.0;
+    void showYouTubeOSD();
+    void hideYouTubeOSD();
+    // Flash giữa: icon .raw nếu user đã thêm file, ngược lại chữ (tự chuyển,
+    // không sửa logic khi có icon mới: aspect/cc/speed/quality).
+    void flashCenter(const std::string& icon, const std::string& textCmd);
+    double ytTimePos();
+    double ytDuration();
+    double ytCacheAhead();
     // P1-3: PID mpv do MpvPlayer giu duy nhat (isPlaying()/pid()/pollExited()).
     // Dùng MpvPlayer::instance() thay cho mirror m_mpvPid.
     bool isMpvPlaying() const;
@@ -311,6 +327,10 @@ private:
     // Ping cache cho channel list (key=URL, value=ms; -1=lỗi)
     std::unordered_map<std::string, int> m_pingCache;
     std::unordered_set<std::string> m_pingInFlight;
+    // Chống thread-storm khi lướt list lớn (10k kênh): chỉ 1 worker ping
+    // tại một thời điểm; yêu cầu mới ghi đè vào hàng đợi.
+    std::atomic<bool> m_pingWorkerActive{false};
+    std::vector<std::string> m_pingPending;
 };
 
 } // namespace RomCloud
