@@ -7,6 +7,7 @@
 #include <fcntl.h>
 #include <signal.h>
 #include <cstring>
+#include <deque>
 #include <sys/stat.h>
 #include <cstdio>
 #include <fstream>
@@ -268,23 +269,28 @@ bool MpvPlayer::stop() {
     return true;
 }
 
-// Doc file stderr cua mpv, moi dong dump vao Logger voi cat=MPV, prefix [stderr].
-// Sau do unlink file de /tmp khong bi day. Gioi han dong dai 256 de khong spam debug.log.
+// Doc file stderr cua mpv, chỉ forward 60 dòng CUỐI vao debug.log (mpv
+// verbose có thể hàng nghìn dòng -> dump hết trên UI thread gây đứng hình
+// lúc thoát video). Sau do unlink file de /tmp khong bi day.
 void MpvPlayer::forwardMpvLogToDebug() {
     if (m_lastLogPath.empty()) return;
     std::ifstream f(m_lastLogPath);
     if (f.is_open()) {
         std::string line;
-        int n = 0;
+        std::deque<std::string> tail;
         while (std::getline(f, line)) {
             if (line.empty()) continue;
             // Trim trailing CR
             while (!line.empty() && (line.back() == '\r' || line.back() == '\n')) line.pop_back();
             if (line.empty()) continue;
             if (line.size() > 240) line = line.substr(0, 237) + "...";
-            RC_LOG_INFO(MPV, "[" + std::to_string(++n) + "] " + line);
+            tail.push_back(line);
+            if (tail.size() > 60) tail.pop_front();
         }
         f.close();
+        int n = 0;
+        for (auto& t : tail)
+            RC_LOG_INFO(MPV, "[" + std::to_string(++n) + "] " + t);
     }
     unlink(m_lastLogPath.c_str());
     m_lastLogPath.clear();

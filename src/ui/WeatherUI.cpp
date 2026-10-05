@@ -261,7 +261,7 @@ void UIManager::renderWeather() {
     drawRect(0, 0, UiTheme::APP_W, UiTheme::HEADER_H, UiTheme::FOOTER_BG, true);
     drawRect(0, UiTheme::HEADER_H - 1, UiTheme::APP_W, 1, UiTheme::FOOTER_LINE,
              true);
-    const std::string title = "THỊ TRƯỜNG";
+    const std::string title = "GIÁ CẢ";
     drawText(title, 24, textYCentered(0, UiTheme::HEADER_H, m_fontLarge),
              UiTheme::ACCENT_CYAN, m_fontLarge);
     int tx = 24 + textWidth(title, m_fontLarge) + 16;
@@ -271,6 +271,8 @@ void UIManager::renderWeather() {
     drawHeaderStatus();
   } else if (m_wxTab == 1) {
     drawAppHeader("ĐỒNG HỒ");
+  } else if (m_wxTab == 4) {
+    drawAppHeader("THỊ TRƯỜNG");
   } else {
     // wxTab == 0: title "THỜI TIẾT & LỊCH" + tên vị trí NGANG hàng
     // (cùng pattern với tab Thị trường: title cyan trái, sub dim phải title).
@@ -291,20 +293,23 @@ void UIManager::renderWeather() {
              m_fontSmall, false);
     drawHeaderStatus();
   }
-  // Tab pills: Thời tiết | Đồng hồ | Camera | Thị trường
+  // Tab pills: Thời tiết | Đồng hồ | Camera | Giá cả | Thị trường
   {
     int w0 = pillWidth("THỜI TIẾT", m_fontSmall) + 32;
     int w1 = pillWidth("ĐỒNG HỒ", m_fontSmall) + 32;
     int w2 = pillWidth("CAMERA", m_fontSmall) + 32;
-    int w3 = pillWidth("THỊ TRƯỜNG", m_fontSmall) + 32;
-    int x3 = 1024 - 24 - w3;
+    int w3 = pillWidth("GIÁ CẢ", m_fontSmall) + 32;
+    int w4 = pillWidth("THỊ TRƯỜNG", m_fontSmall) + 32;
+    int x4 = 1024 - 24 - w4;
+    int x3 = x4 - 8 - w3;
     int x2 = x3 - 8 - w2;
     int x1 = x2 - 8 - w1;
     int x0 = x1 - 8 - w0;
     drawPill(x0, 72, w0, 32, "THỜI TIẾT", m_wxTab == 0, m_fontSmall);
     drawPill(x1, 72, w1, 32, "ĐỒNG HỒ", m_wxTab == 1, m_fontSmall);
     drawPill(x2, 72, w2, 32, "CAMERA", m_wxTab == 2, m_fontSmall);
-    drawPill(x3, 72, w3, 32, "THỊ TRƯỜNG", m_wxTab == 3, m_fontSmall);
+    drawPill(x3, 72, w3, 32, "GIÁ CẢ", m_wxTab == 3, m_fontSmall);
+    drawPill(x4, 72, w4, 32, "THỊ TRƯỜNG", m_wxTab == 4, m_fontSmall);
   }
   if (m_wxTab == 1) {
     renderClock(124, 715 - 124 - 16);
@@ -312,6 +317,10 @@ void UIManager::renderWeather() {
   }
   if (m_wxTab == 3) {
     renderMarket(124, 715 - 124 - 16);
+    return;
+  }
+  if (m_wxTab == 4) {
+    renderWatch(124, 715 - 124 - 16);
     return;
   }
   // (Tên vị trí đã được vẽ ngang title trong header phía trên.)
@@ -907,7 +916,7 @@ bool UIManager::handleWeatherInput() {
   bool r1Tab = input.isButtonJustPressed(Button::R1);
   if (l1Tab || r1Tab) {
     // L1: lùi tab (sang trái), R1: tới tab (sang phải).
-    m_wxTab = (m_wxTab + (l1Tab ? 3 : 1)) % 4;
+    m_wxTab = (m_wxTab + (l1Tab ? 4 : 1)) % 5;
     if (m_wxTab == 0)
       m_wxFocus = 2; // về tab Thời tiết: focus khối Lịch
     if (m_wxTab == 2) {
@@ -923,6 +932,8 @@ bool UIManager::handleWeatherInput() {
     return handleClockInput();
   if (m_wxTab == 3)
     return handleMarketInput();
+  if (m_wxTab == 4)
+    return handleWatchInput();
   if (input.isButtonJustPressed(Button::B)) {
     goBack(); // về trang trước (thường là launcher)
     return true;

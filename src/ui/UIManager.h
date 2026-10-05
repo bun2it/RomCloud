@@ -1,34 +1,34 @@
 #pragma once
+#include "../calendar/CalManager.h"
+#include "../common/BackgroundTask.h"
 #include "../database/DatabaseManager.h"
+#include "../fileexplorer/FileExplorer.h"
 #include "../iptv/IPTVManager.h"
 #include "../localsend/LocalSendProtocol.h"
-#include "CoverManager.h"
-#include "UiRenderer.h"
-#include "ImageCache.h"
-#include "UiTheme.h"
-#include "DialogManager.h"
-#include "../common/BackgroundTask.h"
-#include "VirtualKeyboard.h"
-#include "SearchInputModal.h"
-#include "FileListView.h"
-#include "../fileexplorer/FileExplorer.h"
 #include "../weather/WeatherManager.h"
-#include "../calendar/CalManager.h"
+#include "CoverManager.h"
+#include "DialogManager.h"
+#include "FileListView.h"
+#include "ImageCache.h"
+#include "SearchInputModal.h"
+#include "UiRenderer.h"
+#include "UiTheme.h"
+#include "VirtualKeyboard.h"
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_ttf.h>
-#include <string>
-#include <vector>
-#include <utility>
-#include <unordered_map>
-#include <atomic>
-#include <mutex>
-#include <condition_variable>
-#include <thread>
-#include <chrono>
-#include <queue>
-#include <deque>
 #include <array>
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
+#include <deque>
+#include <mutex>
+#include <queue>
 #include <set>
+#include <string>
+#include <thread>
+#include <unordered_map>
+#include <utility>
+#include <vector>
 
 namespace RomCloud {
 
@@ -50,21 +50,23 @@ enum class UIState {
   IPTV_PLAYLIST_SELECT, // Chon playlist truoc khi xem kenh
   IPTV_LIST,
   IPTV_SEARCH,
-  YOUTUBE_HOME,         // P0-6: Home — search input + pills + content area
-  YOUTUBE_SEARCH,       // Legacy YOUTUBE_SEARCH state (still rendered for back-compat)
+  YOUTUBE_HOME,   // P0-6: Home — search input + pills + content area
+  YOUTUBE_SEARCH, // Legacy YOUTUBE_SEARCH state (still rendered for
+                  // back-compat)
   YOUTUBE_RESULTS,
-  LOCALSEND_HOME,       // Trang chính LocalSend: devices + pending + send queue
-  LOCALSEND_INCOMING,   // Modal duyệt file gửi đến (A=đồng ý, B=từ chối)
-  LOCALSEND_FOLDER,     // Chọn folder đích
-  LOCALSEND_SEND,       // Chọn file để gửi + danh sách target devices
-  LOCALSEND_GAME_PICKER, // Chọn game LOCAL từ DB để gửi (thay vì raw file picker)
-  LOCALSEND_PROGRESS,   // Xem progress upload/download
-  FILE_EXPLORER,      // Explorer 2-pane: m_expL/m_expR + clipboard chung m_expClip
-  DEST_PICKER,        // Chọn thư mục đích cho Sao chép / Chuyển đi / Bung tới...
-  TEXT_VIEWER,        // Xem nội dung file text từ File Explorer
-  WEATHER,            // Thời tiết & Lịch (+ tab Đồng hồ, Camera)
-  CLOCK_ALARM,        // Modal báo thức kêu (briefing)
-  GAME_CAST,          // GameCast TV & Laptop streaming
+  LOCALSEND_HOME,     // Trang chính LocalSend: devices + pending + send queue
+  LOCALSEND_INCOMING, // Modal duyệt file gửi đến (A=đồng ý, B=từ chối)
+  LOCALSEND_FOLDER,   // Chọn folder đích
+  LOCALSEND_SEND,     // Chọn file để gửi + danh sách target devices
+  LOCALSEND_GAME_PICKER, // Chọn game LOCAL từ DB để gửi (thay vì raw file
+                         // picker)
+  LOCALSEND_PROGRESS, // Xem progress upload/download
+  FILE_EXPLORER, // Explorer 2-pane: m_expL/m_expR + clipboard chung m_expClip
+  DEST_PICKER,   // Chọn thư mục đích cho Sao chép / Chuyển đi / Bung tới...
+  TEXT_VIEWER,   // Xem nội dung file text từ File Explorer
+  WEATHER,       // Thời tiết & Lịch (+ tab Đồng hồ, Camera)
+  CLOCK_ALARM,   // Modal báo thức kêu (briefing)
+  GAME_CAST,     // GameCast TV & Laptop streaming
   EXIT_REQUESTED
 };
 
@@ -92,12 +94,12 @@ private:
   SDL_Renderer *m_renderer = nullptr;
   UiRenderer m_ui;
   TTF_Font *m_fontTitle = nullptr;
-  TTF_Font *m_fontHuge = nullptr; // giờ khổ lớn (card Đồng hồ)
-  TTF_Font *m_fontClock = nullptr; // số đồng hồ: Rajdhani Bold (OFL)
+  TTF_Font *m_fontHuge = nullptr;    // giờ khổ lớn (card Đồng hồ)
+  TTF_Font *m_fontClock = nullptr;   // số đồng hồ: Rajdhani Bold (OFL)
   TTF_Font *m_fontClockSm = nullptr; // giờ thế giới (Rajdhani 60)
   TTF_Font *m_fontClockFs = nullptr; // fullscreen (Rajdhani 260)
   TTF_Font *m_fontClockMd = nullptr; // thẻ lật fullscreen (Rajdhani 200)
-  TTF_Font *m_fontFlip = nullptr; // số flip clock (Fliqlo, ISC)
+  TTF_Font *m_fontFlip = nullptr;    // số flip clock (Fliqlo, ISC)
   TTF_Font *m_fontLarge = nullptr;
   TTF_Font *m_fontMedium = nullptr;
   TTF_Font *m_fontSmall = nullptr;
@@ -106,20 +108,21 @@ private:
   std::vector<UIState> m_stateHistory; // stack cho B = back
   bool m_suppressPush = false;         // goBack() set để không push ngược
   int m_selectedMenuIndex = 0;
-  uint32_t m_exitArmedMs = 0; // B lần 1 ở launcher: arm, B lần 2 trong 3s = thoát
+  uint32_t m_exitArmedMs =
+      0; // B lần 1 ở launcher: arm, B lần 2 trong 3s = thoát
 
   // Menu items as grid icons
   struct GridMenuItem {
-      std::string id;
-      std::string title;
-      std::string iconFile;  // PNG filename in assets/apps_icons/
-      std::string subtitle;
+    std::string id;
+    std::string title;
+    std::string iconFile; // PNG filename in assets/apps_icons/
+    std::string subtitle;
   };
   std::vector<GridMenuItem> m_gridMenuItems;
 
   // IPTV Playlist Browser State (MOI)
   int m_selectedPlaylistIndex = 0;
-  int m_playlistScrollOffset  = 0;
+  int m_playlistScrollOffset = 0;
 
   // IPTV Channel List State
   int m_selectedIPTVChannelIndex = 0;
@@ -129,44 +132,49 @@ private:
   int m_localSendMode = 0;
   int m_localSendSelectedDevice = 0;
   int m_localSendFolderSelected = 0;
-  int m_localSendIncomingFolderIdx = 0;  // 0=auto, còn lại = preset trong dialog duyệt
+  int m_localSendIncomingFolderIdx =
+      0; // 0=auto, còn lại = preset trong dialog duyệt
   std::string m_localSendPendingSessionId;
   LsUploadRequest m_localSendCurrentPrompt;
-  int m_localSendProgressSel = 0;     // dong dang chon trong man PROGRESS
-  int m_localSendProgressScroll = 0;  // scroll man PROGRESS
-  uint32_t m_localSendProgressDoneMs = 0;  // moc tat ca xong (de auto-ve home)
+  int m_localSendProgressSel = 0;         // dong dang chon trong man PROGRESS
+  int m_localSendProgressScroll = 0;      // scroll man PROGRESS
+  uint32_t m_localSendProgressDoneMs = 0; // moc tat ca xong (de auto-ve home)
   int m_localSendScrollOffset = 0;
-  int m_localSendTab = 0;  // 0=devices, 1=received, 2=send queue (giữ để tương thích)
+  int m_localSendTab =
+      0; // 0=devices, 1=received, 2=send queue (giữ để tương thích)
   int64_t m_localSendLastDeviceRefreshMs = 0;
 
   // LocalSend: ROM picker — quét thẳng /mnt/SDCARD/Roms (không qua DB)
   struct LsRomEntry {
-      std::string path;        // full path file rom
-      std::string name;        // basename
-      std::string systemDir;   // vd "GBA", "FC"
-      uint64_t sizeBytes = 0;
+    std::string path;      // full path file rom
+    std::string name;      // basename
+    std::string systemDir; // vd "GBA", "FC"
+    uint64_t sizeBytes = 0;
   };
   std::vector<LsRomEntry> m_lsRomList;
   bool m_lsRomListLoaded = false;
   int m_lsRomSelected = 0;
   int m_lsRomScrollOffset = 0;
 
-  // LocalSend: picker tabs 0=File (Roms SD) / 1=Folder (Apps SD) — theo Selection gốc
+  // LocalSend: picker tabs 0=File (Roms SD) / 1=Folder (Apps SD) — theo
+  // Selection gốc
   int m_lsPickerTab = 0;
 
   // Folder picker (LOCALSEND_FOLDER + LOCALSEND_INCOMING) — file explorer 2 cột
   std::string m_localSendFolderCurrentPath = "/mnt/SDCARD";
-  std::vector<std::string> m_localSendFolderEntries;  // path tuyệt đối của folder con
+  std::vector<std::string>
+      m_localSendFolderEntries; // path tuyệt đối của folder con
   bool m_localSendFolderLoaded = false;
-  int m_localSendFolderFocus = 0;  // 0 = danh sách folder, 1 = nút Chốt (panel phải)
+  int m_localSendFolderFocus =
+      0; // 0 = danh sách folder, 1 = nút Chốt (panel phải)
   // Rename / New-folder keyboard (dung chung VirtualKeyboard/VkState)
   bool m_lsFolderRenaming = false;
   bool m_lsFolderRenameExisting = false;
   std::string m_lsFolderRenameOriginal;
   VkState m_lsFolderVk;
   // LOCALSEND_INCOMING: 2 screen — 0=picker 2 cột, 1=xác nhận cuối
-  int m_localSendIncomingMode = 0;  // 0=picker, 1=confirm
-  std::string m_localSendIncomingSavePath;  // path tuyệt đối đích lưu file
+  int m_localSendIncomingMode = 0;         // 0=picker, 1=confirm
+  std::string m_localSendIncomingSavePath; // path tuyệt đối đích lưu file
 
   // Explorer 2-side: 2 FileExplorer doc lap + clipboard chung.
   FileExplorer m_expL, m_expR;
@@ -174,11 +182,12 @@ private:
   int m_expScroll[2] = {0, 0};
   ExplorerClipboard m_expClip;
   bool m_expDeleteArmed = false;
-  FileExplorer& expA() { return m_expActive ? m_expR : m_expL; }
-  FileExplorer& expB() { return m_expActive ? m_expL : m_expR; }
-  const FileExplorer& expA() const { return m_expActive ? m_expR : m_expL; }
+  FileExplorer &expA() { return m_expActive ? m_expR : m_expL; }
+  FileExplorer &expB() { return m_expActive ? m_expL : m_expR; }
+  const FileExplorer &expA() const { return m_expActive ? m_expR : m_expL; }
 
-  // 1-pane FileExplorer dùng chọn thư mục nhận file (LOCALSEND_FOLDER & LOCALSEND_INCOMING)
+  // 1-pane FileExplorer dùng chọn thư mục nhận file (LOCALSEND_FOLDER &
+  // LOCALSEND_INCOMING)
   FileExplorer m_expPicker;
   int m_expPickerScroll = 0;
   // Tiêu đề picker (mặc định nhận file LocalSend; đổi khi bung tới thư mục)
@@ -205,11 +214,13 @@ private:
 
   // Đồng hồ (tab 1 trang Thời tiết): world clock + báo thức + pomodoro.
   // Mọi giờ tính từ đồng hồ máy Brick (localtime), không NTP.
-  int m_clkSel = 0;          // chọn báo thức trong list
-  int m_clkFocus = 0;        // focus khối: 0 = giờ thế giới, 1 = báo thức, 2 = pomodoro
-  int m_citySel = 0;         // con trỏ thành phố trong khối giờ thế giới
+  int m_clkSel = 0; // chọn báo thức trong list
+  int m_clkFocus =
+      0;             // focus khối: 0 = giờ thế giới, 1 = báo thức, 2 = pomodoro
+  int m_citySel = 0; // con trỏ thành phố trong khối giờ thế giới
   bool m_clkFullscreen = false; // toàn màn hình: chỉ đồng hồ, B quay về
-  int m_clkFsStyle = 0; // style fullscreen: 0=thẻ lật (flip), 1=phẳng, 2=qlocktwo
+  int m_clkFsStyle =
+      0; // style fullscreen: 0=thẻ lật (flip), 1=phẳng, 2=qlocktwo
   // Trạng thái lật từng thẻ HH MM SS (theo mẫu FlipCard tham khảo).
   struct FsDigit {
     std::string cur;   // số đang hiện (static)
@@ -218,7 +229,7 @@ private:
     float prog = 0.0f; // tiến trình 0..1
   };
   FsDigit m_fsD[3];
-  uint32_t m_fsLastMs = 0; // tick frame trước (tính dt)
+  uint32_t m_fsLastMs = 0;      // tick frame trước (tính dt)
   uint32_t m_clkFsMsgUntil = 0; // hiện gợi ý/tên kiểu tới mốc này (ms)
   std::string m_clkFsMsg;
   void clkBlockRect(int idx, int &x, int &y, int &w, int &h);
@@ -230,29 +241,30 @@ private:
   int m_apPart = 0; // 0 = khối giờ, 1 = khối chế độ
   int m_apCol = 0;
   int m_apH = 7, m_apM = 0, m_apMode = 0; // giờ 24h: 0-23
-  int m_apEditIdx = -1;      // -1 = thêm mới
+  int m_apEditIdx = -1;                   // -1 = thêm mới
   // Picker đổi thành phố giờ thế giới tại ô m_citySel: A mở/chốt, B hủy.
   bool m_cityPickOpen = false;
   int m_cityPickSel = 0;
   int m_cityPickScroll = 0;
-  bool m_pomoRun = false;    // pomodoro đang chạy
-  bool m_pomoWork = true;    // true = 25 làm, false = 5 nghỉ
-  uint32_t m_pomoEndMs = 0;  // SDL ticks lúc hết phase
+  bool m_pomoRun = false;                 // pomodoro đang chạy
+  bool m_pomoWork = true;                 // true = 25 làm, false = 5 nghỉ
+  uint32_t m_pomoEndMs = 0;               // SDL ticks lúc hết phase
   uint32_t m_pomoLeftMs = 25 * 60 * 1000; // còn lại khi pause
   // Modal báo thức kêu
   bool m_alarmRing = false;
   std::string m_alarmTitle;
   std::vector<std::string> m_alarmLines;
-  int m_alarmSnoozeMin = -1; // hoãn tới phút trong ngày, -1 = không
-  int m_alarmSnoozeDay = -1; // yyyymmdd của lần hoãn
-  int m_alarmFiredKey = -1;  // yyyymmdd*1440+phút đã kêu (chống lặp)
+  int m_alarmSnoozeMin = -1;   // hoãn tới phút trong ngày, -1 = không
+  int m_alarmSnoozeDay = -1;   // yyyymmdd của lần hoãn
+  int m_alarmFiredKey = -1;    // yyyymmdd*1440+phút đã kêu (chống lặp)
   std::set<int64_t> m_evFired; // id sự kiện lịch đã nhắc (chống lặp)
-  int m_evFiredDayKey = -1;  // reset set trên khi sang ngày
+  int m_evFiredDayKey = -1;    // reset set trên khi sang ngày
   uint32_t m_lastClockPoll = 0;
   void renderClock(int contentTop, int contentH);
-  void renderQlockTwoStyle(struct tm* lt);  // Style 3: QlockTwo Vietnamese
+  void renderQlockTwoStyle(struct tm *lt); // Style 3: QlockTwo Vietnamese
   bool handleClockInput();
-  void fireAlarm(const std::string& title, const std::vector<std::string>& lines, int mode);
+  void fireAlarm(const std::string &title,
+                 const std::vector<std::string> &lines, int mode);
   void pollClock();
   void renderAlarmRing();
   bool handleAlarmRingInput();
@@ -263,6 +275,12 @@ private:
   void renderCityPicker();
   bool handleCityPickerInput();
   void renderClockFullscreen();
+  // Tiết kiệm pin fullscreen: chỉ cần vẽ lại khi nội dung đổi (giây/phút
+  // mới, đang animation lật, toast còn hiện). Còn lại UIManager::render()
+  // sẽ SDL_Delay thay vì present 60fps.
+  bool clockFrameNeeded();
+  int m_fsLastKey = -1; // giây/phút đã vẽ gần nhất (tùy style)
+  bool m_fsToastOn = false; // toast đang hiện ở frame đã vẽ (để xóa dứt điểm)
   void drawFlipCardBg(int x, int y, int w, int h);
   void cycleClkFsStyle(int dir); // L1/R1 đổi style fullscreen, lưu setting
 
@@ -276,14 +294,15 @@ private:
   bool m_notesDay = false; // true = ghi chú lọc theo ngày con trỏ
   void wxFocusMove(int dx, int dy);
   void wxBlockRect(int idx, int &x, int &y, int &w, int &h);
-  // Tab trang: 0 = Thời tiết & Lịch, 1 = Đồng hồ, 2 = Camera, 3 = Thị trường
+  // Tab trang: 0 = Thời tiết & Lịch, 1 = Đồng hồ, 2 = Camera,
+  // 3 = Giá cả, 4 = Thị trường (crypto + chứng khoán VN).
   int m_wxTab = 0;
   int m_wxMode = 0;
   int m_wxProvSel = 0, m_wxWardSel = 0, m_wxCandSel = 0;
   int m_wxCalY = 2026, m_wxCalM = 1;
   int m_wxTaskKind = 0;
   bool m_wxFetching = false;
-  uint32_t m_wxEnterMs = 0;  // lúc vào trang: sync DELAY sau 1.5s để vào mượt
+  uint32_t m_wxEnterMs = 0; // lúc vào trang: sync DELAY sau 1.5s để vào mượt
   bool m_wxAutoSync = false;
   BackgroundTask m_wxTask;
   std::vector<WxGeoCand> m_wxCands;
@@ -296,7 +315,7 @@ private:
   // Camera giao thông (tab 1 trang thời tiết)
   size_t m_camSel = 0;
   int m_camScroll = 0;
-  bool m_camView = false;      // false=list, true=xem ảnh
+  bool m_camView = false; // false=list, true=xem ảnh
   bool m_camPaused = false;
   bool m_camFetching = false;
   uint32_t m_camLastRefresh = 0;
@@ -310,7 +329,7 @@ private:
   bool m_camModalOpen = false;
   bool m_camModalInit = false;
   std::vector<size_t> m_camFilter; // rỗng = không lọc text
-  bool m_camFavOnly = false;     // Y: chỉ hiện kênh yêu thích (giống IPTV)
+  bool m_camFavOnly = false;       // Y: chỉ hiện kênh yêu thích (giống IPTV)
   std::vector<size_t> m_camVisIdx; // cache hiển thị = text ∩ fav
   bool m_camVisDirty = true;
   size_t camVisCount() const;
@@ -320,7 +339,27 @@ private:
   bool handleTrafficInput();
   void restartCamView();
   void applyCamFilter(const std::string &query);
-  // Thị trường (tab 3): xăng/dầu/vàng/USD live, 1 card 2x2.
+  // Thị trường (tab 4): crypto + chứng khoán VN, tối đa 4 card 2x2.
+  // Mỗi card 1 mã: giá + % đổi + biểu đồ sparkline. Y nhập mã (modal),
+  // X xóa card, A tải lại.
+  BackgroundTask m_watchTask;
+  bool m_watchFetching = false;
+  uint32_t m_watchLastMs = 0;
+  int m_watchSel = 0; // card đang chọn trong lưới 2 cột
+  // Nhập mã theo dõi (Y mở modal, START chốt như các modal tìm kiếm).
+  VkState m_watchVk;
+  std::vector<std::string> m_watchHist;
+  SearchInputModal::Config m_watchModalCfg;
+  bool m_watchModalOpen = false;
+  bool m_watchModalInit = false;
+  void renderWatch(int contentTop, int contentH);
+  bool handleWatchInput();
+  void openWatchModal();
+  void startWatchFetch();
+  void pollWatch();
+  void drawSparkline(const std::vector<float> &pts, int x, int y, int w, int h,
+                     SDL_Color color);
+  // Giá cả (tab 3): xăng/dầu/vàng/USD live, 1 card 2x2.
   BackgroundTask m_mkTask;
   bool m_mkFetching = false;
   uint32_t m_mkLastMs = 0;
@@ -336,10 +375,10 @@ private:
 
   void renderFileExplorer();
   void renderExplorerKeyboard();
-  void renderExplorerKeyboardFor(FileExplorer& ex);
+  void renderExplorerKeyboardFor(FileExplorer &ex);
   bool handleExplorerInput();
   bool handleExplorerKeyboard();
-  bool handleExplorerKeyboardFor(FileExplorer& ex);
+  bool handleExplorerKeyboardFor(FileExplorer &ex);
   bool handleFolderPickerInput();
   bool handleExplorerBrowser();
   void syncExplorerDialogs();
@@ -347,27 +386,28 @@ private:
   void expCopyCurrent();
   void expMoveCurrent();
   void expDeleteCurrent();
-  void openDestPicker(int op, const std::string& title);
+  void openDestPicker(int op, const std::string &title);
   void openExpMenu();
   void runExpMenuAction(int idx);
   bool handleExpMenuInput();
   void renderExpMenu();
   // Text viewer
-  static bool isTextFile(const std::string& path);
-  void openTextViewer(const std::string& path);
+  static bool isTextFile(const std::string &path);
+  void openTextViewer(const std::string &path);
   void renderTextViewer();
   bool handleTextViewerInput();
-  std::string suggestNewFolderName(const std::string& parentPath);
+  std::string suggestNewFolderName(const std::string &parentPath);
 
   // LocalSend: Apps picker (/mnt/SDCARD/Apps/ drill-down)
   struct LsAppEntry {
-      std::string path;        // full path
-      std::string name;        // display name
-      uint64_t sizeBytes = 0;
-      bool isDirectory = false;
+    std::string path; // full path
+    std::string name; // display name
+    uint64_t sizeBytes = 0;
+    bool isDirectory = false;
   };
   std::vector<LsAppEntry> m_lsAppList;
-  std::vector<std::string> m_lsAppBreadcrumb;  // empty = top level (/mnt/SDCARD/Apps)
+  std::vector<std::string>
+      m_lsAppBreadcrumb; // empty = top level (/mnt/SDCARD/Apps)
   int m_lsAppSelected = 0;
   int m_lsAppScrollOffset = 0;
   bool m_lsAppListLoaded = false;
@@ -377,11 +417,11 @@ private:
   int m_iptvScrollOffset = 0;
   bool m_iptvShowFavoritesOnly = false;
   // Group filter bar (Loi 2 fix)
-  std::string m_iptvSelectedGroup;   // "" = Tat ca
-  int m_iptvGroupBarOffset = 0;      // scroll ngang cua group bar
+  std::string m_iptvSelectedGroup; // "" = Tat ca
+  int m_iptvGroupBarOffset = 0;    // scroll ngang cua group bar
   void centerIptvGroupBar(const std::vector<std::string> &groups,
-                           const std::string &selected);
-  int m_activePlaylistIndex = -1;    // -1 = tat ca playlists
+                          const std::string &selected);
+  int m_activePlaylistIndex = -1; // -1 = tat ca playlists
 
   // IPTV OSD visibility (true = OSD đang hiện, false = footer hiện)
   bool m_iptvOsdVisible = false;
@@ -403,29 +443,34 @@ private:
     Type type = Type::Video;
     std::string id;
     std::string title;       // raw title (for search/re-search)
-    std::string titleL1;    // pre-truncated line 1 (fontSmall, ~700px)
-    std::string titleL2;    // pre-truncated line 2
+    std::string titleL1;     // pre-truncated line 1 (fontSmall, ~700px)
+    std::string titleL2;     // pre-truncated line 2
     std::string channel;     // pre-truncated channel (~320px)
-    std::string viewsStr;   // pre-formatted "1.2M views"
-    std::string durationStr;// pre-formatted "12:34"
+    std::string viewsStr;    // pre-formatted "1.2M views"
+    std::string durationStr; // pre-formatted "12:34"
     bool hasTitleL2 = false;
 
     // Channel-specific fields (only used when type == Channel)
-    std::string channelId;       // @handle hoặc UCxxxx (cho re-search latest)
-    std::string subscribersStr;  // pre-formatted "1.2M subscribers"
-    std::string videoCountStr;   // pre-formatted "523 videos"
+    std::string channelId;      // @handle hoặc UCxxxx (cho re-search latest)
+    std::string subscribersStr; // pre-formatted "1.2M subscribers"
+    std::string videoCountStr;  // pre-formatted "523 videos"
   };
-  std::vector<std::string> m_ytSearchResults;       // raw pipe-delimited (backing store)
-  std::vector<std::string> m_ytAllCachedResults;    // raw pipe-delimited (backing store)
-  std::vector<YtItem> m_ytItems;                    // pre-computed view of m_ytSearchResults
-  std::vector<YtItem> m_ytAllItems;                 // pre-computed view of m_ytAllCachedResults
+  std::vector<std::string>
+      m_ytSearchResults; // raw pipe-delimited (backing store)
+  std::vector<std::string>
+      m_ytAllCachedResults;         // raw pipe-delimited (backing store)
+  std::vector<YtItem> m_ytItems;    // pre-computed view of m_ytSearchResults
+  std::vector<YtItem> m_ytAllItems; // pre-computed view of m_ytAllCachedResults
   int m_ytSearchSelectedIndex = 0;
   int m_ytSearchScrollOffset = 0;
-  int m_ytCurrentPage = 1;           // current page (1-based, 5 results/page)
+  int m_ytCurrentPage = 1; // current page (1-based, 5 results/page)
   std::string m_ytErrorMessage;
   std::atomic<bool> m_ytIsSearching{false};
+  uint32_t m_ytSearchStartMs = 0; // watchdog: search quá 120s không về = kẹt
   std::atomic<bool> m_ytSearchFinished{false};
   std::atomic<bool> m_ytIsLoadingVideo{false};
+  uint32_t m_ytLoadStartMs = 0; // mốc bấm play (hiện tiến trình tải)
+  uint32_t m_ytLoadToastMs = 0; // mốc toast tiến trình gần nhất
   std::atomic<bool> m_ytVideoReady{false};
   std::string m_ytPendingStreamUrl;
   std::string m_ytPendingVideoId;
@@ -448,21 +493,22 @@ private:
   };
   static const std::array<Category, 9> kYtCategories;
   int m_ytSelectedCategory = 0;
-  int m_ytCategoryScrollOffset = 0;  // horizontal scroll offset (px)
+  int m_ytCategoryScrollOffset = 0; // horizontal scroll offset (px)
 
   // P0-6: YouTube HOME state (search input + pills + content)
   // m_ytSearchModalOpen: when true, render SearchInputModal over HOME.
-  // m_ytViewMode: false = row list (5 rows/page), true = grid 3x2 (6 cards/page).
-  // m_ytHasSearched: true after first category auto-feed search has results.
+  // m_ytViewMode: false = row list (5 rows/page), true = grid 3x2 (6
+  // cards/page). m_ytHasSearched: true after first category auto-feed search
+  // has results.
   bool m_ytSearchModalOpen = false;
   bool m_ytViewMode = false; // false = row, true = grid
   bool m_ytHomeHasResults = false;
   int m_ytHomeContentSelected = 0;
   int m_ytHomeContentScrollOffset = 0;
   int m_ytHomePage = 1;
-  int m_ytHomeFocus = 1;          // 0=search box, 1=pills, 2=content
-  int m_ytHomeRow = 1;            // 0=search, 1=tag, 2=thumbnail row 1, 3=thumbnail row 2
-  int m_ytHomeCol = 0;            // 0..2 for thumbnail rows
+  int m_ytHomeFocus = 1; // 0=search box, 1=pills, 2=content
+  int m_ytHomeRow = 1; // 0=search, 1=tag, 2=thumbnail row 1, 3=thumbnail row 2
+  int m_ytHomeCol = 0; // 0..2 for thumbnail rows
   bool m_ytHomeLoadedThisEnter = false;
   struct YtMatchedChannel {
     bool matched = false;
@@ -502,7 +548,7 @@ private:
   void renderYouTubeHomeModalOverlay();
 
   void loadYouTubeHistory();
-  void saveYouTubeHistory(const std::string& query);
+  void saveYouTubeHistory(const std::string &query);
   struct YtHistoryPill {
     int index = 0;
     std::string text;
@@ -512,7 +558,6 @@ private:
                               std::vector<YtHistoryPill> &row4);
   YtItem buildYtItemFromPipe(const std::string &raw);
   void rebuildYtItems();
-
 
   // System Selection State
   int m_selectedSystemIndex = 0;
@@ -555,7 +600,8 @@ private:
   std::vector<GameRecord> m_searchResults;
   int m_searchSelectedIndex = 0;
   int m_searchScrollOffset = 0;
-  VkState m_searchVk; // query/row/col/inResults unified (SEARCH, layout cu giu nguyen)
+  VkState m_searchVk; // query/row/col/inResults unified (SEARCH, layout cu giu
+                      // nguyen)
   std::vector<GameRecord> m_cachedGames;
 
   // Notification toast (DialogManager/ToastState la nguon duy nhat)
@@ -581,7 +627,8 @@ private:
   void renderConfirmDialogFromState();
   void renderConfirmDeleteDialog();
   void renderConfirmBatchDeleteDialog();
-  void drawProgressBar(int x, int y, int w, int h, double frac, SDL_Color fill, bool rounded = false, SDL_Color bg = {35, 42, 54, 255});
+  void drawProgressBar(int x, int y, int w, int h, double frac, SDL_Color fill,
+                       bool rounded = false, SDL_Color bg = {35, 42, 54, 255});
   void renderProgressDialogFromState();
   void renderDisclaimerState();
   void renderCloudLoginState();
@@ -590,7 +637,8 @@ private:
   void renderSettingsState();
   void renderDiagnosticsState();
   void renderAboutTab(int contentTop);
-  std::vector<std::string> wrapAboutText(const std::string &text, TTF_Font *font, int maxPx);
+  std::vector<std::string> wrapAboutText(const std::string &text,
+                                         TTF_Font *font, int maxPx);
   void renderOTAUpdateState();
   void renderOTAChangelogState();
   void renderReverseSyncState();
@@ -613,18 +661,19 @@ private:
 
   // YouTube integration
   bool m_ytTelexMode = true;
-  std::unordered_map<std::string, std::string> m_ytStreamUrlCache;
-  std::vector<std::string> runYouTubeSearch(const std::string& query, int page = 1);
-  std::string resolveYouTubeStreamUrl(const std::string& videoId);
-  void preloadYouTubeStreamUrl(const std::string& videoId);
+  std::unordered_map<std::string, std::string> m_ytStreamUrlCache; // key vid|quality
+  std::vector<std::string> runYouTubeSearch(const std::string &query,
+                                            int page = 1);
+  void preloadYouTubeStreamUrl(const std::string &videoId);
   void triggerYouTubeSearch();
-  void playYouTubeVideo(const std::string& videoId);
-  void startThumbnailDownloads(const std::vector<std::string>& videoIds);
+  void playYouTubeVideo(const std::string &videoId);
+  void startThumbnailDownloads(const std::vector<std::string> &videoIds);
   void clearThumbnailCache();
+  // Xả cache khi rời cụm nặng (IPTV/YouTube/GameCast). Xem releaseHeavyState.
+  void releaseHeavyState();
   void applyYouTubeSearchResults(std::vector<std::string> results);
   void renderUploadOverlay();
   void renderToast();
-
 
   // Primitive drawing
   void drawText(const std::string &text, int x, int y, SDL_Color color,
@@ -642,8 +691,8 @@ private:
                          SDL_Color color, int thickness = 1);
   void drawRoundedTopBar(int x, int y, int w, int h, int radius,
                          SDL_Color color);
-  void drawModalDialog(int x, int y, int w, int h, int radius,
-                       SDL_Color bodyBg, SDL_Color titleBg, int titleH);
+  void drawModalDialog(int x, int y, int w, int h, int radius, SDL_Color bodyBg,
+                       SDL_Color titleBg, int titleH);
   void drawBadge(int x, int y, int w, int h, const std::string &text,
                  SDL_Color bg, SDL_Color fg);
   // Chấm tròn đặc (vẽ bằng rounded-rect bán kính = r)
@@ -656,40 +705,51 @@ private:
   int textHeight(TTF_Font *font);
   int textWidth(const std::string &text, TTF_Font *font);
   // Cat chu theo pixel, khong cat giua ky tu UTF-8 (them "..." khi cat)
-  std::string truncateToWidth(const std::string &text, TTF_Font *font, int maxPx);
+  std::string truncateToWidth(const std::string &text, TTF_Font *font,
+                              int maxPx);
   // Rong pill fit chu theo pixel (kep MIN/MAX)
   int pillWidth(const std::string &text, TTF_Font *font);
   int badgeWidth(const std::string &text, int h);
   int buttonWidth(const std::string &label);
-  int badgeDualWidth(const std::string &label1, const std::string &label2, int h);
+  int badgeDualWidth(const std::string &label1, const std::string &label2,
+                     int h);
   // Chip/button/badge tron mem (phuong an A: pill full-round h/2)
-  void drawPill(int x, int y, int w, int h, const std::string &text, bool active, TTF_Font *font = nullptr);
+  void drawPill(int x, int y, int w, int h, const std::string &text,
+                bool active, TTF_Font *font = nullptr);
   // Button hanh dong (OK/Huy/Xoa...) radius BTN
-  void drawButton(int x, int y, int w, int h, const std::string &label, bool focused, bool danger = false);
+  void drawButton(int x, int y, int w, int h, const std::string &label,
+                  bool focused, bool danger = false);
   // Row list chuan (game/channel/file/cai dat...)
   void drawRow(int x, int y, int w, int h, bool focused, bool dim = false);
   // Y can giua doc chuan cho 1 dong text trong box h (dung FontHeight)
   int textYCentered(int y, int h, TTF_Font *font);
   // Ve cap main/sub can giua doc trong row (fix main/sub lech tam)
-  void drawRowMainSub(int x, int y, int h, const std::string &main, TTF_Font *fMain,
-                      const std::string &sub, TTF_Font *fSub, int maxW = 0, int gap = 4);
-  // Ve text canh phai that (right-align theo pixel, cho goc top-right/bottom-right)
-  void drawTextRight(const std::string &text, int rightX, int y, SDL_Color color, TTF_Font *font);
-  // Tra ve x sau khi ve xong 1 hint (de noi tiep nhieu hint). Icon va text can giua doc theo bar.
-  int drawFooterHint(const std::string &button, const std::string &label, int x, int barY, int barH,
-                     SDL_Color color, TTF_Font *font, int iconSize = 30, int gap = 8);
+  void drawRowMainSub(int x, int y, int h, const std::string &main,
+                      TTF_Font *fMain, const std::string &sub, TTF_Font *fSub,
+                      int maxW = 0, int gap = 4);
+  // Ve text canh phai that (right-align theo pixel, cho goc
+  // top-right/bottom-right)
+  void drawTextRight(const std::string &text, int rightX, int y,
+                     SDL_Color color, TTF_Font *font);
+  // Tra ve x sau khi ve xong 1 hint (de noi tiep nhieu hint). Icon va text can
+  // giua doc theo bar.
+  int drawFooterHint(const std::string &button, const std::string &label, int x,
+                     int barY, int barH, SDL_Color color, TTF_Font *font,
+                     int iconSize = 30, int gap = 8);
   // Ve chuoi footer dang "icon label   icon label..." can giua ngang + doc
-  void drawFooterHintsCentered(const std::vector<std::pair<std::string,std::string>> &hints,
-                               int barY, int barH, SDL_Color color, TTF_Font *font,
-                               int iconSize = 30, int gap = 8, int hintGap = 28);
+  void drawFooterHintsCentered(
+      const std::vector<std::pair<std::string, std::string>> &hints, int barY,
+      int barH, SDL_Color color, TTF_Font *font, int iconSize = 30, int gap = 8,
+      int hintGap = 28);
   // Ve 1 badge co 2 icon nut (vd: "[A] Kiem tra  •  [B] Quay lai")
-  void drawBadgeDual(int x, int y, int w, int h,
-                     const std::string &btn1, const std::string &label1,
-                     const std::string &btn2, const std::string &label2,
-                     SDL_Color bg, SDL_Color fg);
-  // Ve 1 dong text co chua token [NUT] o bat ky vi tri nao -> thay bang icon that, can giua
+  void drawBadgeDual(int x, int y, int w, int h, const std::string &btn1,
+                     const std::string &label1, const std::string &btn2,
+                     const std::string &label2, SDL_Color bg, SDL_Color fg);
+  // Ve 1 dong text co chua token [NUT] o bat ky vi tri nao -> thay bang icon
+  // that, can giua
   void drawInlineHintsCentered(const std::string &text, int centerX, int y,
-                               SDL_Color color, TTF_Font *font, int iconSize = 26, int gap = 6);
+                               SDL_Color color, TTF_Font *font,
+                               int iconSize = 26, int gap = 6);
   // ---- UiTheme helpers (Design Tokens, khong doi logic nghiep vu) ----
   void drawAppBackground();
   void drawCard(int x, int y, int w, int h);
@@ -704,7 +764,8 @@ private:
   void beginModalDim();
 
   // Performance caches (60 FPS Smooth UI) — P2-2: dung ImageCache LRU chung.
-  // Icon/logo/button/grid do m_ui.images() giu; UIManager chi giu thumb YT (gioi han 24).
+  // Icon/logo/button/grid do m_ui.images() giu; UIManager chi giu thumb YT
+  // (gioi han 24).
   ImageCache m_ytThumbCache{24};
 
   // P0-2 YT perf: decode thumbnail off-thread.
@@ -714,7 +775,8 @@ private:
   std::thread m_thumbWorker;
   std::mutex m_thumbQueueMtx;
   std::condition_variable m_thumbCv;
-  std::deque<std::pair<std::string, std::string>> m_thumbPendingDecode; // (vid, path), priority via push_front
+  std::deque<std::pair<std::string, std::string>>
+      m_thumbPendingDecode; // (vid, path), priority via push_front
   std::atomic<bool> m_thumbWorkerStop{false};
   std::atomic<bool> m_thumbWorkerStarted{false};
   // Surfaces ready for GPU upload (worker -> main)
@@ -760,7 +822,8 @@ private:
     std::atomic<int> fps{0};
     std::atomic<int> viewers{0};
     std::atomic<bool> downscale{false};
-    std::atomic<bool> valid{false}; // true sau khi fetch thanh cong it nhat 1 lan
+    std::atomic<bool> valid{
+        false}; // true sau khi fetch thanh cong it nhat 1 lan
   } m_castStats;
   uint32_t m_lastCastStatsPoll = 0;
 
@@ -779,6 +842,14 @@ public:
   // Public API cho background worker threads (LocalSend, IPTV, etc.)
   void setNeedLibraryRefresh(bool v = true) { m_needLibraryRefresh.store(v); }
   bool needLibraryRefresh() const { return m_needLibraryRefresh.load(); }
+  // Cache URL YouTube theo chất lượng (dùng chung UIManager <-> IPTVManager
+  // cho auto-upgrade 720 + SELECT chuyển tức thì).
+  std::string cachedStreamUrl(const std::string &videoId,
+                              const std::string &quality);
+  void cacheStreamUrl(const std::string &videoId, const std::string &quality,
+                      const std::string &url);
+  std::string resolveYouTubeStreamUrl(const std::string &videoId,
+                                      const std::string &quality = "720");
 };
 
 } // namespace RomCloud

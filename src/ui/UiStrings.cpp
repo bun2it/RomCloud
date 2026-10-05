@@ -22,7 +22,7 @@ const char *HEADER_DIAG = "THÔNG TIN";
 const char *HEADER_OTA = "CẬP NHẬT";
 
 // --- 2. MENU CHÍNH (MAIN MENU) ---
-const char *MENU_PLAY = "THƯ VIỆN GAME";
+const char *MENU_PLAY = "THƯ VIỆN";
 const char *MENU_IPTV = "XEM TV";
 const char *MENU_SYNC = "ĐỒNG BỘ";
 const char *MENU_REVERSE_SYNC = "TẢI LÊN DRIVE";
@@ -289,7 +289,7 @@ const char *MULTI_SELECT_HINT =
 const char *MULTI_SELECT_COUNT = " đã chọn";
 
 // --- 16B. MENU SUBTITLE ---
-const char *MENU_SUB_PLAY = "Thư viện game";
+const char *MENU_SUB_PLAY = "Thư viện";
 const char *MENU_SUB_SYNC = "Đồng bộ dữ liệu từ Drive";
 const char *MENU_SUB_REVERSE_SYNC = "Tải game lên Drive";
 const char *MENU_SUB_OTA = "Kiểm tra cập nhật";

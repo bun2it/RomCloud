@@ -1,13 +1,13 @@
 {
-  "version": "2.4.0",
+  "version": "2.4.1",
   "release_date": "2026-10-05",
   "target_os": "ALL",
   "icon_url": "https://raw.githubusercontent.com/bun2it/RomCloud/main/icon.png",
-  "full_zip_url": "https://github.com/bun2it/RomCloud/releases/download/v2.4.0/RomCloud-v2.4.0.zip",
+  "full_zip_url": "https://github.com/bun2it/RomCloud/releases/download/v2.4.1/RomCloud-v2.4.1.zip",
   "os_versions": {
-    "STOCK_PS": "2.4.0",
-    "NEXTUI": "2.4.0",
-    "SPRUCE_OS": "2.4.0"
+    "STOCK_PS": "2.4.1",
+    "NEXTUI": "2.4.1",
+    "SPRUCE_OS": "2.4.1"
   },
-  "changelog": "Office Go của RomCloud là ứng dụng tiện ích thông minh dành cho dân văn phòng: Lịch làm việc & Tiện ích (quản lý lịch trình, lịch làm việc); Thông tin giao thông & Thời tiết (camera giao thông trực tuyến, cập nhật thời tiết); Cập nhật thị trường (giá vàng, giá xăng dầu). Mới: đồng hồ lật thẻ + chữ QlockTwo tiếng Việt, giờ thế giới đổi thành phố, báo thức chuông/rung, thoát app bằng B 2 lần."
+  "changelog": "Launcher lưới 5x2 vừa 1 màn hình, thoát app bằng B 2 lần. Đồng hồ: thẻ lật mượt, chữ QlockTwo tiếng Việt có BÂY GIỜ LÀ + đổi kiểu sáng random, fullscreen tiết kiệm pin. Tab GIÁ CẢ và tab THỊ TRƯỜNG mới (crypto + chứng khoán VN, biểu đồ, nhập mã). Giờ thế giới đổi thành phố. Báo thức tự mở volume. YouTube phát nhanh 720p có tiếng, OSD tự tắt. Smart Cleaner chống lag khi thoát video."
 }

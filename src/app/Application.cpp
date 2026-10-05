@@ -40,6 +40,14 @@
 namespace RomCloud {
 
 static void signalHandler(int signum) {
+  // SIGTERM/SIGINT (kill, reboot, thoát từ launcher): tắt sạch, KHÔNG phải
+  // crash — không gửi báo cáo (tránh issue "Signal 15" giả như #21/#27).
+  if (signum == SIGTERM || signum == SIGINT) {
+    Logger::info("Received signal " + std::to_string(signum) +
+                 ", exiting cleanly...");
+    Application::instance().requestExit();
+    return;
+  }
   std::string sigName;
   switch (signum) {
     case SIGSEGV: sigName = "SIGSEGV (Segmentation Fault)"; break;

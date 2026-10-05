@@ -125,7 +125,7 @@ bool UIManager::handleMarketInput() {
     bool r1Tab = input.isButtonJustPressed(Button::R1);
     if (l1Tab || r1Tab) {
         // L1: lùi tab (sang trái), R1: tới tab (sang phải).
-        m_wxTab = (m_wxTab + (l1Tab ? 3 : 1)) % 4;
+        m_wxTab = (m_wxTab + (l1Tab ? 4 : 1)) % 5;
         if (m_wxTab == 2) {
             m_camView = true;
             m_camVisDirty = true;

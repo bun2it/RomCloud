@@ -17,8 +17,10 @@ void UIManager::renderTraffic() {
     int pillW0 = pillWidth("THỜI TIẾT", m_fontSmall) + 32;
     int pillW1 = pillWidth("ĐỒNG HỒ", m_fontSmall) + 32;
     int pillW2 = pillWidth("CAMERA", m_fontSmall) + 32;
-    int pillW3 = pillWidth("THỊ TRƯỜNG", m_fontSmall) + 32;
-    int pillX3 = 1024 - 24 - pillW3;
+    int pillW3 = pillWidth("GIÁ CẢ", m_fontSmall) + 32;
+    int pillW4 = pillWidth("THỊ TRƯỜNG", m_fontSmall) + 32;
+    int pillX4 = 1024 - 24 - pillW4;
+    int pillX3 = pillX4 - 8 - pillW3;
     int pillX2 = pillX3 - 8 - pillW2;
     int pillX1 = pillX2 - 8 - pillW1;
     int pillX0 = pillX1 - 8 - pillW0;
@@ -32,7 +34,8 @@ void UIManager::renderTraffic() {
             drawPill(pillX0, 72, pillW0, 32, "THỜI TIẾT", false, m_fontSmall);
             drawPill(pillX1, 72, pillW1, 32, "ĐỒNG HỒ", false, m_fontSmall);
             drawPill(pillX2, 72, pillW2, 32, "CAMERA", true, m_fontSmall);
-            drawPill(pillX3, 72, pillW3, 32, "THỊ TRƯỜNG", false, m_fontSmall);
+            drawPill(pillX3, 72, pillW3, 32, "GIÁ CẢ", false, m_fontSmall);
+            drawPill(pillX4, 72, pillW4, 32, "THỊ TRƯỜNG", false, m_fontSmall);
             drawText("Không tìm thấy. Bấm X xóa lọc.", 512, 300,
                      {170, 180, 195, 255}, m_fontSmall, true);
             drawAppFooter({{UiTheme::PadBtn::X, "Xóa lọc"},
@@ -44,7 +47,8 @@ void UIManager::renderTraffic() {
             drawPill(pillX0, 72, pillW0, 32, "THỜI TIẾT", false, m_fontSmall);
             drawPill(pillX1, 72, pillW1, 32, "ĐỒNG HỒ", false, m_fontSmall);
             drawPill(pillX2, 72, pillW2, 32, "CAMERA", true, m_fontSmall);
-            drawPill(pillX3, 72, pillW3, 32, "THỊ TRƯỜNG", false, m_fontSmall);
+            drawPill(pillX3, 72, pillW3, 32, "GIÁ CẢ", false, m_fontSmall);
+            drawPill(pillX4, 72, pillW4, 32, "THỊ TRƯỜNG", false, m_fontSmall);
             drawText("Chưa có danh sách camera.", 512, 300,
                      {170, 180, 195, 255}, m_fontSmall, true);
             drawAppFooter({{UiTheme::PadBtn::B, "Lùi"},
@@ -62,7 +66,8 @@ void UIManager::renderTraffic() {
     drawPill(pillX0, 72, pillW0, 32, "THỜI TIẾT", false, m_fontSmall);
     drawPill(pillX1, 72, pillW1, 32, "ĐỒNG HỒ", false, m_fontSmall);
     drawPill(pillX2, 72, pillW2, 32, "CAMERA", true, m_fontSmall);
-    drawPill(pillX3, 72, pillW3, 32, "THỊ TRƯỜNG", false, m_fontSmall);
+    drawPill(pillX3, 72, pillW3, 32, "GIÁ CẢ", false, m_fontSmall);
+    drawPill(pillX4, 72, pillW4, 32, "THỊ TRƯỜNG", false, m_fontSmall);
 
     // Ảnh full-width dưới hàng pill (cover-crop giữa)
     const int imgX = 0, imgW = 1024;
@@ -154,23 +159,13 @@ void UIManager::renderTraffic() {
         }
     }
 
-    char fbuf[128];
-    if (!m_camFilter.empty())
-        snprintf(fbuf, sizeof(fbuf), "%zu/%zu (lọc)%s", m_camSel + 1, vtotal,
-                 m_camPaused ? " (dừng)" : "");
-    else
-        snprintf(fbuf, sizeof(fbuf), "%zu/%zu%s", m_camSel + 1, vtotal,
-                 m_camPaused ? " (dừng)" : "");
     bool isYt = (CameraManager::instance().at(camVisToReal(m_camSel)).kind == 1);
     drawAppFooter({{UiTheme::PadBtn::A, isYt ? "Xem" : (m_camPaused ? "Tiếp tục" : "Dừng")},
                    {UiTheme::PadBtn::X, "Thích"},
                    {UiTheme::PadBtn::Y, m_camFavOnly ? "Tất cả" : "Yêu thích"},
                    {UiTheme::PadBtn::SELECT, "Tìm"},
-                   {UiTheme::PadBtn::DPAD, "Chuyển kênh"},
                    {UiTheme::PadBtn::L1R1, "Tab"},
                    {UiTheme::PadBtn::B, "Lùi"}});
-    drawText(fbuf, 1000, 715 + (53 - textHeight(m_fontSmall)) / 2,
-             UiTheme::TEXT_SUB, m_fontSmall, false);
     if (m_camModalOpen) SearchInputModal::render(m_camModalCfg);
 }
 
@@ -180,7 +175,7 @@ bool UIManager::handleTrafficInput() {
     bool r1Tab = input.isButtonJustPressed(Button::R1);
     if (l1Tab || r1Tab) {
         // L1: lùi tab (sang trái), R1: tới tab (sang phải).
-        m_wxTab = (m_wxTab + (l1Tab ? 3 : 1)) % 4;
+        m_wxTab = (m_wxTab + (l1Tab ? 4 : 1)) % 5;
         return true;
     }
     // Modal tìm kiếm mở thì route vào modal

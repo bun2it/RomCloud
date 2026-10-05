@@ -1,5 +1,6 @@
 #include "IPTVManager.h"
 #include "../media/MpvPlayer.h"
+#include "../ui/UIManager.h"
 #include "../logging/Logger.h"
 #include "../network/HttpClient.h"
 #include "../filesystem/FileSystemManager.h"
@@ -1130,26 +1131,24 @@ void IPTVManager::showOverlayIcon(const std::string& iconName, uint32_t duration
 
 static std::string fetchYouTubeStreamUrl(const std::string& videoId, const std::string& quality) {
     if (videoId.empty()) return "";
-    std::string appRoot = AppConfig::instance().getAppRoot();
-    if (appRoot.empty()) appRoot = "/mnt/SDCARD/Apps/RomCloud";
-    std::string scriptPath = appRoot + "/scripts/youtube_search.sh";
-    std::string cmd = "\"" + scriptPath + "\" url \"" + videoId + "\" " + quality + " 2>/dev/null";
-    FILE* pipe = popen(cmd.c_str(), "r");
-    if (!pipe) return "";
-    char buffer[4096];
-    std::string streamUrl;
-    while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
-        std::string line(buffer);
-        while (!line.empty() && (line.back() == '\n' || line.back() == '\r')) {
-            line.pop_back();
-        }
-        if (line.find("http://") == 0 || line.find("https://") == 0) {
-            streamUrl = line;
-            break;
-        }
-    }
-    pclose(pipe);
-    return streamUrl;
+    // Dùng chung resolve của UIManager: đủ cả 2 URL video|audio cho DASH
+    // (bản cũ chỉ lấy dòng đầu = video-only nên lên 720p là mất tiếng) +
+    // cache theo chất lượng để chuyển tức thì.
+    return UIManager::instance().resolveYouTubeStreamUrl(videoId, quality);
+}
+
+void IPTVManager::setUpgradeUrl(const std::string& videoId, const std::string& url) {
+    std::lock_guard<std::mutex> lk(m_ytUpgradeMtx);
+    m_ytUpgradeVid = videoId;
+    m_ytUpgradeUrl = url;
+}
+
+bool IPTVManager::takeUpgradeUrl(const std::string& videoId, std::string& out) {
+    std::lock_guard<std::mutex> lk(m_ytUpgradeMtx);
+    if (m_ytUpgradeVid != videoId || m_ytUpgradeUrl.empty()) return false;
+    out = m_ytUpgradeUrl;
+    m_ytUpgradeUrl.clear(); // lấy 1 lần
+    return true;
 }
 
 // iptvDbg: ghi qua Logger chuẩn (gộp vào debug.log chính với category IPTV).
@@ -1945,7 +1944,18 @@ bool IPTVManager::playChannel(const IPTVChannel& channel, size_t initialIndex, c
 bool IPTVManager::switchYouTubeQuality(const std::string& videoId, const std::string& targetQuality) {
     if (!m_isPlaying || !MpvPlayer::instance().isPlaying()) return false;
 
-    // Show initial OSD
+    // Resolve new stream URL (ưu tiên cache từ auto-upgrade ngầm)
+    std::string newUrl = fetchYouTubeStreamUrl(videoId, targetQuality);
+    if (newUrl.empty()) {
+        sendMpvIpcCommand("{\"command\":[\"show-text\",\"Không thể lấy luồng " + targetQuality + "p\",3000]}");
+        return false;
+    }
+    return switchYouTubeStream(videoId, newUrl, targetQuality);
+}
+
+bool IPTVManager::switchYouTubeStream(const std::string& videoId, const std::string& newUrl, const std::string& targetQuality) {
+    if (!m_isPlaying || !MpvPlayer::instance().isPlaying()) return false;
+    (void)videoId;
     sendMpvIpcCommand("{\"command\":[\"show-text\",\"Đang đổi sang " + targetQuality + "p...\",5000]}");
 
     // Query current time position from MPV
@@ -1956,13 +1966,6 @@ bool IPTVManager::switchYouTubeQuality(const std::string& videoId, const std::st
         if (p != std::string::npos) {
             timePos = std::atof(resp.c_str() + p + 7);
         }
-    }
-
-    // Resolve new stream URL
-    std::string newUrl = fetchYouTubeStreamUrl(videoId, targetQuality);
-    if (newUrl.empty()) {
-        sendMpvIpcCommand("{\"command\":[\"show-text\",\"Không thể lấy luồng " + targetQuality + "p\",3000]}");
-        return false;
     }
 
     std::string videoUrl = newUrl;
@@ -1980,10 +1983,26 @@ bool IPTVManager::switchYouTubeQuality(const std::string& videoId, const std::st
     sendMpvIpcCommand(reloadCmd);
 
     if (!audioUrl.empty()) {
-        char audioCmd[2048];
-        snprintf(audioCmd, sizeof(audioCmd),
-            "{\"command\":[\"audio-add\",\"%s\",\"select\"]}", audioUrl.c_str());
-        sendMpvIpcCommand(audioCmd);
+        // Đợi file mới active rồi mới audio-add: gửi liền là rớt vào file
+        // cũ/file chưa mở xong -> mất tiếng (bug đã tái hiện).
+        std::string probe = videoUrl.substr(0, 80);
+        bool active = false;
+        for (int i = 0; i < 50; ++i) {
+            SDL_Delay(200);
+            if (!m_isPlaying || !MpvPlayer::instance().isPlaying()) break;
+            std::string pr;
+            if (sendMpvIpcCommand("{\"command\":[\"get_property\",\"path\"]}", &pr) &&
+                pr.find(probe) != std::string::npos) {
+                active = true;
+                break;
+            }
+        }
+        if (active && m_isPlaying && MpvPlayer::instance().isPlaying()) {
+            char audioCmd[2048];
+            snprintf(audioCmd, sizeof(audioCmd),
+                "{\"command\":[\"audio-add\",\"%s\",\"select\"]}", audioUrl.c_str());
+            sendMpvIpcCommand(audioCmd);
+        }
     }
 
     sendMpvIpcCommand("{\"command\":[\"show-text\",\"Độ phân giải: " + targetQuality + "p\",3000]}");
@@ -2024,7 +2043,7 @@ double IPTVManager::ytCacheAhead() {
     return atof(resp.c_str() + p + 7);
 }
 
-void IPTVManager::showYouTubeOSD() {
+void IPTVManager::showYouTubeOSD(bool extendExpire) {
     std::string appRoot = AppConfig::instance().getAppRoot();
     if (appRoot.empty()) appRoot = "/mnt/SDCARD/Apps/RomCloud";
     static TTF_Font* s_fTitle = nullptr;
@@ -2097,7 +2116,9 @@ void IPTVManager::showYouTubeOSD() {
     }
 
     m_ytOsdOn = true;
-    m_ytOsdExpire = SDL_GetTicks() + 3000;
+    // Refresh tiến trình mỗi giây KHÔNG gia hạn (không thì OSD dính luôn).
+    // Chỉ thao tác của user (gọi mặc định) mới gia hạn thêm 3s.
+    if (extendExpire) m_ytOsdExpire = SDL_GetTicks() + 3000;
     m_ytOsdLastRefresh = SDL_GetTicks();
 }
 
@@ -2256,7 +2277,7 @@ bool IPTVManager::playYouTubeVideo(const std::string& videoId, const std::string
                 if (nowOsd >= m_ytOsdExpire) {
                     hideYouTubeOSD();
                 } else if (nowOsd - m_ytOsdLastRefresh >= 1000) {
-                    showYouTubeOSD();
+                    showYouTubeOSD(false); // refresh, không gia hạn
                 }
             }
             SDL_Delay(35);
@@ -2291,9 +2312,21 @@ bool IPTVManager::stop() {
     unlink("/tmp/stay_awake");
     m_isPlaying = false;
     m_currentChannel = "";
+    m_ytPreActive = false; // hủy prefetch 720p dở dang (nếu có)
+    m_ytPreVid.clear();
+    m_ytPreVideo.clear();
+    m_ytPreAudio.clear();
 
 #ifdef __GLIBC__
     malloc_trim(0);
+#endif
+#ifndef PC_SIMULATOR_MODE
+    // Dừng phát mà ở lại list: vẫn thả pagecache video cho nhẹ RAM.
+    FILE* f = fopen("/proc/sys/vm/drop_caches", "w");
+    if (f) {
+        fputs("1\n", f);
+        fclose(f);
+    }
 #endif
 
     return true;

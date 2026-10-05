@@ -215,6 +215,11 @@ public:
     bool playYouTubeVideo(const std::string& videoId, const std::string& initialUrl, const std::string& quality = "720", const std::string& title = "");
     bool playYouTubeUrl(const std::string& url);
     bool switchYouTubeQuality(const std::string& videoId, const std::string& targetQuality);
+    // Chuyển luồng đã có URL (không resolve): dùng cho auto-upgrade.
+    bool switchYouTubeStream(const std::string& videoId, const std::string& newUrl, const std::string& targetQuality);
+    // URL 720p resolve ngầm (UIManager ghi vào khi xong); loop lấy 1 lần.
+    void setUpgradeUrl(const std::string& videoId, const std::string& url);
+    bool takeUpgradeUrl(const std::string& videoId, std::string& out);
     void showOverlayIcon(const std::string& iconName, uint32_t durationMs = 1400);
     bool sendMpvIpcCommand(const std::string& cmd, std::string* response = nullptr, const std::string& sockPath = "");
     bool isYouTubePlaying() const { return m_isPlaying && m_currentChannel == "YouTube"; }
@@ -292,7 +297,7 @@ private:
     uint32_t m_ytOsdExpire = 0;
     uint32_t m_ytOsdLastRefresh = 0;
     double m_ytDuration = -1.0;
-    void showYouTubeOSD();
+    void showYouTubeOSD(bool extendExpire = true);
     void hideYouTubeOSD();
     // Flash giữa: icon .raw nếu user đã thêm file, ngược lại chữ (tự chuyển,
     // không sửa logic khi có icon mới: aspect/cc/speed/quality).
@@ -321,6 +326,16 @@ private:
     std::string m_prefetchKey;
     std::string m_prefetchUrl;
     std::mutex m_prefetchMutex;
+    // URL 720p YouTube resolve ngầm để tự lên nét (vid + url, có mutex).
+    std::string m_ytUpgradeVid;
+    std::string m_ytUpgradeUrl;
+    std::mutex m_ytUpgradeMtx;
+    // Prefetch 720p: nạp ngầm trong lúc 360 vẫn phát, đủ đệm mới nhảy index.
+    std::string m_ytPreVid;
+    std::string m_ytPreVideo;
+    std::string m_ytPreAudio;
+    uint32_t m_ytPreMs = 0;
+    bool m_ytPreActive = false;
     // Khởi động tiến trình mpv mới cho URL đã resolve (dùng khi restart đổi kênh)
     pid_t spawnMpvForUrl(const std::string& url);
 

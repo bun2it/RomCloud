@@ -107,6 +107,8 @@ $CXX_CMD -std=c++17 -O2 -Wall -Wextra \
     src/ui/WeatherUI.cpp \
     src/clock/ClockStore.cpp \
     src/ui/ClockUI.cpp \
+    src/market/WatchManager.cpp \
+    src/ui/WatchUI.cpp \
     src/market/MarketManager.cpp \
     src/ui/MarketUI.cpp \
     src/camera/CameraManager.cpp \

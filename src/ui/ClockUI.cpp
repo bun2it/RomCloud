@@ -9,6 +9,9 @@
 #include <cstdio>
 #include <cstdlib>
 #include <ctime>
+#ifdef __GLIBC__
+#include <malloc.h>
+#endif
 #include <unistd.h>
 
 namespace RomCloud {
@@ -161,6 +164,8 @@ void UIManager::drawFlipCardBg(int x, int y, int w, int h) {
 
 void UIManager::cycleClkFsStyle(int dir) {
   m_clkFsStyle = (m_clkFsStyle + dir + 3) % 3;
+  m_fsLastKey = -1; // đổi kiểu -> vẽ lại ngay frame tới
+  m_fsToastOn = false;
   DatabaseManager::instance().setSetting("clock_fs_style",
                                          std::to_string(m_clkFsStyle));
   for (int i = 0; i < 3; i++) {
@@ -172,6 +177,35 @@ void UIManager::cycleClkFsStyle(int dir) {
   const char* styleNames[] = {"Kiểu: Thẻ lật", "Kiểu: Phẳng", "Kiểu: QlockTwo"};
   m_clkFsMsg = styleNames[m_clkFsStyle];
   m_clkFsMsgUntil = SDL_GetTicks() + 1500;
+}
+
+bool UIManager::clockFrameNeeded() {
+  std::time_t tnow = std::time(nullptr);
+  struct tm *lt = std::localtime(&tnow);
+  if (!lt) return true;
+  // QlockTwo đổi theo phút, 2 style còn lại hiện cả giây.
+  int key = (m_clkFsStyle == 2) ? (lt->tm_hour * 60 + lt->tm_min)
+                                : (lt->tm_hour * 3600 + lt->tm_min * 60 +
+                                   lt->tm_sec);
+  uint32_t nowMs = SDL_GetTicks();
+  if (key != m_fsLastKey) {
+    m_fsLastKey = key;
+    m_fsToastOn = !m_clkFsMsg.empty() && nowMs < m_clkFsMsgUntil;
+    return true;
+  }
+  // Thẻ lật: vẽ full 60fps trong lúc animation (30fps nhìn kì).
+  if (m_clkFsStyle == 0) {
+    for (int i = 0; i < 3; i++)
+      if (m_fsD[i].ani) return true;
+  }
+  // Toast hiện/tắt: vẽ đúng 1 frame chuyển trạng thái để không kẹt chữ
+  // (QlockTwo vẽ theo phút, không có frame này là hint dính tới 60s).
+  bool toastOn = !m_clkFsMsg.empty() && nowMs < m_clkFsMsgUntil;
+  if (toastOn != m_fsToastOn) {
+    m_fsToastOn = toastOn;
+    return true;
+  }
+  return false;
 }
 
 void UIManager::renderClockFullscreen() {
@@ -275,24 +309,24 @@ void UIManager::renderClockFullscreen() {
 // ============================================================
 void UIManager::renderQlockTwoStyle(struct tm* lt) {
     // Ma trận ký tự 15 hàng x 12 cột: mỗi ô đúng 1 chữ cái, chữ căn giữa
-    // ô nên thẳng hàng dọc. Từ không bao giờ cắt xuống hàng; ô dư chèn
-    // chữ mồi (B/H/BA/HAI/BHAI) không bao giờ sáng.
+    // ô nên thẳng hàng dọc. Hàng 0 luôn sáng "BÂY GIỜ LÀ". Từ không bao giờ
+    // cắt xuống hàng; ô dư chèn chữ mồi (không bao giờ sáng).
     static const char* GRID[15][12] = {
-        {"K","H","Ô","N","G","M","Ư","Ờ","I","M","Ộ","T"},
-        {"H","A","I","B","A","B","Ố","N","N","Ă","M","H"},
-        {"S","Á","U","B","Ả","Y","T","Á","M","H","A","I"},
-        {"C","H","Í","N","M","Ư","Ơ","I","M","Ố","T","B"},
-        {"H","A","I","B","A","B","Ố","N","N","Ă","M","H"},
-        {"S","Á","U","B","Ả","Y","T","Á","M","H","A","I"},
+        {"B","Â","Y","G","I","Ờ","L","À","B","H","A","I"},
+        {"K","H","Ô","N","G","B","H","A","I","B","H","A"},
+        {"M","Ư","Ờ","I","M","Ộ","T","H","A","I","B","A"},
+        {"B","Ố","N","N","Ă","M","S","Á","U","B","Ả","Y"},
+        {"T","Á","M","C","H","Í","N","M","Ư","Ơ","I","B"},
+        {"M","Ố","T","H","A","I","B","A","B","Ố","N","H"},
+        {"N","Ă","M","S","Á","U","B","Ả","Y","T","Á","M"},
         {"C","H","Í","N","M","Ư","Ơ","I","G","I","Ờ","B"},
         {"K","É","M","R","Ư","Ỡ","I","K","H","Ô","N","G"},
         {"M","Ư","Ờ","I","M","Ộ","T","H","A","I","B","A"},
-        {"B","Ố","N","N","Ă","M","S","Á","U","H","A","I"},
-        {"B","Ả","Y","T","Á","M","C","H","Í","N","B","A"},
-        {"M","Ư","Ơ","I","M","Ộ","T","H","A","I","B","A"},
-        {"B","Ố","N","N","Ă","M","S","Á","U","H","A","I"},
-        {"B","Ả","Y","T","Á","M","C","H","Í","N","B","A"},
-        {"M","Ư","Ơ","I","P","H","Ú","T","B","H","A","I"},
+        {"B","Ố","N","N","Ă","M","S","Á","U","B","Ả","Y"},
+        {"T","Á","M","C","H","Í","N","M","Ư","Ơ","I","B"},
+        {"M","Ộ","T","H","A","I","B","A","B","Ố","N","B"},
+        {"N","Ă","M","S","Á","U","B","Ả","Y","T","Á","M"},
+        {"C","H","Í","N","M","Ư","Ơ","I","P","H","Ú","T"},
     };
     constexpr int ROWS = 15, COLS = 12;
 
@@ -301,8 +335,8 @@ void UIManager::renderQlockTwoStyle(struct tm* lt) {
     if (!f) f = m_fontSmall;
     if (!f) f = m_fontTitle;
 
-    // Từ thuộc giờ/phút đang đọc sáng trắng, còn lại xám.
-    const SDL_Color COLOR_INACTIVE = {70, 70, 78, 255};
+    // Từ thuộc giờ/phút đang đọc sáng trắng đậm, còn lại xám rất mờ.
+    const SDL_Color COLOR_INACTIVE = {30, 30, 36, 255};
     const SDL_Color COLOR_ACTIVE = {255, 255, 255, 255};
 
     // Lấy giờ và phút (đồng hồ máy Brick, 24h)
@@ -311,6 +345,30 @@ void UIManager::renderQlockTwoStyle(struct tm* lt) {
 
     // Quy ước đọc: "X GIỜ [Y PHÚT]" | 30p = "X GIỜ RƯỠI" |
     // trên 40p = "(X+1) GIỜ KÉM (60-Y) PHÚT". 0 giờ = KHÔNG.
+    // Từ trùng có 2 ô đều đọc đúng -> random 1 ô (hash theo ngày+giờ+phút
+    // ĐANG ĐỌC nên ổn định suốt phút, phút khác kiểu sáng khác).
+    int dh = hour, dm = minute; // giờ/phút đang đọc (KÉM thì giờ+1)
+    bool isRuoi = (minute == 30), isKem = (minute > 40);
+    if (isKem) {
+        dh = (hour + 1) % 24;
+        dm = 60 - minute;
+    }
+    int dayKey =
+        (lt->tm_year + 1900) * 10000 + (lt->tm_mon + 1) * 100 + lt->tm_mday;
+    auto vhash = [&](unsigned salt) -> unsigned {
+        unsigned x = (unsigned)dayKey * 2654435761u ^
+                     (unsigned)(dh * 60 + dm) * 40503u ^ salt;
+        x ^= x >> 16;
+        x *= 0x7feb352du;
+        x ^= x >> 15;
+        x *= 0x846ca68bu;
+        x ^= x >> 16;
+        return x;
+    };
+    int pickHU = vhash(0x11u) & 1; // đơn vị giờ: cụm trên/dưới
+    int pickH20 = vhash(0x20u) % 3; // combo HAI+MƯƠI lúc 20h
+    int pickMU = vhash(0x33u) & 1; // đơn vị phút: cụm trên/dưới
+    int pickT0 = vhash(0x40u) & 1; // chục tròn: cặp trên/dưới
     bool lit[ROWS][COLS] = {{false}};
     auto light = [&](int r, int c) {
         if (r >= 0 && r < ROWS && c >= 0 && c < COLS) lit[r][c] = true;
@@ -318,68 +376,107 @@ void UIManager::renderQlockTwoStyle(struct tm* lt) {
     auto lightWord = [&](int r, int c0, int len) {
         for (int i = 0; i < len; i++) light(r, c0 + i);
     };
-    // Đơn vị giờ 1-9 (hàng 0-3), đơn vị phút 1-9 (hàng 8-10),
-    // đơn vị phút hàng chục 2x-5x (hàng 11-13, sau MƯƠI).
+    // Đơn vị giờ 1-9: HU cụm trên (hàng 2-4), HU_B cụm dưới (hàng 5-7).
+    // Đơn vị phút 1-9: MU cụm trên (hàng 9-11), MU2 cụm dưới (hàng 12-14).
+    // Chục tròn 20/40/50: TENS + MƯƠI(11,7), hoặc TENS_B + MƯƠI(14,4).
     // Mỗi phần tử = (hàng, cột đầu, số ký tự).
-    static const int HU[10][3] = {{-1,0,0},{0,9,3},{1,0,3},{1,3,2},
-                                  {1,5,3},{1,8,3},{2,0,3},{2,3,3},
-                                  {2,6,3},{3,0,4}};
-    static const int MU[10][3] = {{-1,0,0},{8,4,3},{8,7,3},{8,10,2},
-                                  {9,0,3},{9,3,3},{9,6,3},{10,0,3},
-                                  {10,3,3},{10,6,4}};
-    static const int MU2[10][3] = {{-1,0,0},{11,4,3},{11,7,3},{11,10,2},
-                                   {12,0,3},{12,3,3},{12,6,3},{13,0,3},
-                                   {13,3,3},{13,6,4}};
+    static const int HU[10][3] = {{-1,0,0},{2,4,3},{2,7,3},{2,10,2},
+                                  {3,0,3},{3,3,3},{3,6,3},{3,9,3},
+                                  {4,0,3},{4,3,4}};
+    static const int HU_B[10][3] = {{-1,0,0},{2,4,3},{5,3,3},{5,6,2},
+                                    {5,8,3},{6,0,3},{6,3,3},{6,6,3},
+                                    {6,9,3},{7,0,4}};
+    static const int MU[10][3] = {{-1,0,0},{9,4,3},{9,7,3},{9,10,2},
+                                  {10,0,3},{10,3,3},{10,6,3},{10,9,3},
+                                  {11,0,3},{11,3,4}};
+    static const int MU2[10][3] = {{-1,0,0},{12,0,3},{12,3,3},{12,6,2},
+                                   {12,8,3},{13,0,3},{13,3,3},{13,6,3},
+                                   {13,9,3},{14,0,4}};
+    static const int TENS_B[6][3] = {{-1,0,0},{-1,0,0},{12,3,3},{12,6,2},
+                                     {12,8,3},{13,0,3}};
     auto lightHour = [&](int h) {
         if (h < 0 || h > 23) return;
-        if (h == 0) { lightWord(0, 0, 5); return; } // KHÔNG
-        if (h <= 9) { lightWord(HU[h][0], HU[h][1], HU[h][2]); return; }
-        if (h <= 19) {
-            lightWord(0, 5, 4); // MƯỜI
-            if (h > 10) lightWord(HU[h - 10][0], HU[h - 10][1], HU[h - 10][2]);
+        if (h == 0) { lightWord(1, 0, 5); return; } // KHÔNG (cố định)
+        if (h <= 9) {
+            const int* T = (h >= 2 && pickHU) ? HU_B[h] : HU[h];
+            lightWord(T[0], T[1], T[2]);
             return;
         }
-        // HAI MƯƠI ... đọc xuôi hàng 1 -> hàng 4.
-        lightWord(1, 0, 3); // HAI (chục)
-        lightWord(3, 4, 4); // MƯƠI
+        if (h <= 19) {
+            lightWord(2, 0, 4); // MƯỜI (cố định)
+            if (h > 10) {
+                int u = h - 10;
+                const int* T = (u >= 2 && pickHU) ? HU_B[u] : HU[u];
+                lightWord(T[0], T[1], T[2]);
+            }
+            return;
+        }
         int u = h - 20;
-        if (u == 1) lightWord(3, 8, 3);      // MỐT
-        else if (u == 2) lightWord(4, 0, 3); // HAI
-        else if (u == 3) lightWord(4, 3, 2); // BA
+        if (u == 0) {
+            // 3 combo HAI+MƯƠI đều đọc đúng "HAI MƯƠI".
+            static const int HR[3] = {2, 2, 5}; // hàng HAI
+            static const int MR[3] = {4, 7, 7}; // hàng MƯƠI
+            static const int MC[3] = {7, 4, 4}; // cột MƯƠI
+            int k = pickH20;
+            lightWord(HR[k], HR[k] == 5 ? 3 : 7, 3);
+            lightWord(MR[k], MC[k], 4);
+            return;
+        }
+        lightWord(2, 7, 3); // HAI chục (21-23 cố định)
+        lightWord(4, 7, 4); // MƯƠI (cố định)
+        if (u == 1) lightWord(5, 0, 3);      // MỐT (cố định)
+        else if (u == 2) lightWord(5, 3, 3); // HAI (cố định)
+        else if (u == 3) lightWord(5, 6, 2); // BA (cố định)
     };
-    // Chục phút 2-5 ở hàng 8-9, MƯƠI ở hàng 11, đơn vị ở hàng 11-13
-    // sau MƯƠI — đọc xuôi "HAI MƯƠI NĂM".
+    // Đơn vị phút hàng chục 2x-5x luôn cụm dưới (sau MƯƠI) — cố định.
     auto lightMinute = [&](int m) {
         if (m <= 0 || m > 59) return;
-        if (m <= 9) { lightWord(MU[m][0], MU[m][1], MU[m][2]); return; }
+        if (m <= 9) {
+            const int* T = pickMU ? MU2[m] : MU[m];
+            lightWord(T[0], T[1], T[2]);
+            return;
+        }
         if (m <= 19) {
-            lightWord(8, 0, 4); // MƯỜI
-            if (m > 10) lightWord(MU[m - 10][0], MU[m - 10][1], MU[m - 10][2]);
+            lightWord(9, 0, 4); // MƯỜI (cố định)
+            if (m > 10) {
+                int u = m - 10;
+                const int* T = pickMU ? MU2[u] : MU[u];
+                lightWord(T[0], T[1], T[2]);
+            }
             return;
         }
         int t = m / 10, u = m % 10;
-        static const int TENS[6][3] = {{-1,0,0},{-1,0,0},{8,7,3},{8,10,2},
-                                       {9,0,3},{9,3,3}};
+        if (u == 0 && pickT0) {
+            // Chục tròn: cặp dưới (chục hàng 12-13 + MƯƠI hàng 14).
+            lightWord(TENS_B[t][0], TENS_B[t][1], TENS_B[t][2]);
+            lightWord(14, 4, 4); // MƯƠI
+            return;
+        }
+        static const int TENS[6][3] = {{-1,0,0},{-1,0,0},{9,7,3},{9,10,2},
+                                       {10,0,3},{10,3,3}};
         if (t >= 2 && t <= 5) lightWord(TENS[t][0], TENS[t][1], TENS[t][2]);
-        lightWord(11, 0, 4); // MƯƠI
+        lightWord(11, 7, 4); // MƯƠI
         if (u >= 1) lightWord(MU2[u][0], MU2[u][1], MU2[u][2]);
     };
 
-    lightWord(6, 8, 3); // GIỜ luôn sáng
+    lightWord(0, 0, 3); // BÂY luôn sáng
+    lightWord(0, 3, 3); // GIỜ (đầu) luôn sáng
+    lightWord(0, 6, 2); // LÀ luôn sáng
+    lightWord(7, 8, 3); // GIỜ luôn sáng
     if (minute == 0) {
-        lightHour(hour);
-    } else if (minute == 30) {
-        lightHour(hour);
-        lightWord(7, 3, 4); // RƯỠI
-    } else if (minute > 40) {
-        lightHour((hour + 1) % 24); // đọc giờ kế tiếp
-        lightWord(7, 0, 3); // KÉM
-        lightMinute(60 - minute);
-        lightWord(14, 4, 4); // PHÚT
+        lightHour(dh);
+    } else if (isRuoi) {
+        lightHour(dh);
+        lightWord(8, 3, 4); // RƯỠI
+    } else if (isKem) {
+        lightHour(dh);
+        lightWord(8, 0, 3); // KÉM
+        lightMinute(dm);
+        lightWord(14, 8, 4); // PHÚT
     } else {
-        lightHour(hour);
-        lightMinute(minute);
-        lightWord(14, 4, 4); // PHÚT
+        lightHour(dh);
+        lightMinute(dm);
+        lightWord(14, 8, 4); // PHÚT
     }
 
     // Ma trận full-bleed: padding 12px quanh màn 1024x768.
@@ -555,14 +652,12 @@ void UIManager::renderClock(
     drawAppFooter({{UiTheme::PadBtn::A, "Chạy/Dừng"},
                    {UiTheme::PadBtn::X, "Đặt lại"},
                    {UiTheme::PadBtn::SELECT, "Toàn màn hình"},
-                   {UiTheme::PadBtn::DPAD, "Di chuyển"},
                    {UiTheme::PadBtn::B, "Lùi"},
                    {UiTheme::PadBtn::L1R1, "Tab"}});
   } else if (m_clkFocus == 0) {
     drawAppFooter({{UiTheme::PadBtn::A, "Đổi thành phố"},
                    {UiTheme::PadBtn::Y, "Thêm báo thức"},
                    {UiTheme::PadBtn::SELECT, "Toàn màn hình"},
-                   {UiTheme::PadBtn::DPAD, "Di chuyển"},
                    {UiTheme::PadBtn::B, "Lùi"},
                    {UiTheme::PadBtn::L1R1, "Tab"}});
   } else {
@@ -570,7 +665,6 @@ void UIManager::renderClock(
                    {UiTheme::PadBtn::Y, "Thêm báo thức"},
                    {UiTheme::PadBtn::X, "Xóa báo thức"},
                    {UiTheme::PadBtn::SELECT, "Toàn màn hình"},
-                   {UiTheme::PadBtn::DPAD, "Di chuyển"},
                    {UiTheme::PadBtn::START, "Sửa"},
                    {UiTheme::PadBtn::B, "Lùi"},
                    {UiTheme::PadBtn::L1R1, "Tab"}});
@@ -617,6 +711,19 @@ bool UIManager::handleClockInput() {
       m_fsD[i].prog = 0.0f;
     }
     m_clkFullscreen = true;
+    m_fsLastKey = -1; // vào fullscreen -> vẽ ngay frame đầu
+    m_fsToastOn = false;
+#ifdef __GLIBC__
+    malloc_trim(0); // fullscreen clock ở lâu: trả heap thừa trước khi nghỉ
+#endif
+#ifndef PC_SIMULATOR_MODE
+    // Thả pagecache để RAM ở mức thấp nhất khi treo đồng hồ.
+    FILE* fdc = fopen("/proc/sys/vm/drop_caches", "w");
+    if (fdc) {
+      fputs("1\n", fdc);
+      fclose(fdc);
+    }
+#endif
     // Fullscreen clock: bypass sleep (always awake) theo cùng quy ước
     // /tmp/stay_awake như MpvPlayer/IPTV.
     {
@@ -645,7 +752,7 @@ bool UIManager::handleClockInput() {
   bool r1Tab = input.isButtonJustPressed(Button::R1);
   if (l1Tab || r1Tab) {
     // L1: lùi tab (sang trái), R1: tới tab (sang phải).
-    m_wxTab = (m_wxTab + (l1Tab ? 3 : 1)) % 4;
+    m_wxTab = (m_wxTab + (l1Tab ? 4 : 1)) % 5;
     if (m_wxTab == 2) {
       m_camView = true;
       m_camVisDirty = true;
