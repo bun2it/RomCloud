@@ -9,5 +9,5 @@
     "NEXTUI": "2.4.1",
     "SPRUCE_OS": "2.4.1"
   },
-  "changelog": "Launcher gọn 10 icon trên 1 màn hình, dễ tìm, thoát app bằng B 2 lần. Đồng hồ số lật mượt, giờ chữ tiếng Việt mỗi phút một kiểu sáng, xem lâu đỡ hao pin. Tab Giá cả và tab Thị trường mới: giá vàng/xăng/đô, coin và chứng khoán VN có biểu đồ. Giờ thế giới đổi thành phố tùy thích. Báo thức kêu to rõ. YouTube mở là nét 720p, có tiếng."
+  "changelog": "Sửa lỗi, tối ưu hiệu năng. Thêm chức năng xem biểu đồ thị trường crypto, chứng khoán."
 }
