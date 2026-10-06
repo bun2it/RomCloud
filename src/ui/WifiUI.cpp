@@ -121,7 +121,6 @@ void UIManager::renderWifiTab() {
     }
 
     const int contentTop = 124;
-    const int contentH = 715 - contentTop - 16;
     // Card trạng thái.
     drawRoundedRect(24, contentTop, 1024 - 48, 64, UiTheme::RADIUS_CARD,
                     {22, 28, 38, 255}, true);

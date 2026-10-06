@@ -602,7 +602,7 @@ private:
   void runYouTubeHomeSearch(const std::string &query);
   void toggleYouTubeViewMode();
   void renderYouTubeHomeState();
-  void renderYouTubeHomeContentRow(int contentTop, int contentH);
+  void renderYouTubeHomeContentRow(int contentTop, int /*contentH*/);
   void renderYouTubeHomeContentGrid(int contentTop, int contentH);
   void renderYouTubeHomeChannelLayout(int contentTop, int contentH);
   // ── Chuẩn hoá layout video (áp dụng cho MỌI màn có thumbnail) ──────

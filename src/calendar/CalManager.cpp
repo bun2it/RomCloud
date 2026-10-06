@@ -356,7 +356,6 @@ int CalManager::importIcsText(const std::string& ics, const std::string& sourceN
             }
             if (tp != std::string::npos) {
                 std::string tpart = dur.substr(tp + 1);
-                size_t h = tpart.find('H'), m = tpart.find('M'), s = tpart.find('S');
                 // parse tuần tự (đủ cho ca thường gặp)
                 long v = 0;
                 for (char c : tpart) {

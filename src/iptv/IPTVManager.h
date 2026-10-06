@@ -337,7 +337,6 @@ private:
     std::string m_ytPreVid;
     std::string m_ytPreVideo;
     std::string m_ytPreAudio;
-    uint32_t m_ytPreMs = 0;
     bool m_ytPreActive = false;
     // Khởi động tiến trình mpv mới cho URL đã resolve (dùng khi restart đổi kênh)
     pid_t spawnMpvForUrl(const std::string& url);

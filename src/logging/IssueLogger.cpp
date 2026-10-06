@@ -274,7 +274,7 @@ bool IssueLogger::logError(const std::string& errorType,
 
 bool IssueLogger::logCrash(const std::string& crashInfo,
                            const std::string& stackTrace,
-                           const std::string& deviceInfo) {
+                           const std::string& /*deviceInfo*/) {
     if (!m_enabled) {
         return false;
     }

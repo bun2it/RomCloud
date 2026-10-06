@@ -13,7 +13,7 @@ void UIManager::syncExplorerDialogs() {
         }
         if (ed.confirm.visible && !m_dialogs.confirm.visible) {
             FileExplorer* owner = exps[p];
-            m_dialogs.confirm.open(ed.confirm.title, ed.confirm.lines, [this, owner]() {
+            m_dialogs.confirm.open(ed.confirm.title, ed.confirm.lines, [owner]() {
                 owner->dialogs().confirm.confirm();
             }, ed.confirm.danger);
         }

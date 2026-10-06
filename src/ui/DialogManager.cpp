@@ -261,7 +261,7 @@ void DialogManager::renderLsRow(UiRenderer& ui, TTF_Font* fSmall, TTF_Font* fMed
 }
 
 void DialogManager::renderLocalSendProgress(UiRenderer& ui, TTF_Font* fSmall, TTF_Font* fMedium,
-                                            TTF_Font* fLarge, TTF_Font* fTitle,
+                                            TTF_Font* fLarge, TTF_Font* /*fTitle*/,
                                             int& sel, int& scroll) {
     ui.drawAppBackground();
 

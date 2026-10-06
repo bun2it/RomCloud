@@ -64,7 +64,6 @@ void UIManager::renderTraffic() {
     }
     if (m_camSel >= vtotal) m_camSel = vtotal - 1;
     size_t real = camVisToReal(m_camSel);
-    const auto &cam = CameraManager::instance().at(real);
     // Title header theo chuẩn chung (drawAppHeader tự chừa cụm status),
     // pills nằm hàng dưới nên không giới hạn title.
     drawAppHeader("GIAO THÔNG - CAMERA");

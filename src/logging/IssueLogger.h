@@ -28,7 +28,7 @@ public:
     // Log a crash report
     bool logCrash(const std::string& crashInfo,
                   const std::string& stackTrace = "",
-                  const std::string& deviceInfo = "");
+                  const std::string& deviceInfo = "");  // deviceInfo reserved for future; intentionally unused
 
     // Check if issue reporting is enabled
     bool isEnabled() const;
