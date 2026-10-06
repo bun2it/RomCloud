@@ -2,6 +2,25 @@
 // Luồng: kết nối máy -> tải zip release mới nhất -> đẩy vào thẻ ->
 // bung ra /mnt/SDCARD/Apps -> chmod -> sync. User chỉ bấm 2 nút.
 var adb = null;
+var webusb = null;
+
+function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+
+// Dọn handle USB cũ của chính trang (bấm Kết nối nhiều lần để lại
+// kết nối dở treo cổng). Không dọn được adb ngoài trình duyệt.
+async function closeStale() {
+  try { if (webusb && webusb.close) await webusb.close(); } catch (e) {}
+  webusb = null;
+  adb = null;
+  try {
+    if (navigator.usb && navigator.usb.getDevices) {
+      var devs = await navigator.usb.getDevices();
+      for (var i = 0; i < devs.length; i++) {
+        try { if (devs[i].opened) await devs[i].close(); } catch (e) {}
+      }
+    }
+  } catch (e) {}
+}
 
 var logEl = document.getElementById("log");
 var btnConn = document.getElementById("btnConn");
@@ -23,33 +42,46 @@ async function shell(cmd) {
 }
 
 btnConn.onclick = async function () {
-  try {
-    if (!("usb" in navigator)) {
-      log("Trình duyệt này không hỗ trợ WebUSB. Hãy dùng Chrome/Edge.", "err");
-      return;
+  btnConn.disabled = true;
+  var ok = false;
+  // Tự thử lại 3 lần: dọn handle cũ + mở lại (chọn đúng máy nếu chọn nhầm).
+  for (var attempt = 1; attempt <= 3 && !ok; attempt++) {
+    try {
+      if (!("usb" in navigator)) {
+        log("Trình duyệt này không hỗ trợ WebUSB. Hãy dùng Chrome/Edge.", "err");
+        break;
+      }
+      if (typeof Adb === "undefined") {
+        log("Chưa tải được thư viện webadb (mất mạng?). Tải lại trang.", "err");
+        break;
+      }
+      await closeStale();
+      if (attempt > 1) {
+        log("Tự thử lại lần " + attempt + "/3...");
+        await sleep(1500);
+      } else {
+        log("Đang mở chọn thiết bị...");
+      }
+      webusb = await Adb.open("WebUSB");
+      log("Đang kết nối adb (duyệt trên máy nếu hỏi)...");
+      adb = await webusb.connectAdb("host::", function () {
+        log("Hãy bấm Cho phép / OK trên màn hình máy Brick.");
+      });
+      var model = "?";
+      try { model = (await shell("getprop ro.product.model")).trim() || "?"; } catch (e) {}
+      devInfo.innerHTML = "Đã kết nối: <b>" + model.replace(/</g, "&lt;") + "</b>";
+      log("Đã kết nối máy: " + model, "ok");
+      btnInstall.disabled = false;
+      ok = true;
+    } catch (e) {
+      var msg = (e && e.message ? e.message : String(e));
+      log("Lần " + attempt + " chưa được: " + msg, "err");
+      await closeStale();
     }
-    if (typeof Adb === "undefined") {
-      log("Chưa tải được thư viện webadb (mất mạng?). Tải lại trang.", "err");
-      return;
-    }
-    log("Đang mở chọn thiết bị...");
-    var webusb = await Adb.open("WebUSB");
-    log("Đang kết nối adb (duyệt trên máy nếu hỏi)...");
-    adb = await webusb.connectAdb("host::", function () {
-      log("Hãy bấm Cho phép / OK trên màn hình máy Brick.");
-    });
-    var model = "?";
-    try { model = (await shell("getprop ro.product.model")).trim() || "?"; } catch (e) {}
-    devInfo.innerHTML = "Đã kết nối: <b>" + model.replace(/</g, "&lt;") + "</b>";
-    log("Đã kết nối máy: " + model, "ok");
-    btnInstall.disabled = false;
-    btnConn.disabled = true;
-  } catch (e) {
-    var msg = (e && e.message ? e.message : String(e));
-    log("Kết nối thất bại: " + msg, "err");
-    if (msg.indexOf("claimInterface") >= 0 || msg.indexOf("claim interface") >= 0) {
-      log("Nguyên nhân: adb trên laptop đang giữ cổng USB. Mở Terminal gõ: adb kill-server — rồi rút cáp, cắm lại, bấm Kết nối lại (đừng mở adb khác trong lúc cài).", "err");
-    }
+  }
+  if (!ok) {
+    log("Đã tự thử 3 lần không được. Còn 1 khả năng duy nhất: phần mềm khác (adb/driver) trên laptop đang giữ cổng — tắt nó đi (vd Terminal: adb kill-server), rút cáp cắm lại rồi bấm Kết nối.", "err");
+    btnConn.disabled = false;
   }
 };
 
