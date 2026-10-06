@@ -1,15 +1,54 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="vi">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>RomCloud — Office Go for TrimUI Brick</title></head>
-<body style="font-family:sans-serif;max-width:720px;margin:40px auto;padding:0 16px;line-height:1.6">
-<h1>RomCloud</h1>
-<p>RomCloud (Office Go) is a utility app for the TrimUI Brick handheld: work calendar, weather, traffic cameras, market prices, clock, YouTube, IPTV, and ROM sync with your personal Google Drive / OneDrive.</p>
-<ul>
-<li><a href="privacy.html">Privacy Policy</a></li>
-<li><a href="terms.html">Terms of Service</a></li>
-<li><a href="https://github.com/bun2it/RomCloud">GitHub source code</a></li>
-</ul>
-<p>Contact: bun2it@gmail.com</p>
+<title>RomCloud — Office Go cho TrimUI Brick</title>
+<link rel="stylesheet" href="assets/site.css">
+<script src="assets/site.js"></script>
+</head>
+<body>
+<div class="wrap">
+  <div class="topbar">
+    <div class="logo">🎮</div>
+    <div class="brand">ROMCLOUD<small>OFFICE GO • TRIMUI BRICK</small></div>
+    <nav><a href="install.html">Cài đặt 1 chạm</a><a href="https://github.com/bun2it/RomCloud/releases">Tải về</a></nav>
+    <button class="theme-btn" id="themeBtn" onclick="rcThemeToggle()">Giao diện</button>
+  </div>
+
+  <div class="hero">
+    <h1>ROM<span class="y">CLOUD</span></h1>
+    <p>Ứng dụng tiện ích thông minh cho dân văn phòng trên TrimUI Brick.<br>
+    Lịch làm việc • Thời tiết • Camera giao thông • Giá cả • Đồng hồ • YouTube • IPTV</p>
+    <a class="btn" href="install.html">⚡ CÀI ĐẶT 1 CHẠM</a>
+    <span style="display:inline-block;width:12px"></span>
+    <a class="btn ghost" id="dlBtn" href="https://github.com/bun2it/RomCloud/releases/latest">⬇ Tải bản mới nhất</a>
+    <p id="verLine" style="margin-top:12px"></p>
+  </div>
+
+  <div class="grid">
+    <div class="card"><h3>📅 Lịch &amp; Ghi chú</h3><p>Lịch làm việc, sự kiện sắp tới, nhắc báo thức, lịch âm.</p></div>
+    <div class="card"><h3>🌦 Thời tiết &amp; Camera</h3><p>Thời tiết phường/xã, camera giao thông trực tuyến.</p></div>
+    <div class="card"><h3>💰 Giá cả &amp; Thị trường</h3><p>Vàng, xăng dầu, USD; crypto và chứng khoán VN có biểu đồ.</p></div>
+    <div class="card"><h3>🕰 Đồng hồ</h3><p>Thẻ lật, giờ chữ tiếng Việt, giờ thế giới, báo thức, Pomodoro.</p></div>
+    <div class="card"><h3>📺 YouTube &amp; IPTV</h3><p>Xem YouTube 720p, hàng trăm kênh TV, GameCast lên TV/laptop.</p></div>
+    <div class="card"><h3>☁️ Drive của bạn</h3><p>Liên kết Google Drive cá nhân bằng mã QR, đồng bộ ROM 2 chiều.</p></div>
+  </div>
+
+  <div class="warn">📦 <b>Cài 1 chạm:</b> cắm Brick vào laptop bằng cáp USB → mở trang <a href="install.html">Cài đặt</a> bằng <b>Chrome/Edge</b> → bấm 1 nút, web tự đẩy app vào máy. Không cần gõ lệnh.</div>
+
+  <footer>
+    RomCloud • <a href="privacy.html">Quyền riêng tư</a> • <a href="terms.html">Điều khoản</a> •
+    <a href="https://github.com/bun2it/RomCloud">GitHub</a> • Liên hệ: bun2it@gmail.com
+  </footer>
+</div>
+<script>
+fetch("https://api.github.com/repos/bun2it/RomCloud/releases/latest").then(function (r) {
+  return r.json();
+}).then(function (j) {
+  if (!j || !j.tag_name) return;
+  document.getElementById("verLine").textContent = "Bản mới nhất: " + j.tag_name;
+  var a = (j.assets || []).filter(function (x) { return /\.zip$/.test(x.name); })[0];
+  if (a) document.getElementById("dlBtn").href = a.browser_download_url;
+}).catch(function () {});
+</script>
 </body>
 </html>

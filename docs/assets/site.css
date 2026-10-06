@@ -1,0 +1,90 @@
+/* RomCloud retro site — light/dark + auto theo hệ thống */
+:root {
+  --bg: #0d1117; --bg2: #161b22; --card: #1c2330;
+  --fg: #e6edf3; --dim: #8b949e; --line: #30363d;
+  --acc: #00b4d8; --acc2: #ffd166; --good: #3fb950; --bad: #f85149;
+  --shadow: 4px 4px 0 #000;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --bg: #f4f1ea; --bg2: #fffdf7; --card: #ffffff;
+    --fg: #1f2328; --dim: #59636e; --line: #d4cdbd;
+    --acc: #0969da; --acc2: #9a6700; --good: #1a7f37; --bad: #cf222e;
+    --shadow: 4px 4px 0 #1f2328;
+  }
+}
+:root[data-theme="light"] {
+  --bg: #f4f1ea; --bg2: #fffdf7; --card: #ffffff;
+  --fg: #1f2328; --dim: #59636e; --line: #d4cdbd;
+  --acc: #0969da; --acc2: #9a6700; --good: #1a7f37; --bad: #cf222e;
+  --shadow: 4px 4px 0 #1f2328;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--fg);
+  font-family: "Courier New", ui-monospace, monospace;
+  line-height: 1.6;
+}
+body::after { /* scanline CRT nhẹ */
+  content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 99;
+  background: repeating-linear-gradient(0deg, transparent 0 2px, rgba(0,0,0,.06) 2px 3px);
+}
+.wrap { max-width: 860px; margin: 0 auto; padding: 0 16px 64px; }
+.topbar {
+  display: flex; align-items: center; gap: 12px;
+  padding: 14px 0; border-bottom: 3px double var(--line); margin-bottom: 24px;
+}
+.logo { font-size: 28px; }
+.brand { font-size: 20px; font-weight: bold; letter-spacing: 2px; flex: 1; }
+.brand small { display: block; font-size: 12px; color: var(--dim); letter-spacing: 1px; }
+nav a { color: var(--acc); margin-left: 14px; font-size: 14px; }
+.btn {
+  display: inline-block; background: var(--acc2); color: #000;
+  border: 2px solid #000; box-shadow: var(--shadow);
+  padding: 12px 22px; font-weight: bold; font-size: 16px; cursor: pointer;
+  text-decoration: none; font-family: inherit;
+}
+.btn:active { transform: translate(2px, 2px); box-shadow: 2px 2px 0 #000; }
+.btn.ghost { background: var(--card); color: var(--fg); }
+.btn:disabled { opacity: .5; cursor: wait; }
+.hero {
+  border: 2px solid var(--line); background: var(--bg2);
+  box-shadow: var(--shadow); padding: 28px; text-align: center; margin-bottom: 24px;
+}
+.hero h1 { font-size: 30px; margin: 0 0 8px; letter-spacing: 3px; }
+.hero h1 .y { color: var(--acc2); }
+.hero p { color: var(--dim); margin: 6px 0 18px; }
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 24px; }
+@media (max-width: 640px) { .grid { grid-template-columns: 1fr; } }
+.card {
+  border: 2px solid var(--line); background: var(--card);
+  box-shadow: var(--shadow); padding: 16px;
+}
+.card h3 { margin: 0 0 6px; font-size: 16px; color: var(--acc); }
+.card p { margin: 0; font-size: 13px; color: var(--dim); }
+.steps { counter-reset: s; padding: 0; list-style: none; }
+.steps li {
+  counter-increment: s; border: 2px solid var(--line); background: var(--card);
+  box-shadow: var(--shadow); padding: 14px 14px 14px 58px;
+  margin-bottom: 12px; position: relative; font-size: 14px;
+}
+.steps li::before {
+  content: counter(s); position: absolute; left: 12px; top: 12px;
+  width: 30px; height: 30px; background: var(--acc2); color: #000;
+  font-weight: bold; display: flex; align-items: center; justify-content: center;
+  border: 2px solid #000;
+}
+#log {
+  background: #000; color: #3fb950; border: 2px solid var(--line);
+  padding: 12px; height: 220px; overflow-y: auto; font-size: 12px;
+  white-space: pre-wrap; margin-top: 14px;
+}
+#log .err { color: #f85149; }
+#log .ok { color: #3fb950; }
+.status { margin-top: 12px; font-size: 14px; }
+.status b { color: var(--acc2); }
+footer { margin-top: 32px; border-top: 3px double var(--line); padding-top: 12px; font-size: 12px; color: var(--dim); }
+footer a { color: var(--acc); }
+.theme-btn { background: var(--card); color: var(--fg); border: 2px solid var(--line); padding: 6px 10px; cursor: pointer; font-family: inherit; font-size: 13px; }
+code { background: var(--bg2); border: 1px solid var(--line); padding: 1px 6px; font-size: 13px; }
+.warn { border: 2px dashed var(--acc2); padding: 12px; font-size: 13px; margin-bottom: 16px; }
