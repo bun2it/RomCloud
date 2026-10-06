@@ -24,6 +24,10 @@
     <p id="verLine" style="margin-top:12px"></p>
   </div>
 
+  <div class="card" id="newsCard" style="display:none;margin-bottom:24px">
+    <div class="txt"><h3 id="newsTitle">Có gì mới</h3><p id="newsBody"></p></div>
+  </div>
+
   <div class="grid">
     <div class="card"><img class="feat" src="assets/features/SYNC.png" alt="Đồng bộ"><div class="txt"><h3>Đồng bộ Drive</h3><p>Quét mã QR là liên kết Drive cá nhân, đồng bộ ROM 2 chiều, sao lưu tự động.</p></div></div>
     <div class="card"><img class="feat" src="assets/features/OFFICEGO.png" alt="OfficeGo"><div class="txt"><h3>Lịch &amp; Thời tiết</h3><p>Lịch làm việc, sự kiện sắp tới, báo thức, lịch âm, thời tiết và camera giao thông.</p></div></div>
@@ -50,6 +54,12 @@ fetch("https://api.github.com/repos/bun2it/RomCloud/releases/latest").then(funct
   document.getElementById("verLine").textContent = "Bản mới nhất: " + j.tag_name;
   var a = (j.assets || []).filter(function (x) { return /\.zip$/.test(x.name); })[0];
   if (a) document.getElementById("dlBtn").href = a.browser_download_url;
+  if (j.body && j.body.trim()) {
+    document.getElementById("newsTitle").textContent = "Có gì mới trong " + j.tag_name;
+    document.getElementById("newsBody").textContent = j.body.trim();
+    document.getElementById("newsBody").style.whiteSpace = "pre-line";
+    document.getElementById("newsCard").style.display = "block";
+  }
 }).catch(function () {});
 </script>
 </body>
