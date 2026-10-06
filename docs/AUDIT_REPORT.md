@@ -198,7 +198,9 @@
 | 🔴 **P0** | User issue #34 (OTA fail) | 1 ngày | Đang ảnh hưởng release OTA cho user thật |
 | 🔴 **P0** | User issue #33 (GameCast fail) | 4 giờ | Tương tự |
 | 🟠 **P1** | Phase 1 cleanup (dead code) | 1 giờ | Giảm warning, an toàn |
-| 🟠 **P1** | Verify Browser M2/M4/M8 + VirtualKeyboard wire-up | 1 ngày | Polish web app đang chạy |
+| 🟠 **P1** | Verify Browser M2/M4/M8 + VirtualKeyboard wire-up ✅ | 1 ngày | xong `d339d20` — 167 LOC, 0 warning |
+| 🟡 **P2** | Tables colspan/rowspan (optional) | 1–2 ngày | Custom parser hiện flat cell. Chưa làm |
+| 🟡 **P2** | `<img src="...">` render (optional) | 2–3 ngày | Cần libpng/jpeg + cache. Chưa làm |
 | 🟡 **P2** | Module Plan: build full + P0-1 UiRenderer | 1 ngày | Giảm UIManager.cpp từ 10K → 6.5K dòng |
 | 🟡 **P2** | Phase 2 cleanup (file repo) | 30 ph | Repo sạch |
 | 🟢 **P3** | Phase 3 font + stock_keyboard packaging | 2 giờ | −16 MB |
