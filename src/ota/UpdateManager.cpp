@@ -9,12 +9,68 @@
 #include <SDL2/SDL.h>
 #include <sstream>
 #include <sys/stat.h>
+#include <sys/statvfs.h>
 #include <unistd.h>
 #include <vector>
 #include <fstream>
 #include <algorithm>
+#include <cerrno>
+#include <cstring>
 
 namespace RomCloud {
+
+// === OTA hardening helpers (USER_ISSUES_TODO #34) ===========================
+//
+// Symptom: zip tải về ~23s xong, unzip trả exit != 0 → fail mặc dù zip hợp
+// lệ. Nguyên nhân gốc:
+//   - `unzip` exit 1 chỉ là warning (file trùng tên) — vẫn extract đủ file.
+//   - `2>/dev/null` nuốt stderr → user/device không biết lý do thật.
+//   - Không check dung lượng trống trước khi tải/cp, nên cp đứt giữa chừng
+//     khi thẻ đầy → zip đã bung ra tmp nhưng app bị "half-overwritten".
+//
+// Các helper dưới wrap lại đường đi đó: ghi log có ảnh, chấp nhận unzip
+// warning (exit 0 hoặc 1 nếu file mong đợi tồn tại), fallback 7zzs khi
+// unzip hoàn toàn không chạy được.
+
+// Lấy số byte còn trống trên phân vùng chứa `path`. Trả 0 nếu statvfs lỗi.
+static uint64_t otaFreeBytes(const std::string& path) {
+  struct statvfs sv;
+  if (::statvfs(path.c_str(), &sv) != 0) {
+    Logger::warn(std::string("statvfs(") + path + ") failed: " + std::strerror(errno));
+    return 0;
+  }
+  return (uint64_t)sv.f_bavail * (uint64_t)sv.f_frsize;
+}
+
+// Chạy lệnh shell và ghi cả stdout+stderr ra `logPath`. Trả exit code
+// (WEXITSTATUS). Dùng khi cần capture output để debug khi fail.
+static int otaRunWithLog(const std::string& cmd, const std::string& logPath) {
+  std::string full = cmd + " > '" + logPath + "' 2>&1";
+  int rc = std::system(full.c_str());
+  if (rc == -1) return -1;
+  return WEXITSTATUS(rc);
+}
+
+// Đọc tối đa `maxLines` dòng cuối của file log. Dùng để in nguyên nhân
+// thật của unzip/system call khi OTA fail.
+static std::string otaTailLog(const std::string& path, int maxLines = 12) {
+  std::ifstream f(path.c_str());
+  if (!f.is_open()) return std::string();
+  std::vector<std::string> lines;
+  std::string line;
+  while (std::getline(f, line)) {
+    lines.push_back(std::move(line));
+    if ((int)lines.size() > maxLines * 4) {
+      lines.erase(lines.begin(), lines.begin() + (lines.size() - maxLines * 4));
+    }
+  }
+  if ((int)lines.size() > maxLines) {
+    lines.erase(lines.begin(), lines.begin() + (lines.size() - maxLines));
+  }
+  std::string out;
+  for (const auto& l : lines) out += l + "\n";
+  return out;
+}
 
 UpdateManager &UpdateManager::instance() {
   static UpdateManager instance;
@@ -772,12 +828,54 @@ void UpdateManager::runDownloadWorker(UpdateInfo info) {
     return;
   }
 
-  // Verify zip size (full package ~50MB, không thể nhỏ hơn 1MB)
+  // Verify zip size. USER_ISSUES_TODO #34:
+  //   1. Nếu info.sizeBytes > 0 (server đã gửi Content-Length), đối chiếu
+  //      với dung lượng thực tế — chênh lệch >5% coi như tải lỗi.
+  //   2. Dù check hay không, kích thước < 1MB vẫn là lỗi.
   if (downloadedSize < 1000000) {
     unlink(zipPath.c_str());
     std::lock_guard<std::mutex> lock(m_mutex);
     m_progress.state = UpdateState::FAILED;
     m_progress.errorMessage = "Tập tin tải về quá nhỏ hoặc không hợp lệ.";
+    Logger::error(m_progress.errorMessage + " size=" + std::to_string(downloadedSize));
+    m_isRunning = false;
+    notifyRepairDone(false);
+    return;
+  }
+  if (info.sizeBytes > 0) {
+    // tolerance ±5% để tránh false-positive khi server đo bytes vs thẻ FAT32 cluster.
+    uint64_t expected = info.sizeBytes;
+    uint64_t lowBound = expected - expected / 20;
+    uint64_t hiBound  = expected + expected / 20;
+    if (downloadedSize < lowBound || downloadedSize > hiBound) {
+      unlink(zipPath.c_str());
+      std::lock_guard<std::mutex> lock(m_mutex);
+      m_progress.state = UpdateState::FAILED;
+      m_progress.errorMessage =
+          "Kích thước tải về không khớp (dự kiến " +
+          std::to_string(expected) + ", thực tế " +
+          std::to_string(downloadedSize) + "). Có thể mạng chập chờn — thử lại.";
+      Logger::error(m_progress.errorMessage);
+      m_isRunning = false;
+      notifyRepairDone(false);
+      return;
+    }
+  }
+
+  // Check dung lượng trống trước khi cp đè. Cần ít nhất 2× size zip
+  // (1× bản cũ + 1× bản mới tạm trong .ota_tmp). Nếu thẻ đầy, báo rõ
+  // thay vì để unzip chạy xong rồi cp đứt giữa chừng.
+  uint64_t need = downloadedSize * 2 + 16ULL * 1024 * 1024; // +16MB margin
+  uint64_t freeB = otaFreeBytes(appRoot);
+  if (freeB > 0 && freeB < need) {
+    unlink(zipPath.c_str());
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_progress.state = UpdateState::FAILED;
+    m_progress.errorMessage =
+        "Thẻ nhớ không đủ dung lượng (cần " +
+        std::to_string(need / 1024 / 1024) + " MB, trống " +
+        std::to_string(freeB / 1024 / 1024) + " MB). Hãy giải phóng và thử lại.";
+    Logger::error(m_progress.errorMessage);
     m_isRunning = false;
     notifyRepairDone(false);
     return;
@@ -819,6 +917,8 @@ void UpdateManager::runDownloadWorker(UpdateInfo info) {
   notifyRepairDone(true);
 }
 
+// === installFullZip ========================================================
+
 // Bung full-zip đè lên appRoot, GIỮ dữ liệu user (data/config/iptv).
 // Zip layout: Apps/RomCloud/... → bung qua thư mục tạm rồi copy vào,
 // nên đúng cho cả Apps lẫn App (SpruceOS).
@@ -841,26 +941,75 @@ bool UpdateManager::installFullZip(const std::string& zipPath) {
   system(("cp -a '" + appRoot + "/config' '" + backupDir + "/config' 2>/dev/null").c_str());
   system(("cp -a '" + appRoot + "/iptv' '" + backupDir + "/iptv' 2>/dev/null").c_str());
 
-  // 2. Bung zip vào thư mục tạm
-  int ret = system(("unzip -o '" + zipPath + "' 'Apps/RomCloud/*' -d '" + tmpDir + "' 2>/dev/null").c_str());
+  // 2. Bung zip vào thư mục tạm.
+  // USER_ISSUES_TODO #34: `unzip` có thể trả exit 1 chỉ vì warning (file
+  // trùng tên trong zip), trong khi file vẫn extract đầy đủ. Logic mới:
+  //   - Capture stderr của unzip ra file log.
+  //   - Chấp nhận exit 0 hoặc exit 1 nếu staged/bin/RomCloud tồn tại
+  //     (nghĩa là extract thật sự thành công dù có warning).
+  //   - Nếu unzip không extract được gì, fallback `bin/7zzs x`.
+  std::string unzipLog = tmpDir + ".unzip.log";
+  int ret = otaRunWithLog(
+      "unzip -o '" + zipPath + "' 'Apps/RomCloud/*' -d '" + tmpDir + "'",
+      unzipLog);
   if (ret != 0) {
-    ret = system(("busybox unzip -o '" + zipPath + "' 'Apps/RomCloud/*' -d '" + tmpDir + "' 2>/dev/null").c_str());
+    ret = otaRunWithLog(
+        "busybox unzip -o '" + zipPath + "' 'Apps/RomCloud/*' -d '" + tmpDir + "'",
+        unzipLog);
   }
   std::string staged = tmpDir + "/Apps/RomCloud";
+  std::string stagedBin = staged + "/bin/RomCloud";
   struct stat st;
-  if (ret != 0 || stat(staged.c_str(), &st) != 0) {
-    system(("rm -rf '" + tmpDir + "' '" + backupDir + "' 2>/dev/null").c_str());
-    setErr("Giải nén bản cập nhật thất bại.");
-    return false;
+  bool stagedOk = (stat(stagedBin.c_str(), &st) == 0 && st.st_size > 1000000);
+
+  // Nếu unzip không extract đúng bin/RomCloud thì thử 7zzs (đã có sẵn
+  // trong gói — đính kèm lúc package.sh).
+  if (!stagedOk) {
+    std::string seven = appRoot + "/bin/7zzs";
+    if (access(seven.c_str(), X_OK) == 0) {
+      Logger::warn("unzip failed (exit " + std::to_string(ret) +
+                   "), trying fallback 7zzs");
+      int ret7 = otaRunWithLog(
+          "'" + seven + "' x -y -o'" + tmpDir + "' '" + zipPath + "' -ir!'Apps/RomCloud'",
+          unzipLog);
+      stagedOk = (stat(stagedBin.c_str(), &st) == 0 && st.st_size > 1000000);
+      if (!stagedOk && ret7 != 0) {
+        std::string tail = otaTailLog(unzipLog, 12);
+        system(("rm -rf '" + tmpDir + "' '" + backupDir + "' '" + unzipLog + "' 2>/dev/null").c_str());
+        setErr("Giải nén bản cập nhật thất bại (unzip & 7zzs đều lỗi). Log:\n" + tail);
+        Logger::error("OTA unzip failed. Tail:\n" + tail);
+        return false;
+      }
+    } else {
+      std::string tail = otaTailLog(unzipLog, 12);
+      system(("rm -rf '" + tmpDir + "' '" + backupDir + "' '" + unzipLog + "' 2>/dev/null").c_str());
+      setErr("Giải nén bản cập nhật thất bại (zip không chứa bin/RomCloud). Log:\n" + tail);
+      Logger::error("OTA unzip failed (no staged binary). Tail:\n" + tail);
+      return false;
+    }
+  } else if (ret != 0) {
+    // unzip có warning (exit != 0) nhưng bin/RomCloud tồn tại → coi như OK,
+    // log warning để dev biết nhưng KHÔNG fail OTA.
+    Logger::warn("unzip returned exit " + std::to_string(ret) +
+                 " but staged binary present — treating as success. Tail:\n" +
+                 otaTailLog(unzipLog, 6));
   }
 
-  // 3. Copy đè vào app (giữ file đang chạy an toàn: unzip/cp tạo inode mới)
-  ret = system(("cp -a '" + staged + "/.' '" + appRoot + "/' 2>/dev/null").c_str());
-  system(("rm -rf '" + tmpDir + "' 2>/dev/null").c_str());
+  // 3. Copy đè vào app (giữ file đang chạy an toàn: unzip/cp tạo inode mới).
+  // USER_ISSUES_TODO #34: capture stderr cp để biết cp đứt vì lý do gì
+  // (đầy thẻ, permission, missing source).
+  std::string cpLog = tmpDir + ".cp.log";
+  ret = otaRunWithLog("cp -a '" + staged + "/.' '" + appRoot + "/'", cpLog);
   if (ret != 0) {
-    setErr("Chép file cập nhật thất bại (thẻ nhớ đầy?).");
+    // Giữ cpLog lại để đọc tail khi log lỗi, KHÔNG xóa ở nhánh fail.
+    std::string tail = otaTailLog(cpLog, 8);
+    system(("rm -rf '" + tmpDir + "' '" + backupDir + "' '" + cpLog + "' '" + unzipLog + "' 2>/dev/null").c_str());
+    setErr("Chép file cập nhật thất bại. Có thể thẻ nhớ đầy hoặc permission bị chặn." +
+           (tail.empty() ? std::string() : (std::string("\nLog: ") + tail)));
+    Logger::error("OTA cp -a failed (rc=" + std::to_string(ret) + "). Tail:\n" + tail);
     return false;
   }
+  system(("rm -rf '" + tmpDir + "' '" + cpLog + "' '" + unzipLog + "' 2>/dev/null").c_str());
 
   // 4. Khôi phục dữ liệu user
   system(("cp -a '" + backupDir + "/data/.' '" + appRoot + "/data/' 2>/dev/null").c_str());
