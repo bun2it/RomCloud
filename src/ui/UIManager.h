@@ -67,7 +67,8 @@ enum class UIState {
   WEATHER,       // Thời tiết & Lịch (+ tab Đồng hồ, Camera)
   CLOCK_ALARM,   // Modal báo thức kêu (briefing)
   GAME_CAST,     // GameCast TV & Laptop streaming
-  PORTAL,        // Duyệt captive portal (Ultralight, nhánh portal-browser)
+  BROWSER,       // Browser main state (URL bar + content)
+  BROWSER_INPUT, // Browser URL input (virtual keyboard)
   EXIT_REQUESTED
 };
 
@@ -413,34 +414,13 @@ private:
   bool m_wifiModalInit = false;
   int m_wifiModalMode = 0; // 0=none, 1=SSID ẩn, 2=pass
   std::string m_wifiPendingSsid;
-  std::string m_wifiPortalUrl; // worker check xong, main mở browser
   std::string m_wifiModalTitle; // giữ chuỗi cho Config (const char*)
   std::string m_wifiModalPh;
   void renderWifiTab();
   bool handleWifiTabInput();
   void startWifiScan();
-  // Portal browser (duyệt portal tay, RAM rule: đóng là free sạch).
-  SDL_Texture* m_portalTex = nullptr;
-  std::vector<unsigned char> m_portalPx;
-  std::string m_portalPendingUrl;
-  std::string m_portalBody;
-  std::string m_portalFinal;
-  bool m_portalLoading = false;
-  bool m_portalShowBody = false;
-  BackgroundTask m_portalTask;
-  VkState m_portalVk;
-  std::vector<std::string> m_portalHist;
-  SearchInputModal::Config m_portalModalCfg;
-  bool m_portalModalOpen = false;
-  bool m_portalModalInit = false;
-  std::string m_portalModalTitle;
-  std::string m_portalModalPh;
-  void renderPortal();
-  bool handlePortalInput();
-  void openPortal(const std::string& url);
-  void closePortal();
-  void pollPortalBridge();
-  void openPortalModal();
+  // Browser NetSurf (chạy riêng process, mở từ launcher/Wi-Fi).
+  // Khung UI đấu nối sau khi nsfb build xong.
   void startWifiConnect(const std::string& ssid, const std::string& psk,
                         bool hidden, bool useSaved);
   void startWifiPortal();
@@ -460,6 +440,22 @@ private:
   bool handleExplorerKeyboardFor(FileExplorer &ex);
   bool handleFolderPickerInput();
   bool handleExplorerBrowser();
+  void renderBrowserState();
+  void handleBrowserInput();
+  void renderBrowserInputState();
+  void handleBrowserInputKeyboard();
+  bool isBrowserUrlInputMode() const;
+  void setBrowserUrlInputMode(bool inputMode);
+  // Browser URL input
+  VkState m_browserVk;
+  bool m_browserUrlInputMode = true;
+  // Default landing page. We pick plain HTTP because:
+    //   1. Captive portals and most Wi-Fi login pages are HTTP-only.
+    //   2. HTTP exercises libcurl + DNS without needing libssl/ca-cert to be
+    //      on the device. If HTTP works but the user wants HTTPS later, they
+    //      can type https:// in the URL bar.
+    //   3. example.com is a stable IANA-reserved test domain (RFC 2606).
+    std::string m_browserUrl = "http://example.com";
   void syncExplorerDialogs();
   // Action dùng chung cho phím tắt (Y/X/MENU) và popup menu (A trên file)
   void expCopyCurrent();

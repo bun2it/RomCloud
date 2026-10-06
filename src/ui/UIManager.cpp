@@ -23,6 +23,8 @@
 #include "../platform/PlatformInfo.h"
 #include "../sync/DriveSyncEngine.h"
 #include "../sync/UploadManager.h"
+#include "../browser/BrowserManager.h"
+#include "../browser/HtmlRenderer.h"
 #include "BoxartScraper.h"
 #include "QrRenderer.h"
 #include "TelexHelper.h"
@@ -92,6 +94,7 @@ void UIManager::initGridMenu() {
       {"cast", "GAME CAST", "CAST.png", "Cast lên TV & Laptop"},
       {"explorer", "FILE EXPLORER", "FOLDER.png", "Duyet file SD"},
       {"weather", "OFFICEGO", "OFFICEGO.png", "Thời tiết & Lịch"},
+      {"browser", "BROWSER", "BROWSER.png", "Duyệt web & portal"},
       {"localsend", "LOCALSEND", "LOCALSEND.png", "Chia se P2P trong LAN"},
       {"upload", "TẢI LÊN", "UPLOAD.png", "Upload lên Drive"},
       {"settings", "CÀI ĐẶT", "SETTINGS.png", "Cấu hình"}};
@@ -811,6 +814,9 @@ void UIManager::update() {
         setState(UIState::SYSTEM_SELECT);
       } else if (selectedId == "weather") {
         openWeather();
+      } else if (selectedId == "browser") {
+        // Browser NetSurf (đấu nối sau).
+        setState(UIState::BROWSER);
       } else if (selectedId == "iptv") {
         if (IPTVManager::instance().playlistCount() == 0) {
           IPTVManager::instance().loadPlaylists();
@@ -3008,8 +3014,13 @@ void UIManager::update() {
     break;
   }
 
-  case UIState::PORTAL: {
-    handlePortalInput();
+  case UIState::BROWSER: {
+    handleBrowserInput();
+    break;
+  }
+
+  case UIState::BROWSER_INPUT: {
+    handleBrowserInputKeyboard();
     break;
   }
 
@@ -3556,7 +3567,7 @@ void UIManager::renderFooter() {
       m_currentState == UIState::LOCALSEND_PROGRESS ||
       m_currentState == UIState::FILE_EXPLORER ||
       m_currentState == UIState::GAME_CAST ||
-      m_currentState == UIState::PORTAL) {
+      m_currentState == UIState::BROWSER) {
     return;
   }
 
@@ -6895,8 +6906,11 @@ void UIManager::render() {
   case UIState::GAME_CAST:
     renderGameCastState();
     break;
-  case UIState::PORTAL:
-    renderPortal();
+  case UIState::BROWSER:
+    renderBrowserState();
+    break;
+  case UIState::BROWSER_INPUT:
+    renderBrowserInputState();
     break;
   default:
     break;
@@ -6908,6 +6922,292 @@ void UIManager::render() {
   renderSyncOverlay();
   renderUploadOverlay();
   SDL_RenderPresent(m_renderer);
+}
+
+// Browser URL input state
+bool UIManager::isBrowserUrlInputMode() const {
+  return m_browserUrlInputMode;
+}
+
+void UIManager::setBrowserUrlInputMode(bool inputMode) {
+  m_browserUrlInputMode = inputMode;
+}
+
+void UIManager::renderBrowserState() {
+  // Initialize browser renderer if needed
+  static bool initialized = false;
+  static bool autoLoadTried = false;
+  if (!initialized) {
+    HtmlRenderer::instance().init(m_renderer, m_fontMedium);
+    BrowserManager::instance().init();
+    initialized = true;
+    m_browserUrlInputMode = false;  // skip URL input screen — go straight to content
+    autoLoadTried = false;
+    Logger::info("Browser: initialized, default URL = " + m_browserUrl);
+  }
+
+  // Poll for async HTTP fetch completion
+  HtmlRenderer::instance().pollFetch();
+
+  // Auto-load default URL on first render so they see web right away.
+  if (!autoLoadTried && !m_browserUrl.empty() &&
+      BrowserManager::instance().state() == BrowserState::IDLE) {
+    autoLoadTried = true;
+    Logger::info("Browser: auto-loading default URL " + m_browserUrl);
+    BrowserManager::instance().openUrl(m_browserUrl);
+  }
+
+  // Draw background
+  drawRect(0, 0, 1024, 768, {10, 10, 15, 255}, true);
+
+  // Draw header
+  drawRect(0, 0, 1024, 64, {20, 20, 30, 255}, true);
+  drawRect(0, 63, 1024, 1, {60, 60, 80, 255}, true);
+
+  // Title
+  TTF_Font* titleFont = m_fontMedium;
+  if (titleFont) {
+    drawText("WEB BROWSER", 24, 18, {220, 220, 220, 255}, titleFont, false);
+  }
+
+  // Draw URL bar
+  drawRect(16, 40, 992, 44, {15, 18, 25, 255}, true);
+  drawRect(16, 40, 992, 44, {50, 55, 70, 255}, false);
+
+  // Draw URL text
+  TTF_Font* urlFont = m_fontSmall ? m_fontSmall : m_fontMedium;
+  if (urlFont) {
+    if (m_browserUrlInputMode) {
+      drawText(m_browserUrl, 24, 50, {180, 180, 180, 255}, urlFont, false);
+    } else {
+      std::string url = BrowserManager::instance().currentUrl();
+      if (url.empty()) url = "Nhập URL...";
+      drawText(url, 24, 50, {180, 180, 180, 255}, urlFont, false);
+    }
+  }
+
+  // Content area
+  if (m_browserUrlInputMode) {
+    // Show URL input hint
+    TTF_Font* hintFont = m_fontMedium;
+    if (hintFont) {
+      drawText("Nhấn START để truy cập", 512, 180, {150, 150, 160, 255}, hintFont, true);
+      drawText("A để sửa URL", 512, 220, {120, 120, 130, 255}, hintFont, true);
+    }
+  } else {
+    // Render browser content
+    HtmlRenderer::instance().render();
+  }
+
+  // Draw footer
+  drawRect(0, 715, 1024, 53, {15, 15, 20, 255}, true);
+  drawRect(0, 715, 1024, 1, {40, 40, 60, 255}, true);
+
+  // Footer buttons
+  if (m_browserUrlInputMode) {
+    drawAppFooter({
+      {UiTheme::PadBtn::B, "Thoát"},
+      {UiTheme::PadBtn::A, "Sửa URL"},
+      {UiTheme::PadBtn::START, "Truy cập"}
+    });
+  } else {
+    // Phase 2 — audit M2: surface L1/R1 in the footer so the user knows
+    // there is a faster way to scroll than UP/DOWN through every input.
+    drawAppFooter({
+      {UiTheme::PadBtn::B, "Quay lại"},
+      {UiTheme::PadBtn::L1, "PgUp"},
+      {UiTheme::PadBtn::R1, "PgDn"},
+      {UiTheme::PadBtn::A, "Chọn"},
+      {UiTheme::PadBtn::Y, "URL"}
+    });
+  }
+
+  // Loading/error overlay
+  if (BrowserManager::instance().state() == BrowserState::LOADING) {
+    drawRect(0, 300, 1024, 100, {0, 0, 0, 180}, true);
+    // Rotating spinner: ⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏. 12 fps spin.
+    static const uint32_t startMs = SDL_GetTicks();
+    static const char* spinner[] = {"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"};
+    int idx = ((SDL_GetTicks() - startMs) / 80) % 10;
+    char buf[64];
+    snprintf(buf, sizeof(buf), "%s  Đang tải...", spinner[idx]);
+    drawText(buf, 512, 340, {200, 200, 200, 255}, m_fontMedium, true);
+  } else if (BrowserManager::instance().state() == BrowserState::ERROR) {
+    drawRect(0, 290, 1024, 130, {0, 0, 0, 180}, true);
+    drawText(BrowserManager::instance().errorMessage(), 512, 320, {255, 80, 80, 255}, m_fontMedium, true);
+    drawText("A: thử lại   Y: đổi URL", 512, 360, {180, 180, 180, 255}, m_fontMedium, true);
+  }
+}
+
+void UIManager::handleBrowserInput() {
+  InputManager& input = InputManager::instance();
+
+  // B: Exit or back
+  if (input.isButtonJustPressed(Button::B)) {
+    if (m_browserUrlInputMode) {
+      // Exit browser
+      BrowserManager::instance().close();
+      HtmlRenderer::instance().stop();
+      setState(UIState::MENU);
+    } else {
+      // Go back or exit to URL mode
+      if (HtmlRenderer::instance().canGoBack()) {
+        HtmlRenderer::instance().goBack();
+      } else {
+        m_browserUrlInputMode = true;
+      }
+    }
+    return;
+  }
+
+  // Error state shortcuts: A = retry, Y = edit URL
+  if (BrowserManager::instance().state() == BrowserState::ERROR) {
+    if (input.isButtonJustPressed(Button::A)) {
+      Logger::info("Browser: retrying " + m_browserUrl);
+      BrowserManager::instance().openUrl(m_browserUrl);
+      return;
+    }
+    if (input.isButtonJustPressed(Button::Y)) {
+      m_browserUrlInputMode = true;
+      return;
+    }
+  }
+
+  // Y: Toggle URL input mode
+  if (input.isButtonJustPressed(Button::Y)) {
+    m_browserUrlInputMode = !m_browserUrlInputMode;
+    return;
+  }
+
+  if (m_browserUrlInputMode) {
+    // START: Navigate to URL
+    if (input.isButtonJustPressed(Button::START)) {
+      if (!m_browserUrl.empty()) {
+        m_browserUrlInputMode = false;
+        BrowserManager::instance().openUrl(m_browserUrl);
+      }
+      return;
+    }
+    // A: Open virtual keyboard to edit URL
+    if (input.isButtonJustPressed(Button::A)) {
+      VirtualKeyboard::reset(m_browserVk, true);
+      m_browserVk.query = m_browserUrl;
+      m_browserVk.charset = 1;  // URL-friendly charset
+      m_browserVk.maxLen = 100;
+      setState(UIState::BROWSER_INPUT);
+      return;
+    }
+  } else {
+    // Browser navigation mode
+    if (input.isButtonJustPressed(Button::UP)) {
+      HtmlRenderer::instance().handleInput(0);  // UP
+    } else if (input.isButtonJustPressed(Button::DOWN)) {
+      HtmlRenderer::instance().handleInput(1);  // DOWN
+    } else if (input.isButtonJustPressed(Button::LEFT)) {
+      HtmlRenderer::instance().handleInput(2);  // LEFT
+    } else if (input.isButtonJustPressed(Button::RIGHT)) {
+      HtmlRenderer::instance().handleInput(3);  // RIGHT
+    } else if (input.isButtonJustPressed(Button::A)) {
+      HtmlRenderer::instance().handleInput(4);  // A - Select
+    } else if (input.isButtonJustPressed(Button::L1)) {
+      // Phase 2 — audit M2: shoulder buttons give coarse page scroll.
+      HtmlRenderer::instance().pageUp(120);
+    } else if (input.isButtonJustPressed(Button::R1)) {
+      HtmlRenderer::instance().pageDown(120);
+    }
+  }
+}
+
+// Browser URL input state - render
+void UIManager::renderBrowserInputState() {
+  // Draw background
+  drawRect(0, 0, 1024, 768, {10, 10, 15, 255}, true);
+
+  // Draw header
+  drawRect(0, 0, 1024, 64, {20, 20, 30, 255}, true);
+  drawRect(0, 63, 1024, 1, {60, 60, 80, 255}, true);
+
+  // Title
+  TTF_Font* titleFont = m_fontMedium;
+  if (titleFont) {
+    drawText("NHẬP URL", 24, 18, {220, 220, 220, 255}, titleFont, false);
+  }
+
+  // Draw URL bar
+  drawRect(16, 40, 992, 44, {15, 18, 25, 255}, true);
+  drawRect(16, 40, 992, 44, {50, 55, 70, 255}, false);
+
+  // Draw URL text
+  TTF_Font* urlFont = m_fontSmall ? m_fontSmall : m_fontMedium;
+  if (urlFont) {
+    drawText(m_browserVk.query + " _", 24, 50, {180, 180, 180, 255}, urlFont, false);
+  }
+
+  // Render virtual keyboard using UiRenderer
+  static const char* actions[] = {"ABC", "123", "Cách", "Xóa", "Xong"};
+  m_ui.drawVirtualKeyboard(m_browserVk, 46, 452, 86, 46, 8, 6,
+                           SDL_Color{0, 140, 230, 255},
+                           SDL_Color{0, 180, 255, 255},
+                           actions, true, true, 1);
+
+  // Draw footer
+  drawRect(0, 715, 1024, 53, {15, 15, 20, 255}, true);
+  drawRect(0, 715, 1024, 1, {40, 40, 60, 255}, true);
+
+  drawAppFooter({
+    {UiTheme::PadBtn::B, "Hủy"},
+    {UiTheme::PadBtn::START, "Truy cập"},
+    {UiTheme::PadBtn::Y, "Xóa"}
+  });
+}
+
+// Browser URL input state - handle input
+void UIManager::handleBrowserInputKeyboard() {
+  InputManager& input = InputManager::instance();
+
+  // B: Cancel and go back
+  if (input.isButtonJustPressed(Button::B)) {
+    setState(UIState::BROWSER);
+    return;
+  }
+
+  // Y: Backspace
+  if (input.isButtonJustPressed(Button::Y)) {
+    VirtualKeyboard::backspace(m_browserVk);
+    return;
+  }
+
+  // START: Navigate to URL
+  if (input.isButtonJustPressed(Button::START)) {
+    m_browserUrl = m_browserVk.query;
+    setState(UIState::BROWSER);
+    if (!m_browserUrl.empty()) {
+      BrowserManager::instance().openUrl(m_browserUrl);
+    }
+    return;
+  }
+
+  // Navigation
+  if (input.isButtonJustPressed(Button::UP)) {
+    VirtualKeyboard::move(m_browserVk, -1, 0, true);
+  } else if (input.isButtonJustPressed(Button::DOWN)) {
+    VirtualKeyboard::move(m_browserVk, 1, 0, true);
+  } else if (input.isButtonJustPressed(Button::LEFT)) {
+    VirtualKeyboard::move(m_browserVk, 0, -1, true);
+  } else if (input.isButtonJustPressed(Button::RIGHT)) {
+    VirtualKeyboard::move(m_browserVk, 0, 1, true);
+  } else if (input.isButtonJustPressed(Button::A)) {
+    VkAction act = VirtualKeyboard::pressA(m_browserVk, [](const char*) {}, true);
+    if (act == VkAction::Commit) {
+      m_browserUrl = m_browserVk.query;
+      setState(UIState::BROWSER);
+      if (!m_browserUrl.empty()) {
+        BrowserManager::instance().openUrl(m_browserUrl);
+      }
+    } else if (act == VkAction::Cancel) {
+      setState(UIState::BROWSER);
+    }
+  }
 }
 
 static std::vector<std::string> split(const std::string &s, char delim) {

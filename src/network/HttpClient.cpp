@@ -82,6 +82,22 @@ HttpResponse HttpClient::get(const std::string& url, const std::vector<std::stri
         return response;
     }
 
+    // Preflight: emit one log line with hostname + DNS state so a Brick user
+    // can see whether the failure is DNS, network, or HTTP from /var/log.
+    {
+        std::string host;
+        size_t schemeEnd = url.find("://");
+        if (schemeEnd != std::string::npos) {
+            size_t hostStart = schemeEnd + 3;
+            size_t hostEnd = url.find_first_of("/?#:", hostStart);
+            host = url.substr(hostStart,
+                              hostEnd == std::string::npos ? std::string::npos : hostEnd - hostStart);
+        }
+        bool resolvOk = access("/etc/resolv.conf", F_OK) == 0;
+        Logger::info(std::string("HttpClient: GET ") + host
+                     + " (resolv.conf=" + (resolvOk ? "ok" : "MISSING") + ")");
+    }
+
     struct curl_slist* chunk = nullptr;
     for (const auto& h : headers) {
         chunk = curl_slist_append(chunk, h.c_str());
@@ -97,6 +113,11 @@ HttpResponse HttpClient::get(const std::string& url, const std::vector<std::stri
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 6);
     curl_easy_setopt(curl, CURLOPT_IPRESOLVE, CURL_IPRESOLVE_V4);
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+    // Verbose stderr logging is off by default — set ROMCLOUD_CURL_VERBOSE=1 in
+    // env to see DNS/TLS/handshake chatter on the device console.
+    if (getenv("ROMCLOUD_CURL_VERBOSE")) {
+        curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
+    }
     if (access("/etc/ssl/certs/ca-certificates.crt", F_OK) == 0) {
         curl_easy_setopt(curl, CURLOPT_CAINFO, "/etc/ssl/certs/ca-certificates.crt");
     }
@@ -104,6 +125,11 @@ HttpResponse HttpClient::get(const std::string& url, const std::vector<std::stri
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
     curl_easy_setopt(curl, CURLOPT_USERAGENT, "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36");
     curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
+    // Phase 2 — audit M7: cap response size at 2MB so a runaway page or
+    // a hostile server can't OOM the device. curl returns CURLE_FILESIZE_EXCEEDED
+    // (63) once the limit is hit; the caller treats that as a normal failure.
+    curl_easy_setopt(curl, CURLOPT_MAXFILESIZE_LARGE, static_cast<curl_off_t>(2 * 1024 * 1024));
+    Logger::info("HTTP GET start: " + url + " (timeout=" + std::to_string(timeoutSec) + "s)");
 
     CURLcode res = curl_easy_perform(curl);
     if (res == CURLE_OK) {
@@ -160,6 +186,8 @@ HttpResponse HttpClient::post(const std::string& url, const std::string& postDat
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
     curl_easy_setopt(curl, CURLOPT_USERAGENT, "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36");
     curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
+    // Same 2MB response cap as GET (audit M7).
+    curl_easy_setopt(curl, CURLOPT_MAXFILESIZE_LARGE, static_cast<curl_off_t>(2 * 1024 * 1024));
 
     CURLcode res = curl_easy_perform(curl);
     if (res == CURLE_OK) {

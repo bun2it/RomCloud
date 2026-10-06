@@ -22,6 +22,28 @@ fi
 echo "=== Compiling RomCloud for TrimUI Brick Pro (aarch64-linux-gnu.2.33) ==="
 mkdir -p bin
 
+# Optional: build the NetSurf library stack (HTML5 parser, DOM, CSS engine).
+# Skipped by default; set BUILD_LIBNETSURF=1 to enable. The libs end up in
+# sysroot/lib/ (libcss.a, libhubbub.a, libdom.a, libparserutils.a,
+# libwapcaplet.a, libnslog.a, libnsutils.a) and headers in sysroot/include/.
+# See scripts/build-libnetsurf.py for the cross-compile recipe.
+if [ "${BUILD_LIBNETSURF:-0}" = "1" ]; then
+    if [ ! -e "libnetsurf-src" ]; then
+        if [ -d "$HOME/Downloads/netsurf-all-3.11" ]; then
+            ln -s "$HOME/Downloads/netsurf-all-3.11" libnetsurf-src
+        elif [ -d "/Users/tai/Downloads/netsurf-all-3.11" ]; then
+            ln -s "/Users/tai/Downloads/netsurf-all-3.11" libnetsurf-src
+        else
+            echo "WARNING: BUILD_LIBNETSURF=1 set but no libnetsurf source found."
+            echo "        Expected ~/Downloads/netsurf-all-3.11/. Skipping."
+        fi
+    fi
+    if [ -e "libnetsurf-src" ]; then
+        echo "=== Building libnetsurf stack ==="
+        python3 scripts/build-libnetsurf.py
+    fi
+fi
+
 # Release mode: RELEASE=1 ./build.sh
 #   - Build nhu dev (giu debug info), copy ban debug sang bin/*.debug,
 #   - roi strip binary chinh bang `zig objcopy --strip-all` (nhe ~5-8MB).
@@ -33,16 +55,6 @@ RELEASE="${RELEASE:-0}"
 GIT_SHA="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
 echo "Build commit: $GIT_SHA"
 
-# Ultralight SDK (PortalBrowser, nhánh portal-browser). Lấy từ /tmp/ulsdk
-# (overlay SDK, không commit vào git). Thiếu là dừng và báo rõ.
-ULSDK="${ULSDK:-/tmp/ulsdk}"
-if [ ! -f "$ULSDK/bin/libWebCore.so" ]; then
-    echo "ERROR: Ultralight SDK not found at $ULSDK (need bin/libWebCore.so)." >&2
-    echo "HINT: tải ultralight-free-sdk-1.4.0-linux-arm64.7z từ nhánh base-sdk" >&2
-    echo "      của ovsky/Ultralight-WebBrowser rồi giải nén vào $ULSDK." >&2
-    exit 1
-fi
-
 $ZIG c++ \
     -target aarch64-linux-gnu.2.33 \
     -std=c++17 \
@@ -51,7 +63,6 @@ $ZIG c++ \
     -Wno-error=date-time \
     -DGIT_COMMIT_HASH=\"$GIT_SHA\" \
     -Isrc \
-    -I"$ULSDK/include" \
     -Isysroot/include \
     -Isysroot/include/SDL2 \
     src/main.cpp \
@@ -108,14 +119,9 @@ $ZIG c++ \
     src/rom/RomDetector.cpp \
     src/rom/RomOrganizer.cpp \
     src/localsend/LocalSendManager.cpp \
+    src/browser/HtmlRenderer.cpp \
+    src/browser/BrowserManager.cpp \
     src/cast/CastManager.cpp \
-    src/browser/PortalBrowser.cpp \
-    src/ui/PortalUI.cpp \
-    -L"$ULSDK/bin" \
-    -lUltralight \
-    -lUltralightCore \
-    -lWebCore \
-    -Wl,-rpath,'$ORIGIN/../lib' \
     -Lsysroot/lib \
     -lSDL2 \
     -lSDL2_image \
