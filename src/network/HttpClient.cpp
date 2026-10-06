@@ -140,10 +140,20 @@ HttpResponse HttpClient::get(const std::string& url, const std::vector<std::stri
         char* effUrl = nullptr;
         curl_easy_getinfo(curl, CURLINFO_EFFECTIVE_URL, &effUrl);
         if (effUrl) response.effectiveUrl = effUrl;
+        if (!response.success) {
+            Logger::warn("HTTP GET " + std::to_string(response.statusCode) +
+                         " (" + url + ")");
+        }
     } else {
         response.error = curl_easy_strerror(res);
         response.success = false;
-        Logger::error("HTTP GET failed (" + url + "): " + response.error);
+        // Log the numeric CURLcode too — `curl_easy_strerror()` returns
+        // just "Error" for some codes (CURLE_FAILED_INIT = 2) which makes
+        // "did the device run out of sockets?" indistinguishable from
+        // "did the URL have a typo?". The integer code survives any
+        // sanitization and lets grep find it deterministically.
+        Logger::error("HTTP GET failed (" + url + ") res=" + std::to_string(static_cast<int>(res)) +
+                      " msg=" + response.error);
     }
 
     if (chunk) curl_slist_free_all(chunk);

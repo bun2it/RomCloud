@@ -120,8 +120,6 @@ $CXX_CMD -std=c++17 -O2 -Wall -Wextra \
     src/flood/FloodManager.cpp \
     src/tide/TideManager.cpp \
     src/ui/FloodUI.cpp \
-    src/browser/PortalBrowserStub.cpp \
-    src/ui/PortalUI.cpp \
     $EXTRA_LIBS \
     -o "$OUTPUT_BIN"
 

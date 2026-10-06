@@ -11,7 +11,14 @@ BrowserManager& BrowserManager::instance() {
 }
 
 void BrowserManager::init() {
-    HtmlRenderer::instance().init(nullptr, nullptr);
+    // DO NOT call HtmlRenderer::instance().init() here with a null
+    // renderer/font — UIManager::renderBrowserState() is responsible for
+    // passing the real m_renderer + m_fontMedium after fonts are loaded.
+    // Calling init() here with nullptr would overwrite the font pointer
+    // that renderBrowserState() just set, and every subsequent drawText()
+    // would no-op because m_font would be null again. The "screen is
+    // blank" bug — parser laid out the text correctly, but the text was
+    // never drawn — came from this exact race.
     m_state = BrowserState::IDLE;
     m_currentUrl.clear();
     m_errorMsg.clear();
@@ -35,28 +42,13 @@ bool BrowserManager::openUrl(const std::string& url) {
     m_currentUrl = url;
     m_errorMsg.clear();
     m_state = BrowserState::LOADING;
-    if (HtmlRenderer::instance().loadUrl(url)) {
-        m_state = BrowserState::RENDERING;
-        return true;
-    } else {
-        m_errorMsg = HtmlRenderer::instance().errorMessage();
-        // If the underlying error looks like a network-level failure (DNS,
-        // connection refused, timeout, …) and /etc/resolv.conf is missing,
-        // tell the user — that's almost always the cause on a minimal Linux
-        // image like the TrimUI Brick stock firmware.
-        bool looksNetworky =
-            m_errorMsg.find("Could not resolve") != std::string::npos ||
-            m_errorMsg.find("Couldn't resolve") != std::string::npos ||
-            m_errorMsg.find("Couldn't connect") != std::string::npos ||
-            m_errorMsg.find("Connection refused") != std::string::npos ||
-            m_errorMsg.find("Timeout") != std::string::npos ||
-            m_errorMsg.find("timed out") != std::string::npos;
-        if (looksNetworky && access("/etc/resolv.conf", F_OK) != 0) {
-            m_errorMsg += " — /etc/resolv.conf missing (no DNS)";
-        }
-        m_state = BrowserState::ERROR;
-        return false;
-    }
+    // Stay in LOADING until HtmlRenderer processes the fetch in pollFetch()
+    // — loadUrl() only spawns a worker thread, it does not perform the
+    // network request synchronously. Setting RENDERING here would make
+    // the spinner overlay invisible because the state transition happens
+    // in microseconds, not in the 100ms+ that the HTTP fetch takes.
+    HtmlRenderer::instance().loadUrl(url);
+    return true;
 }
 
 void BrowserManager::close() {

@@ -6957,6 +6957,11 @@ void UIManager::renderBrowserState() {
     BrowserManager::instance().openUrl(m_browserUrl);
   }
 
+  // (No diagnostic logging here in the production build — the
+  // BrowserManager state + HtmlRenderer element count are easy to read
+  // from /mnt/SDCARD/Apps/RomCloud/debug.log via grep if a future bug
+  // needs the same visibility.)
+
   // Draw background
   drawRect(0, 0, 1024, 768, {10, 10, 15, 255}, true);
 

@@ -1,4 +1,3 @@
 # RomCloud IPTV Sources Metadata
 # filename|name|type|url
 default.m3u|Kênh Mặc Định|file|
-vietnam.m3u|Kênh Việt Nam|file|

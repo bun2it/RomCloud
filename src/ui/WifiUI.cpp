@@ -59,38 +59,13 @@ void UIManager::startWifiPortal() {
         showToast("Đang làm Wi-Fi, chờ chút...", {245, 158, 11, 255}, 1500);
         return;
     }
-    // Hook test: file debug_portal.txt chứa URL -> mở browser thẳng (test
-    // portal giả, không cần ra quán). Xóa file là về flow thường.
-    {
-        std::string appRoot = AppConfig::instance().getAppRoot();
-        if (appRoot.empty()) appRoot = "/mnt/SDCARD/Apps/RomCloud";
-        std::ifstream f(appRoot + "/debug_portal.txt");
-        std::string u;
-        if (f && std::getline(f, u)) {
-            while (!u.empty() && (u.back() == '\r' || u.back() == '\n' || u.back() == ' '))
-                u.pop_back();
-            if (!u.empty()) {
-                showToast("Mở portal test...", {0, 180, 216, 255}, 1500);
-                openPortal(u);
-                return;
-            }
-        }
-    }
-    // Mở browser duyệt portal tay (thấy nút nào bấm nút đó).
-    // Engine init TRÊN MAIN thread (WebKit kỵ tạo renderer ở worker):
-    // worker chỉ check, main mở browser qua m_wifiPortalUrl.
+    // Tự xác nhận portal (form click-through). Browser tay đấu sau với NetSurf.
     m_wifiBusy = true;
     m_wifiStatus = "Đang kiểm tra portal...";
     m_wifiTask.run([](TaskProgress &) {
-        PortalInfo pi = WifiManager::instance().checkPortal();
-        if (pi.online) {
-            UIManager::instance().m_wifiStatus = "Mạng OK, không bị portal chặn";
-        } else if (pi.portal) {
-            UIManager::instance().m_wifiStatus = "Mở browser portal...";
-            UIManager::instance().m_wifiPortalUrl = pi.url;
-        } else {
-            UIManager::instance().m_wifiStatus = "Chưa có mạng, kiểm tra Wi-Fi trước";
-        }
+        std::string msg;
+        WifiManager::instance().acceptPortalBlocking(msg);
+        UIManager::instance().m_wifiStatus = msg;
     });
 }
 
@@ -126,13 +101,6 @@ void UIManager::renderWifiTab() {
             m_wifiScroll = 0;
         }
         m_wifiStatusMs = 0; // ép cập nhật dòng trạng thái ngay
-    }
-    // Portal check xong ở worker -> main mở browser (đúng thread).
-    if (!m_wifiPortalUrl.empty() && !m_wifiBusy && !m_wifiTask.isRunning()) {
-        std::string u = m_wifiPortalUrl;
-        m_wifiPortalUrl.clear();
-        openPortal(u);
-        return;
     }
     // Vào tab lần đầu: quét luôn.
     if (m_wifiNeedScan && !m_wifiBusy && !m_wifiTask.isRunning() && m_wifiStatus.empty()) {
