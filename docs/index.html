@@ -22,10 +22,7 @@
     <span style="display:inline-block;width:12px"></span>
     <a class="btn ghost" id="dlBtn" href="https://github.com/bun2it/RomCloud/releases/latest">⬇ Tải bản mới nhất</a>
     <p id="verLine" style="margin-top:12px"></p>
-  </div>
-
-  <div class="card" id="newsCard" style="display:none;margin-bottom:24px">
-    <div class="txt"><h3 id="newsTitle">Có gì mới</h3><p id="newsBody"></p></div>
+    <p id="newsBody" style="display:none;margin:12px auto 0;max-width:640px;text-align:left;font-size:13px;color:var(--dim);white-space:pre-line"></p>
   </div>
 
   <div class="grid">
@@ -55,10 +52,9 @@ fetch("https://api.github.com/repos/bun2it/RomCloud/releases/latest").then(funct
   var a = (j.assets || []).filter(function (x) { return /\.zip$/.test(x.name); })[0];
   if (a) document.getElementById("dlBtn").href = a.browser_download_url;
   if (j.body && j.body.trim()) {
-    document.getElementById("newsTitle").textContent = "Có gì mới trong " + j.tag_name;
-    document.getElementById("newsBody").textContent = j.body.trim();
-    document.getElementById("newsBody").style.whiteSpace = "pre-line";
-    document.getElementById("newsCard").style.display = "block";
+    var nb = document.getElementById("newsBody");
+    nb.textContent = "Có gì mới trong " + j.tag_name + ":\n" + j.body.trim();
+    nb.style.display = "block";
   }
 }).catch(function () {});
 </script>
