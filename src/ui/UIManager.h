@@ -449,6 +449,14 @@ private:
   // Browser URL input
   VkState m_browserVk;
   bool m_browserUrlInputMode = true;
+  // Phase 1 — audit P1-2c: true khi user đang gõ vào một <input> trong page
+  // (HtmlRenderer.m_editingText = true). UIManager sync giá trị giữa
+  // m_browserVk.query (VirtualKeyboard Telex transform) và
+  // HtmlRenderer::setFocusedInputValue().
+  bool m_browserFieldEditing = false;
+  // Value gốc của field khi mới vào edit mode — dùng để restore khi user
+  // bấm "Hủy" (Cancel). Khi "Xong" (Commit) thì giữ value hiện tại.
+  std::string m_browserFieldOriginal;
   // Default landing page. We pick plain HTTP because:
     //   1. Captive portals and most Wi-Fi login pages are HTTP-only.
     //   2. HTTP exercises libcurl + DNS without needing libssl/ca-cert to be

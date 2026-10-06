@@ -7002,6 +7002,27 @@ void UIManager::renderBrowserState() {
   } else {
     // Render browser content
     HtmlRenderer::instance().render();
+    // Phase 1 — audit P1-2c: nếu đang edit một <input>, vẽ VK overlay
+    // đè lên content để user gõ Telex vào field. Mirror query của VK
+    // thành cursor line ngay phía trên VK.
+    if (m_browserFieldEditing) {
+      // Dim nền content để VK nổi bật.
+      drawRect(0, 320, 1024, 132, {0, 0, 0, 160}, true);
+      // Preview value hiện tại (Telex-transformed qua VkState.query).
+      TTF_Font* previewFont = m_fontMedium;
+      if (previewFont) {
+        std::string prev = m_browserVk.query.empty()
+                               ? std::string("(rỗng)")
+                               : (m_browserVk.query + " _");
+        drawText(prev, 512, 332, {220, 220, 230, 255}, previewFont, true);
+      }
+      // Vẽ bàn phím ảo.
+      static const char* fieldActions[] = {"ABC", "123", "Cách", "Xóa", "Xong"};
+      m_ui.drawVirtualKeyboard(m_browserVk, 46, 452, 86, 46, 8, 6,
+                               SDL_Color{0, 140, 230, 255},
+                               SDL_Color{0, 180, 255, 255},
+                               fieldActions, true, true, 1);
+    }
   }
 
   // Draw footer
@@ -7014,6 +7035,17 @@ void UIManager::renderBrowserState() {
       {UiTheme::PadBtn::B, "Thoát"},
       {UiTheme::PadBtn::A, "Sửa URL"},
       {UiTheme::PadBtn::START, "Truy cập"}
+    });
+  } else if (m_browserFieldEditing) {
+    // Phase 1 — audit P1-2c: field edit mode. Đổi footer thành phím tắt
+    // bàn phím ảo để user biết: A=chọn phím, B=Hủy (restore gốc),
+    // X=space, Y=xóa, START=Xong. (L1/R1 không dùng trong edit mode.)
+    drawAppFooter({
+      {UiTheme::PadBtn::B, "Hủy"},
+      {UiTheme::PadBtn::A, "Chọn"},
+      {UiTheme::PadBtn::START, "Xong"},
+      {UiTheme::PadBtn::X, "Cách"},
+      {UiTheme::PadBtn::Y, "Xóa"}
     });
   } else {
     // Phase 2 — audit M2: surface L1/R1 in the footer so the user knows
@@ -7103,22 +7135,82 @@ void UIManager::handleBrowserInput() {
       return;
     }
   } else {
-    // Browser navigation mode
-    if (input.isButtonJustPressed(Button::UP)) {
-      HtmlRenderer::instance().handleInput(0);  // UP
-    } else if (input.isButtonJustPressed(Button::DOWN)) {
-      HtmlRenderer::instance().handleInput(1);  // DOWN
-    } else if (input.isButtonJustPressed(Button::LEFT)) {
-      HtmlRenderer::instance().handleInput(2);  // LEFT
-    } else if (input.isButtonJustPressed(Button::RIGHT)) {
-      HtmlRenderer::instance().handleInput(3);  // RIGHT
-    } else if (input.isButtonJustPressed(Button::A)) {
-      HtmlRenderer::instance().handleInput(4);  // A - Select
-    } else if (input.isButtonJustPressed(Button::L1)) {
-      // Phase 2 — audit M2: shoulder buttons give coarse page scroll.
-      HtmlRenderer::instance().pageUp(120);
-    } else if (input.isButtonJustPressed(Button::R1)) {
-      HtmlRenderer::instance().pageDown(120);
+    // Browser page navigation mode (or field edit when active).
+    HtmlRenderer& html = HtmlRenderer::instance();
+
+    // Phase 1 — audit P1-2c: detect transition false→true vào edit mode
+    // của một <input>. Khi vào edit, init VK với giá trị hiện tại của
+    // field để Telex transform hoạt động đúng từ đầu chuỗi (cursor ở 0).
+    // Lưu value gốc để restore khi user bấm "Hủy".
+    if (html.isEditing() && !m_browserFieldEditing) {
+      m_browserFieldEditing = true;
+      m_browserFieldOriginal = html.focusedInputValue();
+      VirtualKeyboard::reset(m_browserVk, true);
+      m_browserVk.query = m_browserFieldOriginal;
+      m_browserVk.charset = 0;       // qwerty thường
+      m_browserVk.maxLen = html.focusedInputMaxLen();
+      Logger::info("Browser: enter field edit, VK seeded with current text");
+    }
+    if (!html.isEditing() && m_browserFieldEditing) {
+      m_browserFieldEditing = false;
+      Logger::info("Browser: exit field edit");
+    }
+
+    if (m_browserFieldEditing) {
+      // Route input đến VK + sync giá trị về HtmlRenderer mỗi thao tác.
+      // pressA đã tự push char vào s.query (nếu tại row 0..3) hoặc trigger
+      // action (nếu tại row 4). Sync toàn bộ s.query về el.value mỗi
+      // lần để Telex-transformed text được render đúng.
+      if (input.isButtonJustPressed(Button::UP)) {
+        VirtualKeyboard::move(m_browserVk, -1, 0, true);
+      } else if (input.isButtonJustPressed(Button::DOWN)) {
+        VirtualKeyboard::move(m_browserVk, 1, 0, true);
+      } else if (input.isButtonJustPressed(Button::LEFT)) {
+        VirtualKeyboard::move(m_browserVk, 0, -1, true);
+      } else if (input.isButtonJustPressed(Button::RIGHT)) {
+        VirtualKeyboard::move(m_browserVk, 0, 1, true);
+      } else if (input.isButtonJustPressed(Button::A)) {
+        VkAction act = VirtualKeyboard::pressA(m_browserVk, [](const char*) {}, true);
+        if (act == VkAction::Commit) {
+          // "Xong" — giữ value hiện tại (đã sync), đóng edit.
+          html.setFocusedInputValue(m_browserVk.query);
+          html.handleInput(5);  // BTN_B → m_editingText=false
+        } else if (act == VkAction::Cancel) {
+          // "Hủy" hoặc B với query rỗng — restore value gốc, đóng edit.
+          html.setFocusedInputValue(m_browserFieldOriginal);
+          html.handleInput(5);
+        } else {
+          // None / Backspace — typeChar / popUtf8 đã thay đổi s.query.
+          html.setFocusedInputValue(m_browserVk.query);
+        }
+      } else if (input.isButtonJustPressed(Button::X)) {
+        VirtualKeyboard::typeSpace(m_browserVk);
+        html.setFocusedInputValue(m_browserVk.query);
+      } else if (input.isButtonJustPressed(Button::Y)) {
+        VirtualKeyboard::backspace(m_browserVk);
+        html.setFocusedInputValue(m_browserVk.query);
+      } else if (input.isButtonJustPressed(Button::START)) {
+        // Đóng edit (giữ value).
+        html.handleInput(5);
+      }
+    } else {
+      // Browser navigation mode (existing).
+      if (input.isButtonJustPressed(Button::UP)) {
+        html.handleInput(0);  // UP
+      } else if (input.isButtonJustPressed(Button::DOWN)) {
+        html.handleInput(1);  // DOWN
+      } else if (input.isButtonJustPressed(Button::LEFT)) {
+        html.handleInput(2);  // LEFT
+      } else if (input.isButtonJustPressed(Button::RIGHT)) {
+        html.handleInput(3);  // RIGHT
+      } else if (input.isButtonJustPressed(Button::A)) {
+        html.handleInput(4);  // A - Select
+      } else if (input.isButtonJustPressed(Button::L1)) {
+        // Phase 2 — audit M2: shoulder buttons give coarse page scroll.
+        html.pageUp(120);
+      } else if (input.isButtonJustPressed(Button::R1)) {
+        html.pageDown(120);
+      }
     }
   }
 }

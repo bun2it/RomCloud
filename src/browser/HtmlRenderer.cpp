@@ -707,6 +707,42 @@ void HtmlRenderer::deleteCharacter() {
     }
 }
 
+std::string HtmlRenderer::focusedInputValue() const {
+    // Phase 1 — audit P1-2c: cho UIManager đọc giá trị hiện tại của field
+    // đang focus (nếu là INPUT_TEXT/INPUT_PASSWORD) để mirror vào
+    // VkState.query khi mới vào edit mode. Trả "" nếu không có field
+    // focus hoặc element không phải text input (link, button, checkbox).
+    if (m_inputIndex < 0 || m_inputIndex >= (int)m_focusable.size()) {
+        return std::string();
+    }
+    const HtmlElement* el = m_focusable[m_inputIndex];
+    if (el->type == HtmlElementType::INPUT_TEXT || el->type == HtmlElementType::INPUT_PASSWORD) {
+        return el->value;
+    }
+    return std::string();
+}
+
+void HtmlRenderer::setFocusedInputValue(const std::string& v) {
+    // Phase 1 — audit P1-2c: ghi đè giá trị field từ VkState.query (sau khi
+    // VirtualKeyboard Telex transform xong). Trước audit, HtmlRenderer chỉ
+    // có typeCharacter(char) append từng ký tự — không thể mirror cả một
+    // query đã qua Telex transformation. setFocusedInputValue giải quyết
+    // bằng cách ghi đè nguyên xi. 256 char cap là đủ cho mọi Wi-Fi portal
+    // thực tế (username/password hiếm khi quá 64 char).
+    if (m_inputIndex < 0 || m_inputIndex >= (int)m_focusable.size()) return;
+    HtmlElement* el = m_focusable[m_inputIndex];
+    if (el->type != HtmlElementType::INPUT_TEXT && el->type != HtmlElementType::INPUT_PASSWORD) return;
+    constexpr size_t kMaxFieldLen = 256;
+    el->value = v.size() > kMaxFieldLen ? v.substr(0, kMaxFieldLen) : v;
+}
+
+int HtmlRenderer::focusedInputMaxLen() const {
+    // Phase 1 — audit P1-2c: cap 256 cho mọi field. Có thể đọc `maxlength`
+    // attribute sau nếu cần — cho giờ constant là đủ vì không có layout
+    // test nào dùng field > 64 char.
+    return 256;
+}
+
 void HtmlRenderer::submitForm(const HtmlElement& form) {
     // Phase 3 — audit M5: real form submission.
     //

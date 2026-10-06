@@ -104,6 +104,8 @@ $CXX_CMD -std=c++17 -O2 -Wall -Wextra \
     src/localsend/LocalSendManager.cpp \
     src/cast/CastManager.cpp \
     src/ui/ExplorerSync.cpp \
+    src/browser/HtmlRenderer.cpp \
+    src/browser/BrowserManager.cpp \
     src/weather/WeatherManager.cpp \
     src/calendar/CalManager.cpp \
     src/ui/WeatherUI.cpp \

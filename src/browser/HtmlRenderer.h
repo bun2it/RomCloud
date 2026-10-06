@@ -93,6 +93,19 @@ public:
     void typeCharacter(char c);
     void deleteCharacter();
 
+    // Phase 1 — audit P1-2c: API cho UIManager wire VirtualKeyboard vào
+    // <input>/<input type=password> trong page. Trước audit, user focus
+    // được input (UP/DOWN) rồi nhấn A để vào edit, nhưng không có cách
+    // nào gõ ký tự — `m_editingText = true` chỉ thoát được bằng B. Giờ
+    // UIManager gọi isEditing() để biết có nên hiện VK overlay, dùng
+    // focusedInputValue()/setFocusedInputValue() để mirror giá trị
+    // giữa VkState.query (do VirtualKeyboard Telex xử lý) và el.value
+    // (do HtmlRenderer render).
+    bool isEditing() const { return m_editingText; }
+    std::string focusedInputValue() const;
+    void setFocusedInputValue(const std::string& v);
+    int focusedInputMaxLen() const;
+
     // Page scrolling (Phase 2 — audit M2). Public so the UI layer can wire
     // shoulder buttons (L1/R1) without poking at the renderer internals.
     void pageUp(int delta = 80);
