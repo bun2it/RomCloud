@@ -14,17 +14,7 @@
     <button class="theme-btn" id="themeBtn" onclick="rcThemeToggle()">Giao diện</button>
   </div>
 
-  <div class="warn">🔌 Cắm <b>TrimUI Brick (đang bật, chế độ USB = ADB)</b> vào laptop. <b>Chỉ cần tải 1 file dưới đây rồi double-click</b> — nó tự tải adb, tải bản RomCloud mới nhất, đẩy vào máy, bung, cấp quyền. Xong rút cáp là dùng.</div>
-
-  <p style="text-align:center">
-    <a class="btn" href="installers/cai-dat-windows.bat" download>🪟 TẢI BẢN WINDOWS</a>
-    <span style="display:inline-block;width:12px"></span>
-    <a class="btn" href="installers/cai-dat-mac.command" download>🍎 TẢI BẢN MAC</a>
-  </p>
-  <p style="font-size:13px;color:var(--dim)">Windows lần đầu cần driver USB 1 lần: mở <a href="https://zadig.akeo.ie">zadig.akeo.ie</a>, chọn thiết bị Android/TrimUI → Install WinUSB. Mac mở file .command lần đầu: chuột phải → Open.</p>
-
-  <h3 style="margin-top:28px">Cách 2: cài ngay trên trình duyệt (Chrome/Edge)</h3>
-  <p style="font-size:13px;color:var(--dim)">Không tải gì về máy. Nếu báo lỗi cổng USB: tắt hết adb/driver đang giữ cổng, eject ổ đĩa Brick nếu đang hiện, tải lại trang rồi bấm 1 lần duy nhất.</p>
+  <div class="warn">🔌 Cắm <b>TrimUI Brick (đang bật, chế độ USB = ADB)</b> vào laptop, mở trang này bằng <b>Chrome/Edge</b>. Chỉ bấm 2 nút dưới đây — web tự tải bản mới nhất, đẩy vào máy, bung, cấp quyền. Không tải gì về laptop.</div>
 
   <ol class="steps">
     <li><b>Kết nối máy:</b> bấm nút bên dưới, cửa sổ trình duyệt hiện lên thì chọn <b>TrimUI / Android device</b> → Connect.
@@ -37,6 +27,16 @@
   </ol>
 
   <div id="log">[nhật ký]<br>Mở trang bằng Chrome/Edge để dùng WebUSB.<br></div>
+  <p style="font-size:13px;color:var(--dim)">Nếu báo lỗi cổng USB: eject ổ đĩa Brick nếu đang hiện trên máy, tắt adb khác đang chạy, tải lại trang rồi bấm 1 lần duy nhất.</p>
+
+  <h3 style="margin-top:28px">Cách dự phòng: tải file về máy</h3>
+  <p style="font-size:13px;color:var(--dim)">Khi web ở trên không dùng được. Tải 1 file theo hệ điều hành rồi double-click, nó tự làm hết.</p>
+  <p style="text-align:center">
+    <a class="btn ghost" href="installers/cai-dat-windows.bat" download>🪟 BẢN WINDOWS</a>
+    <span style="display:inline-block;width:12px"></span>
+    <a class="btn ghost" href="installers/cai-dat-mac.command" download>🍎 BẢN MAC</a>
+  </p>
+  <p style="font-size:13px;color:var(--dim)">Windows lần đầu cần driver USB 1 lần: mở <a href="https://zadig.akeo.ie">zadig.akeo.ie</a>, chọn thiết bị Android/TrimUI → Install WinUSB. Mac mở file .command lần đầu: chuột phải → Open.</p>
 
   <footer><a href="./">← Trang chủ</a></footer>
 </div>
