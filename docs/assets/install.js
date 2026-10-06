@@ -45,7 +45,11 @@ btnConn.onclick = async function () {
     btnInstall.disabled = false;
     btnConn.disabled = true;
   } catch (e) {
-    log("Kết nối thất bại: " + (e && e.message ? e.message : e), "err");
+    var msg = (e && e.message ? e.message : String(e));
+    log("Kết nối thất bại: " + msg, "err");
+    if (msg.indexOf("claimInterface") >= 0 || msg.indexOf("claim interface") >= 0) {
+      log("Nguyên nhân: adb trên laptop đang giữ cổng USB. Mở Terminal gõ: adb kill-server — rồi rút cáp, cắm lại, bấm Kết nối lại (đừng mở adb khác trong lúc cài).", "err");
+    }
   }
 };
 
