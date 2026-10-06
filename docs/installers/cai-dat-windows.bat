@@ -16,7 +16,12 @@ echo.
 
 if not exist "platform-tools\adb.exe" (
   echo [*] Dang tai cong cu adb (chi 1 lan dau)...
-  powershell -NoProfile -Command "Invoke-WebRequest -Uri 'https://dl.google.com/android/repository/platform-tools-latest-windows.zip' -OutFile $env:TEMP\rc-pt.zip"
+  where curl.exe >nul 2>&1
+  if %errorlevel%==0 (
+    curl.exe -L --progress-bar -o "%TEMP%\rc-pt.zip" "https://dl.google.com/android/repository/platform-tools-latest-windows.zip"
+  ) else (
+    powershell -NoProfile -Command "Invoke-WebRequest -Uri 'https://dl.google.com/android/repository/platform-tools-latest-windows.zip' -OutFile $env:TEMP\rc-pt.zip"
+  )
   if errorlevel 1 (
     echo [!] Khong tai duoc adb. Kiem tra mang.
     pause & exit /b 1
@@ -39,18 +44,38 @@ if "%URL%"=="" (
   pause & exit /b 1
 )
 echo [*] Dang tai ban moi (~54MB)...
-powershell -NoProfile -Command "Invoke-WebRequest -Uri '%URL%' -OutFile $env:TEMP\romcloud.zip"
+where curl.exe >nul 2>&1
+if %errorlevel%==0 (
+  curl.exe -L --progress-bar -o "%TEMP%\romcloud.zip" "%URL%"
+) else (
+  powershell -NoProfile -Command "Invoke-WebRequest -Uri '%URL%' -OutFile $env:TEMP\romcloud.zip"
+)
 if errorlevel 1 (
   echo [!] Tai zip loi.
   pause & exit /b 1
 )
 
 echo [*] Dang day vao the nho...
-platform-tools\adb.exe push "%TEMP%\romcloud.zip" /mnt/SDCARD/RomCloud-install.zip
-if errorlevel 1 (
-  echo [!] Day file loi. Thu rut cap cam lai.
-  pause & exit /b 1
-)
+for %%f in ("%TEMP%\romcloud.zip") do set TOT=%%~zf
+start /b "rcpush" platform-tools\adb.exe push "%TEMP%\romcloud.zip" /mnt/SDCARD/RomCloud-install.zip >push.log 2>&1
+set CNT=0
+:pushloop
+timeout /t 2 /nobreak >nul
+set /a CNT+=1
+platform-tools\adb.exe shell "stat -c %%s /mnt/SDCARD/RomCloud-install.zip | tr -d '\r'" > size.txt 2>nul
+set SZ=0
+for /f "delims=" %%s in (size.txt) do set SZ=%%s
+echo %SZ% | findstr /r "^[0-9][0-9]*$" >nul || set SZ=0
+set /a PCT=%SZ%/(%TOT%/100)
+set /a SZMB=%SZ%/1048576
+set /a TOTMB=%TOT%/1048576
+echo Day file... %SZMB%/%TOTMB%MB ^(%PCT%%%^)
+if %SZ% GEQ %TOT% goto pushdone
+if %CNT% LSS 150 goto pushloop
+echo [!] Day file qua lau/timeout. Thu rut cap cam lai.
+pause & exit /b 1
+:pushdone
+del size.txt push.log 2>nul
 
 echo [*] Dang bung + cap quyen...
 platform-tools\adb.exe shell "cd /mnt/SDCARD && unzip -o -q RomCloud-install.zip && chmod +x Apps/RomCloud/launch.sh Apps/RomCloud/bin/RomCloud Apps/RomCloud/bin/gamecast_d && rm -f RomCloud-install.zip && sync && echo DONE"
