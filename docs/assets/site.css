@@ -84,11 +84,12 @@ nav a:hover { text-decoration: underline; }
   box-shadow: 0 8px 32px rgba(2,8,23,0.35);
   border-radius: 16px; padding: 18px;
   transition: border-color .15s, transform .15s;
+  display: flex; gap: 14px; align-items: center;
 }
 .card:hover { border-color: rgba(56,189,248,0.55); transform: translateY(-3px); }
-.card h3 { margin: 0 0 6px; font-size: 16px; color: var(--acc); }
-.card p { margin: 0; font-size: 13px; color: var(--dim); }
-.card img.feat { width: 56px; height: 56px; object-fit: contain; margin-bottom: 10px; }
+.card img.feat { width: 56px; height: 56px; object-fit: contain; flex: none; }
+.card .txt h3 { margin: 0 0 6px; font-size: 16px; color: var(--acc); }
+.card .txt p { margin: 0; font-size: 13px; color: var(--dim); }
 .steps { counter-reset: s; padding: 0; list-style: none; }
 .steps li {
   counter-increment: s; border: 1px solid var(--line); background: var(--card);
