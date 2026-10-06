@@ -33,6 +33,16 @@ RELEASE="${RELEASE:-0}"
 GIT_SHA="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
 echo "Build commit: $GIT_SHA"
 
+# Ultralight SDK (PortalBrowser, nhánh portal-browser). Lấy từ /tmp/ulsdk
+# (overlay SDK, không commit vào git). Thiếu là dừng và báo rõ.
+ULSDK="${ULSDK:-/tmp/ulsdk}"
+if [ ! -f "$ULSDK/bin/libWebCore.so" ]; then
+    echo "ERROR: Ultralight SDK not found at $ULSDK (need bin/libWebCore.so)." >&2
+    echo "HINT: tải ultralight-free-sdk-1.4.0-linux-arm64.7z từ nhánh base-sdk" >&2
+    echo "      của ovsky/Ultralight-WebBrowser rồi giải nén vào $ULSDK." >&2
+    exit 1
+fi
+
 $ZIG c++ \
     -target aarch64-linux-gnu.2.33 \
     -std=c++17 \
@@ -41,6 +51,7 @@ $ZIG c++ \
     -Wno-error=date-time \
     -DGIT_COMMIT_HASH=\"$GIT_SHA\" \
     -Isrc \
+    -I"$ULSDK/include" \
     -Isysroot/include \
     -Isysroot/include/SDL2 \
     src/main.cpp \
@@ -60,6 +71,11 @@ $ZIG c++ \
     src/ui/MarketUI.cpp \
     src/camera/CameraManager.cpp \
     src/ui/TrafficUI.cpp \
+    src/wifi/WifiManager.cpp \
+    src/ui/WifiUI.cpp \
+    src/flood/FloodManager.cpp \
+    src/tide/TideManager.cpp \
+    src/ui/FloodUI.cpp \
     src/ui/ExplorerInput.cpp \
     src/ui/ExplorerRender.cpp \
     src/ui/ExplorerRenderKb.cpp \
@@ -93,6 +109,13 @@ $ZIG c++ \
     src/rom/RomOrganizer.cpp \
     src/localsend/LocalSendManager.cpp \
     src/cast/CastManager.cpp \
+    src/browser/PortalBrowser.cpp \
+    src/ui/PortalUI.cpp \
+    -L"$ULSDK/bin" \
+    -lUltralight \
+    -lUltralightCore \
+    -lWebCore \
+    -Wl,-rpath,'$ORIGIN/../lib' \
     -Lsysroot/lib \
     -lSDL2 \
     -lSDL2_image \

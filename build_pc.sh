@@ -69,6 +69,8 @@ $CXX_CMD -std=c++17 -O2 -Wall -Wextra \
     src/app/Application.cpp \
     src/ui/UIManager.cpp \
     src/ui/UiRenderer.cpp \
+    src/ui/UiStrings.cpp \
+    src/ui/SearchInputModal.cpp \
     src/ui/DialogManager.cpp \
     src/ui/CoverManager.cpp \
     src/ui/BoxartScraper.cpp \
@@ -113,6 +115,13 @@ $CXX_CMD -std=c++17 -O2 -Wall -Wextra \
     src/ui/MarketUI.cpp \
     src/camera/CameraManager.cpp \
     src/ui/TrafficUI.cpp \
+    src/wifi/WifiManager.cpp \
+    src/ui/WifiUI.cpp \
+    src/flood/FloodManager.cpp \
+    src/tide/TideManager.cpp \
+    src/ui/FloodUI.cpp \
+    src/browser/PortalBrowserStub.cpp \
+    src/ui/PortalUI.cpp \
     $EXTRA_LIBS \
     -o "$OUTPUT_BIN"
 

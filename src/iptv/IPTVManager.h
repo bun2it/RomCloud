@@ -305,6 +305,9 @@ private:
     double ytTimePos();
     double ytDuration();
     double ytCacheAhead();
+    double ytMpvNumber(const std::string& prop);
+    int ytMeasuredW(); // số đo thật từ mpv (0 = chưa có)
+    int ytMeasuredH();
     // P1-3: PID mpv do MpvPlayer giu duy nhat (isPlaying()/pid()/pollExited()).
     // Dùng MpvPlayer::instance() thay cho mirror m_mpvPid.
     bool isMpvPlaying() const;

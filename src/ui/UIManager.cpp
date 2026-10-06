@@ -94,8 +94,7 @@ void UIManager::initGridMenu() {
       {"weather", "OFFICEGO", "OFFICEGO.png", "Thời tiết & Lịch"},
       {"localsend", "LOCALSEND", "LOCALSEND.png", "Chia se P2P trong LAN"},
       {"upload", "TẢI LÊN", "UPLOAD.png", "Upload lên Drive"},
-      {"settings", "CÀI ĐẶT", "SETTINGS.png", "Cấu hình"},
-      {"info", "THÔNG TIN", "INFO.png", "Thông tin hệ thống"}};
+      {"settings", "CÀI ĐẶT", "SETTINGS.png", "Cấu hình"}};
 }
 
 bool UIManager::init(SDL_Window *window, SDL_Renderer *renderer) {
@@ -434,6 +433,14 @@ void UIManager::setState(UIState state) {
       }
     }
     m_ytHomeLoadedThisEnter = true;
+  } else if (state == UIState::CLOUD_LOGIN) {
+    // Vào màn liên kết: tự lấy mã thiết bị nền (user chỉ nhập mã trên ĐT).
+    m_cloudPortalView = false;
+    m_cloudAutoSync = AuthManager::instance().isLinked();
+    if (!AuthManager::instance().isLinked()) {
+      AuthManager::instance().cancelDeviceFlow();
+      std::thread([] { AuthManager::instance().startDeviceFlow(); }).detach();
+    }
   } else if (state == UIState::CONFIRM_DELETE) {
     openConfirmDeleteDialog();
   } else if (state == UIState::CONFIRM_BATCH_DELETE) {
@@ -532,6 +539,14 @@ void UIManager::update() {
   // live 10 phút/lần khi đang ở tab tương ứng.
   pollMarket();
   pollWatch();
+
+  // CLOUD_LOGIN: vừa link xong -> toast + tự sync, user khỏi bấm thêm.
+  if (m_currentState == UIState::CLOUD_LOGIN &&
+      AuthManager::instance().isLinked() && !m_cloudAutoSync) {
+    m_cloudAutoSync = true;
+    showToast("Đã liên kết Drive! Đang đồng bộ...", {34, 197, 94, 255}, 2500);
+    DriveSyncEngine::instance().startSync();
+  }
 
   // P1-2: Poll /api/status moi 2s khi dang o man GAME_CAST va co stream chay.
   // Fetch qua detached thread de khong block UI; atomic de render doc gia tri
@@ -709,10 +724,12 @@ void UIManager::update() {
       std::string url = m_ytPendingStreamUrl;
       std::string vid = m_ytPendingVideoId;
       std::string vtitle = m_ytPendingVideoTitle;
+      std::string vq = m_ytPendingQuality.empty() ? "720" : m_ytPendingQuality;
       m_ytPendingStreamUrl.clear();
       m_ytPendingVideoId.clear();
       m_ytPendingVideoTitle.clear();
-      IPTVManager::instance().playYouTubeVideo(vid, url, "720", vtitle);
+      m_ytPendingQuality.clear();
+      IPTVManager::instance().playYouTubeVideo(vid, url, vq, vtitle);
       setState(UIState::YOUTUBE_RESULTS);
     } else {
       showToast("Không thể lấy link phát video", {239, 68, 68, 255}, 3000);
@@ -781,7 +798,11 @@ void UIManager::update() {
       m_settingsScrollOffset = 0;
       setState(UIState::SETTINGS);
     } else if (input.isButtonJustPressed(Button::SELECT)) {
-      setState(UIState::DIAGNOSTICS);
+      // INFO đã merge vào Cài đặt tab GIỚI THIỆU.
+      m_settingsTab = 4;
+      m_selectedSettingsRow = 0;
+      m_settingsScrollOffset = 0;
+      setState(UIState::SETTINGS);
     } else if (input.isButtonJustPressed(Button::A)) {
       // Handle menu selection based on id
       std::string selectedId = m_gridMenuItems[m_selectedMenuIndex].id;
@@ -817,6 +838,7 @@ void UIManager::update() {
         m_ytIsLoadingVideo = false;
         m_ytVideoReady = false;
         m_ytPendingStreamUrl.clear();
+        m_ytPendingQuality.clear();
         setState(UIState::YOUTUBE_HOME);
       } else if (selectedId == "localsend") {
         LocalSendManager::instance().start();
@@ -856,7 +878,11 @@ void UIManager::update() {
         // Refetch để chắc badge là fresh (background check có thể cũ)
         UpdateManager::instance().checkForUpdatesAsync();
       } else if (selectedId == "info") {
-        setState(UIState::DIAGNOSTICS);
+        // INFO đã merge vào Cài đặt tab GIỚI THIỆU (giữ tương thích).
+        m_settingsTab = 4;
+        m_selectedSettingsRow = 0;
+        m_settingsScrollOffset = 0;
+        setState(UIState::SETTINGS);
       }
     } else if (input.isButtonJustPressed(Button::B)) {
       // B 2 lần trong 3s để thoát app (thay nút THOÁT đã dọn).
@@ -1371,18 +1397,20 @@ void UIManager::update() {
   case UIState::SETTINGS: {
     constexpr int visibleRows = 9;
 
-    // Tab switching (L1/R1 hoặc LEFT/RIGHT):
-    // 0=CẤU HÌNH (8 rows), 1=CÀI ĐẶT (5 rows), 2=CẬP NHẬT (OTA).
-    if (input.isButtonJustPressed(Button::L1) ||
-        input.isButtonJustPressed(Button::LEFT)) {
-      m_settingsTab = (m_settingsTab + 2) % 3;
+    // Tab switching: L1/R1 (rule toàn app). D-pad dành cho nội dung/modal
+    // (bàn phím ảo dùng Trái/Phải di chuyển, tab không được cướp).
+    // Modal Wi-Fi mở thì nhường toàn bộ phím cho modal.
+    // 0=CẤU HÌNH, 1=TÙY CHỌN, 2=CẬP NHẬT, 3=WI-FI, 4=GIỚI THIỆU, 5=HỆ THỐNG.
+    if (!m_wifiModalOpen) {
+    if (input.isButtonJustPressed(Button::L1)) {
+      m_settingsTab = (m_settingsTab + 5) % 6;
       m_selectedSettingsRow = 0;
       m_settingsScrollOffset = 0;
-    } else if (input.isButtonJustPressed(Button::R1) ||
-               input.isButtonJustPressed(Button::RIGHT)) {
-      m_settingsTab = (m_settingsTab + 1) % 3;
+    } else if (input.isButtonJustPressed(Button::R1)) {
+      m_settingsTab = (m_settingsTab + 1) % 6;
       m_selectedSettingsRow = 0;
       m_settingsScrollOffset = 0;
+    }
     }
 
     if (m_settingsTab == 0) {
@@ -1560,7 +1588,7 @@ void UIManager::update() {
                     2000);
         }
       }
-    } else {
+    } else if (m_settingsTab == 2) {
       // ─── Tab 2: CẬP NHẬT: route A/B theo UpdateState ─────────────────
       auto prog = UpdateManager::instance().getProgress();
       if (prog.state == UpdateState::UPDATE_AVAILABLE) {
@@ -1597,10 +1625,30 @@ void UIManager::update() {
           Application::instance().requestRestart();
         }
       }
+    } else if (m_settingsTab == 3) {
+      // ─── Tab 3: WI-FI (quét + nối mạng + portal) ──────────────────────
+      handleWifiTabInput();
+    } else if (m_settingsTab == 4 || m_settingsTab == 5) {
+      // ─── Tab 4/5: GIỚI THIỆU / HỆ THỐNG (từ INFO) ─────────────────────
+      int infoTab = (m_settingsTab == 4) ? 0 : 1;
+      if (infoTab == 0 && m_lastInfoTab != 0) {
+        m_aboutAutoScrollY = 0.0f;
+        m_aboutLastTickMs = 0;
+      }
+      m_lastInfoTab = infoTab;
+      if (infoTab == 1) {
+        if (input.isButtonJustPressed(Button::UP)) {
+          m_diagnosticsScrollOffset =
+              std::max(0, m_diagnosticsScrollOffset - 1);
+        } else if (input.isButtonJustPressed(Button::DOWN)) {
+          m_diagnosticsScrollOffset++;
+        }
+      }
     }
 
     // ─── B (chung) về MENU + reset toàn bộ state về tab CẤU HÌNH ─────────
-    if (input.isButtonJustPressed(Button::B)) {
+    // (bỏ qua khi modal nhập SSID/pass đang mở để B làm Hủy modal).
+    if (input.isButtonJustPressed(Button::B) && !m_wifiModalOpen) {
       setState(UIState::MENU);
       m_selectedSettingsRow = 0;
       m_settingsScrollOffset = 0;
@@ -1646,6 +1694,15 @@ void UIManager::update() {
       if (input.isButtonJustPressed(Button::B)) {
         AuthManager::instance().cancelDeviceFlow();
         setState(UIState::SETTINGS);
+      } else if (input.isButtonJustPressed(Button::Y)) {
+        m_cloudPortalView = !m_cloudPortalView; // mã thiết bị <-> web portal
+      } else if (input.isButtonJustPressed(Button::A)) {
+        // Lỗi lấy mã -> thử lại nền (không đơ UI).
+        if (AuthManager::instance().getState() == AuthState::ERROR_OCCURRED) {
+          AuthManager::instance().cancelDeviceFlow();
+          std::thread([] { AuthManager::instance().startDeviceFlow(); })
+              .detach();
+        }
       }
     }
     break;
@@ -2951,6 +3008,11 @@ void UIManager::update() {
     break;
   }
 
+  case UIState::PORTAL: {
+    handlePortalInput();
+    break;
+  }
+
   case UIState::LOCALSEND_SEND: {
     // Legacy: chuyển thẳng sang Game Picker (LOCALSEND_SEND giờ chỉ là
     // bước chọn device → mở game picker).
@@ -3493,7 +3555,8 @@ void UIManager::renderFooter() {
       m_currentState == UIState::LOCALSEND_GAME_PICKER ||
       m_currentState == UIState::LOCALSEND_PROGRESS ||
       m_currentState == UIState::FILE_EXPLORER ||
-      m_currentState == UIState::GAME_CAST) {
+      m_currentState == UIState::GAME_CAST ||
+      m_currentState == UIState::PORTAL) {
     return;
   }
 
@@ -3703,8 +3766,8 @@ void UIManager::renderMenuState() {
       int bx = x + w - 12 - bw;
       drawRoundedRect(bx, y + 10, bw, 24, UiTheme::RADIUS_ROW,
                       {239, 68, 68, 255}, true);
-      drawText(verText, bx + bw / 2, y + 13, {255, 255, 255, 255}, m_fontSmall,
-               true);
+      drawText(verText, bx + bw / 2, textYCentered(y + 10, 24, m_fontSmall),
+               {255, 255, 255, 255}, m_fontSmall, true);
     }
   }
 
@@ -4561,7 +4624,7 @@ void UIManager::renderSettingsState() {
   drawAppBackground();
   drawAppHeader(UiStrings::HEADER_SETTINGS);
 
-  // ─── Tab pills top-right (CẤU HÌNH | CÀI ĐẶT | CẬP NHẬT) ───────────────
+  // ─── Tab pills top-right (CẤU HÌNH | TÙY CHỌN | CẬP NHẬT | WI-FI | GIỚI THIỆU | HỆ THỐNG)
   // Tabs nằm trong vùng Y=72..104 (8px gap dưới header, 32px tall).
   {
     int tabH = 32;
@@ -4569,7 +4632,13 @@ void UIManager::renderSettingsState() {
     int wCfg = pillWidth(UiStrings::SETTINGS_TAB_CONFIG, m_fontSmall) + 32;
     int wSet = pillWidth(UiStrings::SETTINGS_TAB_PREFS, m_fontSmall) + 32;
     int wUpd = pillWidth(UiStrings::SETTINGS_TAB_UPDATE, m_fontSmall) + 32;
-    int xUpd = 1024 - 24 - wUpd;
+    int wWifi = pillWidth(UiStrings::SETTINGS_TAB_WIFI, m_fontSmall) + 32;
+    int wAbout = pillWidth(UiStrings::INFO_TAB_ABOUT, m_fontSmall) + 32;
+    int wSys = pillWidth(UiStrings::INFO_TAB_SYSTEM, m_fontSmall) + 32;
+    int xSys = 1024 - 24 - wSys;
+    int xAbout = xSys - 8 - wAbout;
+    int xWifi = xAbout - 8 - wWifi;
+    int xUpd = xWifi - 8 - wUpd;
     int xSet = xUpd - 8 - wSet;
     int xCfg = xSet - 8 - wCfg;
     drawPill(xCfg, tabY, wCfg, tabH, UiStrings::SETTINGS_TAB_CONFIG,
@@ -4578,6 +4647,12 @@ void UIManager::renderSettingsState() {
              m_settingsTab == 1, m_fontSmall);
     drawPill(xUpd, tabY, wUpd, tabH, UiStrings::SETTINGS_TAB_UPDATE,
              m_settingsTab == 2, m_fontSmall);
+    drawPill(xWifi, tabY, wWifi, tabH, UiStrings::SETTINGS_TAB_WIFI,
+             m_settingsTab == 3, m_fontSmall);
+    drawPill(xAbout, tabY, wAbout, tabH, UiStrings::INFO_TAB_ABOUT,
+             m_settingsTab == 4, m_fontSmall);
+    drawPill(xSys, tabY, wSys, tabH, UiStrings::INFO_TAB_SYSTEM,
+             m_settingsTab == 5, m_fontSmall);
   }
 
   // ─── Tab 2 (CẬP NHẬT): render OTA body (đã bỏ header/footer nội bộ) ────
@@ -4600,6 +4675,27 @@ void UIManager::renderSettingsState() {
                      {UiTheme::PadBtn::B, "Lùi"},
                      {UiTheme::PadBtn::L1R1, "Chuyển tab"}});
     }
+    return;
+  }
+
+  // ─── Tab 3 (WI-FI): quét + nối mạng + portal ──────────────────────────
+  if (m_settingsTab == 3) {
+    renderWifiTab();
+    return;
+  }
+
+  // ─── Tab 4/5 (GIỚI THIỆU / HỆ THỐNG, từ INFO) ─────────────────────────
+  if (m_settingsTab == 4) {
+    renderAboutTab(124);
+    drawAppFooter({{UiTheme::PadBtn::B, "Lùi"},
+                   {UiTheme::PadBtn::L1R1, "Chuyển tab"}});
+    return;
+  }
+  if (m_settingsTab == 5) {
+    renderSystemTab();
+    drawAppFooter({{UiTheme::PadBtn::DPAD, "Cuộn"},
+                   {UiTheme::PadBtn::B, "Lùi"},
+                   {UiTheme::PadBtn::L1R1, "Chuyển tab"}});
     return;
   }
 
@@ -4868,6 +4964,49 @@ void UIManager::renderCloudLoginState() {
                   (boxW - badgeWidth(UiStrings::WEB_CONNECT_START_BTN, 52)) / 2,
               boxY + 250, 0, 52, UiStrings::WEB_CONNECT_START_BTN,
               {22, 101, 52, 255}, {255, 255, 255, 255});
+  } else if (!m_cloudPortalView) {
+    // Liên kết 1 chạm: quét QR hoặc nhập mã trên điện thoại là xong,
+    // không cần dán token thủ công.
+    AuthState st = AuthManager::instance().getState();
+    DeviceCodeResponse info = AuthManager::instance().getDeviceCodeInfo();
+    int innerX = cardX + 35;
+    int innerY = cardY + 75;
+    int innerW = cardW - 70;
+    int innerH = 435;
+    drawRect(innerX, innerY, innerW, innerH, {16, 20, 28, 255}, true);
+    drawBorder(innerX, innerY, innerW, innerH, {45, 55, 72, 255}, 1);
+    int dy = innerY + 18;
+    drawText("B1: Quét mã QR hoặc vào trang sau trên điện thoại:", 512, dy,
+             {200, 215, 230, 255}, m_fontSmall, true);
+    if (st == AuthState::AWAITING_USER && !info.verificationUrl.empty()) {
+      QrRenderer::renderQrCode(m_renderer, info.verificationUrl,
+                               512 - 95, dy + 30, 190);
+      drawText(truncateToWidth(info.verificationUrl, m_fontSmall, 700), 512,
+               dy + 226, {0, 180, 216, 255}, m_fontSmall, true);
+    }
+    drawText("B2: Nhập mã. Google cảnh báo: bấm Nâng cao → Tiếp tục", 512,
+             dy + 256, {200, 215, 230, 255}, m_fontSmall, true);
+    if (st == AuthState::AWAITING_USER && !info.userCode.empty()) {
+      TTF_Font* fCode = m_fontHuge ? m_fontHuge : m_fontLarge;
+      drawText(info.userCode, 512, dy + 282, {255, 255, 255, 255}, fCode,
+               true);
+      int nd = (int)((SDL_GetTicks() / 500) % 4);
+      drawText("Đang chờ xác nhận" + std::string(nd, '.'), 512, dy + 388,
+               {250, 204, 21, 255}, m_fontSmall, true);
+    } else if (st == AuthState::ERROR_OCCURRED) {
+      drawText(truncateToWidth(AuthManager::instance().getErrorMessage(),
+                               m_fontSmall, 700),
+               512, dy + 300, {248, 113, 113, 255}, m_fontSmall, true);
+      drawText("A: Thử lấy mã mới", 512, dy + 340, {0, 180, 216, 255},
+               m_fontSmall, true);
+    } else {
+      int nd = (int)((SDL_GetTicks() / 500) % 4);
+      drawText("Đang lấy mã liên kết" + std::string(nd, '.'), 512, dy + 310,
+               {0, 180, 216, 255}, m_fontMedium, true);
+    }
+    drawInlineHintsCentered("A Thử lại  •  Y Web nâng cao  •  B Hủy", 512,
+                            cardY + cardH - 30, {148, 163, 184, 255},
+                            m_fontSmall, 24);
   } else {
     std::string ip = PlatformInfo::instance().getIpAddress("wlan0");
     if (ip.empty() || ip == "Disconnected")
@@ -4883,6 +5022,9 @@ void UIManager::renderCloudLoginState() {
     int innerH = 435;
     drawRect(innerX, innerY, innerW, innerH, {16, 20, 28, 255}, true);
     drawBorder(innerX, innerY, innerW, innerH, {45, 55, 72, 255}, 1);
+    // QR portal góc phải: quét bằng điện thoại là vào web, khỏi gõ IP.
+    QrRenderer::renderQrCode(m_renderer, portalUrl, innerX + innerW - 136,
+                             innerY + 16, 120);
 
     int textY = innerY + 30;
 
@@ -4891,12 +5033,14 @@ void UIManager::renderCloudLoginState() {
     drawRect(innerX + 50, textY + 32, innerW - 100, 1, {60, 72, 90, 255}, true);
 
     textY += 55;
-    drawText(UiStrings::WEB_CONNECT_STEP1, innerX + 40, textY,
-             {200, 215, 230, 255}, m_fontMedium);
+    drawText(truncateToWidth(UiStrings::WEB_CONNECT_STEP1, m_fontMedium,
+                             innerW - 136 - 80),
+             innerX + 40, textY, {200, 215, 230, 255}, m_fontMedium);
 
     textY += 45;
-    drawText(UiStrings::WEB_CONNECT_STEP2, innerX + 40, textY,
-             {200, 215, 230, 255}, m_fontMedium);
+    drawText(truncateToWidth(UiStrings::WEB_CONNECT_STEP2, m_fontMedium,
+                             innerW - 136 - 80),
+             innerX + 40, textY, {200, 215, 230, 255}, m_fontMedium);
 
     // Prominent glowing URL box in center
     textY += 38;
@@ -4924,6 +5068,9 @@ void UIManager::renderCloudLoginState() {
     drawBadge(512 - badgeWidth(UiStrings::WEB_CONNECT_BACK_BTN, 48) / 2,
               cardY + cardH - 68, 0, 48, UiStrings::WEB_CONNECT_BACK_BTN,
               {55, 65, 81, 255}, {255, 255, 255, 255});
+    drawInlineHintsCentered("Y Về mã thiết bị  •  B Hủy", 512,
+                            cardY + cardH - 30, {148, 163, 184, 255},
+                            m_fontSmall, 24);
   }
 }
 
@@ -4935,35 +5082,8 @@ void UIManager::renderDownloadOverlay() {
   m_dialogs.renderDownloadOverlay(m_ui, m_fontSmall, m_fontLarge);
 }
 
-void UIManager::renderDiagnosticsState() {
-  // ─── Background + Header chuẩn (giống Settings/IPTV/YouTube/Explorer) ───
-  // Bỏ custom sub-header strip cũ (Y=64..112 + line + title thủ công) để đồng
-  // bộ với các app khác. drawAppHeader tự render: FOOTER_BG bar (Y=0..64) +
-  // separator line + title ACCENT_CYAN + cum status Wi-Fi/pin/clock bên phải.
-  drawAppBackground();
-  drawAppHeader(UiStrings::HEADER_DIAG);
-
-  // Tab pills top-right: [GIỚI THIỆU] [HỆ THỐNG]
-  {
-    int tabH = 32;
-    int tabY = 72;
-    int wAbout = pillWidth(UiStrings::INFO_TAB_ABOUT, m_fontSmall) + 32;
-    int wSys = pillWidth(UiStrings::INFO_TAB_SYSTEM, m_fontSmall) + 32;
-    int xSys = 1024 - 24 - wSys;
-    int xAbout = xSys - 8 - wAbout;
-    drawPill(xAbout, tabY, wAbout, tabH, UiStrings::INFO_TAB_ABOUT,
-             m_infoTab == 0, m_fontSmall);
-    drawPill(xSys, tabY, wSys, tabH, UiStrings::INFO_TAB_SYSTEM, m_infoTab == 1,
-             m_fontSmall);
-  }
-
-  if (m_infoTab == 0) {
-    renderAboutTab(124);
-    drawAppFooter(
-        {{UiTheme::PadBtn::B, "Lùi"}, {UiTheme::PadBtn::L1R1, "Chuyển tab"}});
-    return;
-  }
-
+void UIManager::renderSystemTab() {
+  // Body tab HỆ THỐNG (dùng chung cho Diagnostics và Settings tab 5).
   auto diag = PlatformInfo::instance().getDiagnostics();
 
   struct DiagRow {
@@ -5043,6 +5163,38 @@ void UIManager::renderDiagnosticsState() {
                     true);
     drawRoundedRect(scrollBarX, thumbY, 6, thumbH, 4, {0, 180, 216, 255}, true);
   }
+}
+
+void UIManager::renderDiagnosticsState() {
+  // ─── Background + Header chuẩn (giống Settings/IPTV/YouTube/Explorer) ───
+  // Bỏ custom sub-header strip cũ (Y=64..112 + line + title thủ công) để đồng
+  // bộ với các app khác. drawAppHeader tự render: FOOTER_BG bar (Y=0..64) +
+  // separator line + title ACCENT_CYAN + cum status Wi-Fi/pin/clock bên phải.
+  drawAppBackground();
+  drawAppHeader(UiStrings::HEADER_DIAG);
+
+  // Tab pills top-right: [GIỚI THIỆU] [HỆ THỐNG]
+  {
+    int tabH = 32;
+    int tabY = 72;
+    int wAbout = pillWidth(UiStrings::INFO_TAB_ABOUT, m_fontSmall) + 32;
+    int wSys = pillWidth(UiStrings::INFO_TAB_SYSTEM, m_fontSmall) + 32;
+    int xSys = 1024 - 24 - wSys;
+    int xAbout = xSys - 8 - wAbout;
+    drawPill(xAbout, tabY, wAbout, tabH, UiStrings::INFO_TAB_ABOUT,
+             m_infoTab == 0, m_fontSmall);
+    drawPill(xSys, tabY, wSys, tabH, UiStrings::INFO_TAB_SYSTEM, m_infoTab == 1,
+             m_fontSmall);
+  }
+
+  if (m_infoTab == 0) {
+    renderAboutTab(124);
+    drawAppFooter(
+        {{UiTheme::PadBtn::B, "Lùi"}, {UiTheme::PadBtn::L1R1, "Chuyển tab"}});
+    return;
+  }
+
+  renderSystemTab();
 
   drawAppFooter({{UiTheme::PadBtn::B, "Lùi"}, {UiTheme::PadBtn::DPAD, "Cuộn"}});
 }
@@ -6743,6 +6895,9 @@ void UIManager::render() {
   case UIState::GAME_CAST:
     renderGameCastState();
     break;
+  case UIState::PORTAL:
+    renderPortal();
+    break;
   default:
     break;
   }
@@ -7349,10 +7504,12 @@ void UIManager::playYouTubeVideo(const std::string &videoId) {
 
   // Cache: ưu tiên bản nét đã resolve (replay), rồi tới bản nhanh 360p.
   std::string hit = cachedStreamUrl(videoId, "720");
-  if (hit.empty()) hit = cachedStreamUrl(videoId, "360");
+  std::string hitQ = "720";
+  if (hit.empty()) { hit = cachedStreamUrl(videoId, "360"); hitQ = "360"; }
   if (!hit.empty()) {
     m_ytPendingVideoId = videoId;
     m_ytPendingStreamUrl = hit;
+    m_ytPendingQuality = hitQ;
     m_ytVideoReady = true;
     return;
   }
@@ -7361,12 +7518,20 @@ void UIManager::playYouTubeVideo(const std::string &videoId) {
   m_ytVideoReady = false;
   m_ytPendingStreamUrl.clear();
   m_ytPendingVideoId = videoId;
+  m_ytPendingQuality = "720"; // mặc định 720, rớt mới xuống 360
   m_ytLoadStartMs = SDL_GetTicks();
   m_ytLoadToastMs = 0; // update() toast ngay frame tới
   showToast("Đang tải video...", UiTheme::ACCENT_CYAN, 4000);
 
   m_resolveTask.run([this, videoId](TaskProgress &) {
-    std::string streamUrl = resolveYouTubeStreamUrl(videoId, "360");
+    // Mặc định 720; chỉ khi 720 không resolve được mới dùng 360.
+    std::string streamUrl = resolveYouTubeStreamUrl(videoId, "720");
+    std::string q = "720";
+    if (streamUrl.empty()) {
+      streamUrl = resolveYouTubeStreamUrl(videoId, "360");
+      if (!streamUrl.empty()) q = "360";
+    }
+    m_ytPendingQuality = q;
     m_ytPendingStreamUrl = streamUrl;
     m_ytVideoReady = true;
   });

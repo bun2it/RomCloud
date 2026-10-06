@@ -10,13 +10,18 @@
 namespace RomCloud {
 
 void UIManager::renderTraffic() {
+    // Sub-view Báo ngập (D-pad Trái/Phải chuyển qua lại với Camera).
+    if (m_camSub == 1) {
+        renderFlood();
+        return;
+    }
     CameraManager::instance().load();
     if (m_camVisDirty) rebuildCamVis();
 
     // Hàng pill chuyển tab: đồng nhất size 4 tab (pillWidth + 32).
     int pillW0 = pillWidth("THỜI TIẾT", m_fontSmall) + 32;
     int pillW1 = pillWidth("ĐỒNG HỒ", m_fontSmall) + 32;
-    int pillW2 = pillWidth("CAMERA", m_fontSmall) + 32;
+    int pillW2 = pillWidth("GIAO THÔNG", m_fontSmall) + 32;
     int pillW3 = pillWidth("GIÁ CẢ", m_fontSmall) + 32;
     int pillW4 = pillWidth("THỊ TRƯỜNG", m_fontSmall) + 32;
     int pillX4 = 1024 - 24 - pillW4;
@@ -30,10 +35,10 @@ void UIManager::renderTraffic() {
     if (vtotal == 0) {
         if (!m_camFilter.empty()) {
             drawAppBackground();
-            drawAppHeader("CAMERA GIAO THÔNG");
+            drawAppHeader("GIAO THÔNG - CAMERA");
             drawPill(pillX0, 72, pillW0, 32, "THỜI TIẾT", false, m_fontSmall);
             drawPill(pillX1, 72, pillW1, 32, "ĐỒNG HỒ", false, m_fontSmall);
-            drawPill(pillX2, 72, pillW2, 32, "CAMERA", true, m_fontSmall);
+            drawPill(pillX2, 72, pillW2, 32, "GIAO THÔNG", true, m_fontSmall);
             drawPill(pillX3, 72, pillW3, 32, "GIÁ CẢ", false, m_fontSmall);
             drawPill(pillX4, 72, pillW4, 32, "THỊ TRƯỜNG", false, m_fontSmall);
             drawText("Không tìm thấy. Bấm X xóa lọc.", 512, 300,
@@ -43,10 +48,10 @@ void UIManager::renderTraffic() {
                            {UiTheme::PadBtn::L1R1, "Tab"}});
         } else {
             drawAppBackground();
-            drawAppHeader("CAMERA GIAO THÔNG");
+            drawAppHeader("GIAO THÔNG - CAMERA");
             drawPill(pillX0, 72, pillW0, 32, "THỜI TIẾT", false, m_fontSmall);
             drawPill(pillX1, 72, pillW1, 32, "ĐỒNG HỒ", false, m_fontSmall);
-            drawPill(pillX2, 72, pillW2, 32, "CAMERA", true, m_fontSmall);
+            drawPill(pillX2, 72, pillW2, 32, "GIAO THÔNG", true, m_fontSmall);
             drawPill(pillX3, 72, pillW3, 32, "GIÁ CẢ", false, m_fontSmall);
             drawPill(pillX4, 72, pillW4, 32, "THỊ TRƯỜNG", false, m_fontSmall);
             drawText("Chưa có danh sách camera.", 512, 300,
@@ -62,10 +67,10 @@ void UIManager::renderTraffic() {
     const auto &cam = CameraManager::instance().at(real);
     // Title header theo chuẩn chung (drawAppHeader tự chừa cụm status),
     // pills nằm hàng dưới nên không giới hạn title.
-    drawAppHeader(cam.name.c_str());
+    drawAppHeader("GIAO THÔNG - CAMERA");
     drawPill(pillX0, 72, pillW0, 32, "THỜI TIẾT", false, m_fontSmall);
     drawPill(pillX1, 72, pillW1, 32, "ĐỒNG HỒ", false, m_fontSmall);
-    drawPill(pillX2, 72, pillW2, 32, "CAMERA", true, m_fontSmall);
+    drawPill(pillX2, 72, pillW2, 32, "GIAO THÔNG", true, m_fontSmall);
     drawPill(pillX3, 72, pillW3, 32, "GIÁ CẢ", false, m_fontSmall);
     drawPill(pillX4, 72, pillW4, 32, "THỊ TRƯỜNG", false, m_fontSmall);
 
@@ -176,6 +181,22 @@ bool UIManager::handleTrafficInput() {
     if (l1Tab || r1Tab) {
         // L1: lùi tab (sang trái), R1: tới tab (sang phải).
         m_wxTab = (m_wxTab + (l1Tab ? 4 : 1)) % 5;
+        return true;
+    }
+    // Sub-view Báo ngập: input đi handler riêng (render đã rẽ ở renderTraffic).
+    if (m_camSub == 1 && !m_camModalOpen) return handleFloodInput();
+    // D-pad Trái/Phải: chuyển sang Báo ngập. Chống dội giữ phím/repeat:
+    // chỉ chuyển khi đã nhả phím từ lần trước (m_camSubArmed).
+    bool tLeft = input.isButtonJustPressed(Button::LEFT);
+    bool tRight = input.isButtonJustPressed(Button::RIGHT);
+    if (!input.isButtonPressed(Button::LEFT) &&
+        !input.isButtonPressed(Button::RIGHT))
+        m_camSubArmed = true;
+    if (!m_camModalOpen && m_camSubArmed && (tLeft || tRight)) {
+        m_camSubArmed = false;
+        m_camSub = 1;
+        m_floodVisDirty = true;
+        showToast("Báo ngập TP.HCM", {0, 180, 216, 255}, 1200);
         return true;
     }
     // Modal tìm kiếm mở thì route vào modal

@@ -67,6 +67,7 @@ enum class UIState {
   WEATHER,       // Thời tiết & Lịch (+ tab Đồng hồ, Camera)
   CLOCK_ALARM,   // Modal báo thức kêu (briefing)
   GAME_CAST,     // GameCast TV & Laptop streaming
+  PORTAL,        // Duyệt captive portal (Ultralight, nhánh portal-browser)
   EXIT_REQUESTED
 };
 
@@ -244,6 +245,9 @@ private:
   int m_apEditIdx = -1;                   // -1 = thêm mới
   // Picker đổi thành phố giờ thế giới tại ô m_citySel: A mở/chốt, B hủy.
   bool m_cityPickOpen = false;
+  // Liên kết Drive 1 chạm: portal web nâng cao / tự sync sau khi link.
+  bool m_cloudPortalView = false; // true = xem hướng dẫn web portal cũ
+  bool m_cloudAutoSync = false;   // đã tự sync sau khi link trong lần vào này
   int m_cityPickSel = 0;
   int m_cityPickScroll = 0;
   bool m_pomoRun = false;                 // pomodoro đang chạy
@@ -339,6 +343,31 @@ private:
   bool handleTrafficInput();
   void restartCamView();
   void applyCamFilter(const std::string &query);
+  // Báo ngập: sub-view của tab Camera (m_wxTab == 2), D-pad Trái/Phải
+  // chuyển Camera <-> Báo ngập. Không thêm tab mới (Office Go hết chỗ).
+  int m_camSub = 0; // 0 = camera, 1 = báo ngập
+  bool m_camSubArmed = true; // chống dội: nhả D-pad Trái/Phải mới cho chuyển tiếp
+  size_t m_floodSel = 0;
+  int m_floodScroll = 0;
+  VkState m_floodVk;
+  std::vector<std::string> m_floodHist;
+  SearchInputModal::Config m_floodModalCfg;
+  bool m_floodModalOpen = false;
+  bool m_floodModalInit = false;
+  std::vector<size_t> m_floodFilter; // rỗng = không lọc text
+  std::vector<size_t> m_floodVisIdx; // cache hiển thị sau lọc
+  bool m_floodVisDirty = true;
+  size_t floodVisCount() const;
+  size_t floodVisToReal(size_t pos) const;
+  void rebuildFloodVis();
+  void renderFlood();
+  void drawFloodHeader(size_t vtotal);
+  bool handleFloodInput();
+  void applyFloodFilter(const std::string &query);
+  // Live ngập: fetch nền khi vào màn, TTL 2h (delay chấp nhận được).
+  BackgroundTask m_floodTask;
+  bool m_floodFetching = false;
+  void pollFloodLive();
   // Thị trường (tab 4): crypto + chứng khoán VN, tối đa 4 card 2x2.
   // Mỗi card 1 mã: giá + % đổi + biểu đồ sparkline. Y nhập mã (modal),
   // X xóa card, A tải lại.
@@ -367,6 +396,56 @@ private:
   bool handleMarketInput();
   void startMarketFetch();
   void pollMarket();
+  // Tab Wi-Fi (settings tab 3): quét + nối mạng + portal captive.
+  size_t m_wifiSel = 0;
+  int m_wifiScroll = 0;
+  bool m_wifiBusy = false;
+  bool m_wifiNeedScan = true; // vào tab là quét ngay lần đầu
+  bool m_wifiHidden = false;
+  std::string m_wifiStatus;
+  std::string m_wifiCurSsid; // mạng đang nối (đánh dấu trong list)
+  uint32_t m_wifiStatusMs = 0;
+  BackgroundTask m_wifiTask;
+  VkState m_wifiVk;
+  std::vector<std::string> m_wifiHist;
+  SearchInputModal::Config m_wifiModalCfg;
+  bool m_wifiModalOpen = false;
+  bool m_wifiModalInit = false;
+  int m_wifiModalMode = 0; // 0=none, 1=SSID ẩn, 2=pass
+  std::string m_wifiPendingSsid;
+  std::string m_wifiPortalUrl; // worker check xong, main mở browser
+  std::string m_wifiModalTitle; // giữ chuỗi cho Config (const char*)
+  std::string m_wifiModalPh;
+  void renderWifiTab();
+  bool handleWifiTabInput();
+  void startWifiScan();
+  // Portal browser (duyệt portal tay, RAM rule: đóng là free sạch).
+  SDL_Texture* m_portalTex = nullptr;
+  std::vector<unsigned char> m_portalPx;
+  std::string m_portalPendingUrl;
+  std::string m_portalBody;
+  std::string m_portalFinal;
+  bool m_portalLoading = false;
+  bool m_portalShowBody = false;
+  BackgroundTask m_portalTask;
+  VkState m_portalVk;
+  std::vector<std::string> m_portalHist;
+  SearchInputModal::Config m_portalModalCfg;
+  bool m_portalModalOpen = false;
+  bool m_portalModalInit = false;
+  std::string m_portalModalTitle;
+  std::string m_portalModalPh;
+  void renderPortal();
+  bool handlePortalInput();
+  void openPortal(const std::string& url);
+  void closePortal();
+  void pollPortalBridge();
+  void openPortalModal();
+  void startWifiConnect(const std::string& ssid, const std::string& psk,
+                        bool hidden, bool useSaved);
+  void startWifiPortal();
+  void openWifiModal(int mode, const std::string& title,
+                     const std::string& placeholder);
   // Picker đích dùng chung (DEST_PICKER): 0=không, 1=Sao chép, 2=Chuyển đi,
   // 3=Bung tới thư mục. Mọi thao tác đều qua picker + confirm mới chạy.
   int m_pickerPendingOp = 0;
@@ -475,6 +554,7 @@ private:
   std::string m_ytPendingStreamUrl;
   std::string m_ytPendingVideoId;
   std::string m_ytPendingVideoTitle; // tiêu đề cho OSD top bar (UI-only)
+  std::string m_ytPendingQuality; // "720" mặc định, "360" nếu 720 rớt mới dùng
   std::vector<std::string> m_ytSearchHistory;
   int m_ytSelectedTagIndex = 0;
   bool m_ytFocusInTags = false;
@@ -636,6 +716,7 @@ private:
   void renderDownloadOverlay();
   void renderSettingsState();
   void renderDiagnosticsState();
+  void renderSystemTab(); // body tab HỆ THỐNG (dùng chung Diagnostics/Settings)
   void renderAboutTab(int contentTop);
   std::vector<std::string> wrapAboutText(const std::string &text,
                                          TTF_Font *font, int maxPx);

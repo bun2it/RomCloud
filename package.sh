@@ -79,6 +79,7 @@ cp assets/fonts/gluqlo.ttf "$STAGING_DIR/Apps/RomCloud/assets/fonts/"
 cp assets/sounds/alarm.wav "$STAGING_DIR/Apps/RomCloud/assets/sounds/"
 cp assets/vn_wards.json "$STAGING_DIR/Apps/RomCloud/assets/" 2>/dev/null || true
 cp assets/traffic_cams.json "$STAGING_DIR/Apps/RomCloud/assets/" 2>/dev/null || true
+cp assets/flood_points.json "$STAGING_DIR/Apps/RomCloud/assets/" 2>/dev/null || true
 mkdir -p "$STAGING_DIR/Apps/RomCloud/assets/weather_icons"
 cp assets/weather_icons/*.png "$STAGING_DIR/Apps/RomCloud/assets/weather_icons/" 2>/dev/null || true
 cp -r assets/stock_keyboard/* "$STAGING_DIR/Apps/RomCloud/assets/stock_keyboard/"

@@ -36,6 +36,16 @@
     <div class="card"><img class="feat" src="assets/features/LOCALSEND.png" alt="LocalSend"><div class="txt"><h3>LocalSend</h3><p>Gửi nhận file, ROM với máy khác trong mạng LAN, không cần mạng ngoài.</p></div></div>
   </div>
 
+  <div class="warn">📱 <b>Mở web điều khiển trên Brick:</b> không cần gõ IP — mở app trên Brick → <b>Liên kết Drive</b> → <b>quét mã QR</b> góc phải bằng điện thoại là vào thẳng. Hoặc nhập IP dưới đây (web nhớ lần sau).</div>
+
+  <div class="card" style="margin-bottom:24px">
+    <div style="display:flex;gap:10px;align-items:end;flex-wrap:wrap">
+      <div style="flex:1;min-width:200px"><label style="font-size:11px;color:var(--dim);display:block;margin-bottom:4px">IP của Brick (cùng WiFi)</label>
+      <input type="text" id="brickIp" placeholder="192.168.1.155" style="width:100%;padding:10px 12px;background:var(--bg);border:1px solid var(--line);border-radius:10px;color:var(--fg);font-size:14px;font-family:inherit"></div>
+      <button class="btn" id="btnPortal">🌐 MỞ PORTAL</button>
+    </div>
+  </div>
+
   <div class="warn">📦 <b>Cài 1 chạm:</b> cắm Brick vào laptop bằng cáp USB → mở trang <a href="install.html">Cài đặt</a> bằng <b>Chrome/Edge</b> → bấm 1 nút, web tự đẩy app vào máy. Không cần gõ lệnh.</div>
 
   <footer>
@@ -44,6 +54,19 @@
   </footer>
 </div>
 <script>
+(function () {
+  var ipInput = document.getElementById("brickIp");
+  var saved = "";
+  try { saved = localStorage.getItem("rc-brick-ip") || ""; } catch (e) {}
+  if (saved && ipInput) ipInput.value = saved;
+  var btn = document.getElementById("btnPortal");
+  if (btn) btn.onclick = function () {
+    var ip = (ipInput.value || "").trim();
+    if (!ip) { alert("Nhập IP của Brick (xem trong app → Cài đặt → Thông tin, hoặc quét QR ở màn Liên kết)."); return; }
+    try { localStorage.setItem("rc-brick-ip", ip); } catch (e) {}
+    window.open("http://" + ip + ":8888/", "_blank");
+  };
+})();
 fetch("https://api.github.com/repos/bun2it/RomCloud/releases/latest").then(function (r) {
   return r.json();
 }).then(function (j) {

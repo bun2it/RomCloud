@@ -404,5 +404,6 @@ const char *OTA_CHANGELOG_HEADER = "Cập nhật - Tính năng mới";
 const char *SETTINGS_TAB_CONFIG = "Cấu hình";
 const char *SETTINGS_TAB_PREFS = "Tùy chọn";
 const char *SETTINGS_TAB_UPDATE = "Cập nhật";
+const char *SETTINGS_TAB_WIFI = "Wi-Fi";
 } // namespace UiStrings
 } // namespace RomCloud

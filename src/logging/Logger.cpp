@@ -5,7 +5,9 @@
 #include <iomanip>
 #include <sstream>
 #include <sys/stat.h>
+#if defined(__linux__)
 #include <sys/sysinfo.h>
+#endif
 #include <ifaddrs.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -256,12 +258,14 @@ std::string Logger::sanitize(const std::string& msg) const {
 
 std::string Logger::getStateSnapshot() const {
     std::stringstream ss;
+#if defined(__linux__)
     struct sysinfo si;
     if (sysinfo(&si) == 0) {
         long total = (long)((si.totalram * si.mem_unit) / (1024 * 1024));
         long free  = (long)((si.freeram  * si.mem_unit) / (1024 * 1024));
         ss << "ram=" << free << "/" << total << "MB";
     }
+#endif
     ss << " ip=" << getLocalIp();
     return ss.str();
 }

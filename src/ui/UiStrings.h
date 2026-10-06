@@ -403,5 +403,6 @@ extern const char *OTA_CHANGELOG_HEADER;
 extern const char *SETTINGS_TAB_CONFIG;
 extern const char *SETTINGS_TAB_PREFS;
 extern const char *SETTINGS_TAB_UPDATE;
+extern const char *SETTINGS_TAB_WIFI;
 } // namespace UiStrings
 } // namespace RomCloud

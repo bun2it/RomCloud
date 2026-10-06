@@ -2013,8 +2013,24 @@ bool IPTVManager::playYouTubeUrl(const std::string& url) {
     return playYouTubeVideo("", url, "720");
 }
 
-double IPTVManager::ytTimePos() {    std::string resp;
-    if (!sendMpvIpcCommand("{\"command\":[\"get_property\",\"time-pos\"]}", &resp))
+double IPTVManager::ytTimePos() {
+    return ytMpvNumber("time-pos");
+}
+
+int IPTVManager::ytMeasuredW() {
+    double v = ytMpvNumber("video-params/w");
+    return v > 0 ? (int)v : 0;
+}
+
+int IPTVManager::ytMeasuredH() {
+    double v = ytMpvNumber("video-params/h");
+    return v > 0 ? (int)v : 0;
+}
+
+double IPTVManager::ytMpvNumber(const std::string& prop) {
+    std::string resp;
+    std::string cmd = "{\"command\":[\"get_property\",\"" + prop + "\"]}";
+    if (!sendMpvIpcCommand(cmd, &resp))
         return -1;
     size_t p = resp.find("\"data\":");
     if (p == std::string::npos || p + 7 >= resp.size()) return -1;
@@ -2063,7 +2079,15 @@ void IPTVManager::showYouTubeOSD(bool extendExpire) {
         std::string title = m_ytTitle.empty() ? "YouTube" : m_ytTitle;
         ytBlitText(cv, CW, CH, fTitle, ytTruncUtf8(fTitle, title, 780),
                    {255, 255, 255, 255}, 24, 18);
-        std::string q = m_ytQuality + "p";
+        // Số đo thật từ mpv (video-params); chưa có thì rớt về nhãn yêu cầu.
+        std::string q;
+        {
+            int mw = ytMeasuredW(), mh = ytMeasuredH();
+            if (mw > 0 && mh > 0)
+                q = std::to_string(mw) + "x" + std::to_string(mh);
+            else
+                q = m_ytQuality + "p";
+        }
         int qw = 0, qh = 0;
         if (fBar && TTF_SizeUTF8(fBar, q.c_str(), &qw, &qh) == 0)
             ytBlitText(cv, CW, CH, fBar, q, {0, 180, 216, 255}, 1000 - qw, 20);
@@ -2101,7 +2125,7 @@ void IPTVManager::showYouTubeOSD(bool extendExpire) {
                      255, 255, 255, 255);
         std::string t = ytFmtTime(cur) + " / " + (dur >= 0 ? ytFmtTime(dur) : "--:--");
         ytBlitText(cv, CW, CH, fBar, t, {255, 255, 255, 255}, 24, 42);
-        std::string hints = "A: Tạm dừng   \u2190 \u2192 +-10s   L1/R1 +-60s   B: Thoát";
+        std::string hints = "A: Tạm dừng   \u2190 \u2192 +-10s   SELECT: 720/360   B: Thoát";
         int hintW = 0, hintH = 0;
         if (fBar && TTF_SizeUTF8(fBar, hints.c_str(), &hintW, &hintH) == 0)
             ytBlitText(cv, CW, CH, fBar, hints,

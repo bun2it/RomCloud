@@ -2,6 +2,7 @@
 #include "../app/Application.h"
 #include "../auth/AuthManager.h"
 #include "../calendar/CalManager.h"
+#include "../clock/ClockStore.h"
 #include "../config/AppConfig.h"
 #include "../database/DatabaseManager.h"
 #include "../database/RomIndexer.h"
@@ -17,6 +18,7 @@
 #include "../sync/UploadManager.h"
 #include "../ui/BoxartScraper.h"
 #include "HttpClient.h"
+#include "../market/WatchManager.h"
 #include "../sync/OneDriveSync.h"
 
 
@@ -330,11 +332,11 @@ std::string WebServer::buildHtmlResponse() {
   <title>RomCloud - TrimUI ROM Manager</title>
   <style>
     :root {
-      --bg: #090d16;
-      --card-bg: #111827;
-      --card-alt: #1a2333;
-      --border: #1f293d;
-      --border-hover: #374151;
+      --bg: #05070f;
+      --card-bg: rgba(17, 25, 40, 0.55);
+      --card-alt: rgba(30, 41, 59, 0.5);
+      --border: rgba(148, 163, 184, 0.22);
+      --border-hover: rgba(56, 189, 248, 0.55);
       --primary: #0284c7;
       --primary-hover: #0369a1;
       --accent: #38bdf8;
@@ -349,18 +351,23 @@ std::string WebServer::buildHtmlResponse() {
       --yellow: #f59e0b;
       --yellow-bg: #78350f;
       --purple: #8b5cf6;
-      --radius: 12px;
+      --radius: 16px;
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-      background: var(--bg);
+      background:
+        radial-gradient(900px 500px at 10% -5%, rgba(56,189,248,0.14), transparent 60%),
+        radial-gradient(800px 500px at 95% 10%, rgba(139,92,246,0.12), transparent 60%),
+        radial-gradient(700px 600px at 50% 110%, rgba(16,185,129,0.08), transparent 60%),
+        var(--bg);
+      background-attachment: fixed;
       color: var(--text);
       line-height: 1.5;
       padding: 16px;
       min-height: 100vh;
     }
-    .container { max-width: 1140px; margin: 0 auto; }
+    .container { max-width: 1600px; margin: 0 auto; }
     
     /* Header */
     header {
@@ -966,6 +973,34 @@ std::string WebServer::buildHtmlResponse() {
       .game-table th:nth-child(3), .game-table td:nth-child(3) { display: none; }
       .hide-mobile { display: none; }
     }
+
+    /* Technology glassmorphism: kính mờ + viền sáng + glow */
+    header, .controls-bar, .game-list-container, .card, .arch-card,
+    .active-download-card {
+      background: linear-gradient(135deg, rgba(17,25,40,0.62), rgba(15,23,42,0.45)) !important;
+      -webkit-backdrop-filter: blur(14px);
+      backdrop-filter: blur(14px);
+      border: 1px solid rgba(148,163,184,0.22) !important;
+      box-shadow: 0 8px 32px rgba(2,8,23,0.45), inset 0 1px 0 rgba(255,255,255,0.06);
+    }
+    .tab-btn.active {
+      background: linear-gradient(135deg, #0284c7, #7c3aed);
+      box-shadow: 0 4px 18px rgba(56,189,248,0.45);
+      border-color: transparent;
+    }
+    .btn-primary {
+      background: linear-gradient(135deg, #0284c7, #7c3aed);
+    }
+    .game-card:hover, .tab-btn:hover, .pill-btn:hover { border-color: var(--border-hover); }
+    .logo-text {
+      background: linear-gradient(90deg, #38bdf8, #a78bfa);
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+    }
+    ::-webkit-scrollbar { width: 10px; height: 10px; }
+    ::-webkit-scrollbar-thumb { background: rgba(56,189,248,0.3); border-radius: 8px; }
+    ::-webkit-scrollbar-track { background: transparent; }
   </style>
 </head>
 <body>
@@ -1020,6 +1055,8 @@ std::string WebServer::buildHtmlResponse() {
       <button class="tab-btn" onclick="switchTab('tab-iptv')">📺 IPTV</button>
       <button class="tab-btn" onclick="switchTab('tab-ota')" id="nav-tab-ota">🚀 Cập nhật OTA <span class="badge" id="ota-nav-badge" style="display: none; background: #ef4444; color: #fff; margin-left: 4px; padding: 2px 6px; border-radius: 8px; font-size: 10px;">NEW</span></button>
       <button class="tab-btn" onclick="switchTab('tab-cal')">📅 Lịch phone</button>
+      <button class="tab-btn" onclick="switchTab('tab-alarm')">⏰ Báo thức</button>
+      <button class="tab-btn" onclick="switchTab('tab-watch')">📈 Theo dõi giá</button>
     </div>
 
     <!-- TAB 1: ROM MANAGER -->
@@ -1834,6 +1871,38 @@ std::string WebServer::buildHtmlResponse() {
         <div id="cal-events" style="font-size: 12px; display: flex; flex-direction: column; gap: 6px; max-height: 260px; overflow-y: auto;"></div>
       </div>
     </div>
+    <div id="tab-alarm" class="tab-content">
+      <div class="card" style="max-width: 720px; margin: 0 auto;">
+        <h3>⏰ Báo thức trên Brick</h3>
+        <p style="font-size: 12.5px; color: var(--text-muted); line-height: 1.6; margin-bottom: 14px;">
+          Thêm/sửa báo thức bằng bàn phím thay vì bấm D-pad. Tối đa 10 báo thức.
+          Chế độ: 0 = Chuông+Rung, 1 = Chuông, 2 = Rung.
+        </p>
+        <div style="display: flex; gap: 8px; margin-bottom: 14px; align-items: end;">
+          <div><label style="font-size: 11px; color: var(--text-dim); display: block; margin-bottom: 3px;">Giờ</label>
+          <input type="number" id="alarm-hour" min="0" max="23" value="7" style="width: 80px; padding: 8px 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: #fff; font-size: 13px;"></div>
+          <div><label style="font-size: 11px; color: var(--text-dim); display: block; margin-bottom: 3px;">Phút</label>
+          <input type="number" id="alarm-min" min="0" max="59" value="0" style="width: 80px; padding: 8px 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: #fff; font-size: 13px;"></div>
+          <button class="btn btn-primary" onclick="alarmAdd()">＋ Thêm</button>
+        </div>
+        <div id="alarm-list" style="font-size: 13px; display: flex; flex-direction: column; gap: 8px;"></div>
+      </div>
+    </div>
+    <div id="tab-watch" class="tab-content">
+      <div class="card" style="max-width: 720px; margin: 0 auto;">
+        <h3>📈 Mã theo dõi (crypto + chứng khoán VN)</h3>
+        <p style="font-size: 12.5px; color: var(--text-muted); line-height: 1.6; margin-bottom: 14px;">
+          Tối đa 4 mã, hiển thị lưới 2×2 trên tab Thị trường của Brick.
+          Crypto dùng Yahoo Finance (vd BTC, ETH, SOL), cổ phiếu VN dùng mã HOSE (vd VCB, HPG, FPT).
+        </p>
+        <div style="display: flex; gap: 8px; margin-bottom: 14px; align-items: end;">
+          <div style="flex: 1;"><label style="font-size: 11px; color: var(--text-dim); display: block; margin-bottom: 3px;">Các mã (cách nhau dấu phẩy)</label>
+          <input type="text" id="watch-symbols" placeholder="BTC,ETH,VCB,HPG" style="width: 100%; padding: 8px 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: #fff; font-size: 13px; text-transform: uppercase;"></div>
+          <button class="btn btn-primary" onclick="watchSave()">💾 Lưu</button>
+        </div>
+        <div id="watch-list" style="font-size: 13px; display: flex; gap: 8px; flex-wrap: wrap;"></div>
+      </div>
+    </div>
 
   <!-- FLOATING ACTIVE UPLOAD CARD -->
   <div id="active-upload-floating">
@@ -1970,6 +2039,8 @@ std::string WebServer::buildHtmlResponse() {
         loadCalSources();
         loadCalEvents();
       }
+      if (tabId === 'tab-alarm') loadAlarms();
+      if (tabId === 'tab-watch') loadWatch();
     }
 
     async function loadSystems() {
@@ -3460,6 +3531,57 @@ std::string WebServer::buildHtmlResponse() {
       const d = await postForm('/api/cal/refresh', {});
       showToast(`Đã refresh ${d.refreshed || 0} nguồn!`);
       loadCalEvents();
+    }
+
+    const ALARM_MODES = ['Chuông+Rung', 'Chuông', 'Rung'];
+    async function loadAlarms() {
+      try {
+        const d = await (await fetch('/api/clock_alarms')).json();
+        const box = document.getElementById('alarm-list');
+        if (!d.alarms || !d.alarms.length) {
+          box.innerHTML = '<div style="color:var(--text-dim);font-size:12px">Chưa có báo thức nào.</div>';
+          return;
+        }
+        box.innerHTML = d.alarms.map(a => `
+          <div style="display:flex;align-items:center;gap:10px;background:var(--card-alt);border:1px solid var(--border);border-radius:8px;padding:8px 12px;">
+            <b style="font-size:16px;min-width:56px;${a.enabled ? '' : 'color:var(--text-dim);text-decoration:line-through;'}">${a.time}</b>
+            <span class="status-badge ${a.enabled ? 'status-local' : 'status-cloud'}">${a.enabled ? 'BẬT' : 'TẮT'}</span>
+            <button class="btn btn-secondary" style="padding:4px 10px;font-size:11px" onclick="alarmMode(${a.idx})" title="Đổi chế độ">🔔 ${ALARM_MODES[a.mode] || ''}</button>
+            <span style="flex:1"></span>
+            <button class="btn btn-secondary" style="padding:4px 10px;font-size:11px" onclick="alarmToggle(${a.idx})">${a.enabled ? 'Tắt' : 'Bật'}</button>
+            <button class="btn btn-danger" style="padding:4px 10px;font-size:11px" onclick="alarmDel(${a.idx})">Xóa</button>
+          </div>`).join('');
+      } catch (e) { showToast('Không tải được báo thức'); }
+    }
+    async function alarmAdd() {
+      const h = Math.max(0, Math.min(23, parseInt(document.getElementById('alarm-hour').value || '7', 10)));
+      const m = Math.max(0, Math.min(59, parseInt(document.getElementById('alarm-min').value || '0', 10)));
+      await postForm('/api/clock_alarm', { action: 'add', hour: String(h), minute: String(m) });
+      showToast(`Đã thêm báo thức ${h < 10 ? '0' : ''}${h}:${m < 10 ? '0' : ''}${m}`);
+      loadAlarms();
+    }
+    async function alarmToggle(i) { await postForm('/api/clock_alarm', { action: 'toggle', idx: String(i) }); loadAlarms(); }
+    async function alarmDel(i) { await postForm('/api/clock_alarm', { action: 'del', idx: String(i) }); loadAlarms(); }
+    async function alarmMode(i) {
+      const d = await (await fetch('/api/clock_alarms')).json();
+      const cur = (d.alarms && d.alarms[i]) ? d.alarms[i].mode : 0;
+      await postForm('/api/clock_alarm', { action: 'mode', idx: String(i), mode: String((cur + 1) % 3) });
+      loadAlarms();
+    }
+    async function loadWatch() {
+      try {
+        const d = await (await fetch('/api/watch_symbols')).json();
+        document.getElementById('watch-symbols').value = (d.symbols || []).join(',');
+        document.getElementById('watch-list').innerHTML = (d.symbols || []).map(s =>
+          `<span class="status-badge status-local">${s}</span>`).join('') ||
+          '<div style="color:var(--text-dim);font-size:12px">Trống — Brick sẽ dùng mặc định BTC,ETH,VCB,HPG.</div>';
+      } catch (e) { showToast('Không tải được danh sách mã'); }
+    }
+    async function watchSave() {
+      const v = document.getElementById('watch-symbols').value;
+      const d = await postForm('/api/watch_symbols', { symbols: v });
+      showToast(d.success ? 'Đã lưu! Mở tab Thị trường trên Brick để xem.' : 'Lỗi lưu');
+      loadWatch();
     }
   </script>
 </body>
@@ -5327,6 +5449,92 @@ void WebServer::handleClient(int clientFd) {
     CalManager::instance().ensureTables();
     int n = CalManager::instance().refreshAll();
     std::string json = "{\"success\":true,\"refreshed\":" + std::to_string(n) + "}";
+    std::string res = "HTTP/1.1 200 OK\r\nContent-Type: application/json; "
+                      "charset=UTF-8\r\nAccess-Control-Allow-Origin: "
+                      "*\r\nContent-Length: " +
+                      std::to_string(json.length()) +
+                      "\r\nConnection: close\r\n\r\n" + json;
+    send(clientFd, res.c_str(), res.length(), 0);
+  } else if (method == "GET" && path == "/api/clock_alarms") {
+    auto alarms = ClockStore::instance().alarms();
+    std::string json = "{\"alarms\":[";
+    for (size_t i = 0; i < alarms.size(); ++i) {
+      if (i) json += ",";
+      char t[8];
+      snprintf(t, sizeof(t), "%02d:%02d", alarms[i].hour, alarms[i].minute);
+      json += "{\"idx\":" + std::to_string(i) + ",\"time\":\"" + t +
+              "\",\"enabled\":" + (alarms[i].enabled ? "true" : "false") +
+              ",\"mode\":" + std::to_string(alarms[i].mode) + ",\"label\":\"" +
+              escapeJson(alarms[i].label) + "\"}";
+    }
+    json += "]}";
+    std::string res = "HTTP/1.1 200 OK\r\nContent-Type: application/json; "
+                      "charset=UTF-8\r\nAccess-Control-Allow-Origin: "
+                      "*\r\nContent-Length: " +
+                      std::to_string(json.length()) +
+                      "\r\nConnection: close\r\n\r\n" + json;
+    send(clientFd, res.c_str(), res.length(), 0);
+  } else if (method == "POST" && path == "/api/clock_alarm") {
+    std::string action = extractPostParam(postBody, "action");
+    size_t idx = (size_t)atoi(extractPostParam(postBody, "idx").c_str());
+    if (action == "add") {
+      int h = atoi(extractPostParam(postBody, "hour").c_str());
+      int m = atoi(extractPostParam(postBody, "minute").c_str());
+      if (h < 0) h = 0;
+      if (h > 23) h = 23;
+      if (m < 0) m = 0;
+      if (m > 59) m = 59;
+      ClockStore::instance().addAlarm(h, m);
+    } else if (action == "toggle") {
+      ClockStore::instance().toggleAlarm(idx);
+    } else if (action == "del") {
+      ClockStore::instance().removeAlarm(idx);
+    } else if (action == "mode") {
+      int mode = atoi(extractPostParam(postBody, "mode").c_str());
+      if (mode < 0) mode = 0;
+      if (mode > 2) mode = 2;
+      auto v = ClockStore::instance().alarms();
+      if (idx < v.size()) {
+        v[idx].mode = mode;
+        ClockStore::instance().saveAlarms(v);
+      }
+    }
+    std::string json = "{\"success\":true}";
+    std::string res = "HTTP/1.1 200 OK\r\nContent-Type: application/json; "
+                      "charset=UTF-8\r\nAccess-Control-Allow-Origin: "
+                      "*\r\nContent-Length: " +
+                      std::to_string(json.length()) +
+                      "\r\nConnection: close\r\n\r\n" + json;
+    send(clientFd, res.c_str(), res.length(), 0);
+  } else if (method == "GET" && path == "/api/watch_symbols") {
+    auto syms = WatchManager::instance().symbols();
+    std::string json = "{\"symbols\":[";
+    for (size_t i = 0; i < syms.size(); ++i) {
+      if (i) json += ",";
+      json += "\"" + escapeJson(syms[i]) + "\"";
+    }
+    json += "],\"max\":4}";
+    std::string res = "HTTP/1.1 200 OK\r\nContent-Type: application/json; "
+                      "charset=UTF-8\r\nAccess-Control-Allow-Origin: "
+                      "*\r\nContent-Length: " +
+                      std::to_string(json.length()) +
+                      "\r\nConnection: close\r\n\r\n" + json;
+    send(clientFd, res.c_str(), res.length(), 0);
+  } else if (method == "POST" && path == "/api/watch_symbols") {
+    // symbols=BTC,ETH,VCB (tối đa 4, chuẩn hóa trong setSymbols)
+    std::string csv = extractPostParam(postBody, "symbols");
+    std::vector<std::string> v;
+    std::string cur;
+    for (char c : csv + ",") {
+      if (c == ',') {
+        if (!cur.empty()) v.push_back(cur);
+        cur.clear();
+      } else {
+        cur += c;
+      }
+    }
+    WatchManager::instance().setSymbols(v);
+    std::string json = "{\"success\":true}";
     std::string res = "HTTP/1.1 200 OK\r\nContent-Type: application/json; "
                       "charset=UTF-8\r\nAccess-Control-Allow-Origin: "
                       "*\r\nContent-Length: " +

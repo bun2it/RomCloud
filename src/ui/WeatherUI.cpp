@@ -297,7 +297,7 @@ void UIManager::renderWeather() {
   {
     int w0 = pillWidth("THỜI TIẾT", m_fontSmall) + 32;
     int w1 = pillWidth("ĐỒNG HỒ", m_fontSmall) + 32;
-    int w2 = pillWidth("CAMERA", m_fontSmall) + 32;
+    int w2 = pillWidth("GIAO THÔNG", m_fontSmall) + 32;
     int w3 = pillWidth("GIÁ CẢ", m_fontSmall) + 32;
     int w4 = pillWidth("THỊ TRƯỜNG", m_fontSmall) + 32;
     int x4 = 1024 - 24 - w4;
@@ -307,7 +307,7 @@ void UIManager::renderWeather() {
     int x0 = x1 - 8 - w0;
     drawPill(x0, 72, w0, 32, "THỜI TIẾT", m_wxTab == 0, m_fontSmall);
     drawPill(x1, 72, w1, 32, "ĐỒNG HỒ", m_wxTab == 1, m_fontSmall);
-    drawPill(x2, 72, w2, 32, "CAMERA", m_wxTab == 2, m_fontSmall);
+    drawPill(x2, 72, w2, 32, "GIAO THÔNG", m_wxTab == 2, m_fontSmall);
     drawPill(x3, 72, w3, 32, "GIÁ CẢ", m_wxTab == 3, m_fontSmall);
     drawPill(x4, 72, w4, 32, "THỊ TRƯỜNG", m_wxTab == 4, m_fontSmall);
   }
