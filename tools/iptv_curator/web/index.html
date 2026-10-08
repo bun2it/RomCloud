@@ -202,12 +202,17 @@
       <div class="card mb-6">
         <div class="card-header flex-between">
           <div>
-            <h3>⚡ Quét Kiểm Tra Độ Trễ & Tính Sống/Chết</h3>
-            <p class="card-desc">Kiểm tra đa luồng (30 luồng song song). Đo Ping ms, phát hiện link chết, cập nhật điểm uy tín.</p>
+            <h3>⚡ Quét Kiểm Tra Độ Trễ & Tính Sống/Chết (Browser-Grade Probe)</h3>
+            <p class="card-desc">Kiểm tra đa luồng (30 worker). Bỏ Range header tránh 403, kèm SSL unverified và Referer thông minh.</p>
           </div>
-          <button class="btn btn-accent" id="btnStartProbe" onclick="startHealthCheck()">
-            ▶️ Bắt Đầu Quét Toàn Bộ Luồng
-          </button>
+          <div class="header-actions-group flex items-center gap-2">
+            <button class="btn btn-secondary" id="btnProbeStandby" onclick="startHealthCheck('STANDBY')" title="Chỉ kiểm tra lại các kênh đang ở trạng thái Chờ (STANDBY)">
+              ⚡ Chỉ Quét Lại Kênh Đang CHỜ
+            </button>
+            <button class="btn btn-accent" id="btnStartProbe" onclick="startHealthCheck('ALL')">
+              ▶️ Quét Sâu Chuẩn Trình Duyệt (Tất Cả)
+            </button>
+          </div>
         </div>
 
         <!-- Progress Box -->

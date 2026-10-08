@@ -309,6 +309,9 @@ class CuratorRequestHandler(BaseHTTPRequestHandler):
                 self.send_json({"success": False, "error": "Đang có tiến trình quét đang chạy"}, status=400)
                 return
 
+            body = self.read_json_body() if self.headers.get("Content-Length") else {}
+            target_mode = body.get("target_mode", "ALL")
+
             def run_probe_worker():
                 global probe_state
                 probe_state["is_running"] = True
@@ -328,7 +331,7 @@ class CuratorRequestHandler(BaseHTTPRequestHandler):
                         probe_state["dead_count"] += 1
 
                 try:
-                    results = engine.check_health(max_workers=30, timeout=3, progress_callback=progress_cb)
+                    results = engine.check_health(max_workers=30, timeout=4, target_mode=target_mode, progress_callback=progress_cb)
                     probe_state["last_result"] = {k: v.to_dict() for k, v in results.items()}
                 except Exception as e:
                     print(f"Lỗi khi quét health check: {e}")
@@ -337,7 +340,7 @@ class CuratorRequestHandler(BaseHTTPRequestHandler):
 
             t = threading.Thread(target=run_probe_worker, daemon=True)
             t.start()
-            self.send_json({"success": True, "message": "Bắt đầu quét đa luồng ngầm"})
+            self.send_json({"success": True, "message": f"Bắt đầu quét đa luồng ngầm (Chế độ: {target_mode})"})
             return
 
         # 6. API: Xuất bản file Live M3U & Manifest

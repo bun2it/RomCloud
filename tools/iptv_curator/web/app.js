@@ -955,23 +955,42 @@ async function clearAllSources() {
   }
 }
 
-// 12. Health Check / Ping probe
-async function startHealthCheck() {
-  const btn = document.getElementById("btnStartProbe");
-  btn.disabled = true;
-  btn.textContent = "⏳ Đang quét...";
+// 12. Health Check / Ping probe (Browser-Grade Deep Probe)
+async function startHealthCheck(targetMode = "ALL") {
+  const btnAll = document.getElementById("btnStartProbe");
+  const btnStandby = document.getElementById("btnProbeStandby");
+  if (btnAll) btnAll.disabled = true;
+  if (btnStandby) btnStandby.disabled = true;
+
+  if (targetMode === "STANDBY") {
+    if (btnStandby) btnStandby.textContent = "⏳ Đang quét kênh Chờ...";
+    showToast("Đang kiểm tra lại các kênh STANDBY theo chuẩn Browser-Grade...");
+  } else {
+    if (btnAll) btnAll.textContent = "⏳ Đang quét toàn bộ...";
+    showToast("Đang quét toàn bộ luồng đa luồng song song...");
+  }
 
   document.getElementById("progressBox").style.display = "block";
   document.getElementById("progressFill").style.width = "0%";
-  document.getElementById("progressText").textContent = "Bắt đầu quét đa luồng...";
+  document.getElementById("progressText").textContent = `Bắt đầu quét Browser-Grade (${targetMode === 'STANDBY' ? 'Chỉ kênh Chờ' : 'Toàn bộ'})...`;
 
   try {
-    const res = await fetch("/api/health_check", { method: "POST" });
+    const res = await fetch("/api/health_check", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ target_mode: targetMode })
+    });
     const data = await res.json();
     if (!data.success) {
       showToast(data.error, true);
-      btn.disabled = false;
-      btn.textContent = "▶️ Bắt Đầu Quét Toàn Bộ Luồng";
+      if (btnAll) {
+        btnAll.disabled = false;
+        btnAll.textContent = "▶️ Quét Sâu Chuẩn Trình Duyệt (Tất Cả)";
+      }
+      if (btnStandby) {
+        btnStandby.disabled = false;
+        btnStandby.textContent = "⚡ Chỉ Quét Lại Kênh Đang CHỜ";
+      }
       return;
     }
 
@@ -979,8 +998,14 @@ async function startHealthCheck() {
     probePollingTimer = setInterval(pollHealthProgress, 1000);
   } catch (err) {
     showToast(`Lỗi: ${err}`, true);
-    btn.disabled = false;
-    btn.textContent = "▶️ Bắt Đầu Quét Toàn Bộ Luồng";
+    if (btnAll) {
+      btnAll.disabled = false;
+      btnAll.textContent = "▶️ Quét Sâu Chuẩn Trình Duyệt (Tất Cả)";
+    }
+    if (btnStandby) {
+      btnStandby.disabled = false;
+      btnStandby.textContent = "⚡ Chỉ Quét Lại Kênh Đang CHỜ";
+    }
   }
 }
 
@@ -999,8 +1024,16 @@ async function pollHealthProgress() {
     if (!data.is_running && data.total > 0 && data.completed >= data.total) {
       clearInterval(probePollingTimer);
       probePollingTimer = null;
-      document.getElementById("btnStartProbe").disabled = false;
-      document.getElementById("btnStartProbe").textContent = "▶️ Bắt Đầu Quét Toàn Bộ Luồng";
+      const btnAll = document.getElementById("btnStartProbe");
+      const btnStandby = document.getElementById("btnProbeStandby");
+      if (btnAll) {
+        btnAll.disabled = false;
+        btnAll.textContent = "▶️ Quét Sâu Chuẩn Trình Duyệt (Tất Cả)";
+      }
+      if (btnStandby) {
+        btnStandby.disabled = false;
+        btnStandby.textContent = "⚡ Chỉ Quét Lại Kênh Đang CHỜ";
+      }
       showToast(`Đã hoàn tất kiểm tra: ${data.alive_count} link sống, ${data.dead_count} link lỗi.`);
       loadStats();
       loadChannels();

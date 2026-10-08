@@ -87,18 +87,30 @@ class CuratorEngine:
             "unique_stream_urls": len(unique_urls)
         }
 
-    def check_health(self, max_workers: int = 25, timeout: int = 3, progress_callback: Optional[Callable[[int, int, ProbeResult], None]] = None) -> Dict[str, ProbeResult]:
+    def check_health(self, max_workers: int = 30, timeout: int = 4, target_mode: str = "ALL", progress_callback: Optional[Callable[[int, int, ProbeResult], None]] = None) -> Dict[str, ProbeResult]:
         """
-        Bước 2: Quét đa luồng kiểm tra độ sống/chết và đo độ trễ cho toàn bộ link stream
-        Cập nhật kết quả vào database lịch sử.
+        Bước 2: Quét đa luồng kiểm tra độ sống/chết và đo độ trễ theo chuẩn trình duyệt (Browser-Grade Probe).
+        target_mode:
+          - "ALL": Quét toàn bộ link
+          - "STANDBY": Chỉ quét những link đang ở trạng thái STANDBY hoặc UNKNOWN
+          - "DEAD": Chỉ quét những link đang bị coi là DEAD
         """
         all_urls = []
         url_meta_map = {}
 
         for ch_name, stream_list in self.clustered_channels.items():
+            db_streams = self.db.get_channel_streams(ch_name)
             for item in stream_list:
                 u = item["url"]
                 if u not in url_meta_map:
+                    db_item = next((r for r in db_streams if r["url"] == u), None)
+                    st = db_item["last_status"] if db_item else "UNKNOWN"
+
+                    if target_mode == "STANDBY" and st not in ("STANDBY", "UNKNOWN"):
+                        continue
+                    if target_mode == "DEAD" and st != "DEAD":
+                        continue
+
                     all_urls.append(u)
                     url_meta_map[u] = item
 

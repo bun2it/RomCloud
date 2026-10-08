@@ -34,31 +34,62 @@ class ProbeResult:
 
 class HealthChecker:
     @staticmethod
-    def probe_single_stream(url: str, timeout: int = 3, extra_headers: Optional[Dict[str, str]] = None) -> ProbeResult:
-        """Kiểm tra 1 link stream với request byte range nhỏ (0-512) để đo độ trễ và trạng thái HTTP"""
+    def _get_referer_for_url(url: str) -> Optional[str]:
+        u_lower = url.lower()
+        if "fptplay" in u_lower:
+            return "https://fptplay.vn/"
+        if "tv360" in u_lower:
+            return "https://tv360.vn/"
+        if "mytv" in u_lower:
+            return "https://mytv.com.vn/"
+        if "vtv" in u_lower:
+            return "https://vtvgo.vn/"
+        if "vtvcab" in u_lower:
+            return "https://vtvcab.vn/"
+        if "vieon" in u_lower:
+            return "https://vieon.vn/"
+        return None
+
+    @staticmethod
+    def probe_single_stream(url: str, timeout: int = 4, extra_headers: Optional[Dict[str, str]] = None) -> ProbeResult:
+        """
+        Kiểm tra trạng thái stream theo chuẩn trình duyệt (Browser-Grade Probe):
+        - Bỏ Range header gây lỗi 403 trên file m3u8 playlist.
+        - Bỏ qua kiểm tra chứng chỉ SSL (cho phép các đài truyền hình dùng SSL tự ký/expired).
+        - Sử dụng User-Agent Chrome và Accept headers chuẩn.
+        - Tự động bổ sung Referer thông minh cho các CDN lớn (FPT, TV360, MyTV, VTV...).
+        - Nhận diện chuẩn xác #EXTM3U và MPEG-TS 0x47.
+        """
+        import ssl
+        ctx = ssl._create_unverified_context()
+
         headers = {
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) VLC/3.0.18",
-            "Range": "bytes=0-512"
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+            "Accept": "*/*",
+            "Accept-Language": "vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7",
+            "Connection": "close"
         }
+
+        ref = HealthChecker._get_referer_for_url(url)
+        if ref:
+            headers["Referer"] = ref
+
         if extra_headers:
             headers.update(extra_headers)
 
-        req = urllib.request.Request(url, headers=headers)
         t0 = time.time()
 
         try:
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
                 elapsed_ms = int((time.time() - t0) * 1000)
                 code = resp.getcode()
                 c_type = (resp.headers.get_content_type() or "").lower()
 
-                # Đọc tối đa 512 bytes đầu tiên để nhận diện chuẩn video
-                chunk = resp.read(512)
+                chunk = resp.read(1024)
                 is_m3u8 = b"#EXTM3U" in chunk or b"#EXTINF" in chunk
-                is_ts = len(chunk) > 0 and chunk[0] == 0x47  # Sync byte 0x47 của MPEG-TS
+                is_ts = len(chunk) > 0 and chunk[0] == 0x47
                 is_valid_type = ("text/html" not in c_type) or is_m3u8 or is_ts
-
-                # Kiểm tra hợp lệ: mã HTTP 200/206/302 và không phải trang web lỗi HTML
                 is_valid = (code in (200, 206, 302)) and is_valid_type and (len(chunk) > 0 or code == 200)
 
                 return ProbeResult(
@@ -72,6 +103,19 @@ class HealthChecker:
 
         except urllib.error.HTTPError as e:
             elapsed_ms = int((time.time() - t0) * 1000)
+            # Thử lại 1 lần nếu 403: thêm Referer tổng quát
+            if e.code == 403 and "Referer" not in headers:
+                try:
+                    headers["Referer"] = "https://www.google.com/"
+                    req_retry = urllib.request.Request(url, headers=headers)
+                    with urllib.request.urlopen(req_retry, timeout=timeout, context=ctx) as resp:
+                        elapsed_ms = int((time.time() - t0) * 1000)
+                        chunk = resp.read(1024)
+                        if b"#EXTM3U" in chunk or resp.getcode() == 200:
+                            return ProbeResult(url=url, is_alive=True, latency_ms=elapsed_ms, status_code=200)
+                except Exception:
+                    pass
+
             return ProbeResult(
                 url=url,
                 is_alive=False,
