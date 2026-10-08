@@ -171,18 +171,64 @@ class CuratorRequestHandler(BaseHTTPRequestHandler):
             if os.path.exists(out_file):
                 self.serve_file(out_file, "application/x-mpegurl")
             else:
-                self.send_error(404, "Chưa xuất bản live.m3u. Hãy bấm nút Export.")
+                self.send_error(404, "Not Found: live.m3u not yet exported")
             return
 
         if path == "/download/manifest.json":
             out_file = os.path.join(CUR_DIR, "output", "iptv_manifest.json")
             if os.path.exists(out_file):
                 self.serve_file(out_file, "application/json")
-            else:
-                self.send_error(404, "Chưa có manifest. Hãy bấm nút Export.")
+        # 7. API: Stream CORS Proxy (dành cho các luồng bị chặn CORS trên trình duyệt)
+        if path == "/api/proxy_stream":
+            target_url = query.get("url", [""])[0]
+            if not target_url:
+                self.send_error(400, "Bad Request: Missing url parameter")
+                return
+            try:
+                import ssl
+                ctx = ssl._create_unverified_context()
+                headers = {
+                    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                }
+                req = urllib.request.Request(target_url, headers=headers)
+                with urllib.request.urlopen(req, timeout=8, context=ctx) as resp:
+                    data = resp.read()
+                    content_type = resp.headers.get_content_type() or "application/vnd.apple.mpegurl"
+
+                    # Nếu là m3u8 playlist, rewrite relative URLs để đi qua proxy
+                    if "mpegurl" in content_type or target_url.endswith(".m3u8") or b"#EXTM3U" in data:
+                        try:
+                            text = data.decode("utf-8", errors="replace")
+                            base_url = target_url.rsplit("/", 1)[0] + "/"
+                            lines = text.splitlines()
+                            new_lines = []
+                            for line in lines:
+                                line_str = line.strip()
+                                if line_str and not line_str.startswith("#"):
+                                    if not line_str.startswith("http://") and not line_str.startswith("https://"):
+                                        abs_chunk_url = urllib.parse.urljoin(base_url, line_str)
+                                    else:
+                                        abs_chunk_url = line_str
+                                    new_lines.append(f"/api/proxy_stream?url={urllib.parse.quote(abs_chunk_url)}")
+                                else:
+                                    new_lines.append(line)
+                            data = "\n".join(new_lines).encode("utf-8")
+                            content_type = "application/vnd.apple.mpegurl"
+                        except Exception:
+                            pass
+
+                    self.send_response(200)
+                    self.send_header("Content-Type", content_type)
+                    self.send_header("Access-Control-Allow-Origin", "*")
+                    self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
+                    self.send_header("Content-Length", str(len(data)))
+                    self.end_headers()
+                    self.wfile.write(data)
+            except Exception as e:
+                self.send_error(502, f"Proxy error: {e}")
             return
 
-        # 7. Serve Static Files (HTML / CSS / JS)
+        # 8. Serve Static Files (HTML / CSS / JS)
         if path == "/" or path == "/index.html":
             file_path = os.path.join(WEB_DIR, "index.html")
             self.serve_file(file_path, "text/html; charset=utf-8")
@@ -204,7 +250,7 @@ class CuratorRequestHandler(BaseHTTPRequestHandler):
             self.serve_file(file_path, content_type)
             return
 
-        self.send_error(404, "Không tìm thấy đường dẫn")
+        self.send_error(404, "Not Found")
 
     def do_POST(self):
         parsed = urllib.parse.urlparse(self.path)
@@ -355,7 +401,7 @@ class CuratorRequestHandler(BaseHTTPRequestHandler):
             self.send_json({"success": True, "message": f"Đã đặt nguồn số 1 cho kênh {ch_name}"})
             return
 
-        self.send_error(404, "Không tìm thấy endpoint POST")
+        self.send_error(404, "Not Found: Invalid POST endpoint")
 
     def serve_file(self, file_path: str, content_type: str):
         try:
@@ -367,7 +413,7 @@ class CuratorRequestHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(data)
         except Exception as e:
-            self.send_error(500, f"Lỗi đọc file: {e}")
+            self.send_error(500, f"Internal Server Error: {e}")
 
 
 def run_server(port: int = PORT):

@@ -1,5 +1,5 @@
 // ==========================================================================
-// RomCloud IPTV Curator - Frontend Reactive Controller
+// RomCloud IPTV Curator - Frontend Reactive Controller with Built-in HLS Player
 // ==========================================================================
 
 let allChannels = [];
@@ -7,6 +7,12 @@ let filteredChannels = [];
 let currentPage = 1;
 let pageSize = 100;
 let probePollingTimer = null;
+
+// Video Player State
+let hlsInstance = null;
+let currentPlayingChannel = "";
+let currentPlayingOriginalUrl = "";
+let isProxyActive = false;
 
 document.addEventListener("DOMContentLoaded", () => {
   initDropZone();
@@ -27,18 +33,23 @@ function showToast(message, isError = false) {
 
 // Copy to clipboard
 function copyToClipboard(text) {
-  navigator.clipboard.writeText(text).then(() => {
-    showToast("Đã sao chép link stream vào bộ nhớ tạm!");
-  }).catch(() => {
-    // Fallback
-    const ta = document.createElement("textarea");
-    ta.value = text;
-    document.body.appendChild(ta);
-    ta.select();
-    document.execCommand("copy");
-    document.body.removeChild(ta);
-    showToast("Đã sao chép link stream!");
-  });
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(() => {
+      showToast("Đã sao chép link stream!");
+    }).catch(() => fallbackCopy(text));
+  } else {
+    fallbackCopy(text);
+  }
+}
+
+function fallbackCopy(text) {
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  document.body.appendChild(ta);
+  ta.select();
+  document.execCommand("copy");
+  document.body.removeChild(ta);
+  showToast("Đã sao chép link stream!");
 }
 
 // HTML escape helper
@@ -144,7 +155,7 @@ function onFilterChange() {
     chip.classList.toggle("active", chip.dataset.status === statusFilter);
   });
 
-  // Đếm nhanh số lượng theo các trạng thái trên toàn bộ kho
+  // Đếm nhanh số lượng theo các trạng thái
   let cntAll = allChannels.length;
   let cntAlive = 0;
   let cntDead = 0;
@@ -179,7 +190,7 @@ function onFilterChange() {
     if (statusFilter === "MULTI" && ch.stream_count <= 1) return false;
     if (statusFilter === "SINGLE" && ch.stream_count !== 1) return false;
 
-    // 3. Từ khóa tìm kiếm (tên, nhóm hoặc URL của bất kỳ stream nào)
+    // 3. Từ khóa tìm kiếm
     if (q) {
       const matchName = ch.name.toLowerCase().includes(q);
       const matchGroup = ch.group.toLowerCase().includes(q);
@@ -212,7 +223,6 @@ function onFilterChange() {
     filteredChannels.sort((a, b) => a.group.localeCompare(b.group) || a.name.localeCompare(b.name));
   }
 
-  // Đặt lại trang về 1 khi đổi bộ lọc
   currentPage = 1;
   renderCurrentPage();
 }
@@ -336,9 +346,12 @@ function renderCurrentPage() {
         <td><span class="badge badge-blue">${escapeHtml(ch.group)}</span></td>
         <td>${countBadge}</td>
         <td>${statusBadge}</td>
-        <td style="text-align: right;">
-          <button class="btn btn-secondary text-sm" onclick="openStreamModal('${safeNameAttr}')">
-            🔍 Xem ${ch.stream_count} Nguồn
+        <td style="text-align: right; white-space: nowrap;">
+          <button class="btn btn-action-play text-sm" onclick="playChannel('${safeNameAttr}')" title="Xem phát trực tiếp">
+            ▶ Xem
+          </button>
+          <button class="btn btn-secondary text-sm" onclick="openStreamModal('${safeNameAttr}')" title="Xem chi tiết các nguồn">
+            🔍 Nguồn (${ch.stream_count})
           </button>
         </td>
       </tr>
@@ -389,11 +402,14 @@ function renderModalStreamItems(ch) {
         <div class="stream-url">${escapeHtml(s.url)}</div>
         ${s.source ? `<div class="text-sm text-dim mt-4">Nguồn file gốc: <code>${escapeHtml(s.source)}</code></div>` : ""}
         <div class="stream-item-actions">
+          <button class="btn-action btn-action-play" onclick="playSingleStream('${safeChannelName}', '${safeUrl}', ${idx})">
+            ▶ Phát luồng này
+          </button>
           <button class="btn-action" onclick="copyToClipboard('${escapeHtml(s.url)}')">
-            📋 Sao chép link
+            📋 Sao chép
           </button>
           <button class="btn-action btn-action-probe" id="btn-probe-${idx}" onclick="testSingleStream('${safeChannelName}', '${safeGroupName}', '${safeUrl}', ${idx})">
-            ⚡ Test Ping ngay
+            ⚡ Test Ping
           </button>
           ${!isPrimary ? `
             <button class="btn-action btn-action-primary" onclick="setPrimaryStream('${safeChannelName}', '${safeUrl}')">
@@ -410,7 +426,166 @@ function closeStreamModal() {
   document.getElementById("streamModal").style.display = "none";
 }
 
-// 7. Test Ping Đơn Lẻ Ngay Trong Modal
+// 7. Video Player Controller (HLS.js)
+function playChannel(encodedChannelName) {
+  const channelName = decodeURIComponent(encodedChannelName);
+  const ch = allChannels.find(c => c.name === channelName);
+  if (!ch || !ch.streams || ch.streams.length === 0) {
+    showToast("Kênh không có luồng phát", true);
+    return;
+  }
+  const streamUrl = ch.best_stream ? ch.best_stream.url : ch.streams[0].url;
+  openVideoPlayer(ch.name, streamUrl, ch.group);
+}
+
+function playSingleStream(encodedChannelName, encodedUrl, streamIdx) {
+  const channelName = decodeURIComponent(encodedChannelName);
+  const streamUrl = decodeURIComponent(encodedUrl);
+  openVideoPlayer(`${channelName} • Nguồn #${streamIdx + 1}`, streamUrl);
+}
+
+function openVideoPlayer(channelTitle, streamUrl, group = "") {
+  currentPlayingChannel = channelTitle;
+  currentPlayingOriginalUrl = streamUrl;
+  isProxyActive = false;
+
+  const modal = document.getElementById("playerModal");
+  const titleEl = document.getElementById("playerChannelTitle");
+  const urlEl = document.getElementById("playerCurrentUrl");
+  const btnToggleProxy = document.getElementById("btnToggleProxy");
+
+  if (titleEl) titleEl.textContent = group ? `${channelTitle} (${group})` : channelTitle;
+  if (urlEl) urlEl.textContent = streamUrl;
+  if (btnToggleProxy) {
+    btnToggleProxy.textContent = "🔄 Đổi sang Proxy CORS";
+    btnToggleProxy.classList.remove("btn-action-primary");
+  }
+
+  modal.style.display = "flex";
+  startPlayback(streamUrl, false);
+}
+
+function startPlayback(streamUrl, useProxy = false) {
+  const video = document.getElementById("videoPlayer");
+  const loadingOverlay = document.getElementById("playerLoadingOverlay");
+  const loadingText = document.getElementById("playerLoadingText");
+  const statusBadge = document.getElementById("playerStatusBadge");
+  const streamInfo = document.getElementById("playerStreamInfo");
+
+  if (loadingOverlay) loadingOverlay.style.display = "flex";
+  if (loadingText) loadingText.textContent = useProxy ? "Đang kết nối qua CORS Proxy..." : "Đang kết nối luồng phát...";
+  if (statusBadge) {
+    statusBadge.className = "badge badge-amber";
+    statusBadge.textContent = "⏳ Đang kết nối...";
+  }
+
+  if (hlsInstance) {
+    hlsInstance.destroy();
+    hlsInstance = null;
+  }
+  video.pause();
+  video.removeAttribute("src");
+  video.load();
+
+  const finalUrl = useProxy ? `/api/proxy_stream?url=${encodeURIComponent(streamUrl)}` : streamUrl;
+
+  if (window.Hls && Hls.isSupported()) {
+    hlsInstance = new Hls({
+      enableWorker: true,
+      lowLatencyMode: true,
+      maxBufferLength: 15,
+      maxMaxBufferLength: 30
+    });
+
+    hlsInstance.loadSource(finalUrl);
+    hlsInstance.attachMedia(video);
+
+    hlsInstance.on(Hls.Events.MANIFEST_PARSED, (event, data) => {
+      if (loadingOverlay) loadingOverlay.style.display = "none";
+      if (statusBadge) {
+        statusBadge.className = "badge badge-green";
+        statusBadge.textContent = useProxy ? "🟢 Live (Proxy)" : "🟢 HLS Live";
+      }
+      if (streamInfo && data.levels && data.levels.length > 0) {
+        const lvl = data.levels[0];
+        streamInfo.textContent = `${lvl.width || 0}x${lvl.height || 0} (${Math.round((lvl.bitrate || 0)/1000)} kbps)`;
+      }
+      video.play().catch(e => console.log("Autoplay:", e));
+    });
+
+    hlsInstance.on(Hls.Events.ERROR, (event, data) => {
+      console.warn("Hls error:", data);
+      if (data.fatal) {
+        if (!useProxy) {
+          // Tự động chuyển qua proxy nếu stream bị chặn CORS
+          showToast("Luồng bị hạn chế mạng, đang tự động chuyển sang Proxy CORS...", false);
+          togglePlayerProxy();
+        } else {
+          if (loadingOverlay) loadingOverlay.style.display = "none";
+          if (statusBadge) {
+            statusBadge.className = "badge badge-red";
+            statusBadge.textContent = "🔴 Lỗi luồng";
+          }
+          showToast("Không thể phát luồng này. Bấm 'Mở bằng VLC' để xem ngoài.", true);
+        }
+      }
+    });
+  } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+    // Safari Native HLS
+    video.src = finalUrl;
+    video.addEventListener('loadedmetadata', () => {
+      if (loadingOverlay) loadingOverlay.style.display = "none";
+      if (statusBadge) {
+        statusBadge.className = "badge badge-green";
+        statusBadge.textContent = "🟢 Live (Safari)";
+      }
+      video.play();
+    }, { once: true });
+  } else {
+    video.src = finalUrl;
+    video.play();
+  }
+}
+
+function togglePlayerProxy() {
+  isProxyActive = !isProxyActive;
+  const btnToggleProxy = document.getElementById("btnToggleProxy");
+  if (btnToggleProxy) {
+    btnToggleProxy.textContent = isProxyActive ? "✅ Đang dùng Proxy CORS" : "🔄 Đổi sang Proxy CORS";
+    btnToggleProxy.classList.toggle("btn-action-primary", isProxyActive);
+  }
+  startPlayback(currentPlayingOriginalUrl, isProxyActive);
+}
+
+function closePlayerModal() {
+  const modal = document.getElementById("playerModal");
+  const video = document.getElementById("videoPlayer");
+  if (video) {
+    video.pause();
+    video.removeAttribute("src");
+    video.load();
+  }
+  if (hlsInstance) {
+    hlsInstance.destroy();
+    hlsInstance = null;
+  }
+  modal.style.display = "none";
+}
+
+function copyPlayerUrl() {
+  if (currentPlayingOriginalUrl) {
+    copyToClipboard(currentPlayingOriginalUrl);
+  }
+}
+
+function openInVlc() {
+  if (!currentPlayingOriginalUrl) return;
+  copyToClipboard(currentPlayingOriginalUrl);
+  window.location.href = "vlc://" + currentPlayingOriginalUrl;
+  showToast("Đã copy link! Nếu máy đã cài VLC, link sẽ tự mở.");
+}
+
+// 8. Test Ping Đơn Lẻ Ngay Trong Modal
 async function testSingleStream(encodedChannelName, encodedGroupName, encodedUrl, streamIdx) {
   const chName = decodeURIComponent(encodedChannelName);
   const grpName = decodeURIComponent(encodedGroupName);
@@ -432,7 +607,6 @@ async function testSingleStream(encodedChannelName, encodedGroupName, encodedUrl
     const data = await res.json();
     if (data.success && data.probe) {
       const p = data.probe;
-      // Cập nhật lại đối tượng trong allChannels
       const ch = allChannels.find(c => c.name === chName);
       if (ch && ch.streams[streamIdx]) {
         ch.streams[streamIdx].last_status = p.is_alive ? "ALIVE" : "DEAD";
@@ -451,7 +625,6 @@ async function testSingleStream(encodedChannelName, encodedGroupName, encodedUrl
           showToast(`Link không phản hồi (${p.error || "Timeout"})`, true);
         }
       }
-      // Cập nhật lại bảng ngoài
       renderCurrentPage();
     } else {
       showToast(data.error || "Lỗi kiểm tra", true);
@@ -461,12 +634,12 @@ async function testSingleStream(encodedChannelName, encodedGroupName, encodedUrl
   } finally {
     if (btn) {
       btn.disabled = false;
-      btn.textContent = "⚡ Test Ping ngay";
+      btn.textContent = "⚡ Test Ping";
     }
   }
 }
 
-// 8. Đặt Làm Nguồn Ưu Tiên Số 1
+// 9. Đặt Làm Nguồn Ưu Tiên Số 1
 async function setPrimaryStream(encodedChannelName, encodedUrl) {
   const chName = decodeURIComponent(encodedChannelName);
   const url = decodeURIComponent(encodedUrl);
@@ -480,7 +653,6 @@ async function setPrimaryStream(encodedChannelName, encodedUrl) {
     const data = await res.json();
     if (data.success) {
       showToast(`Đã đưa link lên làm nguồn ưu tiên số 1 của kênh ${chName}!`);
-      // Đổi thứ tự trong allChannels
       const ch = allChannels.find(c => c.name === chName);
       if (ch) {
         const idx = ch.streams.findIndex(s => s.url === url);
@@ -500,7 +672,7 @@ async function setPrimaryStream(encodedChannelName, encodedUrl) {
   }
 }
 
-// 9. Drag & Drop File Upload
+// 10. Drag & Drop File Upload
 function initDropZone() {
   const dropZone = document.getElementById("dropZone");
   const fileInput = document.getElementById("fileInput");
@@ -558,7 +730,7 @@ async function handleFilesUpload(files) {
   switchTab("tabChannels");
 }
 
-// 10. Thêm URL từ xa
+// 11. Thêm URL từ xa
 async function addSourceUrl() {
   const input = document.getElementById("m3uUrlInput");
   const url = input.value.trim();
@@ -622,7 +794,7 @@ async function clearAllSources() {
   }
 }
 
-// 11. Health Check / Ping probe
+// 12. Health Check / Ping probe
 async function startHealthCheck() {
   const btn = document.getElementById("btnStartProbe");
   btn.disabled = true;
@@ -677,7 +849,7 @@ async function pollHealthProgress() {
   }
 }
 
-// 12. Rules Editor
+// 13. Rules Editor
 async function loadRules() {
   try {
     const res = await fetch("/api/rules");
@@ -711,7 +883,7 @@ async function saveRules() {
   }
 }
 
-// 13. Export & OTA Publish
+// 14. Export & OTA Publish
 async function exportPlaylist() {
   const includeBackup = document.getElementById("chkIncludeBackup").checked;
   showToast("Đang tạo file live.m3u và iptv_manifest.json...");

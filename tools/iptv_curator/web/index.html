@@ -8,6 +8,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <!-- HLS.js Video Engine -->
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.8/dist/hls.min.js"></script>
 </head>
 <body>
   <!-- Header Bar -->
@@ -313,6 +315,46 @@
       </div>
       <div class="modal-body" id="modalChannelBody">
         <!-- Streams list -->
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal Trình Phát Video Player Tích Hợp -->
+  <div class="modal-overlay" id="playerModal" style="display: none;">
+    <div class="modal-card player-modal-card">
+      <div class="modal-header flex-between">
+        <div class="player-header-title">
+          <span class="live-pulse"></span>
+          <h3 id="playerChannelTitle">Đang phát kênh...</h3>
+        </div>
+        <button class="btn-close" onclick="closePlayerModal()">✕</button>
+      </div>
+      <div class="modal-body player-modal-body">
+        <div class="video-wrapper">
+          <video id="videoPlayer" controls autoplay playsinline></video>
+          <div id="playerLoadingOverlay" class="player-loading-overlay" style="display: none;">
+            <div class="player-spinner"></div>
+            <p id="playerLoadingText">Đang kết nối luồng phát...</p>
+          </div>
+        </div>
+        <div class="player-controls-bar">
+          <div class="player-meta-info">
+            <span class="badge badge-green" id="playerStatusBadge">🟢 HLS Live</span>
+            <span class="player-stream-info" id="playerStreamInfo">Auto</span>
+            <div class="player-url-box" id="playerCurrentUrl">...</div>
+          </div>
+          <div class="player-actions-row">
+            <button class="btn btn-secondary btn-sm" id="btnToggleProxy" onclick="togglePlayerProxy()">
+              🔄 Đổi sang Proxy CORS
+            </button>
+            <button class="btn btn-secondary btn-sm" onclick="copyPlayerUrl()">
+              📋 Sao chép link
+            </button>
+            <button class="btn btn-secondary btn-sm" onclick="openInVlc()">
+              🎬 Mở bằng VLC
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   </div>
