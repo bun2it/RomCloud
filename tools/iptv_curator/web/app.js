@@ -69,6 +69,8 @@ function switchTab(tabId) {
 
   if (tabId === "tabChannels") {
     loadChannels();
+  } else if (tabId === "tabGrid") {
+    initGridIfEmpty();
   } else if (tabId === "tabProbe") {
     loadStats();
   } else if (tabId === "tabRules") {
@@ -993,5 +995,498 @@ async function publishToRomCloud() {
     }
   } catch (err) {
     showToast(`Lỗi: ${err}`, true);
+  }
+}
+
+// ==========================================================================
+// 15. MultiView Grid Wall Controller (2x2, 4x2, 4x4 Viewports)
+// ==========================================================================
+let currentGridLayout = "2x2";
+let gridSlots = [];
+let cachedChannelOptionsHtml = "";
+
+function initGridIfEmpty() {
+  if (gridSlots.length === 0) {
+    setGridLayout("2x2");
+    // Nếu chưa có kênh nào, tự động nạp Top Kênh Sống (hoặc VTV)
+    setTimeout(() => {
+      const allEmpty = gridSlots.every(s => !s.channelName);
+      if (allEmpty && allChannels.length > 0) {
+        quickFillGrid("vtv");
+      }
+    }, 150);
+  }
+}
+
+function getGridTargetCount(layout) {
+  if (layout === "2x2") return 4;
+  if (layout === "4x2") return 8;
+  if (layout === "4x4") return 16;
+  return 4;
+}
+
+function setGridLayout(layout) {
+  currentGridLayout = layout;
+
+  // Cập nhật button active
+  ["2x2", "4x2", "4x4"].forEach(l => {
+    const btn = document.getElementById(`btnLayout${l}`);
+    if (btn) btn.classList.toggle("active-layout", l === layout);
+  });
+
+  const container = document.getElementById("gridviewWall");
+  if (container) {
+    container.className = `gridview-container layout-${layout}`;
+  }
+
+  const targetCount = getGridTargetCount(layout);
+  const prevCount = gridSlots.length;
+
+  // Nếu giảm số slot: hủy các luồng HLS thừa
+  if (prevCount > targetCount) {
+    for (let i = targetCount; i < prevCount; i++) {
+      if (gridSlots[i] && gridSlots[i].hls) {
+        gridSlots[i].hls.destroy();
+      }
+    }
+    gridSlots = gridSlots.slice(0, targetCount);
+  } else if (prevCount < targetCount) {
+    // Nếu tăng số slot: tạo slot mới
+    for (let i = prevCount; i < targetCount; i++) {
+      gridSlots.push({
+        channelName: "",
+        streamUrl: "",
+        hls: null,
+        isMuted: true,
+        status: "EMPTY"
+      });
+    }
+  }
+
+  renderGridSlots();
+}
+
+function buildCachedChannelOptions() {
+  if (!allChannels || allChannels.length === 0) {
+    return '<option value="">-- Trống --</option>';
+  }
+
+  // Nhóm theo Category
+  const groups = {};
+  allChannels.forEach(ch => {
+    const g = ch.group || "Khác";
+    if (!groups[g]) groups[g] = [];
+    groups[g].push(ch);
+  });
+
+  let html = '<option value="">-- Chọn kênh hiển thị --</option>';
+  Object.keys(groups).sort().forEach(grp => {
+    html += `<optgroup label="${escapeHtml(grp)}">`;
+    groups[grp].forEach(ch => {
+      const statusIcon = (ch.best_stream && ch.best_stream.last_status === "ALIVE") ? "🟢" : "⚪";
+      html += `<option value="${escapeHtml(ch.name)}">${statusIcon} ${escapeHtml(ch.name)}</option>`;
+    });
+    html += `</optgroup>`;
+  });
+
+  cachedChannelOptionsHtml = html;
+  return html;
+}
+
+function renderGridSlots() {
+  const container = document.getElementById("gridviewWall");
+  if (!container) return;
+
+  const optionsHtml = cachedChannelOptionsHtml || buildCachedChannelOptions();
+
+  container.innerHTML = gridSlots.map((slot, idx) => {
+    const slotNum = idx + 1;
+    const isAudioActive = !slot.isMuted;
+    const hasChannel = Boolean(slot.channelName);
+
+    return `
+      <div class="grid-slot ${isAudioActive ? 'audio-active' : ''}" id="gridSlot-${idx}">
+        <div class="slot-header">
+          <div class="slot-title-area">
+            <span class="slot-num-badge">#${slotNum}</span>
+            <select class="slot-channel-select" id="slotSelect-${idx}" onchange="onSlotSelectChange(${idx}, this.value)">
+              ${optionsHtml}
+            </select>
+          </div>
+          <div class="slot-actions">
+            <button class="slot-btn ${isAudioActive ? 'active-audio' : ''}" id="btnAudioSlot-${idx}" title="Bật/Tắt âm thanh" onclick="toggleSlotAudio(${idx})">
+              ${isAudioActive ? '🔊' : '🔇'}
+            </button>
+            <button class="slot-btn" title="Tải lại luồng" onclick="reloadSlot(${idx})">
+              🔄
+            </button>
+            <button class="slot-btn" title="Mở VLC" onclick="openSlotInVlc(${idx})">
+              🎬
+            </button>
+            <button class="slot-btn" title="Xóa ô" onclick="clearSlot(${idx})">
+              ✕
+            </button>
+          </div>
+        </div>
+        <div class="slot-video-wrapper" onclick="onSlotVideoClick(${idx})" ondblclick="toggleSlotFullscreen(${idx})">
+          <video class="slot-video" id="slotVideo-${idx}" playsinline muted></video>
+          <div class="slot-status-overlay" id="slotStatus-${idx}" style="display: ${hasChannel ? 'flex' : 'none'};">
+            <span id="slotStatusText-${idx}">${slot.status === 'ALIVE' ? '🟢 Live' : '⏳ Đang tải...'}</span>
+          </div>
+          <div class="slot-empty-placeholder" id="slotPlaceholder-${idx}" style="display: ${hasChannel ? 'none' : 'flex'};" onclick="focusSlotSelect(${idx})">
+            <span style="font-size: 24px;">📺</span>
+            <span>Bấm để chọn kênh #${slotNum}</span>
+          </div>
+          <div class="slot-vlc-overlay" id="slotVlcOverlay-${idx}" style="display: none;">
+            <div style="font-size: 24px;">🎬</div>
+            <div class="text-sm font-semibold">Cần mở bằng VLC</div>
+            <button class="btn btn-primary btn-sm mt-4" onclick="openSlotInVlc(${idx})">Mở VLC</button>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join("");
+
+  // Đồng bộ giá trị dropdown và khởi động video lại cho các slot đang có kênh
+  gridSlots.forEach((slot, idx) => {
+    const sel = document.getElementById(`slotSelect-${idx}`);
+    if (sel && slot.channelName) {
+      sel.value = slot.channelName;
+      startSlotPlayback(idx, slot.channelName);
+    }
+  });
+}
+
+function focusSlotSelect(idx) {
+  const sel = document.getElementById(`slotSelect-${idx}`);
+  if (sel) sel.focus();
+}
+
+function onSlotSelectChange(idx, channelName) {
+  if (!channelName) {
+    clearSlot(idx);
+    return;
+  }
+  loadSlotChannel(idx, channelName);
+}
+
+function onSlotVideoClick(idx) {
+  toggleSlotAudio(idx);
+}
+
+function toggleSlotFullscreen(idx) {
+  const slotEl = document.getElementById(`gridSlot-${idx}`);
+  if (!slotEl) return;
+  if (!document.fullscreenElement) {
+    if (slotEl.requestFullscreen) slotEl.requestFullscreen();
+    else if (slotEl.webkitRequestFullscreen) slotEl.webkitRequestFullscreen();
+  } else {
+    if (document.exitFullscreen) document.exitFullscreen();
+  }
+}
+
+function loadSlotChannel(idx, channelName) {
+  const ch = allChannels.find(c => c.name === channelName);
+  if (!ch || !ch.streams || ch.streams.length === 0) {
+    showToast(`Kênh ${channelName} không có luồng phát`, true);
+    return;
+  }
+
+  const streamUrl = ch.best_stream ? ch.best_stream.url : ch.streams[0].url;
+  gridSlots[idx].channelName = ch.name;
+  gridSlots[idx].streamUrl = streamUrl;
+  gridSlots[idx].status = "LOADING";
+
+  const placeholder = document.getElementById(`slotPlaceholder-${idx}`);
+  if (placeholder) placeholder.style.display = "none";
+
+  const statusOverlay = document.getElementById(`slotStatus-${idx}`);
+  const statusText = document.getElementById(`slotStatusText-${idx}`);
+  if (statusOverlay) statusOverlay.style.display = "flex";
+  if (statusText) statusText.textContent = "⏳ Đang kết nối...";
+
+  startSlotPlayback(idx, ch.name);
+}
+
+function startSlotPlayback(idx, channelName, forceProxy = false) {
+  const slot = gridSlots[idx];
+  if (!slot || !slot.streamUrl) return;
+
+  const video = document.getElementById(`slotVideo-${idx}`);
+  const vlcOverlay = document.getElementById(`slotVlcOverlay-${idx}`);
+  const statusText = document.getElementById(`slotStatusText-${idx}`);
+  if (!video) return;
+
+  // Hủy instance HLS cũ
+  if (slot.hls) {
+    slot.hls.destroy();
+    slot.hls = null;
+  }
+
+  video.pause();
+  video.removeAttribute("src");
+  video.load();
+  video.muted = slot.isMuted;
+
+  if (vlcOverlay) vlcOverlay.style.display = "none";
+
+  // Kiểm tra nếu cần VLC
+  if (isVlcRequired(slot.streamUrl)) {
+    if (vlcOverlay) vlcOverlay.style.display = "flex";
+    if (statusText) statusText.textContent = "📡 Cần VLC";
+    slot.status = "VLC";
+    return;
+  }
+
+  const finalUrl = forceProxy ? `/api/proxy_stream?url=${encodeURIComponent(slot.streamUrl)}` : slot.streamUrl;
+
+  if (window.Hls && Hls.isSupported()) {
+    const hls = new Hls({
+      enableWorker: true,
+      lowLatencyMode: true,
+      maxBufferLength: 6,
+      maxMaxBufferLength: 12,
+      maxBufferSize: 30 * 1000 * 1000
+    });
+
+    slot.hls = hls;
+    hls.loadSource(finalUrl);
+    hls.attachMedia(video);
+
+    hls.on(Hls.Events.MANIFEST_PARSED, () => {
+      slot.status = "ALIVE";
+      if (statusText) statusText.textContent = forceProxy ? "🟢 Live (Proxy)" : "🟢 Live";
+      video.play().catch(e => console.log(`Slot ${idx} autoplay:`, e));
+    });
+
+    hls.on(Hls.Events.ERROR, (event, data) => {
+      if (data.fatal) {
+        if (!forceProxy) {
+          // Thử lại qua proxy CORS
+          if (slot.hls) {
+            slot.hls.destroy();
+            slot.hls = null;
+          }
+          startSlotPlayback(idx, channelName, true);
+        } else {
+          slot.status = "DEAD";
+          if (statusText) statusText.textContent = "🔴 Lỗi luồng";
+          if (vlcOverlay) vlcOverlay.style.display = "flex";
+        }
+      }
+    });
+  } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
+    video.src = finalUrl;
+    video.addEventListener("loadedmetadata", () => {
+      slot.status = "ALIVE";
+      if (statusText) statusText.textContent = "🟢 Live";
+      video.play().catch(e => console.log(`Slot ${idx} play:`, e));
+    });
+  }
+}
+
+function toggleSlotAudio(idx) {
+  const slot = gridSlots[idx];
+  if (!slot) return;
+
+  const willBeMuted = !slot.isMuted;
+
+  if (!willBeMuted) {
+    // Solo audio: Tắt tiếng TẤT CẢ các slot khác trước
+    gridSlots.forEach((s, i) => {
+      s.isMuted = true;
+      const v = document.getElementById(`slotVideo-${i}`);
+      if (v) v.muted = true;
+      const slotEl = document.getElementById(`gridSlot-${i}`);
+      if (slotEl) slotEl.classList.remove("audio-active");
+      const btn = document.getElementById(`btnAudioSlot-${i}`);
+      if (btn) {
+        btn.classList.remove("active-audio");
+        btn.textContent = "🔇";
+      }
+    });
+
+    // Bật tiếng ô này
+    slot.isMuted = false;
+    const currentVideo = document.getElementById(`slotVideo-${idx}`);
+    if (currentVideo) currentVideo.muted = false;
+    const currentSlotEl = document.getElementById(`gridSlot-${idx}`);
+    if (currentSlotEl) currentSlotEl.classList.add("audio-active");
+    const currentBtn = document.getElementById(`btnAudioSlot-${idx}`);
+    if (currentBtn) {
+      currentBtn.classList.add("active-audio");
+      currentBtn.textContent = "🔊";
+    }
+    showToast(`🔊 Mở âm thanh ô #${idx + 1}: ${slot.channelName || 'Không tên'}`);
+  } else {
+    // Tắt tiếng ô này
+    slot.isMuted = true;
+    const currentVideo = document.getElementById(`slotVideo-${idx}`);
+    if (currentVideo) currentVideo.muted = true;
+    const currentSlotEl = document.getElementById(`gridSlot-${idx}`);
+    if (currentSlotEl) currentSlotEl.classList.remove("audio-active");
+    const currentBtn = document.getElementById(`btnAudioSlot-${idx}`);
+    if (currentBtn) {
+      currentBtn.classList.remove("active-audio");
+      currentBtn.textContent = "🔇";
+    }
+  }
+}
+
+function reloadSlot(idx) {
+  const slot = gridSlots[idx];
+  if (!slot || !slot.channelName) return;
+  showToast(`Đang tải lại ô #${idx + 1}...`);
+  startSlotPlayback(idx, slot.channelName, false);
+}
+
+function clearSlot(idx) {
+  const slot = gridSlots[idx];
+  if (!slot) return;
+
+  if (slot.hls) {
+    slot.hls.destroy();
+    slot.hls = null;
+  }
+
+  const video = document.getElementById(`slotVideo-${idx}`);
+  if (video) {
+    video.pause();
+    video.removeAttribute("src");
+    video.load();
+  }
+
+  slot.channelName = "";
+  slot.streamUrl = "";
+  slot.status = "EMPTY";
+  slot.isMuted = true;
+
+  const sel = document.getElementById(`slotSelect-${idx}`);
+  if (sel) sel.value = "";
+
+  const slotEl = document.getElementById(`gridSlot-${idx}`);
+  if (slotEl) slotEl.classList.remove("audio-active");
+
+  const btnAudio = document.getElementById(`btnAudioSlot-${idx}`);
+  if (btnAudio) {
+    btnAudio.classList.remove("active-audio");
+    btnAudio.textContent = "🔇";
+  }
+
+  const placeholder = document.getElementById(`slotPlaceholder-${idx}`);
+  if (placeholder) placeholder.style.display = "flex";
+
+  const statusOverlay = document.getElementById(`slotStatus-${idx}`);
+  if (statusOverlay) statusOverlay.style.display = "none";
+
+  const vlcOverlay = document.getElementById(`slotVlcOverlay-${idx}`);
+  if (vlcOverlay) vlcOverlay.style.display = "none";
+}
+
+function openSlotInVlc(idx) {
+  const slot = gridSlots[idx];
+  if (!slot || !slot.streamUrl) {
+    showToast("Ô này chưa có luồng phát", true);
+    return;
+  }
+  openInVlc(slot.streamUrl);
+}
+
+function quickFillGrid(preset) {
+  if (!allChannels || allChannels.length === 0) {
+    showToast("Danh sách kênh chưa tải xong, vui lòng thử lại sau giây lát", true);
+    return;
+  }
+
+  const targetCount = gridSlots.length;
+  let candidates = [];
+
+  if (preset === "alive") {
+    candidates = allChannels
+      .filter(c => c.best_stream && c.best_stream.last_status === "ALIVE")
+      .sort((a, b) => (a.best_stream.latency_ms || 9999) - (b.best_stream.latency_ms || 9999));
+  } else if (preset === "vtv") {
+    const isMajor = name => {
+      const n = name.toUpperCase();
+      return n.startsWith("VTV") || n.startsWith("HTV") || n.startsWith("VTC") || n.startsWith("THVL");
+    };
+    candidates = allChannels
+      .filter(c => isMajor(c.name))
+      .sort((a, b) => {
+        const aAlive = a.best_stream && a.best_stream.last_status === "ALIVE" ? 1 : 0;
+        const bAlive = b.best_stream && b.best_stream.last_status === "ALIVE" ? 1 : 0;
+        return bAlive - aAlive || a.name.localeCompare(b.name);
+      });
+  } else if (preset === "sports") {
+    const isSports = c => {
+      const n = (c.name + " " + (c.group || "")).toLowerCase();
+      return n.includes("thể thao") || n.includes("sport") || n.includes("bóng đá") || n.includes("k+");
+    };
+    candidates = allChannels.filter(c => isSports(c));
+  }
+
+  if (candidates.length === 0) {
+    candidates = allChannels.slice(0, targetCount);
+  }
+
+  showToast(`⚡ Đang nạp ${Math.min(targetCount, candidates.length)} kênh vào MultiView...`);
+
+  for (let i = 0; i < targetCount; i++) {
+    if (i < candidates.length) {
+      const ch = candidates[i];
+      const sel = document.getElementById(`slotSelect-${i}`);
+      if (sel) sel.value = ch.name;
+      loadSlotChannel(i, ch.name);
+    } else {
+      clearSlot(i);
+    }
+  }
+}
+
+function toggleMuteAll() {
+  gridSlots.forEach((s, idx) => {
+    s.isMuted = true;
+    const v = document.getElementById(`slotVideo-${idx}`);
+    if (v) v.muted = true;
+    const slotEl = document.getElementById(`gridSlot-${idx}`);
+    if (slotEl) slotEl.classList.remove("audio-active");
+    const btn = document.getElementById(`btnAudioSlot-${idx}`);
+    if (btn) {
+      btn.classList.remove("active-audio");
+      btn.textContent = "🔇";
+    }
+  });
+  showToast("🔇 Đã tắt tiếng tất cả các ô");
+}
+
+function reloadAllGridSlots() {
+  showToast("🔄 Đang tải lại toàn bộ các ô...");
+  gridSlots.forEach((s, idx) => {
+    if (s.channelName) {
+      startSlotPlayback(idx, s.channelName, false);
+    }
+  });
+}
+
+function clearAllGridSlots() {
+  if (!confirm("Bạn có chắc chắn muốn xóa toàn bộ các ô trong MultiView?")) return;
+  gridSlots.forEach((_, idx) => clearSlot(idx));
+  showToast("🗑️ Đã làm sạch toàn bộ MultiView");
+}
+
+function toggleGridFullscreen() {
+  const container = document.getElementById("gridviewWall");
+  if (!container) return;
+
+  if (!document.fullscreenElement) {
+    if (container.requestFullscreen) {
+      container.requestFullscreen();
+    } else if (container.webkitRequestFullscreen) {
+      container.webkitRequestFullscreen();
+    }
+  } else {
+    if (document.exitFullscreen) {
+      document.exitFullscreen();
+    }
   }
 }

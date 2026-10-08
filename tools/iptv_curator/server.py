@@ -10,7 +10,7 @@ import sys
 import json
 import time
 import urllib.parse
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 import threading
 from typing import Dict, Any
 
@@ -451,7 +451,7 @@ def run_server(port: int = PORT):
         print(f"[*] Tự động nạp {cnt} kênh từ iptv/default.m3u")
 
     server_address = ("", port)
-    httpd = HTTPServer(server_address, CuratorRequestHandler)
+    httpd = ThreadingHTTPServer(server_address, CuratorRequestHandler)
     print(f"=======================================================")
     print(f"🚀 RomCloud IPTV Curator Web UI đang chạy tại:")
     print(f"👉 http://localhost:{port}")

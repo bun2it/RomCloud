@@ -39,6 +39,9 @@
       <button class="tab-btn active" data-tab="tabChannels" onclick="switchTab('tabChannels')">
         📺 Danh Sách Kênh (<span id="tabCountBadge">0</span>)
       </button>
+      <button class="tab-btn" data-tab="tabGrid" onclick="switchTab('tabGrid')">
+        🖥️ MultiView (2x2 / 4x2 / 4x4)
+      </button>
       <button class="tab-btn" data-tab="tabSources" onclick="switchTab('tabSources')">
         📥 Nguồn & Thêm M3U
       </button>
@@ -302,6 +305,63 @@
             </a>
           </div>
         </div>
+      </div>
+    </section>
+
+    <!-- TAB 6: MultiView Grid Wall (2x2, 4x2, 4x4) -->
+    <section id="tabGrid" class="tab-pane">
+      <div class="gridview-toolbar card mb-4">
+        <div class="gridview-controls-left">
+          <div class="toolbar-section">
+            <span class="toolbar-title">📐 Bố cục:</span>
+            <div class="btn-group">
+              <button class="btn btn-secondary active-layout" id="btnLayout2x2" onclick="setGridLayout('2x2')">
+                🔲 2x2 (4 Màn)
+              </button>
+              <button class="btn btn-secondary" id="btnLayout4x2" onclick="setGridLayout('4x2')">
+                🔳 4x2 (8 Màn)
+              </button>
+              <button class="btn btn-secondary" id="btnLayout4x4" onclick="setGridLayout('4x4')">
+                ▦ 4x4 (16 Màn)
+              </button>
+            </div>
+          </div>
+
+          <div class="toolbar-section">
+            <span class="toolbar-title">⚡ Tự động nạp:</span>
+            <div class="btn-group">
+              <button class="btn btn-outline-cyan btn-sm" onclick="quickFillGrid('alive')">
+                🟢 Kênh Sống (Alive)
+              </button>
+              <button class="btn btn-outline-cyan btn-sm" onclick="quickFillGrid('vtv')">
+                🇻🇳 VTV / HTV
+              </button>
+              <button class="btn btn-outline-cyan btn-sm" onclick="quickFillGrid('sports')">
+                ⚽ Thể Thao
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div class="gridview-controls-right">
+          <button class="btn btn-secondary btn-sm" id="btnGridMuteAll" onclick="toggleMuteAll()">
+            🔇 Mute Tất Cả
+          </button>
+          <button class="btn btn-secondary btn-sm" onclick="reloadAllGridSlots()">
+            🔄 Tải Lại
+          </button>
+          <button class="btn btn-secondary btn-sm" onclick="clearAllGridSlots()">
+            🗑️ Xóa Trắng
+          </button>
+          <button class="btn btn-primary btn-sm" onclick="toggleGridFullscreen()">
+            ⛶ Toàn Màn Hình
+          </button>
+        </div>
+      </div>
+
+      <!-- Container chứa các video slot -->
+      <div class="gridview-container layout-2x2" id="gridviewWall">
+        <!-- Dynamic Grid Slots render via JS -->
       </div>
     </section>
   </main>
