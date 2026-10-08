@@ -324,6 +324,37 @@ class CuratorRequestHandler(BaseHTTPRequestHandler):
             self.send_json({"success": True})
             return
 
+        # 9. API: Test Ping thử 1 luồng đơn lẻ
+        if path == "/api/stream/probe":
+            body = self.read_json_body()
+            url = body.get("url", "").strip()
+            if not url:
+                self.send_json({"success": False, "error": "URL trống"}, status=400)
+                return
+            from health_checker import HealthChecker
+            res = HealthChecker.probe_single_stream(url, timeout=3)
+            ch_name = body.get("channel_name", "")
+            grp = body.get("group_name", "")
+            engine.db.record_probe(res, channel_name=ch_name, group_name=grp)
+            self.send_json({"success": True, "probe": res.to_dict()})
+            return
+
+        # 10. API: Đặt luồng làm Nguồn ưu tiên số 1 thủ công
+        if path == "/api/channels/set_primary":
+            body = self.read_json_body()
+            ch_name = body.get("channel_name", "").strip()
+            url = body.get("url", "").strip()
+            if not ch_name or not url or ch_name not in engine.clustered_channels:
+                self.send_json({"success": False, "error": "Kênh hoặc URL không hợp lệ"}, status=400)
+                return
+            streams = engine.clustered_channels[ch_name]
+            target_idx = next((i for i, s in enumerate(streams) if s["url"] == url), None)
+            if target_idx is not None and target_idx > 0:
+                item = streams.pop(target_idx)
+                streams.insert(0, item)
+            self.send_json({"success": True, "message": f"Đã đặt nguồn số 1 cho kênh {ch_name}"})
+            return
+
         self.send_error(404, "Không tìm thấy endpoint POST")
 
     def serve_file(self, file_path: str, content_type: str):

@@ -53,19 +53,53 @@
 
     <!-- TAB 1: Danh Sách Kênh -->
     <section id="tabChannels" class="tab-pane active">
-      <!-- Toolbar: Search + Filter -->
+      <!-- Toolbar: Search + Filter + Sort -->
       <div class="toolbar-card">
         <div class="search-box">
           <span class="search-icon">🔍</span>
-          <input type="text" id="searchInput" placeholder="Tìm tên kênh hoặc nhóm..." oninput="filterChannels()">
+          <input type="text" id="searchInput" placeholder="Tìm tên kênh, nhóm hoặc URL..." oninput="onFilterChange()">
         </div>
         <div class="filter-group">
           <label for="groupSelect">Nhóm:</label>
-          <select id="groupSelect" onchange="filterChannels()">
+          <select id="groupSelect" onchange="onFilterChange()">
             <option value="Tất cả">Tất cả nhóm</option>
           </select>
         </div>
+        <div class="filter-group">
+          <label for="statusSelect">Trạng thái:</label>
+          <select id="statusSelect" onchange="onFilterChange()">
+            <option value="ALL">Tất cả trạng thái</option>
+            <option value="ALIVE">🟢 Chỉ kênh sống (ALIVE)</option>
+            <option value="DEAD">🔴 Kênh lỗi / chết (DEAD)</option>
+            <option value="STANDBY">🟡 Chờ / Chưa ping (STANDBY)</option>
+            <option value="MULTI">🔀 Có nhiều nguồn (&gt;1)</option>
+            <option value="SINGLE">⚠️ Chỉ 1 nguồn duy nhất</option>
+          </select>
+        </div>
+        <div class="filter-group">
+          <label for="sortSelect">Sắp xếp:</label>
+          <select id="sortSelect" onchange="onFilterChange()">
+            <option value="DEFAULT">Mặc định (Nhóm &amp; Tên)</option>
+            <option value="PING_ASC">⚡ Ping nhanh nhất (ms thấp)</option>
+            <option value="SOURCES_DESC">🔢 Nhiều nguồn nhất</option>
+            <option value="SCORE_DESC">⭐ Điểm uy tín cao nhất</option>
+            <option value="NAME_ASC">🔤 Tên kênh (A - Z)</option>
+          </select>
+        </div>
         <button class="btn btn-secondary" onclick="loadChannels()">🔄 Làm mới</button>
+      </div>
+
+      <!-- Quick Filter Chips & Stats Bar -->
+      <div class="quick-filter-bar">
+        <div class="filter-chips">
+          <button class="chip active" data-status="ALL" onclick="setQuickStatus('ALL')">Tất cả (<span id="countAll">0</span>)</button>
+          <button class="chip chip-green" data-status="ALIVE" onclick="setQuickStatus('ALIVE')">🟢 Sống (<span id="countAlive">0</span>)</button>
+          <button class="chip chip-red" data-status="DEAD" onclick="setQuickStatus('DEAD')">🔴 Chết (<span id="countDead">0</span>)</button>
+          <button class="chip chip-purple" data-status="MULTI" onclick="setQuickStatus('MULTI')">🔀 Có dự phòng (<span id="countMulti">0</span>)</button>
+        </div>
+        <div class="filter-summary" id="filterSummaryText">
+          Hiển thị 0 kênh
+        </div>
       </div>
 
       <!-- Channel Grid / List -->
@@ -73,12 +107,12 @@
         <table class="channel-table">
           <thead>
             <tr>
-              <th style="width: 60px;">Logo</th>
+              <th style="width: 50px;">Logo</th>
               <th>Tên Kênh Chuẩn</th>
               <th>Nhóm Kênh</th>
               <th>Số Nguồn</th>
-              <th>Ping / Trạng Thái Nguồn Chính</th>
-              <th>Thao Tác</th>
+              <th>Ping / Nguồn Chính</th>
+              <th style="text-align: right; width: 140px;">Thao Tác</th>
             </tr>
           </thead>
           <tbody id="channelTableBody">
@@ -87,6 +121,29 @@
             </tr>
           </tbody>
         </table>
+      </div>
+
+      <!-- Pagination Footer -->
+      <div class="pagination-container" id="paginationBar">
+        <div class="pagination-info" id="paginationInfo">
+          Đang hiển thị...
+        </div>
+        <div class="pagination-controls">
+          <div class="page-size-selector">
+            <span>Hiển thị:</span>
+            <select id="pageSizeSelect" onchange="changePageSize()">
+              <option value="50">50 / trang</option>
+              <option value="100" selected>100 / trang</option>
+              <option value="250">250 / trang</option>
+              <option value="99999">Tất cả</option>
+            </select>
+          </div>
+          <button class="btn btn-secondary btn-sm" id="btnPageFirst" onclick="goToPage(1)">« Đầu</button>
+          <button class="btn btn-secondary btn-sm" id="btnPagePrev" onclick="prevPage()">‹ Trước</button>
+          <span class="page-indicator" id="pageIndicator">Trang 1 / 1</span>
+          <button class="btn btn-secondary btn-sm" id="btnPageNext" onclick="nextPage()">Tiếp ›</button>
+          <button class="btn btn-secondary btn-sm" id="btnPageLast" onclick="goToLastPage()">Cuối »</button>
+        </div>
       </div>
     </section>
 
