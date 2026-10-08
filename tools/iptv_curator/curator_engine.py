@@ -122,7 +122,7 @@ class CuratorEngine:
 
         return probe_results
 
-    def generate_live_entries(self, include_backup: bool = True, probe_results: Optional[Dict[str, ProbeResult]] = None) -> List[LiveChannelEntry]:
+    def generate_live_entries(self, include_backup: bool = True, probe_results: Optional[Dict[str, ProbeResult]] = None, publish_filters: Optional[Dict[str, Any]] = None) -> List[LiveChannelEntry]:
         """
         Bước 3: Chọn lọc luồng tốt nhất cho mỗi kênh dựa trên Ping ms và Điểm uy tín
         """
@@ -161,7 +161,8 @@ class CuratorEngine:
                     "tvg_id": s["tvg_id"],
                     "is_alive": is_alive,
                     "latency": latency,
-                    "score": score
+                    "score": score,
+                    "last_status": stream_record["last_status"] if stream_record else ("ALIVE" if is_alive else "STANDBY")
                 })
 
             # Sắp xếp candidate:
@@ -178,7 +179,41 @@ class CuratorEngine:
 
             # Chọn link chính
             best = candidate_streams[0]
-            # Nếu link chính còn sống, hoặc chấp nhận link tốt nhất
+
+            # Kiểm tra bộ lọc xuất bản (Publish Filters) do Admin thiết lập
+            if publish_filters:
+                good_ms = int(publish_filters.get("good_threshold_ms", self.normalizer.ping_thresholds.get("good_ms", 500)))
+                fair_ms = int(publish_filters.get("fair_threshold_ms", self.normalizer.ping_thresholds.get("fair_ms", 1500)))
+                allow_good = bool(publish_filters.get("allow_good", True))
+                allow_fair = bool(publish_filters.get("allow_fair", True))
+                allow_poor = bool(publish_filters.get("allow_poor", True))
+                allow_standby = bool(publish_filters.get("allow_standby", True))
+                allow_dead = bool(publish_filters.get("allow_dead", False))
+
+                st = best.get("last_status", "UNKNOWN")
+                lat = best.get("latency", 0)
+
+                if st == "DEAD":
+                    if not allow_dead:
+                        continue
+                elif st in ("STANDBY", "UNKNOWN"):
+                    if not allow_standby:
+                        continue
+                elif best.get("is_alive", False):
+                    if lat <= good_ms:
+                        if not allow_good:
+                            continue
+                    elif lat <= fair_ms:
+                        if not allow_fair:
+                            continue
+                    else:
+                        if not allow_poor:
+                            continue
+                else:
+                    if not allow_dead:
+                        continue
+
+            # Nếu link chính thỏa mãn bộ lọc, thêm vào danh sách live
             live_entries.append(LiveChannelEntry(
                 name=best["name"],
                 group=best["group"],
@@ -207,7 +242,7 @@ class CuratorEngine:
 
         return live_entries
 
-    def export(self, output_dir: Optional[str] = None, include_backup: bool = True, probe_results: Optional[Dict[str, ProbeResult]] = None) -> Dict[str, Any]:
+    def export(self, output_dir: Optional[str] = None, include_backup: bool = True, probe_results: Optional[Dict[str, ProbeResult]] = None, publish_filters: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
         Bước 4: Xuất ra live.m3u và iptv_manifest.json
         """
@@ -218,7 +253,7 @@ class CuratorEngine:
         m3u_path = os.path.join(output_dir, "live.m3u")
         manifest_path = os.path.join(output_dir, "iptv_manifest.json")
 
-        entries = self.generate_live_entries(include_backup=include_backup, probe_results=probe_results)
+        entries = self.generate_live_entries(include_backup=include_backup, probe_results=probe_results, publish_filters=publish_filters)
         manifest = PlaylistExporter.export_files(entries, m3u_path, manifest_path)
 
         return {

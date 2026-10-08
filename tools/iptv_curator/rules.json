@@ -78,5 +78,9 @@
     "\\b(fhd|uhd|hd|sd|4k|2k|1080p|720p|50fps|60fps|h265|hevc|raw|vip|backup|dự phòng)\\b",
     "[⚽🔥📺⚡⭐♦️🔴]+",
     "\\s+"
-  ]
+  ],
+  "ping_thresholds": {
+    "good_ms": 500,
+    "fair_ms": 1500
+  }
 }

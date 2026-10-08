@@ -14,6 +14,69 @@ let currentPlayingChannel = "";
 let currentPlayingOriginalUrl = "";
 let isProxyActive = false;
 
+// Ping Latency Thresholds Settings
+let pingThresholds = {
+  good_ms: 500,
+  fair_ms: 1500
+};
+
+function getStreamQualityTier(stream) {
+  if (!stream) return "UNKNOWN";
+  if (stream.last_status === "DEAD") return "DEAD";
+  if (stream.last_status === "STANDBY" || stream.last_status === "UNKNOWN" || !stream.latency_ms || stream.latency_ms === 0) {
+    return "STANDBY";
+  }
+  if (stream.latency_ms <= pingThresholds.good_ms) return "GOOD";
+  if (stream.latency_ms <= pingThresholds.fair_ms) return "FAIR";
+  return "POOR";
+}
+
+function applyPingThresholdLabels() {
+  document.querySelectorAll(".val-good-ms").forEach(el => el.textContent = pingThresholds.good_ms);
+  document.querySelectorAll(".val-fair-ms").forEach(el => el.textContent = pingThresholds.fair_ms);
+  const lblPoor = document.getElementById("lblPoorMinMs");
+  if (lblPoor) lblPoor.textContent = `> ${pingThresholds.fair_ms}`;
+  const inpG = document.getElementById("settingGoodMs");
+  const inpF = document.getElementById("settingFairMs");
+  if (inpG) inpG.value = pingThresholds.good_ms;
+  if (inpF) inpF.value = pingThresholds.fair_ms;
+}
+
+function onPingSettingsInputChange() {
+  const inpG = document.getElementById("settingGoodMs");
+  const inpF = document.getElementById("settingFairMs");
+  if (inpG && inpF) {
+    let g = parseInt(inpG.value, 10) || 500;
+    let f = parseInt(inpF.value, 10) || 1500;
+    if (g >= f) f = g + 100;
+    pingThresholds.good_ms = g;
+    pingThresholds.fair_ms = f;
+    applyPingThresholdLabels();
+    onFilterChange();
+    updatePublishPreview();
+  }
+}
+
+async function savePingSettings() {
+  onPingSettingsInputChange();
+  try {
+    const res = await fetch("/api/rules", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ping_thresholds: pingThresholds })
+    });
+    const data = await res.json();
+    if (data.success) {
+      showToast(`Đã lưu ngưỡng Ping: Tốt ≤ ${pingThresholds.good_ms}ms, TB ≤ ${pingThresholds.fair_ms}ms`);
+      loadChannels();
+    } else {
+      showToast("Lỗi khi lưu ngưỡng ping", true);
+    }
+  } catch (e) {
+    showToast(`Lỗi: ${e}`, true);
+  }
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   initDropZone();
   loadStats();
@@ -157,38 +220,49 @@ function onFilterChange() {
     chip.classList.toggle("active", chip.dataset.status === statusFilter);
   });
 
-  // Đếm nhanh số lượng theo các trạng thái
+  // Đếm nhanh số lượng theo các phân hạng chất lượng
   let cntAll = allChannels.length;
-  let cntAlive = 0;
+  let cntGood = 0;
+  let cntFair = 0;
+  let cntPoor = 0;
+  let cntStandby = 0;
   let cntDead = 0;
-  let cntMulti = 0;
 
   allChannels.forEach(ch => {
-    const st = ch.best_stream ? ch.best_stream.last_status : "UNKNOWN";
-    if (st === "ALIVE") cntAlive++;
-    if (st === "DEAD") cntDead++;
-    if (ch.stream_count > 1) cntMulti++;
+    const tier = getStreamQualityTier(ch.best_stream);
+    if (tier === "GOOD") cntGood++;
+    else if (tier === "FAIR") cntFair++;
+    else if (tier === "POOR") cntPoor++;
+    else if (tier === "STANDBY") cntStandby++;
+    else if (tier === "DEAD") cntDead++;
   });
 
   const elAll = document.getElementById("countAll");
-  const elAlive = document.getElementById("countAlive");
+  const elGood = document.getElementById("countGood");
+  const elFair = document.getElementById("countFair");
+  const elPoor = document.getElementById("countPoor");
+  const elStandby = document.getElementById("countStandby");
   const elDead = document.getElementById("countDead");
-  const elMulti = document.getElementById("countMulti");
   if (elAll) elAll.textContent = cntAll;
-  if (elAlive) elAlive.textContent = cntAlive;
+  if (elGood) elGood.textContent = cntGood;
+  if (elFair) elFair.textContent = cntFair;
+  if (elPoor) elPoor.textContent = cntPoor;
+  if (elStandby) elStandby.textContent = cntStandby;
   if (elDead) elDead.textContent = cntDead;
-  if (elMulti) elMulti.textContent = cntMulti;
 
   // Lọc dữ liệu
   filteredChannels = allChannels.filter(ch => {
     // 1. Nhóm
     if (grp && grp !== "Tất cả" && ch.group !== grp) return false;
 
-    // 2. Trạng thái
-    const bestSt = ch.best_stream ? ch.best_stream.last_status : "UNKNOWN";
-    if (statusFilter === "ALIVE" && bestSt !== "ALIVE") return false;
-    if (statusFilter === "DEAD" && bestSt !== "DEAD") return false;
-    if (statusFilter === "STANDBY" && (bestSt === "ALIVE" || bestSt === "DEAD")) return false;
+    // 2. Trạng thái & Phân hạng chất lượng Ping
+    const tier = getStreamQualityTier(ch.best_stream);
+    if (statusFilter === "GOOD" && tier !== "GOOD") return false;
+    if (statusFilter === "FAIR" && tier !== "FAIR") return false;
+    if (statusFilter === "POOR" && tier !== "POOR") return false;
+    if (statusFilter === "STANDBY" && tier !== "STANDBY") return false;
+    if (statusFilter === "DEAD" && tier !== "DEAD") return false;
+    if (statusFilter === "ALIVE" && (tier !== "GOOD" && tier !== "FAIR" && tier !== "POOR")) return false;
     if (statusFilter === "MULTI" && ch.stream_count <= 1) return false;
     if (statusFilter === "SINGLE" && ch.stream_count !== 1) return false;
 
@@ -206,8 +280,8 @@ function onFilterChange() {
   // Sắp xếp
   if (sortBy === "PING_ASC") {
     filteredChannels.sort((a, b) => {
-      const pA = (a.best_stream && a.best_stream.last_status === "ALIVE") ? a.best_stream.latency_ms : 99999;
-      const pB = (b.best_stream && b.best_stream.last_status === "ALIVE") ? b.best_stream.latency_ms : 99999;
+      const pA = (a.best_stream && a.best_stream.latency_ms > 0) ? a.best_stream.latency_ms : 99999;
+      const pB = (b.best_stream && b.best_stream.latency_ms > 0) ? b.best_stream.latency_ms : 99999;
       return pA - pB;
     });
   } else if (sortBy === "SOURCES_DESC") {
@@ -227,6 +301,7 @@ function onFilterChange() {
 
   currentPage = 1;
   renderCurrentPage();
+  updatePublishPreview();
 }
 
 function setQuickStatus(status) {
@@ -324,11 +399,19 @@ function renderCurrentPage() {
     let statusBadge = `<span class="badge badge-amber">Chưa kiểm tra</span>`;
 
     if (best) {
-      if (best.last_status === "ALIVE") {
-        statusBadge = `<span class="badge badge-green">🟢 ${best.latency_ms} ms</span>`;
-      } else if (best.last_status === "STANDBY") {
-        statusBadge = `<span class="badge badge-amber">🟡 Chờ (${best.score}đ)</span>`;
-      } else if (best.last_status === "DEAD") {
+      const tier = getStreamQualityTier(best);
+      const ms = best.latency_ms;
+      if (tier === "GOOD") {
+        statusBadge = `<span class="badge badge-green">🟢 ${ms} ms (Tốt)</span>`;
+      } else if (tier === "FAIR") {
+        statusBadge = `<span class="badge badge-yellow">🟡 ${ms} ms (T.Bình)</span>`;
+      } else if (tier === "POOR") {
+        statusBadge = `<span class="badge badge-orange">🟠 ${ms} ms (Yếu)</span>`;
+      } else if (tier === "STANDBY") {
+        statusBadge = (ms > 0)
+          ? `<span class="badge badge-amber">🟡 Chờ (${ms} ms)</span>`
+          : `<span class="badge badge-amber">⚪ Chưa ping</span>`;
+      } else if (tier === "DEAD") {
         statusBadge = `<span class="badge badge-red">🔴 Lỗi</span>`;
       }
     }
@@ -383,12 +466,19 @@ function renderModalStreamItems(ch) {
   const safeGroupName = encodeURIComponent(ch.group);
 
   body.innerHTML = ch.streams.map((s, idx) => {
+    const tier = getStreamQualityTier(s);
     let badge = `<span class="badge badge-amber" id="badge-stream-${idx}">CHƯA PING</span>`;
-    if (s.last_status === "ALIVE") {
-      badge = `<span class="badge badge-green" id="badge-stream-${idx}">🟢 ALIVE (${s.latency_ms}ms)</span>`;
-    } else if (s.last_status === "STANDBY") {
-      badge = `<span class="badge badge-amber" id="badge-stream-${idx}">🟡 STANDBY (${s.score}đ)</span>`;
-    } else if (s.last_status === "DEAD") {
+    if (tier === "GOOD") {
+      badge = `<span class="badge badge-green" id="badge-stream-${idx}">🟢 ${s.latency_ms} ms (Tốt)</span>`;
+    } else if (tier === "FAIR") {
+      badge = `<span class="badge badge-yellow" id="badge-stream-${idx}">🟡 ${s.latency_ms} ms (Trung bình)</span>`;
+    } else if (tier === "POOR") {
+      badge = `<span class="badge badge-orange" id="badge-stream-${idx}">🟠 ${s.latency_ms} ms (Yếu)</span>`;
+    } else if (tier === "STANDBY") {
+      badge = (s.latency_ms > 0)
+        ? `<span class="badge badge-amber" id="badge-stream-${idx}">🟡 Chờ (${s.latency_ms} ms • ${s.score}đ)</span>`
+        : `<span class="badge badge-amber" id="badge-stream-${idx}">🟡 Chờ (Chưa ping • ${s.score}đ)</span>`;
+    } else if (tier === "DEAD") {
       badge = `<span class="badge badge-red" id="badge-stream-${idx}">🔴 DEAD</span>`;
     }
 
@@ -920,11 +1010,15 @@ async function pollHealthProgress() {
   }
 }
 
-// 13. Rules Editor
+// 13. Rules Editor & Latency Thresholds
 async function loadRules() {
   try {
     const res = await fetch("/api/rules");
     const data = await res.json();
+    if (data.ping_thresholds) {
+      pingThresholds = data.ping_thresholds;
+      applyPingThresholdLabels();
+    }
     document.getElementById("rulesChannelJson").value = JSON.stringify(data.channel_aliases || {}, null, 2);
     document.getElementById("rulesGroupJson").value = JSON.stringify(data.group_mappings || {}, null, 2);
   } catch (err) {
@@ -940,7 +1034,11 @@ async function saveRules() {
     const res = await fetch("/api/rules", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ channel_aliases: chAliases, group_mappings: grpMappings })
+      body: JSON.stringify({
+        channel_aliases: chAliases,
+        group_mappings: grpMappings,
+        ping_thresholds: pingThresholds
+      })
     });
     const data = await res.json();
     if (data.success) {
@@ -954,16 +1052,78 @@ async function saveRules() {
   }
 }
 
-// 14. Export & OTA Publish
+// 14. Export & OTA Publish with Quality Filter Criteria
+function getPublishFilters() {
+  return {
+    allow_good: document.getElementById("chkPubGood") ? document.getElementById("chkPubGood").checked : true,
+    allow_fair: document.getElementById("chkPubFair") ? document.getElementById("chkPubFair").checked : true,
+    allow_poor: document.getElementById("chkPubPoor") ? document.getElementById("chkPubPoor").checked : false,
+    allow_standby: document.getElementById("chkPubStandby") ? document.getElementById("chkPubStandby").checked : true,
+    allow_dead: document.getElementById("chkPubDead") ? document.getElementById("chkPubDead").checked : false,
+    good_threshold_ms: pingThresholds.good_ms,
+    fair_threshold_ms: pingThresholds.fair_ms
+  };
+}
+
+function updatePublishPreview() {
+  if (!allChannels || allChannels.length === 0) return;
+  const filters = getPublishFilters();
+  let countGood = 0;
+  let countFair = 0;
+  let countPoor = 0;
+  let countStandby = 0;
+  let countDead = 0;
+  let countWillExport = 0;
+
+  allChannels.forEach(ch => {
+    const tier = getStreamQualityTier(ch.best_stream);
+    if (tier === "GOOD") countGood++;
+    else if (tier === "FAIR") countFair++;
+    else if (tier === "POOR") countPoor++;
+    else if (tier === "STANDBY") countStandby++;
+    else if (tier === "DEAD") countDead++;
+
+    let willExport = false;
+    if (tier === "GOOD" && filters.allow_good) willExport = true;
+    else if (tier === "FAIR" && filters.allow_fair) willExport = true;
+    else if (tier === "POOR" && filters.allow_poor) willExport = true;
+    else if (tier === "STANDBY" && filters.allow_standby) willExport = true;
+    else if (tier === "DEAD" && filters.allow_dead) willExport = true;
+
+    if (willExport) countWillExport++;
+  });
+
+  const elG = document.getElementById("countPubGood");
+  const elF = document.getElementById("countPubFair");
+  const elP = document.getElementById("countPubPoor");
+  const elS = document.getElementById("countPubStandby");
+  const elD = document.getElementById("countPubDead");
+  if (elG) elG.textContent = `${countGood} kênh`;
+  if (elF) elF.textContent = `${countFair} kênh`;
+  if (elP) elP.textContent = `${countPoor} kênh`;
+  if (elS) elS.textContent = `${countStandby} kênh`;
+  if (elD) elD.textContent = `${countDead} kênh`;
+
+  const badge = document.getElementById("previewPublishCountBadge");
+  if (badge) {
+    const pct = allChannels.length > 0 ? ((countWillExport / allChannels.length) * 100).toFixed(1) : 0;
+    badge.textContent = `Dự kiến xuất bản: ${countWillExport} / ${allChannels.length} kênh (${pct}%)`;
+  }
+}
+
 async function exportPlaylist() {
-  const includeBackup = document.getElementById("chkIncludeBackup").checked;
-  showToast("Đang tạo file live.m3u và iptv_manifest.json...");
+  const includeBackup = document.getElementById("chkIncludeBackup") ? document.getElementById("chkIncludeBackup").checked : true;
+  const pubFilters = getPublishFilters();
+  showToast("Đang tạo file live.m3u và iptv_manifest.json theo bộ lọc tiêu chí...");
 
   try {
     const res = await fetch("/api/export", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ include_backup: includeBackup })
+      body: JSON.stringify({
+        include_backup: includeBackup,
+        publish_filters: pubFilters
+      })
     });
     const data = await res.json();
     if (data.success) {
@@ -971,7 +1131,7 @@ async function exportPlaylist() {
       document.getElementById("exportSummaryText").textContent =
         `Phiên bản: ${m.version} • ${m.channel_count} kênh chính (${m.total_streams} tổng luồng) • SHA256: ${m.sha256.substring(0, 16)}...`;
       document.getElementById("exportResultBox").style.display = "block";
-      showToast("Xuất bản thành công!");
+      showToast(`Xuất bản thành công: ${m.channel_count} kênh!`);
       switchTab("tabExport");
     } else {
       showToast("Lỗi xuất bản playlist", true);
@@ -982,14 +1142,23 @@ async function exportPlaylist() {
 }
 
 async function publishToRomCloud() {
-  if (!confirm("Đẩy file live.m3u và manifest trực tiếp vào thư mục RomCloud iptv/ để máy handheld dùng ngay?")) return;
+  const filters = getPublishFilters();
+  if (!confirm("Đẩy file live.m3u và manifest đã qua chọn lọc theo tiêu chí chất lượng trực tiếp vào thư mục RomCloud iptv/ để máy handheld dùng ngay?")) return;
   showToast("Đang xuất bản vào thư mục RomCloud/iptv/...");
 
   try {
-    const res = await fetch("/api/publish_ota", { method: "POST" });
+    const res = await fetch("/api/publish_ota", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        include_backup: true,
+        publish_filters: filters
+      })
+    });
     const data = await res.json();
     if (data.success) {
-      showToast("Đã lưu thành công vào thư mục RomCloud/iptv/!");
+      const m = data.result.manifest;
+      showToast(`Đã xuất bản thành công ${m.channel_count} kênh vào RomCloud/iptv/!`);
     } else {
       showToast("Lỗi khi lưu vào RomCloud", true);
     }

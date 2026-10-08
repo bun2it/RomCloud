@@ -161,7 +161,8 @@ class CuratorRequestHandler(BaseHTTPRequestHandler):
         if path == "/api/rules":
             self.send_json({
                 "group_mappings": engine.normalizer.group_mappings,
-                "channel_aliases": engine.normalizer.channel_aliases
+                "channel_aliases": engine.normalizer.channel_aliases,
+                "ping_thresholds": getattr(engine.normalizer, "ping_thresholds", {"good_ms": 500, "fair_ms": 1500})
             })
             return
 
@@ -343,14 +344,18 @@ class CuratorRequestHandler(BaseHTTPRequestHandler):
         if path == "/api/export":
             body = self.read_json_body()
             include_backup = body.get("include_backup", True)
-            res = engine.export(include_backup=include_backup)
+            publish_filters = body.get("publish_filters", None)
+            res = engine.export(include_backup=include_backup, publish_filters=publish_filters)
             self.send_json({"success": True, "result": res})
             return
 
         # 7. API: Đẩy trực tiếp vào thư mục RomCloud iptv/ (OTA deploy cục bộ)
         if path == "/api/publish_ota":
+            body = self.read_json_body() if self.headers.get("Content-Length") else {}
+            include_backup = body.get("include_backup", True)
+            publish_filters = body.get("publish_filters", None)
             dest_dir = os.path.join(REPO_ROOT, "iptv")
-            res = engine.export(output_dir=dest_dir, include_backup=True)
+            res = engine.export(output_dir=dest_dir, include_backup=include_backup, publish_filters=publish_filters)
             self.send_json({
                 "success": True,
                 "message": f"Đã xuất bản thành công vào thư mục {dest_dir}",
@@ -358,16 +363,18 @@ class CuratorRequestHandler(BaseHTTPRequestHandler):
             })
             return
 
-        # 8. API: Cập nhật Rules
+        # 8. API: Cập nhật Rules & Cấu hình Ngưỡng Ping
         if path == "/api/rules":
             body = self.read_json_body()
             if "group_mappings" in body:
                 engine.normalizer.group_mappings = body["group_mappings"]
             if "channel_aliases" in body:
                 engine.normalizer.channel_aliases = body["channel_aliases"]
+            if "ping_thresholds" in body:
+                engine.normalizer.ping_thresholds = body["ping_thresholds"]
             engine.normalizer.save_rules()
             engine.process_and_cluster()
-            self.send_json({"success": True})
+            self.send_json({"success": True, "ping_thresholds": engine.normalizer.ping_thresholds})
             return
 
         # 9. API: Test Ping thử 1 luồng đơn lẻ

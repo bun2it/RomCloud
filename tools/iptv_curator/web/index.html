@@ -74,9 +74,11 @@
           <label for="statusSelect">Trạng thái:</label>
           <select id="statusSelect" onchange="onFilterChange()">
             <option value="ALL">Tất cả trạng thái</option>
-            <option value="ALIVE">🟢 Chỉ kênh sống (ALIVE)</option>
-            <option value="DEAD">🔴 Kênh lỗi / chết (DEAD)</option>
-            <option value="STANDBY">🟡 Chờ / Chưa ping (STANDBY)</option>
+            <option value="GOOD">🟢 Ping Tốt (≤ <span class="val-good-ms">500</span>ms)</option>
+            <option value="FAIR">🟡 Ping T.Bình (&gt;<span class="val-good-ms">500</span>ms - ≤<span class="val-fair-ms">1500</span>ms)</option>
+            <option value="POOR">🟠 Ping Yếu (&gt; <span class="val-fair-ms">1500</span>ms)</option>
+            <option value="STANDBY">🟡 Chờ / Chưa ping</option>
+            <option value="DEAD">🔴 Kênh lỗi / Chết (DEAD)</option>
             <option value="MULTI">🔀 Có nhiều nguồn (&gt;1)</option>
             <option value="SINGLE">⚠️ Chỉ 1 nguồn duy nhất</option>
           </select>
@@ -98,9 +100,11 @@
       <div class="quick-filter-bar">
         <div class="filter-chips">
           <button class="chip active" data-status="ALL" onclick="setQuickStatus('ALL')">Tất cả (<span id="countAll">0</span>)</button>
-          <button class="chip chip-green" data-status="ALIVE" onclick="setQuickStatus('ALIVE')">🟢 Sống (<span id="countAlive">0</span>)</button>
+          <button class="chip chip-green" data-status="GOOD" onclick="setQuickStatus('GOOD')">🟢 Tốt (<span id="countGood">0</span>)</button>
+          <button class="chip chip-yellow" data-status="FAIR" onclick="setQuickStatus('FAIR')">🟡 T.Bình (<span id="countFair">0</span>)</button>
+          <button class="chip chip-orange" data-status="POOR" onclick="setQuickStatus('POOR')">🟠 Yếu (<span id="countPoor">0</span>)</button>
+          <button class="chip chip-amber" data-status="STANDBY" onclick="setQuickStatus('STANDBY')">🟡 Chờ (<span id="countStandby">0</span>)</button>
           <button class="chip chip-red" data-status="DEAD" onclick="setQuickStatus('DEAD')">🔴 Chết (<span id="countDead">0</span>)</button>
-          <button class="chip chip-purple" data-status="MULTI" onclick="setQuickStatus('MULTI')">🔀 Có dự phòng (<span id="countMulti">0</span>)</button>
         </div>
         <div class="filter-summary" id="filterSummaryText">
           Hiển thị 0 kênh
@@ -244,8 +248,55 @@
       </div>
     </section>
 
-    <!-- TAB 4: Quy Tắc Gom Kênh -->
+    <!-- TAB 4: Quy Tắc Gom Kênh & Cấu Hình Ngưỡng Ping -->
     <section id="tabRules" class="tab-pane">
+      <!-- Card Cấu hình Ngưỡng Ping Dynamic -->
+      <div class="card mb-4">
+        <div class="card-header flex-between">
+          <div>
+            <h3>⚡ Cấu Hình Ngưỡng Độ Trễ Ping (Dynamic Latency Settings)</h3>
+            <p class="card-desc">Thiết lập ngưỡng số ms để hệ thống tự động phân loại đường truyền: Tốt, Trung bình, Yếu.</p>
+          </div>
+          <button class="btn btn-primary" onclick="savePingSettings()">💾 Lưu Ngưỡng Ping</button>
+        </div>
+        <div class="threshold-settings-grid mt-4">
+          <div class="setting-box setting-good">
+            <div class="setting-header">
+              <span class="badge badge-green">🟢 Tốt (Fast)</span>
+              <span class="text-dim text-sm">Ping ≤ Ngưỡng này</span>
+            </div>
+            <div class="setting-input-row">
+              <input type="number" id="settingGoodMs" min="50" max="5000" step="50" value="500" class="input-number" oninput="onPingSettingsInputChange()">
+              <span class="input-unit">ms</span>
+            </div>
+            <p class="setting-hint">Khuyên dùng: ≤ 500 ms (tải tức thì, không giật lag)</p>
+          </div>
+
+          <div class="setting-box setting-fair">
+            <div class="setting-header">
+              <span class="badge badge-yellow">🟡 Trung Bình (Normal)</span>
+              <span class="text-dim text-sm">Từ Ngưỡng Tốt đến</span>
+            </div>
+            <div class="setting-input-row">
+              <input type="number" id="settingFairMs" min="100" max="10000" step="50" value="1500" class="input-number" oninput="onPingSettingsInputChange()">
+              <span class="input-unit">ms</span>
+            </div>
+            <p class="setting-hint">Khuyên dùng: 500 - 1500 ms (ổn định, chấp nhận được)</p>
+          </div>
+
+          <div class="setting-box setting-poor">
+            <div class="setting-header">
+              <span class="badge badge-orange">🟠 Yếu / Chậm (Slow)</span>
+              <span class="text-dim text-sm">Ping &gt; Ngưỡng Trung Bình</span>
+            </div>
+            <div class="setting-static-val">
+              <span id="lblPoorMinMs">&gt; 1500</span> ms
+            </div>
+            <p class="setting-hint">Có thể bị nghẽn mạng, giật hình hoặc server CDN chậm</p>
+          </div>
+        </div>
+      </div>
+
       <div class="card">
         <div class="card-header flex-between">
           <div>
@@ -276,11 +327,63 @@
           <p class="card-desc">Tạo ra file M3U tinh gọn, chọn link ping thấp nhất cho mỗi kênh kèm mã SHA256 manifest.</p>
         </div>
 
-        <div class="export-options">
-          <label class="checkbox-label">
-            <input type="checkbox" id="chkIncludeBackup" checked>
-            <span>Bao gồm 1 luồng dự phòng <b>(Backup)</b> cho mỗi kênh nếu có</span>
-          </label>
+        <!-- Tiêu chí chọn lọc kênh cho phép Public OTA -->
+        <div class="publish-filters-box card-sub mt-4">
+          <div class="flex-between mb-4">
+            <h4>🎯 Bộ Lọc Tiêu Chí Kênh Cho Phép Xuất Bản [Public OTA]</h4>
+            <span class="badge badge-cyan" id="previewPublishCountBadge">Đang tính toán...</span>
+          </div>
+          <p class="text-sm text-dim mb-4">
+            Admin có thể chọn những loại kênh nào được phép đưa vào bản cập nhật OTA cho thiết bị cầm tay:
+          </p>
+          <div class="filter-checkbox-grid">
+            <label class="checkbox-card checked-good">
+              <input type="checkbox" id="chkPubGood" checked onchange="updatePublishPreview()">
+              <div class="chk-content">
+                <span class="chk-title">🟢 Kênh Tốt (≤ <span class="val-good-ms">500</span>ms)</span>
+                <span class="chk-sub" id="countPubGood">0 kênh</span>
+              </div>
+            </label>
+
+            <label class="checkbox-card checked-fair">
+              <input type="checkbox" id="chkPubFair" checked onchange="updatePublishPreview()">
+              <div class="chk-content">
+                <span class="chk-title">🟡 Kênh T.Bình (&gt;<span class="val-good-ms">500</span>ms - ≤<span class="val-fair-ms">1500</span>ms)</span>
+                <span class="chk-sub" id="countPubFair">0 kênh</span>
+              </div>
+            </label>
+
+            <label class="checkbox-card checked-poor">
+              <input type="checkbox" id="chkPubPoor" onchange="updatePublishPreview()">
+              <div class="chk-content">
+                <span class="chk-title">🟠 Kênh Yếu (&gt; <span class="val-fair-ms">1500</span>ms)</span>
+                <span class="chk-sub" id="countPubPoor">0 kênh</span>
+              </div>
+            </label>
+
+            <label class="checkbox-card checked-standby">
+              <input type="checkbox" id="chkPubStandby" checked onchange="updatePublishPreview()">
+              <div class="chk-content">
+                <span class="chk-title">🟡 Kênh Chờ / Chưa ping</span>
+                <span class="chk-sub" id="countPubStandby">0 kênh</span>
+              </div>
+            </label>
+
+            <label class="checkbox-card checked-dead">
+              <input type="checkbox" id="chkPubDead" onchange="updatePublishPreview()">
+              <div class="chk-content">
+                <span class="chk-title">🔴 Kênh Lỗi / Chết (DEAD)</span>
+                <span class="chk-sub" id="countPubDead">0 kênh</span>
+              </div>
+            </label>
+          </div>
+
+          <div class="export-options mt-4">
+            <label class="checkbox-label">
+              <input type="checkbox" id="chkIncludeBackup" checked>
+              <span>Bao gồm 1 luồng dự phòng <b>(Backup)</b> cho mỗi kênh nếu có</span>
+            </label>
+          </div>
         </div>
 
         <div class="form-actions mt-4">

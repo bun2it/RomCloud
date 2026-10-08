@@ -22,6 +22,7 @@ class Normalizer:
         self.channel_aliases: Dict[str, List[str]] = {}
         self.strip_patterns: List[str] = []
         self._compiled_strips: List[re.Pattern] = []
+        self.ping_thresholds: Dict[str, int] = {"good_ms": 500, "fair_ms": 1500}
 
         self.load_rules()
 
@@ -35,6 +36,7 @@ class Normalizer:
         self.group_mappings = data.get("group_mappings", {})
         self.channel_aliases = data.get("channel_aliases", {})
         self.strip_patterns = data.get("strip_patterns", [])
+        self.ping_thresholds = data.get("ping_thresholds", {"good_ms": 500, "fair_ms": 1500})
 
         self._compiled_strips = [
             re.compile(p, re.IGNORECASE) for p in self.strip_patterns
@@ -44,7 +46,8 @@ class Normalizer:
         data = {
             "group_mappings": self.group_mappings,
             "channel_aliases": self.channel_aliases,
-            "strip_patterns": self.strip_patterns
+            "strip_patterns": self.strip_patterns,
+            "ping_thresholds": self.ping_thresholds
         }
         with open(self.rules_path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
