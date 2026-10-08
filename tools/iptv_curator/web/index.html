@@ -336,6 +336,14 @@
             <div class="player-spinner"></div>
             <p id="playerLoadingText">Đang kết nối luồng phát...</p>
           </div>
+          <div id="playerVlcFallback" class="player-vlc-fallback" style="display: none;">
+            <div class="vlc-icon">🎬</div>
+            <h4>Luồng Này Cần Phát Qua VLC</h4>
+            <p id="playerVlcReason" class="text-sm text-dim">Luồng sử dụng giao thức hoặc codec truyền hình đặc thù mà trình duyệt không hỗ trợ.</p>
+            <button class="btn btn-primary mt-4" onclick="openInVlc()">
+              🚀 Kích Hoạt VLC Ngay
+            </button>
+          </div>
         </div>
         <div class="player-controls-bar">
           <div class="player-meta-info">

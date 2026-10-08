@@ -336,6 +336,10 @@ function renderCurrentPage() {
       : `<span class="badge badge-blue">1 luồng</span>`;
 
     const safeNameAttr = encodeURIComponent(ch.name);
+    const needVlc = best && isVlcRequired(best.url);
+    const playBtnHtml = needVlc
+      ? `<button class="btn btn-action-vlc text-sm" onclick="openInVlc('${encodeURIComponent(best.url)}')" title="Luồng UDP/FLV đặc thù - Kích hoạt VLC">🎬 VLC</button>`
+      : `<button class="btn btn-action-play text-sm" onclick="playChannel('${safeNameAttr}')" title="Xem phát trực tiếp trên Web">▶ Xem</button>`;
 
     return `
       <tr>
@@ -347,9 +351,7 @@ function renderCurrentPage() {
         <td>${countBadge}</td>
         <td>${statusBadge}</td>
         <td style="text-align: right; white-space: nowrap;">
-          <button class="btn btn-action-play text-sm" onclick="playChannel('${safeNameAttr}')" title="Xem phát trực tiếp">
-            ▶ Xem
-          </button>
+          ${playBtnHtml}
           <button class="btn btn-secondary text-sm" onclick="openStreamModal('${safeNameAttr}')" title="Xem chi tiết các nguồn">
             🔍 Nguồn (${ch.stream_count})
           </button>
@@ -430,6 +432,25 @@ function closeStreamModal() {
 }
 
 // 7. Video Player Controller (HLS.js)
+function isVlcRequired(url) {
+  if (!url) return false;
+  const u = url.toLowerCase().trim();
+  if (u.startsWith("udp://") || u.startsWith("rtp://") || u.startsWith("rtmp://") || u.startsWith("rtsp://")) {
+    return true;
+  }
+  if (u.includes(".flv") || u.endsWith(".ts") || u.includes(".mkv")) {
+    return true;
+  }
+  return false;
+}
+
+function showVlcFallbackPrompt(reason) {
+  const vlcFallback = document.getElementById("playerVlcFallback");
+  const vlcReason = document.getElementById("playerVlcReason");
+  if (vlcReason && reason) vlcReason.textContent = reason;
+  if (vlcFallback) vlcFallback.style.display = "flex";
+}
+
 function playChannel(encodedChannelName) {
   const channelName = decodeURIComponent(encodedChannelName);
   const ch = allChannels.find(c => c.name === channelName);
@@ -438,12 +459,22 @@ function playChannel(encodedChannelName) {
     return;
   }
   const streamUrl = ch.best_stream ? ch.best_stream.url : ch.streams[0].url;
+  if (isVlcRequired(streamUrl)) {
+    showToast("📡 Luồng UDP/FLV truyền hình — Đang kích hoạt VLC...", false);
+    openInVlc(streamUrl);
+    return;
+  }
   openVideoPlayer(ch.name, streamUrl, ch.group);
 }
 
 function playSingleStream(encodedChannelName, encodedUrl, streamIdx) {
   const channelName = decodeURIComponent(encodedChannelName);
   const streamUrl = decodeURIComponent(encodedUrl);
+  if (isVlcRequired(streamUrl)) {
+    showToast("📡 Luồng UDP/FLV truyền hình — Đang kích hoạt VLC...", false);
+    openInVlc(streamUrl);
+    return;
+  }
   openVideoPlayer(`${channelName} • Nguồn #${streamIdx + 1}`, streamUrl);
 }
 
@@ -474,7 +505,9 @@ function startPlayback(streamUrl, useProxy = false) {
   const loadingText = document.getElementById("playerLoadingText");
   const statusBadge = document.getElementById("playerStatusBadge");
   const streamInfo = document.getElementById("playerStreamInfo");
+  const vlcFallback = document.getElementById("playerVlcFallback");
 
+  if (vlcFallback) vlcFallback.style.display = "none";
   if (loadingOverlay) loadingOverlay.style.display = "flex";
   if (loadingText) loadingText.textContent = useProxy ? "Đang kết nối qua CORS Proxy..." : "Đang kết nối luồng phát...";
   if (statusBadge) {
@@ -489,6 +522,17 @@ function startPlayback(streamUrl, useProxy = false) {
   video.pause();
   video.removeAttribute("src");
   video.load();
+
+  if (isVlcRequired(streamUrl)) {
+    if (loadingOverlay) loadingOverlay.style.display = "none";
+    if (statusBadge) {
+      statusBadge.className = "badge badge-purple";
+      statusBadge.textContent = "📡 Cần VLC";
+    }
+    showVlcFallbackPrompt("Luồng truyền hình này sử dụng giao thức UDP / Multicast hoặc định dạng FLV/TS mà trình duyệt không hỗ trợ. VLC sẽ giúp bạn phát mượt mà.");
+    openInVlc(streamUrl);
+    return;
+  }
 
   const finalUrl = useProxy ? `/api/proxy_stream?url=${encodeURIComponent(streamUrl)}` : streamUrl;
 
@@ -527,9 +571,9 @@ function startPlayback(streamUrl, useProxy = false) {
           if (loadingOverlay) loadingOverlay.style.display = "none";
           if (statusBadge) {
             statusBadge.className = "badge badge-red";
-            statusBadge.textContent = "🔴 Lỗi luồng";
+            statusBadge.textContent = "🔴 Cần VLC";
           }
-          showToast("Không thể phát luồng này. Bấm 'Mở bằng VLC' để xem ngoài.", true);
+          showVlcFallbackPrompt("Trình duyệt không thể giải mã luồng video này (Codec MPEG-2, âm thanh AC-3 hoặc DRM). Bấm nút bên dưới để mở ngay bằng VLC!");
         }
       }
     });
@@ -563,6 +607,8 @@ function togglePlayerProxy() {
 function closePlayerModal() {
   const modal = document.getElementById("playerModal");
   const video = document.getElementById("videoPlayer");
+  const vlcFallback = document.getElementById("playerVlcFallback");
+  if (vlcFallback) vlcFallback.style.display = "none";
   if (video) {
     video.pause();
     video.removeAttribute("src");

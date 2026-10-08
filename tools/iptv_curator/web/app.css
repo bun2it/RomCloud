@@ -892,6 +892,51 @@ select {
   to { transform: rotate(360deg); }
 }
 
+/* VLC Fallback Card */
+.player-vlc-fallback {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at center, #1e293b, #090d16);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 30px;
+  text-align: center;
+  z-index: 15;
+}
+
+.player-vlc-fallback .vlc-icon {
+  font-size: 52px;
+  margin-bottom: 12px;
+  filter: drop-shadow(0 4px 12px rgba(239, 68, 68, 0.4));
+  animation: pulse-ring 2s infinite ease-in-out;
+}
+
+.player-vlc-fallback h4 {
+  color: #fff;
+  font-size: 19px;
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
+.player-vlc-fallback p {
+  max-width: 460px;
+  line-height: 1.6;
+}
+
+.btn-action-vlc {
+  background-color: rgba(245, 158, 11, 0.15);
+  color: var(--accent-amber);
+  border-color: rgba(245, 158, 11, 0.35);
+  font-weight: 600;
+}
+
+.btn-action-vlc:hover {
+  background-color: rgba(245, 158, 11, 0.25);
+  border-color: var(--accent-amber);
+}
+
 .player-controls-bar {
   display: flex;
   justify-content: space-between;
