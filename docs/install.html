@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="vi">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Cài đặt 1 chạm — RomCloud</title>
+<title>Cài đặt 1 chạm</title>
 <link rel="stylesheet" href="assets/site.css">
 <script src="assets/site.js"></script>
 </head>
@@ -9,8 +9,8 @@
 <div class="wrap">
   <div class="topbar">
     <div class="logo">🎮</div>
-    <div class="brand">ROMCLOUD<small>CÀI ĐẶT 1 CHẠM</small></div>
-    <nav><a href="./">Trang chủ</a></nav>
+    <div class="brand" id="brandName">ROMCLOUD<small>CÀI ĐẶT 1 CHẠM</small></div>
+    <nav><a id="homeLink" href="./">Trang chủ</a></nav>
     <button class="theme-btn" id="themeBtn" onclick="rcThemeToggle()">Giao diện</button>
   </div>
 
@@ -21,7 +21,7 @@
       <br><br><button class="btn" id="btnConn">1️⃣ KẾT NỐI MÁY</button>
       <div class="status" id="devInfo">Chưa kết nối.</div>
     </li>
-    <li><b>Cài RomCloud mới nhất:</b> web tự tải bản mới nhất từ GitHub rồi đẩy vào thẻ nhớ, bung ra, cấp quyền, xong báo DONE.
+    <li><b id="step2Title">Cài RomCloud mới nhất:</b> <span id="step2Desc">web tự tải bản mới nhất từ GitHub rồi đẩy vào thẻ nhớ, bung ra, cấp quyền, xong báo DONE.</span>
       <br><br><button class="btn" id="btnInstall" disabled>2️⃣ CÀI ĐẶT</button>
     </li>
   </ol>
@@ -32,13 +32,13 @@
   <h3 style="margin-top:28px">Cách dự phòng: tải file về máy</h3>
   <p style="font-size:13px;color:var(--dim)">Khi web ở trên không dùng được. Tải 1 file theo hệ điều hành rồi double-click, nó tự làm hết.</p>
   <p style="text-align:center">
-    <a class="btn ghost" href="installers/cai-dat-windows.bat" download>🪟 BẢN WINDOWS</a>
+    <a class="btn ghost" id="dlWin" href="installers/cai-dat-windows.bat" download>🪟 BẢN WINDOWS</a>
     <span style="display:inline-block;width:12px"></span>
-    <a class="btn ghost" href="installers/cai-dat-mac.command" download>🍎 BẢN MAC</a>
+    <a class="btn ghost" id="dlMac" href="installers/cai-dat-mac.command" download>🍎 BẢN MAC</a>
   </p>
   <p style="font-size:13px;color:var(--dim)">Windows lần đầu cần driver USB 1 lần: mở <a href="https://zadig.akeo.ie">zadig.akeo.ie</a>, chọn thiết bị Android/TrimUI → Install WinUSB. Mac mở file .command lần đầu: chuột phải → Open.</p>
 
-  <footer><a href="./">← Trang chủ</a></footer>
+  <footer><a id="homeLink2" href="./">← Trang chủ</a></footer>
 </div>
 <script src="https://cdn.jsdelivr.net/gh/webadb/webadb.js@master/webadb.js"></script>
 <script src="assets/install.js"></script>

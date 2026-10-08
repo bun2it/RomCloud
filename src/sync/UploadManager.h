@@ -48,6 +48,7 @@ struct LocalGameInfo {
     std::string localPath;
     int systemId = 0;
     std::string systemCode;
+    std::string romDir;       // Subfolder path name (e.g. "GBA", "FC", "PS")
     std::string cloudFileId;  // empty if not on cloud
     bool needsUpload = false; // true if local but not on cloud
 };

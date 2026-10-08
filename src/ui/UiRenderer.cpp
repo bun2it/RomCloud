@@ -1515,8 +1515,8 @@ void UiRenderer::drawVirtualKeyboard(const VkState &vk, int x, int y, int cellW,
           drawText(lbl, curX, textYCentered(actY, cellH, fAct), tc, fAct);
         }
       } else if (i == 1) {
-        // R1 / TELEX
-        std::string lbl = vk.telexMode ? "TELEX" : "US";
+        // R1 / ABC-123 (stock): doi bo chu <-> so & ky tu dac biet
+        std::string lbl = vk.symbolMode ? "123" : "ABC";
         int lw = fAct ? textWidth(lbl, fAct) : 0;
         int contentW = (tipW ? tipW + 8 : 0) + lw;
         int curX = cx + (actW - contentW) / 2;
@@ -1526,8 +1526,8 @@ void UiRenderer::drawVirtualKeyboard(const VkState &vk, int x, int y, int cellW,
           curX += tipW + 8;
         }
         if (fAct) {
-          SDL_Color c = vk.telexMode ? SDL_Color{0, 180, 255, 255}
-                                     : SDL_Color{148, 163, 184, 255};
+          SDL_Color c = vk.symbolMode ? SDL_Color{0, 180, 255, 255}
+                                      : SDL_Color{148, 163, 184, 255};
           if (sel)
             c = selFg;
           drawText(lbl, curX, textYCentered(actY, cellH, fAct), c, fAct);

@@ -3,6 +3,8 @@
 #include "../ui/UIManager.h"
 #include "../logging/Logger.h"
 #include "../network/HttpClient.h"
+#include "../network/JsonHelper.h"
+#include "../database/DatabaseManager.h"
 #include "../filesystem/FileSystemManager.h"
 #include "../config/AppConfig.h"
 #include "../input/InputManager.h"
@@ -806,6 +808,109 @@ bool IPTVManager::refreshPlaylistFromUrl(const std::string& filename, std::strin
                  std::to_string(m_channels.size()) + " channels total)");
     return true;
 }
+
+// ---------------------------------------------------------------------------
+// updateOtaPlaylist
+// Tự động kiểm tra manifest và cập nhật Live M3U Playlist từ xa qua OTA
+// ---------------------------------------------------------------------------
+bool IPTVManager::updateOtaPlaylist(std::string& outMessage) {
+    outMessage.clear();
+    std::string defaultManifestUrl = "https://raw.githubusercontent.com/bun2it/RomCloud/main/iptv/iptv_manifest.json";
+    std::string defaultPlaylistUrl = "https://raw.githubusercontent.com/bun2it/RomCloud/main/iptv/live.m3u";
+
+    std::string manifestUrl = DatabaseManager::instance().getSetting("iptv_ota_manifest_url", defaultManifestUrl);
+    std::string playlistUrl = DatabaseManager::instance().getSetting("iptv_ota_playlist_url", defaultPlaylistUrl);
+
+    Logger::info("IPTV: Checking OTA playlist update from: " + manifestUrl);
+
+    // 1. Fetch manifest
+    HttpResponse mResp = HttpClient::instance().get(manifestUrl, {}, 10);
+    std::string targetM3uUrl = playlistUrl;
+    std::string otaVersion = "";
+    std::string otaSha256 = "";
+    int manifestChannelCount = 0;
+
+    if (mResp.success && (mResp.statusCode == 200 || mResp.statusCode == 206)) {
+        otaVersion = JsonHelper::extractString(mResp.body, "version");
+        otaSha256 = JsonHelper::extractString(mResp.body, "sha256");
+        manifestChannelCount = JsonHelper::extractInt(mResp.body, "channel_count", 0);
+        std::string dlUrl = JsonHelper::extractString(mResp.body, "download_url");
+        if (!dlUrl.empty()) {
+            targetM3uUrl = dlUrl;
+        }
+    } else {
+        Logger::warn("IPTV: Could not fetch manifest, attempting direct playlist download from: " + playlistUrl);
+    }
+
+    // 2. Fetch M3U playlist
+    Logger::info("IPTV: Fetching OTA M3U playlist from: " + targetM3uUrl);
+    HttpResponse pResp = HttpClient::instance().get(targetM3uUrl, {}, 25);
+    if (!pResp.success || pResp.body.empty() || (pResp.statusCode != 200 && pResp.statusCode != 206)) {
+        outMessage = "Lỗi kết nối tải playlist OTA (HTTP " + std::to_string(pResp.statusCode) + "): " + pResp.error;
+        Logger::error("IPTV OTA update error: " + outMessage);
+        return false;
+    }
+
+    // Kiểm tra định dạng M3U
+    if (pResp.body.find("#EXTM3U") == std::string::npos && pResp.body.find("#EXTINF") == std::string::npos) {
+        outMessage = "Nội dung tải về không phải định dạng M3U hợp lệ.";
+        Logger::error("IPTV OTA update error: " + outMessage);
+        return false;
+    }
+
+    // 3. Ghi đè vào m_iptvDir + "/live.m3u"
+    std::string targetFile = m_iptvDir + "/live.m3u";
+    std::ofstream ofs(targetFile, std::ios::binary);
+    if (!ofs.is_open()) {
+        outMessage = "Không thể ghi file " + targetFile;
+        Logger::error("IPTV OTA update error: " + outMessage);
+        return false;
+    }
+    ofs.write(pResp.body.data(), pResp.body.size());
+    ofs.close();
+    sync();
+
+    // 4. Đăng ký vào sources.txt
+    IPTVSource src;
+    src.filename = "live.m3u";
+    src.name = "Kênh Trực Tuyến (OTA Live)";
+    src.type = "url";
+    src.url = targetM3uUrl;
+    src.lastRefreshed = std::time(nullptr);
+    src.fileSize = pResp.body.size();
+    src.refreshIntervalHours = 24;
+    m_sourcesMeta["live.m3u"] = src;
+    saveSourcesMeta();
+
+    // 5. Lưu thông tin phiên bản vào Database
+    if (!otaVersion.empty()) {
+        DatabaseManager::instance().setSetting("iptv_ota_version", otaVersion);
+    }
+    if (!otaSha256.empty()) {
+        DatabaseManager::instance().setSetting("iptv_ota_sha256", otaSha256);
+    }
+
+    // 6. Reload lại toàn bộ playlist vào RAM
+    loadPlaylists(m_iptvDir);
+
+    const Playlist* pl = getPlaylistById("live");
+    if (!pl) {
+        for (const auto& p : m_playlists) {
+            if (p.sourceFile == "live.m3u") {
+                pl = &p;
+                break;
+            }
+        }
+    }
+    int totalChans = pl ? static_cast<int>(pl->channelCount()) : manifestChannelCount;
+    if (totalChans <= 0) totalChans = static_cast<int>(m_channels.size());
+
+    outMessage = "Đã cập nhật OTA: " + std::to_string(totalChans) + " kênh" +
+                 (!otaVersion.empty() ? (" (" + otaVersion + ")") : "") + "!";
+    Logger::info("IPTV: OTA update success: " + outMessage);
+    return true;
+}
+
 
 // ---------------------------------------------------------------------------
 // checkAndAutoRefresh

@@ -49,13 +49,19 @@ bool UIManager::handleExplorerKeyboardFor(FileExplorer& ex) {
     if (input.isButtonJustPressed(Button::DOWN)) { VirtualKeyboard::move(vk, 1, 0); return true; }
     if (input.isButtonJustPressed(Button::LEFT)) { VirtualKeyboard::move(vk, 0, -1); return true; }
     if (input.isButtonJustPressed(Button::RIGHT)) { VirtualKeyboard::move(vk, 0, 1); return true; }
-    if (input.isButtonJustPressed(Button::X)) { VirtualKeyboard::typeSpace(vk); return true; }
-    if (input.isButtonJustPressed(Button::Y)) { VirtualKeyboard::backspace(vk); return true; }
+    if (input.isButtonRepeat(Button::X)) { VirtualKeyboard::typeSpace(vk); return true; }
+    if (input.isButtonRepeat(Button::Y)) { VirtualKeyboard::backspace(vk); return true; }
     if (input.isButtonJustPressed(Button::L1)) { vk.shift = !vk.shift; return true; }
     if (input.isButtonJustPressed(Button::R1)) {
-        vk.telexMode = !vk.telexMode;
-        showToast(vk.telexMode ? "Chế độ: TELEX" : "Chế độ: TIẾNG ANH (US)",
-                  {0, 180, 255, 255}, 1200);
+        VirtualKeyboard::toggleSymbol(vk, [this](const char* msg) {
+            showToast(msg, {0, 180, 255, 255}, 1200);
+        });
+        return true;
+    }
+    if (input.isButtonJustPressed(Button::SELECT)) {
+        VirtualKeyboard::toggleTelex(vk, [this](const char* msg) {
+            showToast(msg, {0, 180, 255, 255}, 1200);
+        });
         return true;
     }
     if (input.isButtonJustPressed(Button::START)) {
@@ -63,14 +69,13 @@ bool UIManager::handleExplorerKeyboardFor(FileExplorer& ex) {
         syncExplorerDialogs();
         return true;
     }
-    if (input.isButtonJustPressed(Button::A)) {
+    if (input.isButtonRepeat(Button::A)) {
         if (vk.row < 4) {
             char ch = VirtualKeyboard::charAt(vk);
             if (ch) VirtualKeyboard::typeChar(vk, ch);
         } else {
-            VkAction act = VirtualKeyboard::pressA(vk, [this, &vk](const char*) {
-                showToast(vk.telexMode ? "Chế độ: TELEX" : "Chế độ: TIẾNG ANH (US)",
-                          {0, 180, 255, 255}, 1200);
+            VkAction act = VirtualKeyboard::pressA(vk, [this](const char* msg) {
+                showToast(msg, {0, 180, 255, 255}, 1200);
             }, false);
             if (act == VkAction::Commit) {
                 ex.commitKeyboard();

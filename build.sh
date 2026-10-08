@@ -55,6 +55,16 @@ RELEASE="${RELEASE:-0}"
 GIT_SHA="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
 echo "Build commit: $GIT_SHA"
 
+# nsgif is strict C99 (uses `restrict`) — compile as C, not C++.
+mkdir -p build
+$ZIG cc -target aarch64-linux-gnu.2.33 -O2 -Isrc/browser/nsgif \
+    -c src/browser/nsgif/gif.c -o build/nsgif_gif.o
+$ZIG cc -target aarch64-linux-gnu.2.33 -O2 -Isrc/browser/nsgif \
+    -c src/browser/nsgif/lzw.c -o build/nsgif_lzw.o
+# Duktape is C99 — same treatment.
+$ZIG cc -target aarch64-linux-gnu.2.33 -O2 -Isrc/browser/duktape \
+    -c src/browser/duktape/duktape.c -o build/duktape.o
+
 $ZIG c++ \
     -target aarch64-linux-gnu.2.33 \
     -std=c++17 \
@@ -121,8 +131,22 @@ $ZIG c++ \
     src/localsend/LocalSendManager.cpp \
     src/browser/HtmlRenderer.cpp \
     src/browser/BrowserManager.cpp \
+    src/browser/JsEngine.cpp \
+    src/browser/SvgRaster.cpp \
+    src/browser/netsurf/NetSurfBridge.cpp \
+    src/browser/netsurf/NetSurfLayout.cpp \
+    src/browser/netsurf/NetSurfRenderer.cpp \
+    src/browser/netsurf/NetSurfEngine.cpp \
+    build/nsgif_gif.o \
+    build/nsgif_lzw.o \
+    build/duktape.o \
     src/cast/CastManager.cpp \
     -Lsysroot/lib \
+    -lcss \
+    -ldom \
+    -lhubbub \
+    -lparserutils \
+    -lwapcaplet \
     -lSDL2 \
     -lSDL2_image \
     -lSDL2_ttf \

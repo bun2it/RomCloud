@@ -6,6 +6,9 @@
 
 namespace RomCloud {
 
+// P4: cookie jar path (tmpfs on Brick — session cookies, gone on reboot).
+static const char* kCookieJarPath = "/tmp/romcloud_cookies.txt";
+
 static size_t writeCallback(void* contents, size_t size, size_t nmemb, void* userp) {
     size_t totalSize = size * nmemb;
     std::string* str = static_cast<std::string*>(userp);
@@ -60,6 +63,27 @@ void HttpClient::shutdown() {
     }
 }
 
+void HttpClient::clearCookies() {
+    unlink(kCookieJarPath);
+}
+
+// Apply the options shared by GET and POST handles.
+static void applyCommonOptions(CURL* curl, struct curl_slist* chunk, int timeoutSec) {
+    (void)chunk;
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, timeoutSec);
+    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 6);
+    curl_easy_setopt(curl, CURLOPT_IPRESOLVE, CURL_IPRESOLVE_V4);
+    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 10L);
+    // P4: cookie engine backed by jar file — every handle in the app shares
+    // the portal session (each request builds a fresh easy handle).
+    curl_easy_setopt(curl, CURLOPT_COOKIEFILE, kCookieJarPath);
+    curl_easy_setopt(curl, CURLOPT_COOKIEJAR, kCookieJarPath);
+    // P4: ask for gzip/deflate/br — vnexpress serves gzip, ~5x smaller.
+    curl_easy_setopt(curl, CURLOPT_ACCEPT_ENCODING, "");
+    curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
+}
+
 std::string HttpClient::urlEncode(const std::string& value) {
     if (!m_initialized) init();
     CURL* curl = curl_easy_init();
@@ -99,6 +123,22 @@ HttpResponse HttpClient::get(const std::string& url, const std::vector<std::stri
     }
 
     struct curl_slist* chunk = nullptr;
+    chunk = curl_slist_append(chunk, "Sec-CH-UA-Mobile: ?1");
+    chunk = curl_slist_append(chunk, "Sec-CH-UA-Platform: \"Android\"");
+    // Do NOT advertise image/webp: TrimUI Brick's SDL2_image does not have libwebp.
+    // Advertising webp causes CDNs (VnExpress, etc.) to transcode JPEG/PNG to WebP,
+    // which then fails to decode on the device.
+    bool hasAccept = false;
+    for (const auto& h : headers) {
+        if (h.rfind("Accept:", 0) == 0 || h.rfind("accept:", 0) == 0) {
+            hasAccept = true;
+            break;
+        }
+    }
+    if (!hasAccept) {
+        chunk = curl_slist_append(chunk, "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/jpeg,image/png,image/*;q=0.8,*/*;q=0.7");
+    }
+    chunk = curl_slist_append(chunk, "Accept-Language: vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7");
     for (const auto& h : headers) {
         chunk = curl_slist_append(chunk, h.c_str());
     }
@@ -109,10 +149,7 @@ HttpResponse HttpClient::get(const std::string& url, const std::vector<std::stri
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response.body);
     curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, headerCallback);
     curl_easy_setopt(curl, CURLOPT_HEADERDATA, &response.headers);
-    curl_easy_setopt(curl, CURLOPT_TIMEOUT, timeoutSec);
-    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 6);
-    curl_easy_setopt(curl, CURLOPT_IPRESOLVE, CURL_IPRESOLVE_V4);
-    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+    applyCommonOptions(curl, chunk, timeoutSec);
     // Verbose stderr logging is off by default — set ROMCLOUD_CURL_VERBOSE=1 in
     // env to see DNS/TLS/handshake chatter on the device console.
     if (getenv("ROMCLOUD_CURL_VERBOSE")) {
@@ -123,12 +160,10 @@ HttpResponse HttpClient::get(const std::string& url, const std::vector<std::stri
     }
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
-    curl_easy_setopt(curl, CURLOPT_USERAGENT, "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36");
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.6099.230 Mobile Safari/537.36");
     curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
-    // Phase 2 — audit M7: cap response size at 2MB so a runaway page or
-    // a hostile server can't OOM the device. curl returns CURLE_FILESIZE_EXCEEDED
-    // (63) once the limit is hit; the caller treats that as a normal failure.
-    curl_easy_setopt(curl, CURLOPT_MAXFILESIZE_LARGE, static_cast<curl_off_t>(2 * 1024 * 1024));
+    // Cap response size at 10MB to avoid OOM while allowing full news / modern pages.
+    curl_easy_setopt(curl, CURLOPT_MAXFILESIZE_LARGE, static_cast<curl_off_t>(10 * 1024 * 1024));
     Logger::info("HTTP GET start: " + url + " (timeout=" + std::to_string(timeoutSec) + "s)");
 
     CURLcode res = curl_easy_perform(curl);
@@ -172,6 +207,10 @@ HttpResponse HttpClient::post(const std::string& url, const std::string& postDat
     }
 
     struct curl_slist* chunk = nullptr;
+    chunk = curl_slist_append(chunk, "Sec-CH-UA-Mobile: ?1");
+    chunk = curl_slist_append(chunk, "Sec-CH-UA-Platform: \"Android\"");
+    chunk = curl_slist_append(chunk, "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8");
+    chunk = curl_slist_append(chunk, "Accept-Language: vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7");
     for (const auto& h : headers) {
         chunk = curl_slist_append(chunk, h.c_str());
     }
@@ -185,19 +224,16 @@ HttpResponse HttpClient::post(const std::string& url, const std::string& postDat
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response.body);
     curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, headerCallback);
     curl_easy_setopt(curl, CURLOPT_HEADERDATA, &response.headers);
-    curl_easy_setopt(curl, CURLOPT_TIMEOUT, timeoutSec);
-    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 6);
-    curl_easy_setopt(curl, CURLOPT_IPRESOLVE, CURL_IPRESOLVE_V4);
-    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+    applyCommonOptions(curl, chunk, timeoutSec);
     if (access("/etc/ssl/certs/ca-certificates.crt", F_OK) == 0) {
         curl_easy_setopt(curl, CURLOPT_CAINFO, "/etc/ssl/certs/ca-certificates.crt");
     }
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
-    curl_easy_setopt(curl, CURLOPT_USERAGENT, "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36");
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.6099.230 Mobile Safari/537.36");
     curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
-    // Same 2MB response cap as GET (audit M7).
-    curl_easy_setopt(curl, CURLOPT_MAXFILESIZE_LARGE, static_cast<curl_off_t>(2 * 1024 * 1024));
+    // Cap response size at 10MB to avoid OOM while allowing full portal/web forms.
+    curl_easy_setopt(curl, CURLOPT_MAXFILESIZE_LARGE, static_cast<curl_off_t>(10 * 1024 * 1024));
 
     CURLcode res = curl_easy_perform(curl);
     if (res == CURLE_OK) {

@@ -34,6 +34,10 @@ public:
     bool isButtonPressed(Button btn) const;
     bool isButtonJustPressed(Button btn) const;
     bool isButtonJustReleased(Button btn) const;
+    // Typematic repeat for keyboard typing (A/X/Y): first press immediate,
+    // then repeat after 400ms every 70ms while held. Use ONLY in virtual
+    // keyboard input handlers — never for confirm/cancel/play actions.
+    bool isButtonRepeat(Button btn) const;
     void reset();
     const char* getControllerName() const;
 

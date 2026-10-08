@@ -27,6 +27,11 @@ public:
 
     std::string urlEncode(const std::string& value);
 
+    // P4 (vnexpress plan): cookie jar shared by all handles (portal logins
+    // are multi-step and stateless handles would drop session cookies).
+    // Backed by a file so cookies survive across easy handles.
+    void clearCookies();
+
 private:
     HttpClient() = default;
     ~HttpClient();

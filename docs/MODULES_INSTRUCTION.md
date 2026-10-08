@@ -215,12 +215,40 @@ class ImageCache {
 
 UiRenderer giu ImageCache m_images{256} + wrapper getImage/getOrLoadImage/clearImages.
 
-## 10. Phu tro giu nguyen
+## 10. Web Browser - src/browser/ (2 engine)
+
+Trinh duyet web cho may Brick (1024x768). UIManager chi goi qua BrowserManager + HtmlRenderer/NetSurfEngine, khong cham DOM truc tiep.
+
+```
+BrowserManager (singleton facade: openUrl/close/goBack/refresh, settings luu browser.cfg)
+ +- LITE (mac dinh): HtmlRenderer — tu parse HTML, CSS subset (specificity/selector),
+ |    layout, render SDL_ttf. Worker fetch HTTP/anh/CSS; main thread giu DOM+texture.
+ +- FULL: NetSurfEngine — libhubbub parse -> libdom -> libcss cascade ->
+      NetSurfLayout (RenderBox tree, block/flex) -> NetSurfRenderer (ve SDL).
+      P16: loadHtml() chi QUEUE, worker layout roi poll() (trong render()) nhan tree.
+ +- JsEngine — Duktape, 1 heap/page, DOM toi thieu (getElementById/querySelector/
+      XHR/timers), epoch-check; worker XHR chi cham job duoi mutex.
+```
+
+Quy tac:
+1. Chi mo http/https (BrowserManager::openUrl whitelist, tu choi file://, javascript:, ...).
+2. Thread: worker duoc fetch/decode (CPU-only); DOM/SDL_Texture chi main thread. Chuyen giao qua mutex + poll() moi frame.
+3. Tai nguyen co cap: anh 4 in-flight/24 cache/2MB, CSS 8 inline + 8 external rieng biet (P9e), JS 64KB/file/4 file.
+4. Doi engine (SELECT trong browser) -> refreshAfterSettings(); FULL->LITE rebuild tree tu m_rawHtml.
+5. Form (P17): LITE dung HtmlRenderer (input/checkbox/select/submit + VK). FULL dung RenderBox (inputType/value/checked/options, hidden=phantom) + NetSurfEngine (editing API, submitFocusedForm -> HtmlRenderer::fetchAsync). UIManager wire VK chung cho ca 2 engine qua lambda eng*.
+6. Flow 2 lop (P18): BROWSER (header/URL bar/viewport/footer; Y mo thang keyboard, B back/X forward, L1/R1 cuon) <-> BROWSER_INPUT (keyboard US + history pill + TLD pill; A tren pill = mo luon). Khong con mode web-mau rieng (da xoa m_browserUrlInputMode).
+7. Render LUON clip vao content viewport (112..714): HtmlRenderer::render() set SDL clip quanh vong renderElement; NetSurfRenderer::render() da co. Khong clip -> hang lech bien se ve de len header/URL bar.
+8. B khi dang edit <input> = Huy edit (restore gia tri goc), KHONG phai back-nav. Top-level B handler phai check m_browserFieldEditing DAU TIEN (qua cancelBrowserFieldEdit()), vi no "an" nut truoc ca field-edit routing.
+9. BrowserManager::normalizeUrl(): user go "google.com" -> tu them "https://" (trim whitespace truoc). Chi reject that khi co scheme la nhung khong phai http(s) (file://, javascript: ...).
+10. FULL inline layout: RenderBox.isInline=true cho #text + span/a/b/i/em/... (createBoxTree). layoutBlockBox gom inline children lien tiep thanh inline run -> layoutInlineRun() chay ngang + wrap chu (khong xep doc, khong de chu). Block children van xep doc. Inline co anh ma khong co chu -> fallback ve block.
+11. Them .cpp moi vao build.sh (can -ldom -lhubbub -lcss -lwapcaplet cho FULL).
+
+## 11. Phu tro giu nguyen
 
 - TelexHelper (src/ui/TelexHelper.h): processTelex, popUtf8, splitUtf8, bang dau. Chi goi qua VirtualKeyboard.
 - UiTheme (src/ui/UiTheme.h): token mau, APP_W=1024/APP_H=768, FOOTER_Y/H, Layout A 65/35, enum PadBtn, struct FooterHint.
 
-## 11. Checklist khi them man hinh moi
+## 12. Checklist khi them man hinh moi
 
 1. Ve → m_ui.draw*, mau/geometry tu UiTheme::, khong hardcode.
 2. Nhap lieu → 1 VkState + VirtualKeyboard::*, ve bang drawVirtualKeyboard.

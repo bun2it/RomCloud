@@ -61,7 +61,7 @@ void UIManager::renderExplorerKeyboardFor(FileExplorer& ex) {
     // ─── Bottom: Compact Virtual Keyboard (Y = 452..706) ───
     static std::string s0, s1, s2, s3, s4;
     s0 = vk.shift ? "ABC" : "abc";
-    s1 = vk.telexMode ? "TELEX" : "US";
+    s1 = vk.symbolMode ? "123" : "ABC";
     s2 = "Cách";
     s3 = "Xóa";
     s4 = "Xong";
@@ -72,11 +72,14 @@ void UIManager::renderExplorerKeyboardFor(FileExplorer& ex) {
                              exActs, true, true, 1);
 
     // ─── Bottom Bar: drawAppFooter tự vẽ nền (B = Hủy) ───
+    // R1 = ABC/123 giong stock; SELECT = Telex (nhan hien trang thai).
+    std::string telexLbl = vk.telexMode ? "Telex: Bật" : "Telex: Tắt";
     drawAppFooter({{UiTheme::PadBtn::A, "Nhập"},
                    {UiTheme::PadBtn::X, "Cách"},
                    {UiTheme::PadBtn::Y, "Xóa"},
                    {UiTheme::PadBtn::L1, "Hoa"},
-                   {UiTheme::PadBtn::R1, "Telex"},
+                   {UiTheme::PadBtn::R1, "ABC/123"},
+                   {UiTheme::PadBtn::SELECT, telexLbl.c_str()},
                    {UiTheme::PadBtn::START, "Xong"},
                    {UiTheme::PadBtn::B, "Hủy"}});
 }

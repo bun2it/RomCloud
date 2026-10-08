@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="vi">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>RomCloud — Office Go cho TrimUI Brick</title>
+<title>bun2it — Apps cho TrimUI Brick</title>
 <link rel="stylesheet" href="assets/site.css">
 <script src="assets/site.js"></script>
 </head>
@@ -9,51 +9,141 @@
 <div class="wrap">
   <div class="topbar">
     <div class="logo">🎮</div>
-    <div class="brand">ROMCLOUD<small>OFFICE GO • TRIMUI BRICK</small></div>
-    <nav><a href="install.html">Cài đặt 1 chạm</a><a href="https://github.com/bun2it/RomCloud/releases">Tải về</a></nav>
+    <div class="brand">bun2it<small>APPS • TRIMUI BRICK</small></div>
+    <nav><a href="install.html">Cài đặt 1 chạm</a><a id="navDl" href="https://github.com/bun2it/RomCloud/releases">Tải về</a></nav>
     <button class="theme-btn" id="themeBtn" onclick="rcThemeToggle()">Giao diện</button>
   </div>
 
   <div class="hero">
-    <h1>ROM<span class="y">CLOUD</span></h1>
-    <p>Ứng dụng tiện ích thông minh cho dân văn phòng trên TrimUI Brick.<br>
-    Lịch làm việc • Thời tiết • Camera giao thông • Giá cả • Đồng hồ • YouTube • IPTV</p>
-    <a class="btn" href="install.html">⚡ CÀI ĐẶT 1 CHẠM</a>
+    <div class="app-switch">
+      <div class="app-card active" id="card-romcloud" onclick="selectApp('romcloud')">
+        <div class="app-emoji">🎮</div>
+        <div><h2>RomCloud</h2><p>Office Go cho TrimUI Brick</p></div>
+      </div>
+      <div class="app-card" id="card-brickdrop" onclick="selectApp('brickdrop')">
+        <div class="app-emoji">📦</div>
+        <div><h2>BrickDrop</h2><p>Gửi file Brick ↔ Brick</p></div>
+      </div>
+    </div>
+    <h1 id="heroTitle"></h1>
+    <p id="heroDesc"></p>
+    <a class="btn" id="installBtn" href="install.html?app=romcloud">⚡ CÀI ĐẶT 1 CHẠM</a>
     <span style="display:inline-block;width:12px"></span>
     <a class="btn ghost" id="dlBtn" href="https://github.com/bun2it/RomCloud/releases/latest">⬇ Tải bản mới nhất</a>
     <p id="verLine" style="margin-top:12px"></p>
     <p id="newsBody" style="display:none;margin:12px auto 0;max-width:640px;text-align:left;font-size:13px;color:var(--dim);white-space:pre-line"></p>
   </div>
 
-  <div class="grid">
-    <div class="card"><img class="feat" src="assets/features/SYNC.png" alt="Đồng bộ"><div class="txt"><h3>Đồng bộ Drive</h3><p>Quét mã QR là liên kết Drive cá nhân, đồng bộ ROM 2 chiều, sao lưu tự động.</p></div></div>
-    <div class="card"><img class="feat" src="assets/features/OFFICEGO.png" alt="OfficeGo"><div class="txt"><h3>Lịch &amp; Thời tiết</h3><p>Lịch làm việc, sự kiện sắp tới, báo thức, lịch âm, thời tiết và camera giao thông.</p></div></div>
-    <div class="card"><img class="feat" src="assets/features/CAST.png" alt="GameCast"><div class="txt"><h3>GameCast</h3><p>Chiếu màn hình Brick lên TV và laptop qua mạng LAN.</p></div></div>
-    <div class="card"><img class="feat" src="assets/features/GAMES.png" alt="Thư viện"><div class="txt"><h3>Thư viện game</h3><p>Quản lý ROM local + cloud, tự cào bìa, tìm kiếm, bác sĩ ROM lạc chỗ.</p></div></div>
-    <div class="card"><img class="feat" src="assets/features/YOUTUBE.png" alt="YouTube"><div class="txt"><h3>YouTube</h3><p>Tìm và phát 720p có tiếng, chuyển chất lượng ngay khi đang xem.</p></div></div>
-    <div class="card"><img class="feat" src="assets/features/TV.png" alt="TV"><div class="txt"><h3>Xem TV</h3><p>Hàng trăm kênh truyền hình trực tuyến, nhóm kênh, yêu thích.</p></div></div>
-    <div class="card"><img class="feat" src="assets/features/FOLDER.png" alt="File"><div class="txt"><h3>File Explorer</h3><p>Duyệt file 2 panel trên thẻ nhớ, sao chép, giải nén, xem text.</p></div></div>
-    <div class="card"><img class="feat" src="assets/features/LOCALSEND.png" alt="LocalSend"><div class="txt"><h3>LocalSend</h3><p>Gửi nhận file, ROM với máy khác trong mạng LAN, không cần mạng ngoài.</p></div></div>
-  </div>
+  <div class="grid" id="featGrid"></div>
 
-  <div class="warn">📱 <b>Mở web điều khiển trên Brick:</b> không cần gõ IP — mở app trên Brick → <b>Liên kết Drive</b> → <b>quét mã QR</b> góc phải bằng điện thoại là vào thẳng. Hoặc nhập IP dưới đây (web nhớ lần sau).</div>
+  <div id="portalSection">
+    <div class="warn">📱 <b>Mở web điều khiển trên Brick:</b> không cần gõ IP — mở app trên Brick → <b>Liên kết Drive</b> → <b>quét mã QR</b> góc phải bằng điện thoại là vào thẳng. Hoặc nhập IP dưới đây (web nhớ lần sau).</div>
 
-  <div class="card" style="margin-bottom:24px">
-    <div style="display:flex;gap:10px;align-items:end;flex-wrap:wrap">
-      <div style="flex:1;min-width:200px"><label style="font-size:11px;color:var(--dim);display:block;margin-bottom:4px">IP của Brick (cùng WiFi)</label>
-      <input type="text" id="brickIp" placeholder="192.168.1.155" style="width:100%;padding:10px 12px;background:var(--bg);border:1px solid var(--line);border-radius:10px;color:var(--fg);font-size:14px;font-family:inherit"></div>
-      <button class="btn" id="btnPortal">🌐 MỞ PORTAL</button>
+    <div class="card" style="margin-bottom:24px">
+      <div style="display:flex;gap:10px;align-items:end;flex-wrap:wrap">
+        <div style="flex:1;min-width:200px"><label style="font-size:11px;color:var(--dim);display:block;margin-bottom:4px">IP của Brick (cùng WiFi)</label>
+        <input type="text" id="brickIp" placeholder="192.168.1.155" style="width:100%;padding:10px 12px;background:var(--bg);border:1px solid var(--line);border-radius:10px;color:var(--fg);font-size:14px;font-family:inherit"></div>
+        <button class="btn" id="btnPortal">🌐 MỞ PORTAL</button>
+      </div>
     </div>
   </div>
 
-  <div class="warn">📦 <b>Cài 1 chạm:</b> cắm Brick vào laptop bằng cáp USB → mở trang <a href="install.html">Cài đặt</a> bằng <b>Chrome/Edge</b> → bấm 1 nút, web tự đẩy app vào máy. Không cần gõ lệnh.</div>
+  <div class="warn">📦 <b>Cài 1 chạm:</b> cắm Brick vào laptop bằng cáp USB → mở trang <a id="installLink" href="install.html?app=romcloud">Cài đặt</a> bằng <b>Chrome/Edge</b> → bấm 1 nút, web tự đẩy app vào máy. Không cần gõ lệnh.</div>
 
   <footer>
-    RomCloud • <a href="privacy.html">Quyền riêng tư</a> • <a href="terms.html">Điều khoản</a> •
-    <a href="https://github.com/bun2it/RomCloud">GitHub</a> • Liên hệ: bun2it@gmail.com
+    bun2it • <a href="https://github.com/bun2it/RomCloud">RomCloud</a> • <a href="https://github.com/bun2it/Brickdrop">BrickDrop</a> • <a href="privacy.html">Quyền riêng tư</a> • <a href="terms.html">Điều khoản</a> • Liên hệ: bun2it@gmail.com
   </footer>
 </div>
 <script>
+var APPS = {
+  romcloud: {
+    repo: "bun2it/RomCloud",
+    title: 'ROM<span class="y">CLOUD</span>',
+    pageTitle: "RomCloud — Office Go cho TrimUI Brick",
+    desc: "Ứng dụng tiện ích thông minh cho dân văn phòng trên TrimUI Brick.<br>Lịch làm việc • Thời tiết • Camera giao thông • Giá cả • Đồng hồ • YouTube • IPTV",
+    showPortal: true,
+    features: [
+      {img: "assets/features/SYNC.png", t: "Đồng bộ Drive", d: "Quét mã QR là liên kết Drive cá nhân, đồng bộ ROM 2 chiều, sao lưu tự động."},
+      {img: "assets/features/OFFICEGO.png", t: "Lịch & Thời tiết", d: "Lịch làm việc, sự kiện sắp tới, báo thức, lịch âm, thời tiết và camera giao thông."},
+      {img: "assets/features/CAST.png", t: "GameCast", d: "Chiếu màn hình Brick lên TV và laptop qua mạng LAN."},
+      {img: "assets/features/GAMES.png", t: "Thư viện game", d: "Quản lý ROM local + cloud, tự cào bìa, tìm kiếm, bác sĩ ROM lạc chỗ."},
+      {img: "assets/features/YOUTUBE.png", t: "YouTube", d: "Tìm và phát 720p có tiếng, chuyển chất lượng ngay khi đang xem."},
+      {img: "assets/features/TV.png", t: "Xem TV", d: "Hàng trăm kênh truyền hình trực tuyến, nhóm kênh, yêu thích."},
+      {img: "assets/features/FOLDER.png", t: "File Explorer", d: "Duyệt file 2 panel trên thẻ nhớ, sao chép, giải nén, xem text."},
+      {img: "assets/features/LOCALSEND.png", t: "LocalSend", d: "Gửi nhận file, ROM với máy khác trong mạng LAN, không cần mạng ngoài."}
+    ]
+  },
+  brickdrop: {
+    repo: "bun2it/Brickdrop",
+    title: 'BRICK<span class="y">DROP</span>',
+    pageTitle: "BrickDrop — Gửi file giữa các máy TrimUI Brick",
+    desc: "Gửi file qua lại giữa các máy TrimUI Brick Pro.<br>Không cần WiFi nhà • Không cần internet • Không cần dây cáp",
+    showPortal: false,
+    features: [
+      {icon: "⚡", t: "Gửi file nhanh", d: "Chọn file, chọn máy, bấm gửi. File tự chạy sang máy kia."},
+      {icon: "📁", t: "Gửi cả thư mục", d: "Chọn 1 thư mục là gửi nguyên cả thư mục sang."},
+      {icon: "🔍", t: "Tự tìm thấy nhau", d: "Hai máy mở app là thấy nhau, dù có chung WiFi hay không. Không cần chỉnh gì thêm."},
+      {icon: "💾", t: "Tự chọn nơi lưu", d: "Chọn thư mục để chứa file nhận về."},
+      {icon: "📇", t: "Danh bạ", d: "Lưu máy quen vào danh bạ, chỉ hiện những máy mình muốn thấy."},
+      {icon: "🗂️", t: "Quản lý file", d: "Sao chép, dời, xoá, bung file zip ngay trong app."},
+      {icon: "✅", t: "File được kiểm tra", d: "File nhận về được kiểm tra đầy đủ trước khi lưu, file lỗi sẽ bị từ chối."},
+      {icon: "🔄", t: "Tự cập nhật", d: "Có bản mới là app tự báo, bấm một nút là xong."}
+    ]
+  }
+};
+var relCache = {};
+var curApp = "romcloud";
+
+function cardHTML(f) {
+  var media = f.img
+    ? '<img class="feat" src="' + f.img + '" alt="">'
+    : '<div class="feat-emoji">' + f.icon + '</div>';
+  return '<div class="card">' + media + '<div class="txt"><h3>' + f.t + '</h3><p>' + f.d + '</p></div></div>';
+}
+
+function loadRelease(key) {
+  var app = APPS[key];
+  var verLine = document.getElementById("verLine");
+  var newsBody = document.getElementById("newsBody");
+  var dlBtn = document.getElementById("dlBtn");
+  dlBtn.href = "https://github.com/" + app.repo + "/releases/latest";
+  verLine.textContent = "";
+  newsBody.style.display = "none";
+  newsBody.textContent = "";
+  function apply(j) {
+    if (!j || !j.tag_name) return;
+    verLine.textContent = "Bản mới nhất: " + j.tag_name;
+    var a = (j.assets || []).filter(function (x) { return /\.zip$/.test(x.name); })[0];
+    if (a) dlBtn.href = a.browser_download_url;
+    if (j.body && j.body.trim()) {
+      newsBody.textContent = "Có gì mới trong " + j.tag_name + ":\n" + j.body.trim();
+      newsBody.style.display = "block";
+    }
+  }
+  if (relCache[key]) { apply(relCache[key]); return; }
+  fetch("https://api.github.com/repos/" + app.repo + "/releases/latest")
+    .then(function (r) { return r.json(); })
+    .then(function (j) { relCache[key] = j; if (key === curApp) apply(j); })
+    .catch(function () {});
+}
+
+function selectApp(key) {
+  if (!APPS[key]) return;
+  curApp = key;
+  var app = APPS[key];
+  document.getElementById("card-romcloud").classList.toggle("active", key === "romcloud");
+  document.getElementById("card-brickdrop").classList.toggle("active", key === "brickdrop");
+  document.title = app.pageTitle;
+  document.getElementById("heroTitle").innerHTML = app.title;
+  document.getElementById("heroDesc").innerHTML = app.desc;
+  document.getElementById("installBtn").href = "install.html?app=" + key;
+  document.getElementById("installLink").href = "install.html?app=" + key;
+  document.getElementById("navDl").href = "https://github.com/" + app.repo + "/releases";
+  document.getElementById("featGrid").innerHTML = app.features.map(cardHTML).join("");
+  document.getElementById("portalSection").style.display = app.showPortal ? "" : "none";
+  loadRelease(key);
+}
+
 (function () {
   var ipInput = document.getElementById("brickIp");
   var saved = "";
@@ -66,20 +156,8 @@
     try { localStorage.setItem("rc-brick-ip", ip); } catch (e) {}
     window.open("http://" + ip + ":8888/", "_blank");
   };
+  selectApp("romcloud");
 })();
-fetch("https://api.github.com/repos/bun2it/RomCloud/releases/latest").then(function (r) {
-  return r.json();
-}).then(function (j) {
-  if (!j || !j.tag_name) return;
-  document.getElementById("verLine").textContent = "Bản mới nhất: " + j.tag_name;
-  var a = (j.assets || []).filter(function (x) { return /\.zip$/.test(x.name); })[0];
-  if (a) document.getElementById("dlBtn").href = a.browser_download_url;
-  if (j.body && j.body.trim()) {
-    var nb = document.getElementById("newsBody");
-    nb.textContent = "Có gì mới trong " + j.tag_name + ":\n" + j.body.trim();
-    nb.style.display = "block";
-  }
-}).catch(function () {});
 </script>
 </body>
 </html>

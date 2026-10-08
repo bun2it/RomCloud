@@ -46,7 +46,7 @@ public:
         const char* title = "TÌM KIẾM";      // modal title
         const char* placeholder = "Nhập từ khóa...";
         const char* actionLabels[5] = {
-            "abc", "TELEX", "Cách", "Xóa", "Tìm"
+            "abc", "ABC", "Cách", "Xóa", "Tìm"
         };
 
         // Layout
@@ -85,13 +85,15 @@ public:
     // Xử lý input trong modal. Caller đã xử lý B-back chung cho state nền
     // (vd YOUTUBE_HOME) — modal chỉ lo input khi đang mở.
     // in: InputManager từ caller (chỉ đọc).
+    // Mapping (giong stock): L1=Shift, R1=ABC/123, SELECT=Telex.
     // Returns signal cho caller (vd setState về RESULTS, hoặc đóng modal).
     static Result handleInput(const Config& cfg, bool aPressed,
                               bool bPressed, bool startPressed,
                               bool upPressed, bool downPressed,
                               bool leftPressed, bool rightPressed,
                               bool xPressed, bool yPressed,
-                              bool l1Pressed, bool r1Pressed);
+                              bool l1Pressed, bool r1Pressed,
+                              bool selectPressed = false);
 
     // Vẽ modal (gọi sau khi đã vẽ state nền). Tự gọi beginModalDim.
     static void render(const Config& cfg);

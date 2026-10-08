@@ -106,8 +106,8 @@ public:
     void beginModalDim();
 
     // ---- virtual keyboard chung (P0-2: gom 6 ban phim ve tay) ----
-    // Ve 4 hang phim QWERTY (VirtualKeyboard::lower/upperRows) + hang action 5 o.
-    // actionLabels: 5 nhan (vd {"Thường","TELEX","Cách","Xóa","Tìm"}); withIcons: ve icon nut L1/R1/X/Y/START.
+    // Ve 4 hang phim QWERTY (VirtualKeyboard::lower/upperRows, symbolMode -> symbolRows) + hang action 5 o.
+    // actionLabels: 5 nhan (vd {"abc","ABC","Cách","Xóa","Tìm"} — o 0/1 chi fallback khi withIcons=false); withIcons: ve icon nut L1/R1/X/Y/START.
     // actionStride: 1 = col 0..4 (Explorer/LsFolder/VirtualKeyboard::move), 2 = col 0..9 kieu YT/TT cu (col/2).
     void drawVirtualKeyboard(const VkState& vk, int x, int y, int cellW, int cellH,
                              int gapX, int gapY, SDL_Color accent, SDL_Color accentEdge,

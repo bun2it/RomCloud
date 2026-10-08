@@ -20,7 +20,9 @@ static std::string truncateFor(UiRenderer& r, const std::string& s,
 
 // ─── Title strip ────────────────────────────────────────────────────────
 void SearchInputModal::renderTitle(const Config& cfg) {
-    drawText(*cfg.ui, cfg.title, cfg.modalX, cfg.historyY - 4,
+    std::string title = cfg.title ? cfg.title : "";
+    if (cfg.vk) title += cfg.vk->telexMode ? " • TELEX" : " • US";
+    drawText(*cfg.ui, title, cfg.modalX, cfg.historyY - 4,
              UiTheme::ACCENT_CYAN, cfg.fLarge);
     if (cfg.vk && !cfg.vk->query.empty()) {
         std::string q = "\"" + cfg.vk->query + "\"";
@@ -118,7 +120,8 @@ void SearchInputModal::render(const Config& cfg) {
 SearchInputModal::Result SearchInputModal::handleInput(
     const Config& cfg, bool aPressed, bool bPressed, bool startPressed,
     bool upPressed, bool downPressed, bool leftPressed, bool rightPressed,
-    bool xPressed, bool yPressed, bool l1Pressed, bool r1Pressed) {
+    bool xPressed, bool yPressed, bool l1Pressed, bool r1Pressed,
+    bool selectPressed) {
     if (!cfg.vk) return Result::Cancel;
     if (bPressed) return Result::Cancel;
 
@@ -156,7 +159,7 @@ SearchInputModal::Result SearchInputModal::handleInput(
         return Result::None;
     }
 
-    // focusMode == 1: keyboard
+    // focusMode == 1: keyboard (callers pass typematic repeats for A/X/Y)
     if (upPressed && cfg.history && !cfg.history->empty()) {
         // UP từ keyboard → về hàng pill (chỉ khi có lịch sử)
         Config& mcfg = const_cast<Config&>(cfg);
@@ -201,6 +204,10 @@ SearchInputModal::Result SearchInputModal::handleInput(
         return Result::None;
     }
     if (r1Pressed) {
+        cfg.vk->symbolMode = !cfg.vk->symbolMode;
+        return Result::None;
+    }
+    if (selectPressed) {
         cfg.vk->telexMode = !cfg.vk->telexMode;
         return Result::None;
     }

@@ -14,3 +14,8 @@ pc_data/
 .claude/
 .romcloud/
 config/youtube_api.key
+config/device_id
+data/
+bin/test_browser
+tools/iptv_curator/*.db
+tools/iptv_curator/output/

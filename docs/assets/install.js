@@ -1,6 +1,31 @@
-// RomCloud 1-chạm installer qua WebUSB ADB (webadb.js classic).
+// Cài 1 chạm qua WebUSB ADB (webadb.js classic).
 // Luồng: kết nối máy -> tải zip release mới nhất -> đẩy vào thẻ ->
 // bung ra /mnt/SDCARD/Apps -> chmod -> sync. User chỉ bấm 2 nút.
+// Hỗ trợ 2 app qua ?app=romcloud|brickdrop (mặc định romcloud).
+var APP_INSTALL = {
+  romcloud: {
+    label: "RomCloud",
+    repo: "bun2it/RomCloud",
+    zipName: "RomCloud-install.zip",
+    chmod: ["Apps/RomCloud/launch.sh", "Apps/RomCloud/bin/RomCloud", "Apps/RomCloud/bin/gamecast_d"],
+    verify: "Apps/RomCloud/bin/RomCloud",
+    fallbackWin: "installers/cai-dat-windows.bat",
+    fallbackMac: "installers/cai-dat-mac.command"
+  },
+  brickdrop: {
+    label: "BrickDrop",
+    repo: "bun2it/Brickdrop",
+    zipName: "BrickDrop-install.zip",
+    chmod: ["Apps/BrickDrop/launch.sh", "Apps/BrickDrop/bin/brickdrop"],
+    verify: "Apps/BrickDrop/bin/brickdrop",
+    fallbackWin: "installers/cai-dat-brickdrop-windows.bat",
+    fallbackMac: "installers/cai-dat-brickdrop-mac.command"
+  }
+};
+var APP_KEY = ((location.search || "").match(/[?&]app=([a-z]+)/) || [])[1] || "romcloud";
+if (!APP_INSTALL[APP_KEY]) APP_KEY = "romcloud";
+var CFG = APP_INSTALL[APP_KEY];
+
 var adb = null;
 var webusb = null;
 
@@ -40,6 +65,23 @@ async function shell(cmd) {
   var out = await stream.receive();
   return (out || "").toString();
 }
+
+// Cập nhật chữ theo app đang cài.
+(function () {
+  document.title = "Cài đặt 1 chạm — " + CFG.label;
+  var b = document.getElementById("brandName");
+  if (b) b.innerHTML = CFG.label.toUpperCase() + "<small>CÀI ĐẶT 1 CHẠM</small>";
+  var s2 = document.getElementById("step2Title");
+  if (s2) s2.textContent = "Cài " + CFG.label + " mới nhất:";
+  var s2d = document.getElementById("step2Desc");
+  if (s2d) s2d.textContent = "web tự tải bản mới nhất từ GitHub rồi đẩy vào thẻ nhớ, bung ra, cấp quyền, xong báo DONE.";
+  var fw = document.getElementById("dlWin");
+  if (fw) fw.href = CFG.fallbackWin;
+  var fm = document.getElementById("dlMac");
+  if (fm) fm.href = CFG.fallbackMac;
+  var home = document.getElementById("homeLink");
+  if (home) home.href = "./";
+})();
 
 btnConn.onclick = async function () {
   btnConn.disabled = true;
@@ -91,18 +133,18 @@ btnInstall.onclick = async function () {
   try {
     // 1. Release mới nhất
     log("Đang hỏi bản mới nhất...");
-    var rel = await (await fetch("https://api.github.com/repos/bun2it/RomCloud/releases/latest")).json();
+    var rel = await (await fetch("https://api.github.com/repos/" + CFG.repo + "/releases/latest")).json();
     var asset = (rel.assets || []).filter(function (a) { return /\.zip$/.test(a.name); })[0];
     if (!asset) throw new Error("Không thấy file zip trong release " + rel.tag_name);
     log("Bản mới nhất: " + rel.tag_name + " (" + asset.name + ")", "ok");
 
     // 2. Tải zip
-    log("Đang tải zip (~54MB, chờ chút)...");
+    log("Đang tải zip (chờ chút)...");
     var blob = await (await fetch(asset.browser_download_url)).blob();
     log("Đã tải: " + (blob.size / 1048576).toFixed(1) + "MB", "ok");
 
     // 3. Đẩy lên thẻ nhớ
-    var remoteZip = "/mnt/SDCARD/RomCloud-install.zip";
+    var remoteZip = "/mnt/SDCARD/" + CFG.zipName;
     log("Đang đẩy lên thẻ nhớ...");
     var sync = await adb.sync();
     await sync.push(blob, remoteZip, 420, function (sent, total) {
@@ -113,12 +155,12 @@ btnInstall.onclick = async function () {
 
     // 4. Bung + quyền + dọn
     log("Đang bung ra Apps/...");
-    var unzip = await shell("cd /mnt/SDCARD && unzip -o -q RomCloud-install.zip && echo UNZIP_OK");
+    var unzip = await shell("cd /mnt/SDCARD && unzip -o -q " + CFG.zipName + " && echo UNZIP_OK");
     if (unzip.indexOf("UNZIP_OK") < 0) throw new Error("Bung zip lỗi, còn thiếu unzip trên máy?");
-    await shell("chmod +x /mnt/SDCARD/Apps/RomCloud/launch.sh /mnt/SDCARD/Apps/RomCloud/bin/RomCloud /mnt/SDCARD/Apps/RomCloud/bin/gamecast_d; sync; echo DONE");
-    var check = await shell("ls /mnt/SDCARD/Apps/RomCloud/bin/RomCloud && rm -f /mnt/SDCARD/RomCloud-install.zip && echo INSTALLED");
+    await shell("chmod +x " + CFG.chmod.map(function (p) { return "/mnt/SDCARD/" + p; }).join(" ") + "; sync; echo DONE");
+    var check = await shell("ls /mnt/SDCARD/" + CFG.verify + " && rm -f " + remoteZip + " && echo INSTALLED");
     if (check.indexOf("INSTALLED") < 0) throw new Error("Kiểm tra sau cài thất bại.");
-    log("XONG! Rút cáp, mở RomCloud trên máy và dùng.", "ok");
+    log("XONG! Rút cáp, mở " + CFG.label + " trên máy và dùng.", "ok");
     devInfo.innerHTML = "<b>DONE ✔</b>";
   } catch (e) {
     log("LỖI: " + (e && e.message ? e.message : e), "err");

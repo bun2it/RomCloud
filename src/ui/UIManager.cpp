@@ -25,6 +25,7 @@
 #include "../sync/UploadManager.h"
 #include "../browser/BrowserManager.h"
 #include "../browser/HtmlRenderer.h"
+#include "../browser/netsurf/NetSurfEngine.h"
 #include "BoxartScraper.h"
 #include "QrRenderer.h"
 #include "TelexHelper.h"
@@ -96,7 +97,7 @@ void UIManager::initGridMenu() {
       {"weather", "OFFICEGO", "OFFICEGO.png", "Thời tiết & Lịch"},
       {"browser", "BROWSER", "BROWSER.png", "Duyệt web & portal"},
       {"localsend", "LOCALSEND", "LOCALSEND.png", "Chia se P2P trong LAN"},
-      {"upload", "TẢI LÊN", "UPLOAD.png", "Upload lên Drive"},
+      {"wallpaper", "HÌNH NỀN", "WALLPAPER.png", "Hình nền & Giao diện"},
       {"settings", "CÀI ĐẶT", "SETTINGS.png", "Cấu hình"}};
 }
 
@@ -138,6 +139,7 @@ bool UIManager::init(SDL_Window *window, SDL_Renderer *renderer) {
         m_fontSmall) {
       Logger::info(std::string("Loaded TTF font from: ") + path +
                    " (Sizes: 42, 100, 36, 30, 24)");
+      m_fontPathUsed = path;  // P9: CSS font-size siblings open from here
       break;
     }
   }
@@ -360,7 +362,7 @@ bool UIManager::goBack() {
     m_suppressPush = true;
     setState(prev);
     m_suppressPush = false;
-    Logger::error("[STATE] BACK");
+    Logger::debug("[STATE] BACK");
     return true;
   }
   return false;
@@ -381,7 +383,7 @@ void UIManager::setState(UIState state) {
     clearThumbnailCache();
   }
 
-  Logger::error("[STATE] SET");
+  Logger::debug("[STATE] SET");
   // Smart cleaner: rời cụm nặng (IPTV/YouTube/GameCast) ra ngoài thì xả
   // cache chữ + thumb + pagecache video để màn tiếp theo sẵn sàng, không
   // giật. Trong cụm giữ nguyên (chuyển kênh/video nhanh).
@@ -448,6 +450,8 @@ void UIManager::setState(UIState state) {
     openConfirmDeleteDialog();
   } else if (state == UIState::CONFIRM_BATCH_DELETE) {
     openConfirmBatchDeleteDialog();
+  } else if (state == UIState::CONFIRM_UPLOAD) {
+    openConfirmUploadDialog();
   }
 }
 
@@ -463,9 +467,53 @@ void UIManager::refreshSystems() {
 }
 
 void UIManager::refreshGames() {
-  int filterInt = static_cast<int>(m_filterMode);
+  int filterInt = -1;
+  if (m_libraryTab == LibraryTab::DRIVE) {
+    if (m_filterMode == GameFilterMode::ALL) {
+      filterInt = 2; // Tất cả game trên Drive (cả đã tải và chưa tải)
+    } else if (m_filterMode == GameFilterMode::CLOUD_ONLY) {
+      filterInt = 0; // Chỉ game trên Cloud chưa tải về thẻ
+    } else {
+      filterInt = 2; // Sẽ lọc localState == LOCAL bên dưới
+    }
+  } else {
+    // Tab THẺ NHỚ: Tất cả game có trên thẻ SD
+    filterInt = 1;
+  }
+
   m_cachedGames = DatabaseManager::instance().getGamesBySystem(
       m_activeSystem.id, filterInt);
+
+  if (m_libraryTab == LibraryTab::DRIVE && m_filterMode == GameFilterMode::LOCAL_ONLY) {
+    std::vector<GameRecord> filtered;
+    for (const auto &g : m_cachedGames) {
+      if (g.localState == GameState::LOCAL) {
+        filtered.push_back(g);
+      }
+    }
+    m_cachedGames = std::move(filtered);
+  } else if (m_libraryTab == LibraryTab::SDCARD) {
+    if (m_filterMode == GameFilterMode::CLOUD_ONLY) {
+      // Chỉ các game trên thẻ CHƯA được tải lên Drive (cần backup)
+      std::vector<GameRecord> filtered;
+      for (const auto &g : m_cachedGames) {
+        if (g.cloudFileId.empty()) {
+          filtered.push_back(g);
+        }
+      }
+      m_cachedGames = std::move(filtered);
+    } else if (m_filterMode == GameFilterMode::LOCAL_ONLY) {
+      // Chỉ các game trên thẻ ĐÃ được tải lên Drive
+      std::vector<GameRecord> filtered;
+      for (const auto &g : m_cachedGames) {
+        if (!g.cloudFileId.empty()) {
+          filtered.push_back(g);
+        }
+      }
+      m_cachedGames = std::move(filtered);
+    }
+  }
+
   if (m_selectedGameIndex >= static_cast<int>(m_cachedGames.size())) {
     m_selectedGameIndex =
         std::max(0, static_cast<int>(m_cachedGames.size()) - 1);
@@ -811,6 +859,7 @@ void UIManager::update() {
       std::string selectedId = m_gridMenuItems[m_selectedMenuIndex].id;
 
       if (selectedId == "games") {
+        m_libraryTab = LibraryTab::DRIVE;
         setState(UIState::SYSTEM_SELECT);
       } else if (selectedId == "weather") {
         openWeather();
@@ -862,16 +911,9 @@ void UIManager::update() {
         m_expScroll[0] = 0;
         m_expScroll[1] = 0;
         setState(UIState::FILE_EXPLORER);
-      } else if (selectedId == "upload") {
-        if (!AuthManager::instance().isLinked()) {
-          showToast(UiStrings::TOAST_CONNECT_DRIVE_FIRST, {245, 158, 11, 255});
-        } else if (!AuthManager::instance().canUpload()) {
-          showToast(UiStrings::TOAST_CONNECT_PERSONAL_DRIVE,
-                    {245, 158, 11, 255}, 4000);
-        } else {
-          UploadManager::instance().startReverseSync();
-          setState(UIState::REVERSE_SYNC);
-        }
+      } else if (selectedId == "wallpaper") {
+        showToast("Tính năng Hình Nền đang được phát triển...",
+                  {0, 180, 216, 255}, 2000);
       } else if (selectedId == "settings") {
         // P5: Settings giờ có 2 tab [CHUNG] [CẬP NHẬT]. Nếu có bản OTA mới,
         // auto-switch sang tab CẬP NHẬT để badge "NEW" trên icon Cài đặt
@@ -908,19 +950,27 @@ void UIManager::update() {
 
   case UIState::SYSTEM_SELECT: {
     int total = static_cast<int>(m_cachedSystems.size());
+    if (input.isButtonJustPressed(Button::L1) || input.isButtonJustPressed(Button::R1)) {
+      m_libraryTab = (m_libraryTab == LibraryTab::DRIVE) ? LibraryTab::SDCARD : LibraryTab::DRIVE;
+      std::string tabName = (m_libraryTab == LibraryTab::DRIVE) ? "GOOGLE DRIVE" : "THẺ NHỚ";
+      showToast("Tab: " + tabName, {0, 180, 216, 255}, 1200);
+      break;
+    }
+
     if (total > 0) {
       if (input.isButtonJustPressed(Button::UP)) {
         m_selectedSystemIndex = (m_selectedSystemIndex - 1 + total) % total;
       } else if (input.isButtonJustPressed(Button::DOWN)) {
         m_selectedSystemIndex = (m_selectedSystemIndex + 1) % total;
-      } else if (input.isButtonJustPressed(Button::L1)) {
+      } else if (input.isButtonJustPressed(Button::LEFT)) {
         m_selectedSystemIndex = std::max(0, m_selectedSystemIndex - 6);
-      } else if (input.isButtonJustPressed(Button::R1)) {
+      } else if (input.isButtonJustPressed(Button::RIGHT)) {
         m_selectedSystemIndex = std::min(total - 1, m_selectedSystemIndex + 6);
       } else if (input.isButtonJustPressed(Button::A)) {
         m_activeSystem = m_cachedSystems[m_selectedSystemIndex];
         m_selectedGameIndex = 0;
         m_gameScrollOffset = 0;
+        m_filterMode = GameFilterMode::ALL;
         refreshGames();
         setState(UIState::GAME_LIST);
       } else if (input.isButtonJustPressed(Button::Y)) {
@@ -935,49 +985,109 @@ void UIManager::update() {
 
   case UIState::GAME_LIST: {
     int total = static_cast<int>(m_cachedGames.size());
-    int pageSize = 7;
+    int pageSize = 6;
 
-    // Multi-select mode handling
-    if (input.isButtonJustPressed(Button::L2)) {
-      m_multiSelectMode = !m_multiSelectMode;
-      if (!m_multiSelectMode) {
+    // 1. Phím B: LÙI - Luôn luôn hoạt động bất kể danh sách rỗng hay có game
+    if (input.isButtonJustPressed(Button::B)) {
+      if (m_multiSelectMode) {
+        m_multiSelectMode = false;
         m_selectedGameIds.clear();
-        showToast(UiStrings::MULTI_SELECT_DISABLED, {168, 85, 247, 255}, 2000);
+        showToast(UiStrings::MULTI_SELECT_DISABLED, {168, 85, 247, 255}, 1500);
       } else {
-        showToast(std::string(UiStrings::MULTI_SELECT_ENABLED) + ". " +
-                      UiStrings::MULTI_SELECT_HINT,
-                  {168, 85, 247, 255}, 3000);
+        setState(UIState::SYSTEM_SELECT);
       }
+      break;
     }
 
-    if (m_multiSelectMode && total > 0) {
-      // Multi-select mode: different controls
-      if (input.isButtonJustPressed(Button::UP) ||
-          input.isButtonJustPressed(Button::DOWN) ||
-          input.isButtonJustPressed(Button::L1) ||
-          input.isButtonJustPressed(Button::R1)) {
-        // Normal navigation while in multi-select mode
-        if (input.isButtonJustPressed(Button::UP)) {
-          m_selectedGameIndex = std::max(0, m_selectedGameIndex - 1);
-        } else if (input.isButtonJustPressed(Button::DOWN)) {
-          m_selectedGameIndex = std::min(total - 1, m_selectedGameIndex + 1);
-        } else if (input.isButtonJustPressed(Button::L1)) {
-          m_selectedGameIndex = std::max(0, m_selectedGameIndex - pageSize);
-        } else if (input.isButtonJustPressed(Button::R1)) {
-          m_selectedGameIndex =
-              std::min(total - 1, m_selectedGameIndex + pageSize);
+    // 2. Chuyển Tab (L1 / R1) khi không ở chế độ multi-select: Luôn hoạt động bất kể rỗng hay có game
+    if (!m_multiSelectMode && (input.isButtonJustPressed(Button::L1) || input.isButtonJustPressed(Button::R1))) {
+      m_libraryTab = (m_libraryTab == LibraryTab::DRIVE) ? LibraryTab::SDCARD : LibraryTab::DRIVE;
+      m_selectedGameIndex = 0;
+      m_gameScrollOffset = 0;
+      m_filterMode = GameFilterMode::ALL;
+      refreshGames();
+      std::string tabName = (m_libraryTab == LibraryTab::DRIVE) ? "GOOGLE DRIVE" : "THẺ NHỚ";
+      showToast("Tab: " + tabName, {0, 180, 216, 255}, 1200);
+      break;
+    }
+
+    // 3. Phím START: Mở tìm kiếm (luôn hoạt động)
+    if (input.isButtonJustPressed(Button::START)) {
+      VirtualKeyboard::reset(m_searchVk, true);
+      m_searchVk.charset = 1;
+      m_searchVk.maxLen = 30;
+      m_searchResults.clear();
+      m_searchSelectedIndex = 0;
+      m_searchScrollOffset = 0;
+      setState(UIState::SEARCH);
+      break;
+    }
+
+    // 4. Phím SELECT: Đổi bộ lọc (luôn hoạt động)
+    if (input.isButtonJustPressed(Button::SELECT)) {
+      if (m_filterMode == GameFilterMode::ALL) {
+        m_filterMode = GameFilterMode::LOCAL_ONLY;
+        showToast(m_libraryTab == LibraryTab::DRIVE ? "Lọc: Đã tải về thẻ" : "Lọc: Đã sao lưu", {34, 197, 94, 255}, 1500);
+      } else if (m_filterMode == GameFilterMode::LOCAL_ONLY) {
+        m_filterMode = GameFilterMode::CLOUD_ONLY;
+        showToast(m_libraryTab == LibraryTab::DRIVE ? "Lọc: Chưa tải về thẻ" : "Lọc: Chưa sao lưu", {0, 180, 216, 255}, 1500);
+      } else {
+        m_filterMode = GameFilterMode::ALL;
+        showToast(UiStrings::FILTER_LABEL_ALL, {168, 85, 247, 255}, 1500);
+      }
+      m_selectedGameIndex = 0;
+      m_gameScrollOffset = 0;
+      refreshGames();
+      break;
+    }
+
+    // 5. Chế độ chọn nhiều (L2)
+    if (input.isButtonJustPressed(Button::L2)) {
+      if (total > 0) {
+        m_multiSelectMode = !m_multiSelectMode;
+        if (!m_multiSelectMode) {
+          m_selectedGameIds.clear();
+          showToast(UiStrings::MULTI_SELECT_DISABLED, {168, 85, 247, 255}, 2000);
+        } else {
+          showToast(std::string(UiStrings::MULTI_SELECT_ENABLED) + ". " +
+                        UiStrings::MULTI_SELECT_HINT,
+                    {168, 85, 247, 255}, 3000);
         }
-        // Update scroll offset
-        if (m_selectedGameIndex < m_gameScrollOffset) {
-          m_gameScrollOffset = m_selectedGameIndex;
-        } else if (m_selectedGameIndex >= m_gameScrollOffset + pageSize) {
-          m_gameScrollOffset = m_selectedGameIndex - pageSize + 1;
-        }
-      } else if (input.isButtonJustPressed(Button::Y)) {
-        // Toggle selection on current game
+      }
+      break;
+    }
+
+    // 6. Xử lý khi Danh sách RỖNG (total == 0):
+    if (total == 0) {
+      if (input.isButtonJustPressed(Button::Y)) {
+        triggerManualSync();
+      }
+      break;
+    }
+
+    // 7. Xử lý khi Có Game (total > 0):
+    if (m_multiSelectMode) {
+      // Điều hướng trong chế độ Multi-select
+      if (input.isButtonJustPressed(Button::UP)) {
+        m_selectedGameIndex = std::max(0, m_selectedGameIndex - 1);
+      } else if (input.isButtonJustPressed(Button::DOWN)) {
+        m_selectedGameIndex = std::min(total - 1, m_selectedGameIndex + 1);
+      } else if (input.isButtonJustPressed(Button::LEFT)) {
+        m_selectedGameIndex = std::max(0, m_selectedGameIndex - pageSize);
+      } else if (input.isButtonJustPressed(Button::RIGHT)) {
+        m_selectedGameIndex = std::min(total - 1, m_selectedGameIndex + pageSize);
+      }
+
+      if (m_selectedGameIndex < m_gameScrollOffset) {
+        m_gameScrollOffset = m_selectedGameIndex;
+      } else if (m_selectedGameIndex >= m_gameScrollOffset + pageSize) {
+        m_gameScrollOffset = m_selectedGameIndex - pageSize + 1;
+      }
+
+      if (input.isButtonJustPressed(Button::Y)) {
+        // Toggle chọn game hiện tại
         const auto &g = m_cachedGames[m_selectedGameIndex];
-        auto it =
-            std::find(m_selectedGameIds.begin(), m_selectedGameIds.end(), g.id);
+        auto it = std::find(m_selectedGameIds.begin(), m_selectedGameIds.end(), g.id);
         if (it != m_selectedGameIds.end()) {
           m_selectedGameIds.erase(it);
           showToast("Đã bỏ chọn: " + g.title, {245, 158, 11, 255}, 1500);
@@ -985,18 +1095,16 @@ void UIManager::update() {
           m_selectedGameIds.push_back(g.id);
           showToast("Đã chọn: " + g.title, {34, 197, 94, 255}, 1500);
         }
-      } else if (input.isButtonJustPressed(Button::X) &&
-                 !m_selectedGameIds.empty()) {
-        // Batch delete - show confirmation
+      } else if (input.isButtonJustPressed(Button::X) && !m_selectedGameIds.empty()) {
         setState(UIState::CONFIRM_BATCH_DELETE);
-      } else if (input.isButtonJustPressed(Button::R2)) {
-        // Add all selected to download queue
+      } else if ((input.isButtonJustPressed(Button::R2) || (m_libraryTab == LibraryTab::DRIVE && input.isButtonJustPressed(Button::A))) &&
+                 !m_selectedGameIds.empty()) {
+        // Thêm các game đã chọn vào hàng đợi tải xuống
         if (!AuthManager::instance().isLinked()) {
           showToast(UiStrings::TOAST_CONNECT_DRIVE_FIRST, {245, 158, 11, 255});
         } else {
           int addedCount = 0;
           for (int64_t gameId : m_selectedGameIds) {
-            // Find the game record
             for (const auto &g : m_cachedGames) {
               if (g.id == gameId && g.localState != GameState::LOCAL &&
                   !DownloadManager::instance().isInQueue(g.id)) {
@@ -1007,8 +1115,7 @@ void UIManager::update() {
             }
           }
           if (addedCount > 0) {
-            showToast("Đã thêm " + std::to_string(addedCount) +
-                          " game vào hàng tải!",
+            showToast("Đã thêm " + std::to_string(addedCount) + " game vào hàng tải!",
                       {34, 197, 94, 255}, 3000);
             if (!DownloadManager::instance().isDownloading()) {
               DownloadManager::instance().processNextInQueue();
@@ -1017,48 +1124,41 @@ void UIManager::update() {
             showToast("Không có game nào được thêm (đã tải hoặc đang chờ)",
                       {245, 158, 11, 255}, 3000);
           }
+          m_multiSelectMode = false;
+          m_selectedGameIds.clear();
           refreshGames();
         }
-      } else if (input.isButtonJustPressed(Button::L1) &&
+      } else if ((m_libraryTab == LibraryTab::SDCARD && input.isButtonJustPressed(Button::A)) &&
                  !m_selectedGameIds.empty()) {
-        // Start upload of selected games to cloud
+        // Bắt đầu tải lên các game đã chọn lên Drive
         if (!AuthManager::instance().isLinked()) {
           showToast(UiStrings::TOAST_CONNECT_DRIVE_FIRST, {245, 158, 11, 255});
         } else if (!AuthManager::instance().canUpload()) {
-          showToast(UiStrings::TOAST_CONNECT_PERSONAL_DRIVE,
-                    {245, 158, 11, 255}, 4000);
+          showToast(UiStrings::TOAST_CONNECT_PERSONAL_DRIVE, {245, 158, 11, 255}, 4000);
         } else {
-          // Gather games to upload (local but not on cloud)
           std::vector<int64_t> uploadIds;
           for (int64_t gameId : m_selectedGameIds) {
             for (const auto &g : m_cachedGames) {
-              if (g.id == gameId && g.localState == GameState::LOCAL &&
-                  g.cloudFileId.empty()) {
+              if (g.id == gameId && g.localState == GameState::LOCAL && g.cloudFileId.empty()) {
                 uploadIds.push_back(gameId);
                 break;
               }
             }
           }
           if (!uploadIds.empty()) {
-            showToast("Bắt đầu sao lưu " + std::to_string(uploadIds.size()) +
-                          " game lên Drive...",
+            showToast("Bắt đầu sao lưu " + std::to_string(uploadIds.size()) + " game lên Drive...",
                       {168, 85, 247, 255}, 2000);
             UploadManager::instance().startUploadGames(uploadIds);
             m_multiSelectMode = false;
             m_selectedGameIds.clear();
             setState(UIState::REVERSE_SYNC);
           } else {
-            showToast("Không có game nào cần tải lên (đã có trên Cloud)",
-                      {245, 158, 11, 255}, 3000);
+            showToast("Các game đã chọn đều đã có trên Google Drive", {245, 158, 11, 255}, 3000);
           }
         }
-      } else if (input.isButtonJustPressed(Button::B)) {
-        // Exit multi-select mode
-        m_multiSelectMode = false;
-        m_selectedGameIds.clear();
-        showToast(UiStrings::MULTI_SELECT_DISABLED, {168, 85, 247, 255}, 2000);
       }
-    } else if (total > 0) {
+    } else {
+      // Điều hướng thường khi có game
       if (input.isButtonJustPressed(Button::UP)) {
         if (m_selectedGameIndex > 0) {
           m_selectedGameIndex--;
@@ -1079,68 +1179,72 @@ void UIManager::update() {
           m_selectedGameIndex = 0;
           m_gameScrollOffset = 0;
         }
-      } else if (input.isButtonJustPressed(Button::L1)) {
+      } else if (input.isButtonJustPressed(Button::LEFT)) {
         m_selectedGameIndex = std::max(0, m_selectedGameIndex - pageSize);
         m_gameScrollOffset = std::max(0, m_gameScrollOffset - pageSize);
-      } else if (input.isButtonJustPressed(Button::R1)) {
-        m_selectedGameIndex =
-            std::min(total - 1, m_selectedGameIndex + pageSize);
+      } else if (input.isButtonJustPressed(Button::RIGHT)) {
+        m_selectedGameIndex = std::min(total - 1, m_selectedGameIndex + pageSize);
         m_gameScrollOffset = std::min(std::max(0, total - pageSize),
                                       m_gameScrollOffset + pageSize);
       } else if (input.isButtonJustPressed(Button::A)) {
         const auto &g = m_cachedGames[m_selectedGameIndex];
-        if (g.localState == GameState::LOCAL) {
-          showToast(UiStrings::TOAST_GAME_EXISTS_DELETE, {34, 197, 94, 255},
-                    3000);
-        } else if (DownloadManager::instance().isInQueue(g.id)) {
-          showToast("\"" + g.title + "\" đã có trong danh sách tải.",
-                    {245, 158, 11, 255});
-        } else {
-          if (AuthManager::instance().isLinked()) {
-            bool added =
-                DownloadManager::instance().addToQueue(g, m_activeSystem);
-            if (added) {
-              showToast(std::string(UiStrings::TOAST_ADDED_TO_QUEUE) + g.title,
-                        {0, 180, 216, 255}, 2500);
-              // Auto-start if nothing is currently downloading
-              if (!DownloadManager::instance().isDownloading()) {
-                DownloadManager::instance().processNextInQueue();
-              }
-              refreshGames();
-            }
+        if (m_libraryTab == LibraryTab::DRIVE) {
+          // Tab DRIVE: Tải game xuống thẻ
+          if (g.localState == GameState::LOCAL) {
+            showToast("Game đã có sẵn trên thẻ nhớ.", {34, 197, 94, 255}, 2500);
+          } else if (DownloadManager::instance().isInQueue(g.id)) {
+            showToast("\"" + g.title + "\" đã có trong hàng đợi tải.", {245, 158, 11, 255});
           } else {
-            showToast(UiStrings::TOAST_CONNECT_DRIVE_FIRST,
-                      {245, 158, 11, 255});
+            if (AuthManager::instance().isLinked()) {
+              bool added = DownloadManager::instance().addToQueue(g, m_activeSystem);
+              if (added) {
+                showToast(std::string(UiStrings::TOAST_ADDED_TO_QUEUE) + g.title,
+                          {0, 180, 216, 255}, 2500);
+                if (!DownloadManager::instance().isDownloading()) {
+                  DownloadManager::instance().processNextInQueue();
+                }
+                refreshGames();
+              }
+            } else {
+              showToast(UiStrings::TOAST_CONNECT_DRIVE_FIRST, {245, 158, 11, 255});
+            }
           }
+        } else {
+          // Tab THẺ NHỚ: Bấm A để sync lên Drive, có popup xác nhận
+          setState(UIState::CONFIRM_UPLOAD);
         }
       } else if (input.isButtonJustPressed(Button::X)) {
         const auto &g = m_cachedGames[m_selectedGameIndex];
-        if (DownloadManager::instance().isDownloading() &&
-            DownloadManager::instance().getProgress().gameId == g.id) {
-          DownloadManager::instance().cancelDownload();
-          showToast(std::string(UiStrings::TOAST_DOWNLOAD_STOPPED) + g.title,
-                    {245, 158, 11, 255});
-          DownloadManager::instance().processNextInQueue();
-          refreshGames();
-        } else if (DownloadManager::instance().isInQueue(g.id)) {
-          DownloadManager::instance().removeFromQueue(g.id);
-          showToast(std::string(UiStrings::TOAST_REMOVED_FROM_QUEUE) + g.title,
-                    {245, 158, 11, 255});
-        } else if (g.localState == GameState::LOCAL) {
-          setState(UIState::CONFIRM_DELETE);
+        if (m_libraryTab == LibraryTab::DRIVE) {
+          if (DownloadManager::instance().isDownloading() &&
+              DownloadManager::instance().getProgress().gameId == g.id) {
+            DownloadManager::instance().cancelDownload();
+            showToast(std::string(UiStrings::TOAST_DOWNLOAD_STOPPED) + g.title, {245, 158, 11, 255});
+            DownloadManager::instance().processNextInQueue();
+            refreshGames();
+          } else if (DownloadManager::instance().isInQueue(g.id)) {
+            DownloadManager::instance().removeFromQueue(g.id);
+            showToast(std::string(UiStrings::TOAST_REMOVED_FROM_QUEUE) + g.title, {245, 158, 11, 255});
+          } else if (g.localState == GameState::LOCAL) {
+            setState(UIState::CONFIRM_DELETE);
+          } else {
+            showToast(UiStrings::TOAST_GAME_ONLY_ON_DRIVE, {245, 158, 11, 255});
+          }
         } else {
-          showToast(UiStrings::TOAST_GAME_ONLY_ON_DRIVE, {245, 158, 11, 255});
+          // Tab THẺ NHỚ: Xóa ROM khỏi thẻ
+          if (g.localState == GameState::LOCAL) {
+            setState(UIState::CONFIRM_DELETE);
+          }
         }
       } else if (input.isButtonJustPressed(Button::Y)) {
-        // Quick Alphabet Jump across large game library
+        // Nhảy vần chữ cái
         if (!m_cachedGames.empty()) {
           char curL = 'A';
           if (!m_cachedGames[m_selectedGameIndex].title.empty()) {
             curL = std::toupper(m_cachedGames[m_selectedGameIndex].title[0]);
           }
           int nextIdx = -1;
-          for (size_t i = m_selectedGameIndex + 1; i < m_cachedGames.size();
-               ++i) {
+          for (size_t i = m_selectedGameIndex + 1; i < m_cachedGames.size(); ++i) {
             char l = ' ';
             if (!m_cachedGames[i].title.empty()) {
               l = std::toupper(m_cachedGames[i].title[0]);
@@ -1151,7 +1255,7 @@ void UIManager::update() {
             }
           }
           if (nextIdx < 0) {
-            nextIdx = 0; // wrap around to top
+            nextIdx = 0; // Quay về đầu
           }
           m_selectedGameIndex = nextIdx;
           m_gameScrollOffset = std::max(0, m_selectedGameIndex - 4);
@@ -1159,38 +1263,8 @@ void UIManager::update() {
           if (!m_cachedGames[m_selectedGameIndex].title.empty()) {
             newL = std::toupper(m_cachedGames[m_selectedGameIndex].title[0]);
           }
-          showToast(std::string("Chuyển đến vần chữ: [ ") + newL + " ]",
-                    {234, 179, 8, 255}, 1500);
+          showToast(std::string("Chuyển đến vần chữ: [ ") + newL + " ]", {234, 179, 8, 255}, 1500);
         }
-      } else if (input.isButtonJustPressed(Button::SELECT)) {
-        if (m_filterMode == GameFilterMode::ALL) {
-          m_filterMode = GameFilterMode::LOCAL_ONLY;
-          showToast(UiStrings::FILTER_LABEL_LOCAL, {34, 197, 94, 255});
-        } else if (m_filterMode == GameFilterMode::LOCAL_ONLY) {
-          m_filterMode = GameFilterMode::CLOUD_ONLY;
-          showToast(UiStrings::FILTER_LABEL_CLOUD, {0, 180, 216, 255});
-        } else {
-          m_filterMode = GameFilterMode::ALL;
-          showToast(UiStrings::FILTER_LABEL_ALL, {168, 85, 247, 255});
-        }
-        m_selectedGameIndex = 0;
-        m_gameScrollOffset = 0;
-        refreshGames();
-      }
-
-      if (input.isButtonJustPressed(Button::START)) {
-        // Open on-device search (unified keyboard, charset media nhu YT/IPTV)
-        VirtualKeyboard::reset(m_searchVk, true);
-        m_searchVk.charset = 1;
-        m_searchVk.maxLen = 30;
-        m_searchResults.clear();
-        m_searchSelectedIndex = 0;
-        m_searchScrollOffset = 0;
-        setState(UIState::SEARCH);
-      }
-
-      if (input.isButtonJustPressed(Button::B)) {
-        setState(UIState::SYSTEM_SELECT);
       }
     }
     break;
@@ -1220,6 +1294,17 @@ void UIManager::update() {
     break;
   }
 
+  case UIState::CONFIRM_UPLOAD: {
+    if (input.isButtonJustPressed(Button::A)) {
+      m_dialogs.confirm.confirm();
+    } else if (input.isButtonJustPressed(Button::B) ||
+               input.isButtonJustPressed(Button::X)) {
+      m_dialogs.confirm.cancel();
+      setState(UIState::GAME_LIST);
+    }
+    break;
+  }
+
   case UIState::SEARCH: {
     if (!m_searchVk.inResults) {
       // Unified keyboard (P0-2): giong YouTube — move/pressA stride2.
@@ -1240,13 +1325,11 @@ void UIManager::update() {
         VirtualKeyboard::move(m_searchVk, 0, -1, true);
       } else if (input.isButtonJustPressed(Button::RIGHT)) {
         VirtualKeyboard::move(m_searchVk, 0, 1, true);
-      } else if (input.isButtonJustPressed(Button::A)) {
+      } else if (input.isButtonRepeat(Button::A)) {
         VkAction act = VirtualKeyboard::pressA(
             m_searchVk,
-            [this](const char *) {
-              showToast(m_searchVk.telexMode ? "Chế độ: TELEX"
-                                             : "Chế độ: TIẾNG ANH (US)",
-                        {0, 180, 216, 255}, 1200);
+            [this](const char *msg) {
+              showToast(msg, {0, 180, 216, 255}, 1200);
             },
             true);
         if (act == VkAction::Commit) {
@@ -1266,13 +1349,13 @@ void UIManager::update() {
           m_searchSelectedIndex = 0;
           m_searchScrollOffset = 0;
         }
-      } else if (input.isButtonJustPressed(Button::X)) {
+      } else if (input.isButtonRepeat(Button::X)) {
         // Clear query
         m_searchVk.query.clear();
         m_searchResults.clear();
         m_searchSelectedIndex = 0;
         m_searchScrollOffset = 0;
-      } else if (input.isButtonJustPressed(Button::Y)) {
+      } else if (input.isButtonRepeat(Button::Y)) {
         VirtualKeyboard::backspace(m_searchVk);
         if (m_searchVk.query.length() >= 2) {
           m_searchResults =
@@ -1285,10 +1368,13 @@ void UIManager::update() {
       } else if (input.isButtonJustPressed(Button::L1)) {
         m_searchVk.shift = !m_searchVk.shift;
       } else if (input.isButtonJustPressed(Button::R1)) {
-        m_searchVk.telexMode = !m_searchVk.telexMode;
-        showToast(m_searchVk.telexMode ? "Chế độ: TELEX"
-                                       : "Chế độ: TIẾNG ANH (US)",
-                  {0, 180, 216, 255}, 1200);
+        VirtualKeyboard::toggleSymbol(m_searchVk, [this](const char *msg) {
+          showToast(msg, {0, 180, 216, 255}, 1200);
+        });
+      } else if (input.isButtonJustPressed(Button::SELECT)) {
+        VirtualKeyboard::toggleTelex(m_searchVk, [this](const char *msg) {
+          showToast(msg, {0, 180, 216, 255}, 1200);
+        });
       } else if (input.isButtonJustPressed(Button::START)) {
         if (!m_searchResults.empty()) {
           m_searchVk.inResults = true;
@@ -1754,20 +1840,26 @@ void UIManager::update() {
         prog.state == UploadState::PREPARING) {
       if (input.isButtonJustPressed(Button::B)) {
         UploadManager::instance().cancel();
-        setState(UIState::MENU);
+        refreshGames();
+        refreshSystems();
+        setState(UIState::GAME_LIST);
       }
     } else if (prog.state == UploadState::UPLOADING) {
       if (input.isButtonJustPressed(Button::B)) {
         UploadManager::instance().cancel();
         showToast(UiStrings::REVERSE_SYNC_CANCELLED, {245, 158, 11, 255});
-        setState(UIState::MENU);
+        refreshGames();
+        refreshSystems();
+        setState(UIState::GAME_LIST);
       }
     } else if (prog.state == UploadState::COMPLETED ||
                prog.state == UploadState::FAILED ||
                prog.state == UploadState::CANCELLED) {
       if (input.isButtonJustPressed(Button::A) ||
           input.isButtonJustPressed(Button::B)) {
-        setState(UIState::MENU);
+        refreshGames();
+        refreshSystems();
+        setState(UIState::GAME_LIST);
       }
     }
     break;
@@ -1808,38 +1900,47 @@ void UIManager::update() {
         setState(UIState::IPTV_LIST);
       }
     } else if (input.isButtonJustPressed(Button::Y)) {
-      // Manual refresh playlist co URL nguon
-      if (plCount > 0 && m_selectedPlaylistIndex < plCount) {
-        const Playlist *pl = IPTVManager::instance().getPlaylist(
-            static_cast<size_t>(m_selectedPlaylistIndex));
-        if (pl) {
-          const auto &sources = IPTVManager::instance().getSources();
-          bool hasUrl = false;
-          for (const auto &s : sources)
-            if (s.filename == pl->sourceFile && s.type == "url") {
-              hasUrl = true;
-              break;
-            }
-
-          if (hasUrl) {
-            showToast("Đang cập nhật playlist: " + pl->name + "...",
-                      {250, 204, 21, 255}, 3000);
-            render();
-            std::string err;
-            if (IPTVManager::instance().refreshPlaylistFromUrl(pl->sourceFile,
-                                                               err)) {
-              std::string ts =
-                  IPTVManager::instance().getLastRefreshedStr(pl->sourceFile);
-              showToast("Cập nhật thành công! (" + ts + ")", {34, 197, 94, 255},
-                        3000);
-            } else {
-              showToast("Cập nhật thất bại: " + err, {239, 68, 68, 255}, 4000);
-            }
-          } else {
-            showToast("Playlist này không có URL nguồn (chỉ có thể refresh "
-                      "playlist được thêm qua URL)",
-                      {148, 163, 184, 255}, 3000);
+      // Neu playlist duoc chon la URL tuy bien khac live.m3u, refresh URL do;
+      // Nguoc lai (mac dinh hoac khi chon live.m3u), chay cap nhat OTA Playlist
+      bool isCustomUrl = false;
+      const Playlist *selectedPl =
+          (plCount > 0 && m_selectedPlaylistIndex < plCount)
+              ? IPTVManager::instance().getPlaylist(
+                    static_cast<size_t>(m_selectedPlaylistIndex))
+              : nullptr;
+      if (selectedPl && selectedPl->sourceFile != "live.m3u") {
+        const auto &sources = IPTVManager::instance().getSources();
+        for (const auto &s : sources) {
+          if (s.filename == selectedPl->sourceFile && s.type == "url") {
+            isCustomUrl = true;
+            break;
           }
+        }
+      }
+
+      if (isCustomUrl && selectedPl) {
+        showToast("Đang tải lại URL: " + selectedPl->name + "...",
+                  {250, 204, 21, 255}, 3000);
+        render();
+        std::string err;
+        if (IPTVManager::instance().refreshPlaylistFromUrl(
+                selectedPl->sourceFile, err)) {
+          std::string ts =
+              IPTVManager::instance().getLastRefreshedStr(selectedPl->sourceFile);
+          showToast("Cập nhật thành công! (" + ts + ")", {34, 197, 94, 255},
+                    3000);
+        } else {
+          showToast("Cập nhật thất bại: " + err, {239, 68, 68, 255}, 4000);
+        }
+      } else {
+        showToast("Đang kiểm tra & tải OTA Playlist...", {250, 204, 21, 255},
+                  5000);
+        render();
+        std::string otaMsg;
+        if (IPTVManager::instance().updateOtaPlaylist(otaMsg)) {
+          showToast(otaMsg, {34, 197, 94, 255}, 4000);
+        } else {
+          showToast(otaMsg, {239, 68, 68, 255}, 4000);
         }
       }
     } else if (input.isButtonJustPressed(Button::X)) {
@@ -2144,13 +2245,11 @@ void UIManager::update() {
         VirtualKeyboard::move(m_iptvVk, 0, -1, true);
       } else if (input.isButtonJustPressed(Button::RIGHT)) {
         VirtualKeyboard::move(m_iptvVk, 0, 1, true);
-      } else if (input.isButtonJustPressed(Button::A)) {
+      } else if (input.isButtonRepeat(Button::A)) {
         VkAction act = VirtualKeyboard::pressA(
             m_iptvVk,
-            [this](const char *) {
-              showToast(m_iptvVk.telexMode ? "Chế độ: TELEX"
-                                           : "Chế độ: TIẾNG ANH (US)",
-                        {0, 180, 255, 255}, 1200);
+            [this](const char *msg) {
+              showToast(msg, {0, 180, 255, 255}, 1200);
             },
             true);
         if (act == VkAction::Commit) {
@@ -2176,7 +2275,7 @@ void UIManager::update() {
           m_iptvSearchSelectedIndex = 0;
           m_iptvSearchScrollOffset = 0;
         }
-      } else if (input.isButtonJustPressed(Button::X)) {
+      } else if (input.isButtonRepeat(Button::X)) {
         VirtualKeyboard::typeSpace(m_iptvVk);
         if (!m_iptvVk.query.empty()) {
           m_iptvSearchResults = IPTVManager::instance().search(m_iptvVk.query);
@@ -2185,7 +2284,7 @@ void UIManager::update() {
         }
         m_iptvSearchSelectedIndex = 0;
         m_iptvSearchScrollOffset = 0;
-      } else if (input.isButtonJustPressed(Button::Y)) {
+      } else if (input.isButtonRepeat(Button::Y)) {
         VirtualKeyboard::backspace(m_iptvVk);
         if (!m_iptvVk.query.empty()) {
           m_iptvSearchResults = IPTVManager::instance().search(m_iptvVk.query);
@@ -2197,10 +2296,13 @@ void UIManager::update() {
       } else if (input.isButtonJustPressed(Button::L1)) {
         m_iptvVk.shift = !m_iptvVk.shift;
       } else if (input.isButtonJustPressed(Button::R1)) {
-        m_iptvVk.telexMode = !m_iptvVk.telexMode;
-        showToast(m_iptvVk.telexMode ? "Chế độ: TELEX"
-                                     : "Chế độ: TIẾNG ANH (US)",
-                  {0, 180, 255, 255}, 1200);
+        VirtualKeyboard::toggleSymbol(m_iptvVk, [this](const char *msg) {
+          showToast(msg, {0, 180, 255, 255}, 1200);
+        });
+      } else if (input.isButtonJustPressed(Button::SELECT)) {
+        VirtualKeyboard::toggleTelex(m_iptvVk, [this](const char *msg) {
+          showToast(msg, {0, 180, 255, 255}, 1200);
+        });
       } else if (input.isButtonJustPressed(Button::START)) {
         if (resultCount > 0) {
           const auto &selChan = m_iptvSearchResults[m_iptvSearchSelectedIndex];
@@ -2312,19 +2414,20 @@ void UIManager::update() {
     // Modal mở → xử lý modal input
     if (m_ytSearchModalOpen) {
       // Read input flags locally to keep modal handler pure
-      bool a = input.isButtonJustPressed(Button::A);
+      bool a = input.isButtonRepeat(Button::A);
       bool b = input.isButtonJustPressed(Button::B);
       bool s = input.isButtonJustPressed(Button::START);
       bool u = input.isButtonJustPressed(Button::UP);
       bool d = input.isButtonJustPressed(Button::DOWN);
       bool l = input.isButtonJustPressed(Button::LEFT);
       bool r = input.isButtonJustPressed(Button::RIGHT);
-      bool x = input.isButtonJustPressed(Button::X);
-      bool y = input.isButtonJustPressed(Button::Y);
+      bool x = input.isButtonRepeat(Button::X);
+      bool y = input.isButtonRepeat(Button::Y);
       bool l1 = input.isButtonJustPressed(Button::L1);
       bool r1 = input.isButtonJustPressed(Button::R1);
+      bool sel = input.isButtonJustPressed(Button::SELECT);
       auto res = SearchInputModal::handleInput(m_ytHomeModalCfg, a, b, s, u, d,
-                                               l, r, x, y, l1, r1);
+                                               l, r, x, y, l1, r1, sel);
       if (res == SearchInputModal::Result::Commit) {
         m_ytSearchModalOpen = false;
         std::string q = m_ytVk.query;
@@ -2621,18 +2724,20 @@ void UIManager::update() {
       } else if (input.isButtonJustPressed(Button::B)) {
         // B moves focus back to keyboard
         m_ytSearchFocus = 2;
-      } else if (input.isButtonJustPressed(Button::X)) {
+      } else if (input.isButtonRepeat(Button::X)) {
         VirtualKeyboard::typeSpace(m_ytVk);
-      } else if (input.isButtonJustPressed(Button::Y)) {
+      } else if (input.isButtonRepeat(Button::Y)) {
         VirtualKeyboard::backspace(m_ytVk);
       } else if (input.isButtonJustPressed(Button::L1)) {
         m_ytVk.shift = !m_ytVk.shift;
       } else if (input.isButtonJustPressed(Button::R1)) {
-        m_ytVk.telexMode = !m_ytVk.telexMode;
-        showToast(m_ytVk.telexMode ? "Chế độ: TELEX" : "Chế độ: TIẾNG ANH (US)",
-                  UiTheme::ACCENT_GREEN, 1200);
+        VirtualKeyboard::toggleSymbol(m_ytVk, [this](const char *msg) {
+          showToast(msg, UiTheme::ACCENT_GREEN, 1200);
+        });
       } else if (input.isButtonJustPressed(Button::SELECT)) {
-        setState(UIState::MENU);
+        VirtualKeyboard::toggleTelex(m_ytVk, [this](const char *msg) {
+          showToast(msg, UiTheme::ACCENT_GREEN, 1200);
+        });
       }
       break;
     }
@@ -2655,13 +2760,11 @@ void UIManager::update() {
       VirtualKeyboard::move(m_ytVk, 0, -1, true);
     } else if (input.isButtonJustPressed(Button::RIGHT)) {
       VirtualKeyboard::move(m_ytVk, 0, 1, true);
-    } else if (input.isButtonJustPressed(Button::A)) {
+    } else if (input.isButtonRepeat(Button::A)) {
       VkAction act = VirtualKeyboard::pressA(
           m_ytVk,
-          [this](const char *) {
-            showToast(m_ytVk.telexMode ? "Chế độ: TELEX"
-                                       : "Chế độ: TIẾNG ANH (US)",
-                      UiTheme::ACCENT_GREEN, 1200);
+          [this](const char *msg) {
+            showToast(msg, UiTheme::ACCENT_GREEN, 1200);
           },
           true);
       if (act == VkAction::Commit) {
@@ -2679,12 +2782,16 @@ void UIManager::update() {
     } else if (input.isButtonJustPressed(Button::L1)) {
       m_ytVk.shift = !m_ytVk.shift;
     } else if (input.isButtonJustPressed(Button::R1)) {
-      m_ytVk.telexMode = !m_ytVk.telexMode;
-      showToast(m_ytVk.telexMode ? "Chế độ: TELEX" : "Chế độ: TIẾNG ANH (US)",
-                UiTheme::ACCENT_GREEN, 1200);
-    } else if (input.isButtonJustPressed(Button::X)) {
+      VirtualKeyboard::toggleSymbol(m_ytVk, [this](const char *msg) {
+        showToast(msg, UiTheme::ACCENT_GREEN, 1200);
+      });
+    } else if (input.isButtonJustPressed(Button::SELECT)) {
+      VirtualKeyboard::toggleTelex(m_ytVk, [this](const char *msg) {
+        showToast(msg, UiTheme::ACCENT_GREEN, 1200);
+      });
+    } else if (input.isButtonRepeat(Button::X)) {
       VirtualKeyboard::typeSpace(m_ytVk);
-    } else if (input.isButtonJustPressed(Button::Y)) {
+    } else if (input.isButtonRepeat(Button::Y)) {
       VirtualKeyboard::backspace(m_ytVk);
     } else if (input.isButtonJustPressed(Button::START)) {
       if (!m_ytVk.query.empty()) {
@@ -2698,8 +2805,6 @@ void UIManager::update() {
       // B = Back to YouTube Home
       m_ytKeyboardQuery = m_ytVk.query;
       setState(UIState::YOUTUBE_HOME);
-    } else if (input.isButtonJustPressed(Button::SELECT)) {
-      setState(UIState::MENU);
     }
     break;
   }
@@ -3452,7 +3557,7 @@ void UIManager::renderSearchState() {
   {
     static std::string s0, s1, s2, s3, s4;
     s0 = m_searchVk.shift ? "ABC" : "abc";
-    s1 = m_searchVk.telexMode ? "TELEX" : "US";
+    s1 = m_searchVk.symbolMode ? "123" : "ABC";
     s2 = "Cách";
     s3 = "Xóa";
     s4 = "Tìm";
@@ -3589,33 +3694,45 @@ void UIManager::renderFooter() {
   int x = 20;
 
   if (m_currentState == UIState::GAME_LIST) {
-    bool isLocal = false;
-    if (m_selectedGameIndex >= 0 &&
-        m_selectedGameIndex < static_cast<int>(m_cachedGames.size())) {
-      isLocal =
-          (m_cachedGames[m_selectedGameIndex].localState == GameState::LOCAL);
+    if (m_multiSelectMode) {
+      x = drawFooterHint("A", m_libraryTab == LibraryTab::DRIVE ? "Tải về" : "Tải lên", x, barY, barH, cyan, m_fontSmall, iconSize, gap) + 30;
+      x = drawFooterHint("B", "Hủy chọn", x, barY, barH, fg, m_fontSmall, iconSize, gap) + 30;
+      x = drawFooterHint("Y", "Chọn/Bỏ", x, barY, barH, fg, m_fontSmall, iconSize, gap) + 30;
+      x = drawFooterHint("X", "Xóa", x, barY, barH, red, m_fontSmall, iconSize, gap) + 30;
+    } else {
+      if (m_cachedGames.empty()) {
+        x = drawFooterHint("B", "Lùi", x, barY, barH, fg, m_fontSmall, iconSize, gap) + 30;
+        x = drawFooterHint("Y", m_libraryTab == LibraryTab::DRIVE ? "Đồng bộ" : "Quét thẻ", x, barY, barH, cyan, m_fontSmall, iconSize, gap) + 30;
+      } else {
+        bool isLocal = false;
+        if (m_selectedGameIndex >= 0 &&
+            m_selectedGameIndex < static_cast<int>(m_cachedGames.size())) {
+          isLocal =
+              (m_cachedGames[m_selectedGameIndex].localState == GameState::LOCAL);
+        }
+        std::string aAction = (m_libraryTab == LibraryTab::DRIVE) ? (isLocal ? "Chơi" : "Tải") : "Tải lên";
+        x = drawFooterHint("A", aAction, x, barY, barH, fg, m_fontSmall, iconSize, gap) + 30;
+        x = drawFooterHint("B", "Lùi", x, barY, barH, fg, m_fontSmall, iconSize, gap) + 30;
+        if (isLocal) {
+          x = drawFooterHint("X", "Xóa ROM", x, barY, barH, red, m_fontSmall, iconSize, gap) + 30;
+        }
+        x = drawFooterHint("Y", "Nhảy chữ", x, barY, barH, fg, m_fontSmall, iconSize, gap) + 30;
+        x = drawFooterHint("L2", "Chọn nhiều", x, barY, barH, fg, m_fontSmall, iconSize, gap) + 30;
+      }
+      x = drawFooterHint("SELECT", "Lọc", x, barY, barH, fg, m_fontSmall, iconSize, gap) + 30;
+      x = drawFooterHint("START", "Tìm", x, barY, barH, cyan, m_fontSmall, iconSize, gap) + 30;
     }
-
-    x = drawFooterHint("A", isLocal ? "Chơi" : "Tải", x, barY, barH, fg,
-                       m_fontSmall, iconSize, gap) +
-        30;
-    x = drawFooterHint("B", "Lùi", x, barY, barH, fg, m_fontSmall, iconSize,
-                       gap) +
-        30;
-    if (isLocal) {
-      x = drawFooterHint("X", "Xóa ROM", x, barY, barH, red, m_fontSmall,
-                         iconSize, gap) +
-          30;
+    // L1 + R1 đổi Tab
+    {
+      int centerY = barY + barH / 2;
+      drawButtonIcon("L1", x, centerY - iconSize / 2, iconSize);
+      x += iconSize + 4;
+      drawButtonIcon("R1", x, centerY - iconSize / 2, iconSize);
+      x += iconSize + gap;
+      int th = textHeight(m_fontSmall);
+      drawText("Tab", x, centerY - th / 2, fg, m_fontSmall);
+      x += textWidth("Tab", m_fontSmall) + 30;
     }
-    x = drawFooterHint("Y", "Nhảy chữ", x, barY, barH, fg, m_fontSmall,
-                       iconSize, gap) +
-        30;
-    x = drawFooterHint("SELECT", "Lọc", x, barY, barH, fg, m_fontSmall,
-                       iconSize, gap) +
-        30;
-    x = drawFooterHint("START", "Tìm kiếm", x, barY, barH, cyan, m_fontSmall,
-                       iconSize, gap) +
-        30;
   } else if (m_currentState == UIState::SEARCH) {
     if (!m_searchVk.inResults) {
       x = drawFooterHint("A", "Nhập", x, barY, barH, fg, m_fontSmall, iconSize,
@@ -3628,6 +3745,15 @@ void UIManager::renderFooter() {
                          gap) +
           30;
       x = drawFooterHint("X", "Xóa hết", x, barY, barH, fg, m_fontSmall,
+                         iconSize, gap) +
+          30;
+      x = drawFooterHint("L1", "Hoa", x, barY, barH, fg, m_fontSmall,
+                         iconSize, gap) +
+          30;
+      x = drawFooterHint("R1", "ABC/123", x, barY, barH, fg, m_fontSmall,
+                         iconSize, gap) +
+          30;
+      x = drawFooterHint("SELECT", m_searchVk.telexMode ? "Telex: Bật" : "Telex: Tắt", x, barY, barH, fg, m_fontSmall,
                          iconSize, gap) +
           30;
       x = drawFooterHint("START", "Tìm", x, barY, barH, cyan, m_fontSmall,
@@ -3647,6 +3773,13 @@ void UIManager::renderFooter() {
                          iconSize, gap) +
           30;
     }
+  } else if (m_currentState == UIState::CONFIRM_UPLOAD) {
+    x = drawFooterHint("A", "Đồng bộ", x, barY, barH, cyan, m_fontSmall, iconSize,
+                       gap) +
+        30;
+    x = drawFooterHint("B", "Hủy", x, barY, barH, fg, m_fontSmall, iconSize,
+                       gap) +
+        30;
   } else if (m_currentState == UIState::CONFIRM_DELETE ||
              m_currentState == UIState::CONFIRM_BATCH_DELETE) {
     x = drawFooterHint("A", "Xóa", x, barY, barH, red, m_fontSmall, iconSize,
@@ -3688,10 +3821,10 @@ void UIManager::renderFooter() {
     x = drawFooterHint("B", "Menu", x, barY, barH, fg, m_fontSmall, iconSize,
                        gap) +
         30;
-    x = drawFooterHint("Y", "Đồng bộ", x, barY, barH, fg, m_fontSmall, iconSize,
+    x = drawFooterHint("Y", m_libraryTab == LibraryTab::DRIVE ? "Đồng bộ" : "Quét thẻ", x, barY, barH, cyan, m_fontSmall, iconSize,
                        gap) +
         30;
-    // L1 + R1 cùng là chuyển trang
+    // L1 + R1 đổi Tab
     {
       int centerY = barY + barH / 2;
       drawButtonIcon("L1", x, centerY - iconSize / 2, iconSize);
@@ -3699,8 +3832,8 @@ void UIManager::renderFooter() {
       drawButtonIcon("R1", x, centerY - iconSize / 2, iconSize);
       x += iconSize + gap;
       int th = textHeight(m_fontSmall);
-      drawText("Trang", x, centerY - th / 2, fg, m_fontSmall);
-      x += textWidth("Trang", m_fontSmall) + 30;
+      drawText("Đổi Tab", x, centerY - th / 2, fg, m_fontSmall);
+      x += textWidth("Đổi Tab", m_fontSmall) + 30;
     }
   } else {
     x = drawFooterHint("A", "Chọn", x, barY, barH, fg, m_fontSmall, iconSize,
@@ -3793,31 +3926,47 @@ void UIManager::renderSystemSelectState() {
   int totalLocal = 0, totalCloud = 0;
   DatabaseManager::instance().getTotalGameCounts(totalLocal, totalCloud);
 
-  // Header 1 hàng: CHỌN HỆ MÁY - 24 Hệ máy | 2 Thẻ | ... (không 2 hàng)
-  std::string counts =
-      std::to_string(m_cachedSystems.size()) +
-      UiStrings::SYS_SELECT_SYSTEMS_LABEL + std::to_string(totalLocal) +
-      UiStrings::SYS_SELECT_GAMES_LOCAL + std::to_string(totalCloud) +
-      UiStrings::SYS_SELECT_GAMES_CLOUD;
-  std::string title = UiStrings::SYSTEM_SELECT_TITLE;
+  // 1. Header Bar (Y = 0..64)
   drawRect(0, 0, UiTheme::APP_W, UiTheme::HEADER_H, UiTheme::FOOTER_BG, true);
-  drawRect(0, UiTheme::HEADER_H - 1, UiTheme::APP_W, 1, UiTheme::FOOTER_LINE,
-           true);
+  drawRect(0, UiTheme::HEADER_H - 1, UiTheme::APP_W, 1, UiTheme::FOOTER_LINE, true);
   drawHeaderStatus();
+
+  std::string title = "THƯ VIỆN GAME";
+  std::string counts = (m_libraryTab == LibraryTab::DRIVE)
+      ? (" - " + std::to_string(totalCloud) + " game Drive")
+      : (" - " + std::to_string(totalLocal) + " game trên thẻ");
+
   int hcy = textYCentered(0, UiTheme::HEADER_H, m_fontLarge);
   drawText(title, 24, hcy, UiTheme::ACCENT_CYAN, m_fontLarge);
   int htx = 24 + textWidth(title, m_fontLarge);
-  std::string rest = truncateToWidth(std::string(" - ") + counts, m_fontLarge,
-                                     UiTheme::APP_W - htx - 300);
+  std::string rest = truncateToWidth(counts, m_fontLarge, UiTheme::APP_W - htx - 260);
   drawText(rest, htx, hcy, UiTheme::TEXT_DIM, m_fontLarge);
 
+  // 2. Tab row below title bar (Office Go style: Y = 72, H = 32, right aligned)
+  int tabH = 32;
+  int tabY = 72;
+  int wDrive = pillWidth("GOOGLE DRIVE", m_fontSmall) + 32;
+  int wSd = pillWidth("THẺ NHỚ", m_fontSmall) + 32;
+  int xSd = 1024 - 24 - wSd;
+  int xDrive = xSd - 8 - wDrive;
+  drawPill(xDrive, tabY, wDrive, tabH, "GOOGLE DRIVE",
+           m_libraryTab == LibraryTab::DRIVE, m_fontSmall);
+  drawPill(xSd, tabY, wSd, tabH, "THẺ NHỚ",
+           m_libraryTab == LibraryTab::SDCARD, m_fontSmall);
+
+  std::string guide = (m_libraryTab == LibraryTab::DRIVE)
+      ? "Chọn hệ máy để xem ROM trên Google Drive"
+      : "Chọn hệ máy để xem ROM trên thẻ nhớ SD";
+  drawText(guide, 24, textYCentered(tabY, tabH, m_fontSmall), UiTheme::TEXT_SUB, m_fontSmall);
+
+  // 3. System list starting at Y = 114
   int visibleCount = 6;
   int startIdx = 0;
   if (m_selectedSystemIndex >= visibleCount) {
     startIdx = m_selectedSystemIndex - visibleCount + 1;
   }
 
-  int rowY = 76;
+  int rowY = 114;
   int rowH = 88;
   int rowW = 976;
   int rx = 24;
@@ -3835,7 +3984,6 @@ void UIManager::renderSystemSelectState() {
     if (selected) {
       drawRoundedBorder(rx, y, rowW, rowH, UiTheme::RADIUS_ROW,
                         UiTheme::ACCENT_CYAN, 2);
-      // Left neon accent
       drawRoundedRect(rx + 6, y + 12, 5, rowH - 24, 2, UiTheme::ACCENT_CYAN,
                       true);
     }
@@ -3851,72 +3999,139 @@ void UIManager::renderSystemSelectState() {
     drawRowMainSub(rx + 96, y, rowH, sysName, m_fontLarge, subtext,
                    m_fontSmall);
 
-    std::string localBadge = std::to_string(sys.localCount) + " local";
-    std::string cloudBadge = std::to_string(sys.cloudCount) + " cloud";
+    std::string localBadge = std::to_string(sys.localCount) + " trên thẻ";
+    std::string cloudBadge = std::to_string(sys.cloudCount) + " trên Drive";
 
-    // Count badges (elastic, right edge pinned with 10px margin)
     int cloudW = badgeWidth(cloudBadge, 40);
     int cloudX = rx + rowW - 10 - cloudW;
     int localW = badgeWidth(localBadge, 40);
     int localX = cloudX - 10 - localW;
+
+    SDL_Color localBg = (m_libraryTab == LibraryTab::SDCARD) ? SDL_Color{22, 101, 52, 255} : UiTheme::PILL_BG;
+    SDL_Color cloudBg = (m_libraryTab == LibraryTab::DRIVE) ? SDL_Color{2, 132, 199, 255} : UiTheme::FOCUS_BG;
+
     drawBadge(localX, y + (rowH - 40) / 2, localW, 40, localBadge,
-              UiTheme::PILL_BG, UiTheme::TEXT_MAIN);
+              localBg, UiTheme::TEXT_MAIN);
     drawBadge(cloudX, y + (rowH - 40) / 2, cloudW, 40, cloudBadge,
-              UiTheme::FOCUS_BG, UiTheme::TEXT_MAIN);
+              cloudBg, UiTheme::TEXT_MAIN);
+  }
+
+  if (static_cast<int>(m_cachedSystems.size()) > visibleCount) {
+    int barX = rx + rowW + 8;
+    int barTrackH = visibleCount * (rowH + 10) - 10;
+    drawRoundedRect(barX, rowY, 4, barTrackH, 2, {35, 42, 54, 255}, true);
+    float ratio = (float)visibleCount / (float)m_cachedSystems.size();
+    int thumbH = std::max(24, (int)(barTrackH * ratio));
+    float scrollRatio = (float)startIdx / (float)(m_cachedSystems.size() - visibleCount);
+    int thumbY = rowY + (int)((barTrackH - thumbH) * scrollRatio);
+    drawRoundedRect(barX, thumbY, 4, thumbH, 2, {0, 180, 216, 255}, true);
   }
 }
 
 void UIManager::renderGameListState() {
-  // Header 1 hang: TEN HE MAY - N game
+  // 1. Header Bar (Y = 0..64)
   std::string gTitle =
-      m_activeSystem.name.empty() ? "DANH SACH GAME" : m_activeSystem.name;
+      m_activeSystem.name.empty() ? "DANH SÁCH GAME" : m_activeSystem.name;
   std::string gCounts =
-      std::string(" - ") + std::to_string(m_cachedGames.size()) + " game";
+      std::string(" - ") + std::to_string(m_cachedGames.size()) +
+      (m_libraryTab == LibraryTab::DRIVE ? " game Drive" : " game trên thẻ");
   drawRect(0, 0, UiTheme::APP_W, UiTheme::HEADER_H, UiTheme::FOOTER_BG, true);
   drawRect(0, UiTheme::HEADER_H - 1, UiTheme::APP_W, 1, UiTheme::FOOTER_LINE,
            true);
   drawHeaderStatus();
+
   int ghcy = textYCentered(0, UiTheme::HEADER_H, m_fontLarge);
   drawText(gTitle, 24, ghcy, UiTheme::ACCENT_CYAN, m_fontLarge);
   int ghtx = 24 + textWidth(gTitle, m_fontLarge);
   std::string gRest =
-      truncateToWidth(gCounts, m_fontLarge, UiTheme::APP_W - ghtx - 300);
+      truncateToWidth(gCounts, m_fontLarge, UiTheme::APP_W - ghtx - 260);
   drawText(gRest, ghtx, ghcy, UiTheme::TEXT_DIM, m_fontLarge);
 
-  // Layout A 65/35: list 666px + detail 300px (gap + divider)
-  int listY = 76;
-  int listH = 627;
+  // 2. Tab row below title bar (Office Go style: Y = 72, H = 32, right aligned)
+  int tabH = 32;
+  int tabY = 72;
+  int wDrive = pillWidth("GOOGLE DRIVE", m_fontSmall) + 32;
+  int wSd = pillWidth("THẺ NHỚ", m_fontSmall) + 32;
+  int xSd = 1024 - 24 - wSd;
+  int xDrive = xSd - 8 - wDrive;
+  drawPill(xDrive, tabY, wDrive, tabH, "GOOGLE DRIVE",
+           m_libraryTab == LibraryTab::DRIVE, m_fontSmall);
+  drawPill(xSd, tabY, wSd, tabH, "THẺ NHỚ",
+           m_libraryTab == LibraryTab::SDCARD, m_fontSmall);
+
+  std::string infoStr = "/Roms/" + m_activeSystem.romDir + "  •  " +
+                        std::to_string(m_cachedGames.size()) + " game";
+  drawText(infoStr, 24, textYCentered(tabY, tabH, m_fontSmall), UiTheme::TEXT_SUB,
+           m_fontSmall);
+
+  // 3. Panes Layout (Y = 114, H = 595)
+  int listY = 114;
+  int listH = 595;
   int listW = UiTheme::LIST_W;
   int listX = 16;
 
   int detailX = UiTheme::DETAIL_X;
-  int detailY = 76;
+  int detailY = 114;
   int detailW = UiTheme::DETAIL_W;
-  int detailH = 627;
+  int detailH = 595;
 
   // Subtle 1px vertical divider between panes
-  drawRect(listX + listW + 8, 76, 1, 627, {38, 48, 64, 255}, true);
+  drawRect(listX + listW + 8, 114, 1, 595, {38, 48, 64, 255}, true);
 
-  // 1. Render Left Games List
+  // Left Games List
   int totalGames = static_cast<int>(m_cachedGames.size());
   int pageSize = 6;
-  int rowH = 92;
+  int rowH = 88;
   int rowW = listW - 30;
   int rowX = listX;
-  int listStartY = listY + 12;
+  int listStartY = listY + 6;
 
   if (totalGames == 0) {
-    drawText(UiStrings::GAME_LIST_EMPTY, listX + listW / 2, listY + 280,
-             {140, 150, 165, 255}, m_fontLarge, true);
-    drawInlineHintsCentered(UiStrings::GAME_FILTER_HINT, listX + listW / 2,
-                            listY + 325, {0, 180, 216, 255}, m_fontSmall, 24);
+    int cardW = listW - 40;
+    int cardH = 220;
+    int cardX = listX + 20;
+    int cardY = listY + 80;
+    drawRoundedRect(cardX, cardY, cardW, cardH, UiTheme::RADIUS_CARD, UiTheme::CARD_BG, true);
+    drawRoundedBorder(cardX, cardY, cardW, cardH, UiTheme::RADIUS_CARD, UiTheme::CARD_BORDER, 1);
+
+    if (m_libraryTab == LibraryTab::DRIVE) {
+      if (!AuthManager::instance().isLinked()) {
+        drawText("Chưa liên kết Google Drive", cardX + cardW / 2, cardY + 45,
+                 {245, 158, 11, 255}, m_fontLarge, true);
+        drawText("Vào Cài đặt để quét mã QR liên kết tài khoản Drive.",
+                 cardX + cardW / 2, cardY + 95, UiTheme::TEXT_DIM, m_fontSmall, true);
+        drawBadge(cardX + cardW / 2 - 120, cardY + 145, 240, 38,
+                 "[B] Lùi  •  [L1/R1] Xem Thẻ", {45, 55, 72, 255}, UiTheme::TEXT_MAIN);
+      } else if (DriveSyncEngine::instance().isSyncing()) {
+        drawText("Đang đồng bộ Google Drive...", cardX + cardW / 2, cardY + 45,
+                 UiTheme::ACCENT_CYAN, m_fontLarge, true);
+        drawText("Vui lòng đợi trong giây lát, danh sách sẽ tự cập nhật.",
+                 cardX + cardW / 2, cardY + 95, UiTheme::TEXT_DIM, m_fontSmall, true);
+        drawBadge(cardX + cardW / 2 - 90, cardY + 145, 180, 38,
+                 "Đang đồng bộ...", {2, 132, 199, 255}, UiTheme::TEXT_MAIN);
+      } else {
+        drawText("Chưa có dữ liệu ROM trên Drive", cardX + cardW / 2, cardY + 45,
+                 UiTheme::ACCENT_CYAN, m_fontLarge, true);
+        drawText("Bấm [Y] để bắt đầu Đồng bộ thư viện Google Drive",
+                 cardX + cardW / 2, cardY + 95, UiTheme::TEXT_DIM, m_fontSmall, true);
+        drawBadge(cardX + cardW / 2 - 100, cardY + 145, 200, 38,
+                 "[Y] Đồng bộ ngay", {34, 197, 94, 255}, {255, 255, 255, 255});
+      }
+    } else {
+      drawText("Không có ROM nào trên thẻ nhớ", cardX + cardW / 2, cardY + 45,
+               {245, 158, 11, 255}, m_fontLarge, true);
+      std::string pathHint = "Thư mục: /Roms/" + m_activeSystem.romDir;
+      drawText(pathHint, cardX + cardW / 2, cardY + 95, UiTheme::TEXT_DIM, m_fontSmall, true);
+      drawBadge(cardX + cardW / 2 - 100, cardY + 145, 200, 38,
+               "[Y] Quét lại thẻ nhớ", {2, 132, 199, 255}, {255, 255, 255, 255});
+    }
   } else {
     for (int i = 0; i < pageSize && (m_gameScrollOffset + i) < totalGames;
          ++i) {
       int gameIdx = m_gameScrollOffset + i;
       const auto &game = m_cachedGames[gameIdx];
       bool selected = (gameIdx == m_selectedGameIndex);
-      int y = listStartY + i * (rowH + 12);
+      int y = listStartY + i * (rowH + 10);
 
       SDL_Color bg = selected ? UiTheme::FOCUS_BG : UiTheme::ROW_BG;
       if (selected)
@@ -3924,147 +4139,211 @@ void UIManager::renderGameListState() {
       else
         drawRoundedRect(rowX, y, rowW, rowH, UiTheme::RADIUS_ROW, bg, true);
 
-      // State Pill Badge (compact: h 20, pad 6 moi ben, sat mep trai)
-      bool isThisDownloading =
-          DownloadManager::instance().isDownloading() &&
-          DownloadManager::instance().getProgress().gameId == game.id;
-      auto dlp = DownloadManager::instance().getProgress();
-      int badgeH = 20;
-      int badgeY = y + (rowH - badgeH) / 2;
-      int badgeX = rowX + 6;
-      std::string badgeTxt;
-      SDL_Color badgeBg{22, 101, 52, 255};
+      if (m_libraryTab == LibraryTab::SDCARD) {
+        // Tab THẺ NHỚ:
+        // 1. Bên phải: duy nhất 1 status pill (backed up, not backed up)
+        std::string badgeTxt = !game.cloudFileId.empty() ? "ĐÃ SAO LƯU" : "CHƯA SAO LƯU";
+        SDL_Color badgeBg = !game.cloudFileId.empty() ? SDL_Color{22, 101, 52, 255} : SDL_Color{217, 119, 6, 255};
 
-      if (game.localState == GameState::LOCAL) {
-        badgeTxt = UiStrings::BADGE_DOWNLOADED;
-        badgeBg = {22, 101, 52, 255};
-      } else if (isThisDownloading) {
-        char pctBuf[16];
-        std::snprintf(pctBuf, sizeof(pctBuf), "%.0f%%", dlp.progressPct);
-        badgeTxt = std::string(pctBuf);
-        badgeBg = {2, 132, 199, 255};
-      } else if (DownloadManager::instance().isInQueue(game.id)) {
-        auto q = DownloadManager::instance().getQueue();
-        int pos = 1;
-        for (const auto &qi : q) {
-          if (qi.game.id == game.id)
-            break;
-          pos++;
-        }
-        badgeTxt = "#" + std::to_string(pos);
-        badgeBg = {107, 33, 168, 255};
-      } else if (game.localState == GameState::CLOUD) {
-        badgeTxt = "CLOUD";
-        badgeBg = UiTheme::FOCUS_BG;
-      } else {
-        badgeTxt = UiStrings::BTN_SYNC;
-        badgeBg = {217, 119, 6, 255};
-      }
-      // Pill compact tu ve (pad 7 moi ben) de giam ca cao + rong
-      int btw = m_fontSmall ? textWidth(badgeTxt, m_fontSmall) : 60;
-      int bw = btw + 14;
-      if (bw < 40)
-        bw = 40;
-      drawRoundedRect(badgeX, badgeY, bw, badgeH, badgeH / 2, badgeBg, true);
-      drawText(badgeTxt, badgeX + bw / 2,
-               textYCentered(badgeY, badgeH, m_fontSmall), UiTheme::TEXT_MAIN,
-               m_fontSmall, true);
-      // Ten game cach pill 1 space (~12px), khong dinh nhau
-      int titleX = badgeX + bw + 12;
+        int badgeH = 24;
+        int btw = m_fontSmall ? textWidth(badgeTxt, m_fontSmall) : 60;
+        int bw = btw + 18;
+        int badgeX = rowX + rowW - bw - 14;
+        int badgeY = y + (rowH - badgeH) / 2;
 
-      // Title: marquee chay ngang khi highlight + ten dai
-      // titleX da cach pill 1 space, maxW do theo mep phai row
-      int titleMaxW = rowX + rowW - 16 - titleX;
-      if (titleMaxW < 120)
-        titleMaxW = 120;
-      std::string titleFull = game.title;
-      std::string title;
-      if (selected && m_fontLarge &&
-          textWidth(titleFull, m_fontLarge) > titleMaxW) {
-        // Tach UTF-8 thanh codepoint de scroll khong vo chu
-        std::vector<std::string> cps;
-        for (size_t k = 0; k < titleFull.size();) {
-          unsigned char c = titleFull[k];
-          size_t len = 1;
-          if ((c & 0x80) == 0x00)
-            len = 1;
-          else if ((c & 0xE0) == 0xC0)
-            len = 2;
-          else if ((c & 0xF0) == 0xE0)
-            len = 3;
-          else if ((c & 0xF8) == 0xF0)
-            len = 4;
-          if (k + len > titleFull.size())
-            len = titleFull.size() - k;
-          cps.push_back(titleFull.substr(k, len));
-          k += len;
-        }
-        static int s_marqueeSel = -999;
-        static uint32_t s_marqueeT0 = 0;
-        uint32_t now = SDL_GetTicks();
-        if (s_marqueeSel != gameIdx) {
-          s_marqueeSel = gameIdx;
-          s_marqueeT0 = now;
-        }
-        uint32_t el = now - s_marqueeT0;
-        std::string cand = titleFull;
-        if (el > 1200 && !cps.empty()) {
-          size_t steps = cps.size() + 3;
-          size_t off = ((el - 1200) / 350) % steps;
-          if (off < cps.size()) {
-            std::string rot;
-            for (size_t k = off; k < cps.size(); k++)
-              rot += cps[k];
-            rot += "   ";
-            for (size_t k = 0; k < off && k < cps.size(); k++)
-              rot += cps[k];
-            cand = rot;
-          } else {
-            cand = titleFull;
+        drawRoundedRect(badgeX, badgeY, bw, badgeH, badgeH / 2, badgeBg, true);
+        drawText(badgeTxt, badgeX + bw / 2,
+                 textYCentered(badgeY, badgeH, m_fontSmall), UiTheme::TEXT_MAIN,
+                 m_fontSmall, true);
+
+        // 2. Bên trái: Tên game & Subname (hệ game, dung lượng)
+        int titleX = rowX + 16;
+        int titleMaxW = badgeX - titleX - 14;
+        if (titleMaxW < 120)
+          titleMaxW = 120;
+
+        std::string titleFull = game.title;
+        std::string title;
+        if (selected && m_fontLarge &&
+            textWidth(titleFull, m_fontLarge) > titleMaxW) {
+          std::vector<std::string> cps;
+          for (size_t k = 0; k < titleFull.size();) {
+            unsigned char c = titleFull[k];
+            size_t len = 1;
+            if ((c & 0x80) == 0x00) len = 1;
+            else if ((c & 0xE0) == 0xC0) len = 2;
+            else if ((c & 0xF0) == 0xE0) len = 3;
+            else if ((c & 0xF8) == 0xF0) len = 4;
+            if (k + len > titleFull.size()) len = titleFull.size() - k;
+            cps.push_back(titleFull.substr(k, len));
+            k += len;
           }
+          static int s_marqueeSel = -999;
+          static uint32_t s_marqueeT0 = 0;
+          uint32_t now = SDL_GetTicks();
+          if (s_marqueeSel != gameIdx) {
+            s_marqueeSel = gameIdx;
+            s_marqueeT0 = now;
+          }
+          uint32_t el = now - s_marqueeT0;
+          std::string cand = titleFull;
+          if (el > 1200 && !cps.empty()) {
+            size_t steps = cps.size() + 3;
+            size_t off = ((el - 1200) / 350) % steps;
+            if (off < cps.size()) {
+              std::string rot;
+              for (size_t k = off; k < cps.size(); k++) rot += cps[k];
+              rot += "   ";
+              for (size_t k = 0; k < off && k < cps.size(); k++) rot += cps[k];
+              cand = rot;
+            } else {
+              cand = titleFull;
+            }
+          }
+          title = truncateToWidth(cand, m_fontLarge, titleMaxW);
+        } else {
+          title = truncateToWidth(titleFull, m_fontLarge, titleMaxW);
         }
-        title = truncateToWidth(cand, m_fontLarge, titleMaxW);
-      } else {
-        title = truncateToWidth(titleFull, m_fontLarge, titleMaxW);
-      }
-      SDL_Color titleCol = isThisDownloading ? UiTheme::ACCENT_CYAN
-                                             : (selected ? UiTheme::TEXT_MAIN
-                                                         : UiTheme::TEXT_DIM);
 
-      if (isThisDownloading) {
-        drawText(title, titleX, textYCentered(y, 56, m_fontLarge), titleCol,
-                 m_fontLarge);
-
-        char pctBuf[16];
-        std::snprintf(pctBuf, sizeof(pctBuf), "%.1f%%", dlp.progressPct);
-        std::string dlSub =
-            FileSystemManager::instance().formatBytes(dlp.bytesDownloaded) +
-            " / " + FileSystemManager::instance().formatBytes(dlp.totalBytes) +
-            "  (" + pctBuf + ")";
-        dlSub = truncateToWidth(dlSub, m_fontSmall, titleMaxW);
-        drawText(dlSub, titleX, y + 44, {140, 205, 245, 255}, m_fontSmall);
-
-        // Live in-row rounded progress bar
-        int pBarX = titleX;
-        int pBarY = y + 70;
-        int pBarW = rowX + rowW - 16 - titleX;
-        int pBarH = 6;
-        drawRoundedRect(pBarX, pBarY, pBarW, pBarH, 3, {35, 45, 60, 255}, true);
-        float pct = std::max(0.0, std::min(100.0, dlp.progressPct));
-        drawRoundedRect(pBarX, pBarY, (int)(pBarW * (pct / 100.0)), pBarH, 3,
-                        {34, 197, 94, 255}, true);
-      } else {
-        std::string sizeStr =
-            FileSystemManager::instance().formatBytes(game.sizeBytes);
-        std::string sub = truncateToWidth(game.filename + "  (" + sizeStr + ")",
+        SDL_Color titleCol = selected ? UiTheme::TEXT_MAIN : UiTheme::TEXT_DIM;
+        std::string sizeStr = FileSystemManager::instance().formatBytes(game.sizeBytes);
+        std::string sysLabel = !m_activeSystem.name.empty() ? m_activeSystem.name : m_activeSystem.code;
+        std::string sub = truncateToWidth(sysLabel + " (" + m_activeSystem.code + ")  •  " + sizeStr,
                                           m_fontSmall, titleMaxW);
-        // Cum main/sub can giua doc trong row 92px (fix lech tam)
+
         int thM = m_fontLarge ? TTF_FontHeight(m_fontLarge) : 24;
         int thS = m_fontSmall ? TTF_FontHeight(m_fontSmall) : 16;
         int blockH = thM + 4 + thS;
         int ty = y + (rowH - blockH) / 2;
         drawText(title, titleX, ty, titleCol, m_fontLarge);
         drawText(sub, titleX, ty + thM + 4, UiTheme::TEXT_SUB, m_fontSmall);
+      } else {
+        // Tab DRIVE: Giữ nguyên pill bên trái và trạng thái download
+        bool isThisDownloading =
+            DownloadManager::instance().isDownloading() &&
+            DownloadManager::instance().getProgress().gameId == game.id;
+        auto dlp = DownloadManager::instance().getProgress();
+        int badgeH = 20;
+        int badgeY = y + (rowH - badgeH) / 2;
+        int badgeX = rowX + 6;
+        std::string badgeTxt;
+        SDL_Color badgeBg{22, 101, 52, 255};
+
+        if (game.localState == GameState::LOCAL) {
+          badgeTxt = UiStrings::BADGE_DOWNLOADED;
+          badgeBg = {22, 101, 52, 255};
+        } else if (isThisDownloading) {
+          char pctBuf[16];
+          std::snprintf(pctBuf, sizeof(pctBuf), "%.0f%%", dlp.progressPct);
+          badgeTxt = std::string(pctBuf);
+          badgeBg = {2, 132, 199, 255};
+        } else if (DownloadManager::instance().isInQueue(game.id)) {
+          auto q = DownloadManager::instance().getQueue();
+          int pos = 1;
+          for (const auto &qi : q) {
+            if (qi.game.id == game.id)
+              break;
+            pos++;
+          }
+          badgeTxt = "#" + std::to_string(pos);
+          badgeBg = {107, 33, 168, 255};
+        } else {
+          badgeTxt = "TRÊN DRIVE";
+          badgeBg = {2, 132, 199, 255};
+        }
+
+        int btw = m_fontSmall ? textWidth(badgeTxt, m_fontSmall) : 60;
+        int bw = btw + 14;
+        if (bw < 40)
+          bw = 40;
+        drawRoundedRect(badgeX, badgeY, bw, badgeH, badgeH / 2, badgeBg, true);
+        drawText(badgeTxt, badgeX + bw / 2,
+                 textYCentered(badgeY, badgeH, m_fontSmall), UiTheme::TEXT_MAIN,
+                 m_fontSmall, true);
+
+        int titleX = badgeX + bw + 12;
+        int titleMaxW = rowX + rowW - 16 - titleX;
+        if (titleMaxW < 120)
+          titleMaxW = 120;
+        std::string titleFull = game.title;
+        std::string title;
+        if (selected && m_fontLarge &&
+            textWidth(titleFull, m_fontLarge) > titleMaxW) {
+          std::vector<std::string> cps;
+          for (size_t k = 0; k < titleFull.size();) {
+            unsigned char c = titleFull[k];
+            size_t len = 1;
+            if ((c & 0x80) == 0x00) len = 1;
+            else if ((c & 0xE0) == 0xC0) len = 2;
+            else if ((c & 0xF0) == 0xE0) len = 3;
+            else if ((c & 0xF8) == 0xF0) len = 4;
+            if (k + len > titleFull.size()) len = titleFull.size() - k;
+            cps.push_back(titleFull.substr(k, len));
+            k += len;
+          }
+          static int s_marqueeSel = -999;
+          static uint32_t s_marqueeT0 = 0;
+          uint32_t now = SDL_GetTicks();
+          if (s_marqueeSel != gameIdx) {
+            s_marqueeSel = gameIdx;
+            s_marqueeT0 = now;
+          }
+          uint32_t el = now - s_marqueeT0;
+          std::string cand = titleFull;
+          if (el > 1200 && !cps.empty()) {
+            size_t steps = cps.size() + 3;
+            size_t off = ((el - 1200) / 350) % steps;
+            if (off < cps.size()) {
+              std::string rot;
+              for (size_t k = off; k < cps.size(); k++) rot += cps[k];
+              rot += "   ";
+              for (size_t k = 0; k < off && k < cps.size(); k++) rot += cps[k];
+              cand = rot;
+            } else {
+              cand = titleFull;
+            }
+          }
+          title = truncateToWidth(cand, m_fontLarge, titleMaxW);
+        } else {
+          title = truncateToWidth(titleFull, m_fontLarge, titleMaxW);
+        }
+        SDL_Color titleCol = isThisDownloading ? UiTheme::ACCENT_CYAN
+                                               : (selected ? UiTheme::TEXT_MAIN
+                                                           : UiTheme::TEXT_DIM);
+
+        if (isThisDownloading) {
+          drawText(title, titleX, textYCentered(y, 56, m_fontLarge), titleCol,
+                   m_fontLarge);
+
+          char pctBuf[16];
+          std::snprintf(pctBuf, sizeof(pctBuf), "%.1f%%", dlp.progressPct);
+          std::string dlSub =
+              FileSystemManager::instance().formatBytes(dlp.bytesDownloaded) +
+              " / " + FileSystemManager::instance().formatBytes(dlp.totalBytes) +
+              "  (" + pctBuf + ")";
+          dlSub = truncateToWidth(dlSub, m_fontSmall, titleMaxW);
+          drawText(dlSub, titleX, y + 44, {140, 205, 245, 255}, m_fontSmall);
+
+          int pBarX = titleX;
+          int pBarY = y + 70;
+          int pBarW = rowX + rowW - 16 - titleX;
+          int pBarH = 6;
+          drawRoundedRect(pBarX, pBarY, pBarW, pBarH, 3, {35, 45, 60, 255}, true);
+          float pct = std::max(0.0, std::min(100.0, dlp.progressPct));
+          drawRoundedRect(pBarX, pBarY, (int)(pBarW * (pct / 100.0)), pBarH, 3,
+                          {34, 197, 94, 255}, true);
+        } else {
+          std::string sizeStr =
+              FileSystemManager::instance().formatBytes(game.sizeBytes);
+          std::string sub = truncateToWidth(game.filename + "  (" + sizeStr + ")",
+                                            m_fontSmall, titleMaxW);
+          int thM = m_fontLarge ? TTF_FontHeight(m_fontLarge) : 24;
+          int thS = m_fontSmall ? TTF_FontHeight(m_fontSmall) : 16;
+          int blockH = thM + 4 + thS;
+          int ty = y + (rowH - blockH) / 2;
+          drawText(title, titleX, ty, titleCol, m_fontLarge);
+          drawText(sub, titleX, ty + thM + 4, UiTheme::TEXT_SUB, m_fontSmall);
+        }
       }
 
       // Multi-select checkbox
@@ -4072,15 +4351,11 @@ void UIManager::renderGameListState() {
         auto it = std::find(m_selectedGameIds.begin(), m_selectedGameIds.end(),
                             game.id);
         bool isSelected = (it != m_selectedGameIds.end());
-
-        // Checkbox background
         SDL_Color cbBg = isSelected ? SDL_Color{34, 197, 94, 255}
                                     : SDL_Color{50, 60, 75, 255};
-        drawRoundedRect(rowX + rowW - 40, y + 35, 24, 24, 4, cbBg, true);
-
-        // Checkmark
+        drawRoundedRect(rowX + rowW - 40, y + 32, 24, 24, 4, cbBg, true);
         if (isSelected) {
-          drawText("✓", rowX + rowW - 40 + 3, y + 33, {255, 255, 255, 255},
+          drawText("✓", rowX + rowW - 40 + 3, y + 30, {255, 255, 255, 255},
                    m_fontMedium);
         }
       }
@@ -4115,7 +4390,7 @@ void UIManager::renderGameListState() {
                 UiTheme::TEXT_MAIN);
     }
 
-    // Scrollbar (sat mep phai cot trai, khong de len row)
+    // Scrollbar
     if (totalGames > pageSize) {
       int barX = rowX + rowW + 8;
       int barTrackH = listH - 24;
@@ -4131,19 +4406,18 @@ void UIManager::renderGameListState() {
     }
   }
 
-  // 2. Render Right Details & Cover Panel (Borderless)
+  // 4. Render Right Details & Cover Panel
   const GameRecord *selGame =
       (totalGames > 0 && m_selectedGameIndex < totalGames)
           ? &m_cachedGames[m_selectedGameIndex]
           : nullptr;
 
-  // Cover Art Box (vừa khít panel DETAIL_W=300, không tràn viền)
+  // Cover Art Box (vừa khít panel DETAIL_W=300, chiều cao 260px)
   int coverBoxW = detailW - 16;
-  int coverBoxH = 290;
+  int coverBoxH = 260;
   int coverBoxX = detailX + (detailW - coverBoxW) / 2;
   int coverBoxY = detailY + 14;
 
-  // Rounded backdrop for cover art container
   drawRoundedRect(coverBoxX - 4, coverBoxY - 4, coverBoxW + 8, coverBoxH + 8,
                   UiTheme::RADIUS_MODAL, {16, 20, 28, 255}, true);
   drawRoundedBorder(coverBoxX - 4, coverBoxY - 4, coverBoxW + 8, coverBoxH + 8,
@@ -4153,18 +4427,18 @@ void UIManager::renderGameListState() {
                                           coverBoxH, selGame, &m_activeSystem,
                                           m_fontMedium);
 
-  // Detail Metadata (cant le trai, truncate theo pixel de khong tran vien)
+  // Detail Metadata
   if (selGame) {
     int metaX = detailX + 16;
     int valX = detailX + 108;
     int valMaxW = detailX + detailW - 16 - valX;
-    int metaY = coverBoxY + coverBoxH + 18;
+    int metaY = coverBoxY + coverBoxH + 16;
 
     std::string title =
         truncateToWidth(selGame->title, m_fontLarge, detailW - 48);
     drawText(title, metaX, metaY, {255, 255, 255, 255}, m_fontLarge);
 
-    metaY += 44;
+    metaY += 34;
     drawText(UiStrings::DETAIL_SYS_LABEL, metaX, metaY, {140, 155, 175, 255},
              m_fontSmall);
     std::string sysVal =
@@ -4172,7 +4446,7 @@ void UIManager::renderGameListState() {
                         m_fontSmall, valMaxW);
     drawText(sysVal, valX, metaY, {0, 180, 216, 255}, m_fontSmall);
 
-    metaY += 34;
+    metaY += 28;
     drawText(UiStrings::DETAIL_SIZE_LABEL, metaX, metaY, {140, 155, 175, 255},
              m_fontSmall);
     std::string sizeVal = truncateToWidth(
@@ -4180,10 +4454,10 @@ void UIManager::renderGameListState() {
         m_fontSmall, valMaxW);
     drawText(sizeVal, valX, metaY, {255, 255, 255, 255}, m_fontSmall);
 
-    metaY += 34;
+    metaY += 28;
     drawText(UiStrings::DETAIL_LOCATION_LABEL, metaX, metaY,
              {140, 155, 175, 255}, m_fontSmall);
-    if (selGame->localState == GameState::LOCAL) {
+    if (m_libraryTab == LibraryTab::SDCARD || selGame->localState == GameState::LOCAL) {
       std::string locVal =
           truncateToWidth(std::string(UiStrings::GAME_LOCATION_SD_PREFIX) +
                               m_activeSystem.romDir + ")",
@@ -4195,52 +4469,71 @@ void UIManager::renderGameListState() {
       drawText(locVal, valX, metaY, {0, 180, 216, 255}, m_fontSmall);
     }
 
+    metaY += 28;
+    drawText("Drive:", metaX, metaY, {140, 155, 175, 255}, m_fontSmall);
+    if (!selGame->cloudFileId.empty()) {
+      drawText("Đã sao lưu", valX, metaY, {34, 197, 94, 255}, m_fontSmall);
+    } else {
+      drawText("Chưa sao lưu", valX, metaY, {245, 158, 11, 255}, m_fontSmall);
+    }
+
     // Action Status Pill & Live Progress
-    metaY += 42;
-    if (selGame->localState == GameState::LOCAL) {
+    metaY += 34;
+    if (m_libraryTab == LibraryTab::SDCARD) {
       int halfW = (detailW - 40) / 2;
-      drawBadge(metaX, metaY, halfW, 46, UiStrings::BADGE_DOWNLOADED,
-                UiTheme::ACCENT_GREEN, UiTheme::TEXT_MAIN);
+      std::string aSyncText = selGame->cloudFileId.empty() ? "[A] Sao lưu Drive" : "[A] Đồng bộ lại";
+      drawBadge(metaX, metaY, halfW, 46, aSyncText,
+                {2, 132, 199, 255}, {255, 255, 255, 255});
       drawBadge(metaX + 8 + halfW, metaY, halfW, 46,
                 UiStrings::BADGE_DELETE_BTN, UiTheme::ACCENT_RED,
                 UiTheme::TEXT_MAIN);
-    } else if (DownloadManager::instance().isDownloading() &&
-               DownloadManager::instance().getProgress().gameId ==
-                   selGame->id) {
-      auto dlp = DownloadManager::instance().getProgress();
-      char pctBuf[32];
-      std::snprintf(pctBuf, sizeof(pctBuf), "%.1f%%", dlp.progressPct);
-      std::string dlInfo =
-          std::string(UiStrings::GAME_DOWNLOADING_PREFIX) + std::string(pctBuf);
-      drawBadge(metaX, metaY, detailW - 32, 40, dlInfo, {2, 132, 199, 255},
-                {255, 255, 255, 255});
-
-      int dBarX = metaX;
-      int dBarY = metaY + 46;
-      int dBarW = detailW - 32;
-      int dBarH = 10;
-      drawRoundedRect(dBarX, dBarY, dBarW, dBarH, 5, {35, 45, 60, 255}, true);
-      float pct = std::max(0.0, std::min(100.0, dlp.progressPct));
-      drawRoundedRect(dBarX, dBarY, (int)(dBarW * (pct / 100.0)), dBarH, 5,
-                      {34, 197, 94, 255}, true);
-
-      std::string dSizeStr =
-          FileSystemManager::instance().formatBytes(dlp.bytesDownloaded) +
-          " / " + FileSystemManager::instance().formatBytes(dlp.totalBytes);
-      drawText(dSizeStr, detailX + detailW / 2, dBarY + 16,
-               {200, 220, 240, 255}, m_fontSmall, true);
-
-      drawBadge(metaX, dBarY + 38, detailW - 32, 36,
-                UiStrings::BADGE_CANCEL_DL_BTN, UiTheme::ACCENT_RED,
-                UiTheme::TEXT_MAIN);
-      metaY += 56;
-    } else if (DownloadManager::instance().isInQueue(selGame->id)) {
-      drawBadge(metaX, metaY, detailW - 32, 46,
-                UiStrings::BADGE_REMOVE_QUEUE_BTN, {107, 33, 168, 255},
-                {255, 255, 255, 255});
     } else {
-      drawBadge(metaX, metaY, detailW - 32, 46, UiStrings::BADGE_ADD_QUEUE_BTN,
-                {2, 132, 199, 255}, {255, 255, 255, 255});
+      // Tab DRIVE
+      if (selGame->localState == GameState::LOCAL) {
+        int halfW = (detailW - 40) / 2;
+        drawBadge(metaX, metaY, halfW, 46, UiStrings::BADGE_DOWNLOADED,
+                  UiTheme::ACCENT_GREEN, UiTheme::TEXT_MAIN);
+        drawBadge(metaX + 8 + halfW, metaY, halfW, 46,
+                  UiStrings::BADGE_DELETE_BTN, UiTheme::ACCENT_RED,
+                  UiTheme::TEXT_MAIN);
+      } else if (DownloadManager::instance().isDownloading() &&
+                 DownloadManager::instance().getProgress().gameId ==
+                     selGame->id) {
+        auto dlp = DownloadManager::instance().getProgress();
+        char pctBuf[32];
+        std::snprintf(pctBuf, sizeof(pctBuf), "%.1f%%", dlp.progressPct);
+        std::string dlInfo =
+            std::string(UiStrings::GAME_DOWNLOADING_PREFIX) + std::string(pctBuf);
+        drawBadge(metaX, metaY, detailW - 32, 40, dlInfo, {2, 132, 199, 255},
+                  {255, 255, 255, 255});
+
+        int dBarX = metaX;
+        int dBarY = metaY + 46;
+        int dBarW = detailW - 32;
+        int dBarH = 10;
+        drawRoundedRect(dBarX, dBarY, dBarW, dBarH, 5, {35, 45, 60, 255}, true);
+        float pct = std::max(0.0, std::min(100.0, dlp.progressPct));
+        drawRoundedRect(dBarX, dBarY, (int)(dBarW * (pct / 100.0)), dBarH, 5,
+                        {34, 197, 94, 255}, true);
+
+        std::string dSizeStr =
+            FileSystemManager::instance().formatBytes(dlp.bytesDownloaded) +
+            " / " + FileSystemManager::instance().formatBytes(dlp.totalBytes);
+        drawText(dSizeStr, detailX + detailW / 2, dBarY + 16,
+                 {200, 220, 240, 255}, m_fontSmall, true);
+
+        drawBadge(metaX, dBarY + 38, detailW - 32, 36,
+                  UiStrings::BADGE_CANCEL_DL_BTN, UiTheme::ACCENT_RED,
+                  UiTheme::TEXT_MAIN);
+        metaY += 56;
+      } else if (DownloadManager::instance().isInQueue(selGame->id)) {
+        drawBadge(metaX, metaY, detailW - 32, 46,
+                  UiStrings::BADGE_REMOVE_QUEUE_BTN, {107, 33, 168, 255},
+                  {255, 255, 255, 255});
+      } else {
+        drawBadge(metaX, metaY, detailW - 32, 46, "[A] Tải về thẻ nhớ",
+                  {2, 132, 199, 255}, {255, 255, 255, 255});
+      }
     }
 
     // Queue info panel below action pill
@@ -4260,10 +4553,12 @@ void UIManager::renderGameListState() {
       }
       drawText(qInfo, metaX, metaY, {168, 85, 247, 255}, m_fontSmall);
     }
+  } else {
+    drawText("Chưa có game được chọn", detailX + detailW / 2, detailY + 330,
+             UiTheme::TEXT_DIM, m_fontSmall, true);
   }
 
-  // Active download indicator banner at bottom right if user is browsing
-  // another game
+  // Active download indicator banner at bottom right
   if (DownloadManager::instance().isDownloading() &&
       (!selGame ||
        DownloadManager::instance().getProgress().gameId != selGame->id)) {
@@ -4361,6 +4656,46 @@ void UIManager::openConfirmBatchDeleteDialog() {
         m_selectedGameIds.clear();
       },
       true);
+}
+
+void UIManager::openConfirmUploadDialog() {
+  if (m_selectedGameIndex < 0 ||
+      m_selectedGameIndex >= static_cast<int>(m_cachedGames.size())) {
+    return;
+  }
+  const auto &g = m_cachedGames[m_selectedGameIndex];
+  int64_t gameId = g.id;
+  std::string gameTitle = g.title;
+  std::string pathName = !m_activeSystem.romDir.empty() ? m_activeSystem.romDir : m_activeSystem.code;
+  std::string sizeStr = FileSystemManager::instance().formatBytes(g.sizeBytes);
+  bool alreadyBackedUp = !g.cloudFileId.empty();
+
+  std::vector<std::string> lines;
+  lines.push_back(truncateToWidth(gameTitle, m_fontMedium, 440));
+  lines.push_back("Hệ máy: " + m_activeSystem.name + " (" + m_activeSystem.code + ")  •  " + sizeStr);
+  lines.push_back("Đích Drive: root/Roms/" + pathName + "/" + g.filename);
+  lines.push_back(alreadyBackedUp
+                      ? "Game đã có trên Drive. Tải lên để đồng bộ lại?"
+                      : "Xác nhận sao lưu game này lên Google Drive?");
+
+  m_dialogs.confirm.open(
+      "ĐỒNG BỘ LÊN DRIVE", std::move(lines),
+      [this, gameId, gameTitle]() {
+        if (!AuthManager::instance().isLinked()) {
+          showToast(UiStrings::TOAST_CONNECT_DRIVE_FIRST, {245, 158, 11, 255}, 3000);
+          setState(UIState::GAME_LIST);
+          return;
+        }
+        if (!AuthManager::instance().canUpload()) {
+          showToast(UiStrings::TOAST_CONNECT_PERSONAL_DRIVE, {245, 158, 11, 255}, 4000);
+          setState(UIState::GAME_LIST);
+          return;
+        }
+        showToast("Bắt đầu sao lưu \"" + gameTitle + "\"...", {168, 85, 247, 255}, 2000);
+        UploadManager::instance().startUploadGames({gameId});
+        setState(UIState::REVERSE_SYNC);
+      },
+      false);
 }
 
 void UIManager::renderConfirmDialogFromState() {
@@ -5060,7 +5395,9 @@ void UIManager::renderCloudLoginState() {
     int urlBoxX = innerX + (innerW - urlBoxW) / 2;
     drawRect(urlBoxX, textY, urlBoxW, urlBoxH, {10, 15, 22, 255}, true);
     drawBorder(urlBoxX, textY, urlBoxW, urlBoxH, {0, 180, 216, 255}, 2);
-    drawText(portalUrl, urlBoxX + urlBoxW / 2, textY + 18, {0, 180, 216, 255},
+    drawText(truncateToWidth(portalUrl,
+                          m_fontTitle ? m_fontTitle : m_fontLarge, urlBoxW - 24),
+             urlBoxX + urlBoxW / 2, textY + 18, {0, 180, 216, 255},
              m_fontTitle ? m_fontTitle : m_fontLarge, true);
 
     textY += urlBoxH + 34;
@@ -6149,8 +6486,8 @@ void UIManager::renderIPTVPlaylistSelectState() {
   }
 
   // Footer chuan IPTV (drawAppFooter tu ve nen)
-  drawAppFooter({{UiTheme::PadBtn::Y, "Tải lại"},
-                 {UiTheme::PadBtn::X, "Đổi"},
+  drawAppFooter({{UiTheme::PadBtn::Y, "Cập nhật OTA"},
+                 {UiTheme::PadBtn::X, "Đổi chu kỳ"},
                  {UiTheme::PadBtn::B, "Menu"}});
 }
 
@@ -6744,7 +7081,7 @@ void UIManager::renderIPTVSearchState() {
   {
     static std::string i0, i1, i2, i3, i4;
     i0 = m_iptvVk.shift ? "ABC" : "abc";
-    i1 = m_iptvVk.telexMode ? "TELEX" : "US";
+    i1 = m_iptvVk.symbolMode ? "123" : "ABC";
     i2 = "Cách";
     i3 = "Xóa";
     i4 = "Xem";
@@ -6772,7 +7109,9 @@ void UIManager::renderIPTVSearchState() {
                    {UiTheme::PadBtn::B, "Thoát"},
                    {UiTheme::PadBtn::X, "Cách"},
                    {UiTheme::PadBtn::Y, "Xóa"},
-                   {UiTheme::PadBtn::R1, "Telex"},
+                   {UiTheme::PadBtn::L1, "Hoa"},
+                   {UiTheme::PadBtn::R1, "ABC/123"},
+                   {UiTheme::PadBtn::SELECT, m_iptvVk.telexMode ? "Telex: Bật" : "Telex: Tắt"},
                    {UiTheme::PadBtn::START, "Tìm kênh"}});
   }
 }
@@ -6823,6 +7162,10 @@ void UIManager::render() {
   case UIState::CONFIRM_BATCH_DELETE:
     renderGameListState();
     renderConfirmBatchDeleteDialog();
+    break;
+  case UIState::CONFIRM_UPLOAD:
+    renderGameListState();
+    renderConfirmDialogFromState();
     break;
   case UIState::DISCLAIMER:
     renderDisclaimerState();
@@ -6924,13 +7267,31 @@ void UIManager::render() {
   SDL_RenderPresent(m_renderer);
 }
 
-// Browser URL input state
-bool UIManager::isBrowserUrlInputMode() const {
-  return m_browserUrlInputMode;
-}
-
-void UIManager::setBrowserUrlInputMode(bool inputMode) {
-  m_browserUrlInputMode = inputMode;
+// P13: launch mpv for page video (fullscreen takeover, B to return).
+void UIManager::pollBrowserMedia() {
+  if (m_browserMediaPlaying) {
+    if (MpvPlayer::instance().pollExited()) m_browserMediaPlaying = false;
+    return;
+  }
+  std::string url;
+  if (!HtmlRenderer::instance().takeMediaRequest(url)) return;
+  if (!BrowserManager::instance().settings().video) {
+    showToast("Bật Video trong Cài đặt (SELECT) để phát", {245, 158, 11, 255}, 2000);
+    return;
+  }
+  std::string low = url;
+  std::transform(low.begin(), low.end(), low.begin(), ::tolower);
+  if (low.find("youtube.com") != std::string::npos ||
+      low.find("youtu.be") != std::string::npos) {
+    showToast("Video YouTube: mở app YouTube để xem", {245, 158, 11, 255}, 2500);
+    return;
+  }
+  if (MpvPlayer::instance().play(url, {}, "/tmp/mpv_browser.sock", "/tmp/mpv_browser.log")) {
+    m_browserMediaPlaying = true;
+    showToast("Đang phát (B để dừng)", {0, 180, 255, 255}, 1500);
+  } else {
+    showToast("Không phát được video", {239, 68, 68, 255}, 2000);
+  }
 }
 
 void UIManager::renderBrowserState() {
@@ -6938,16 +7299,23 @@ void UIManager::renderBrowserState() {
   static bool initialized = false;
   static bool autoLoadTried = false;
   if (!initialized) {
-    HtmlRenderer::instance().init(m_renderer, m_fontMedium);
+    // P9: pass the resolved font file so CSS font-size can open siblings.
+    HtmlRenderer::instance().init(m_renderer, m_fontMedium, m_fontPathUsed, 20);
+    NetSurfEngine::instance().init(m_renderer, m_fontMedium, m_fontPathUsed, 20);
     BrowserManager::instance().init();
     initialized = true;
-    m_browserUrlInputMode = false;  // skip URL input screen — go straight to content
     autoLoadTried = false;
     Logger::info("Browser: initialized, default URL = " + m_browserUrl);
   }
 
   // Poll for async HTTP fetch completion
   HtmlRenderer::instance().pollFetch();
+
+  // P13: page media play requests (A on a video box).
+  pollBrowserMedia();
+
+  // P13: mpv owns the framebuffer while page media plays — don't fight it.
+  if (m_browserMediaPlaying) return;
 
   // Auto-load default URL on first render so they see web right away.
   if (!autoLoadTried && !m_browserUrl.empty() &&
@@ -6965,43 +7333,63 @@ void UIManager::renderBrowserState() {
   // Draw background
   drawRect(0, 0, 1024, 768, {10, 10, 15, 255}, true);
 
-  // Draw header
-  drawRect(0, 0, 1024, 64, {20, 20, 30, 255}, true);
-  drawRect(0, 63, 1024, 1, {60, 60, 80, 255}, true);
+  // 1. HEADER (Y 0..63)
+  drawRect(0, 0, 1024, 64, UiTheme::FOOTER_BG, true);
+  drawRect(0, 63, 1024, 1, UiTheme::FOOTER_LINE, true);
+  drawHeaderStatus();
 
-  // Title
-  TTF_Font* titleFont = m_fontMedium;
+  TTF_Font* titleFont = m_fontMedium ? m_fontMedium : m_fontLarge;
   if (titleFont) {
-    drawText("WEB BROWSER", 24, 18, {220, 220, 220, 255}, titleFont, false);
+    bool reader = HtmlRenderer::instance().isReaderMode();
+    int hcy = textYCentered(0, 64, titleFont);
+    const char* mainTitle = reader ? "BÀI VIẾT" : "TRÌNH DUYỆT WEB";
+    drawText(mainTitle, 24, hcy,
+             reader ? SDL_Color{0, 200, 120, 255} : UiTheme::ACCENT_CYAN,
+             titleFont, false);
+
+    int titleW = 0;
+    TTF_SizeUTF8(titleFont, mainTitle, &titleW, nullptr);
+    bool isFull = BrowserManager::instance().engineMode() == BrowserEngine::FULL;
+    std::string modeBadge = isFull ? "[FULL ENGINE]" : "[LITE ENGINE]";
+    SDL_Color badgeCol = isFull ? UiTheme::ACCENT_CYAN : SDL_Color{150, 200, 100, 255};
+    drawText(modeBadge, 24 + titleW + 16, hcy, badgeCol, titleFont, false);
   }
 
-  // Draw URL bar
-  drawRect(16, 40, 992, 44, {15, 18, 25, 255}, true);
-  drawRect(16, 40, 992, 44, {50, 55, 70, 255}, false);
+  // 2. THANH URL DƯỚI HEADER (Y 64..111, h = 48)
+  drawRect(0, 64, 1024, 48, {16, 18, 26, 255}, true);
+  drawRect(0, 111, 1024, 1, UiTheme::FOOTER_LINE, true);
+
+  // Khung Input URL (x = 16, y = 70, w = 992, h = 36)
+  SDL_Color urlEdge = m_browserUrlFocused ? UiTheme::ACCENT_CYAN : SDL_Color{50, 55, 70, 255};
+  drawRect(16, 70, 992, 36, {22, 26, 36, 255}, true);
+  drawRect(16, 70, 992, 36, urlEdge, false);
 
   // Draw URL text
   TTF_Font* urlFont = m_fontSmall ? m_fontSmall : m_fontMedium;
   if (urlFont) {
-    if (m_browserUrlInputMode) {
-      drawText(m_browserUrl, 24, 50, {180, 180, 180, 255}, urlFont, false);
-    } else {
+    int urlY = textYCentered(70, 36, urlFont);
+    {
       std::string url = BrowserManager::instance().currentUrl();
-      if (url.empty()) url = "Nhập URL...";
-      drawText(url, 24, 50, {180, 180, 180, 255}, urlFont, false);
+      if (url.empty()) url = "Nhấn Y để nhập địa chỉ web...";
+      SDL_Color urlCol = m_browserUrlFocused ? SDL_Color{255, 255, 255, 255}
+                                            : SDL_Color{180, 180, 180, 255};
+      drawText(truncateToWidth(url, urlFont, 850), 32, urlY,
+               urlCol, urlFont, false);
+    }
+    // Loading indicator on URL bar
+    if (BrowserManager::instance().state() == BrowserState::LOADING) {
+      drawText("[Đang tải...]", 890, urlY, {245, 158, 11, 255}, urlFont, false);
     }
   }
 
-  // Content area
-  if (m_browserUrlInputMode) {
-    // Show URL input hint
-    TTF_Font* hintFont = m_fontMedium;
-    if (hintFont) {
-      drawText("Nhấn START để truy cập", 512, 180, {150, 150, 160, 255}, hintFont, true);
-      drawText("A để sửa URL", 512, 220, {120, 120, 130, 255}, hintFont, true);
-    }
-  } else {
+  // 3. PHẦN HIỂN THỊ WEB (Y 112..714, h = 603)
+  {
     // Render browser content
-    HtmlRenderer::instance().render();
+    if (BrowserManager::instance().engineMode() == BrowserEngine::FULL) {
+      NetSurfEngine::instance().render();
+    } else {
+      HtmlRenderer::instance().render();
+    }
     // Phase 1 — audit P1-2c: nếu đang edit một <input>, vẽ VK overlay
     // đè lên content để user gõ Telex vào field. Mirror query của VK
     // thành cursor line ngay phía trên VK.
@@ -7014,7 +7402,8 @@ void UIManager::renderBrowserState() {
         std::string prev = m_browserVk.query.empty()
                                ? std::string("(rỗng)")
                                : (m_browserVk.query + " _");
-        drawText(prev, 512, 332, {220, 220, 230, 255}, previewFont, true);
+        drawText(truncateToWidth(prev, previewFont, 992), 512, 332,
+                 {220, 220, 230, 255}, previewFont, true);
       }
       // Vẽ bàn phím ảo.
       static const char* fieldActions[] = {"ABC", "123", "Cách", "Xóa", "Xong"};
@@ -7030,32 +7419,56 @@ void UIManager::renderBrowserState() {
   drawRect(0, 715, 1024, 1, {40, 40, 60, 255}, true);
 
   // Footer buttons
-  if (m_browserUrlInputMode) {
+  if (m_browserUrlFocused) {
+    // P8: URL bar focused — A edits, DOWN returns to page
+    // P18: START re-navigates = reload (hint renamed from "Truy cập").
     drawAppFooter({
-      {UiTheme::PadBtn::B, "Thoát"},
+      {UiTheme::PadBtn::B, "Lùi"},
       {UiTheme::PadBtn::A, "Sửa URL"},
-      {UiTheme::PadBtn::START, "Truy cập"}
+      {UiTheme::PadBtn::UPDOWN, "Về trang"},
+      {UiTheme::PadBtn::START, "Tải lại"}
     });
   } else if (m_browserFieldEditing) {
-    // Phase 1 — audit P1-2c: field edit mode. Đổi footer thành phím tắt
-    // bàn phím ảo để user biết: A=chọn phím, B=Hủy (restore gốc),
-    // X=space, Y=xóa, START=Xong. (L1/R1 không dùng trong edit mode.)
+    // Field edit mode: A=chọn phím, B=Hủy (restore gốc), X=space, Y=xóa,
+    // L1=Hoa, R1=ABC/123 (stock), SELECT=Telex, START=Xong.
     drawAppFooter({
       {UiTheme::PadBtn::B, "Hủy"},
       {UiTheme::PadBtn::A, "Chọn"},
       {UiTheme::PadBtn::START, "Xong"},
       {UiTheme::PadBtn::X, "Cách"},
-      {UiTheme::PadBtn::Y, "Xóa"}
+      {UiTheme::PadBtn::Y, "Xóa"},
+      {UiTheme::PadBtn::L1, "Hoa"},
+      {UiTheme::PadBtn::R1, "ABC/123"},
+      {UiTheme::PadBtn::SELECT, m_browserVk.telexMode ? "Telex: Bật" : "Telex: Tắt"}
     });
   } else {
-    // Phase 2 — audit M2: surface L1/R1 in the footer so the user knows
-    // there is a faster way to scroll than UP/DOWN through every input.
+    // P8: dpad = move between events, A/B = action (YouTube-style)
+    // P15.2: START = find in page, SELECT = browser settings.
+    // P17: FULL mode — hint A theo loại control đang focus (Nhập/Chọn/Gửi).
+    std::string aHint = "Mở";
+    if (BrowserManager::instance().engineMode() == BrowserEngine::FULL) {
+      RenderBox* ffb = NetSurfEngine::instance().focusedBox();
+      if (ffb && (ffb->type == RenderBoxType::INPUT ||
+                  ffb->type == RenderBoxType::BUTTON)) {
+        const std::string& ft = ffb->inputType;
+        if (ffb->type == RenderBoxType::INPUT &&
+            (ft == "text" || ft == "password" || ft == "textarea"))
+          aHint = "Nhập";
+        else if (ft == "checkbox" || ft == "radio" || ft == "select")
+          aHint = "Chọn";
+        else
+          aHint = "Gửi";
+      }
+    }
     drawAppFooter({
       {UiTheme::PadBtn::B, "Quay lại"},
-      {UiTheme::PadBtn::L1, "PgUp"},
-      {UiTheme::PadBtn::R1, "PgDn"},
-      {UiTheme::PadBtn::A, "Chọn"},
-      {UiTheme::PadBtn::Y, "URL"}
+      {UiTheme::PadBtn::UPDOWN, "Mục"},
+      {UiTheme::PadBtn::L1R1, "Trang"},
+      {UiTheme::PadBtn::A, aHint.c_str()},
+      {UiTheme::PadBtn::X, "Tiến"},
+      {UiTheme::PadBtn::Y, "URL"},
+      {UiTheme::PadBtn::SELECT, "Cài đặt"},
+      {UiTheme::PadBtn::START, "Tìm"}
     });
   }
 
@@ -7074,24 +7487,58 @@ void UIManager::renderBrowserState() {
     drawText(BrowserManager::instance().errorMessage(), 512, 320, {255, 80, 80, 255}, m_fontMedium, true);
     drawText("A: thử lại   Y: đổi URL", 512, 360, {180, 180, 180, 255}, m_fontMedium, true);
   }
+
+  // Feature settings overlay (topmost).
+  if (m_browserSettingsOpen) {
+    renderBrowserSettings();
+  }
 }
 
 void UIManager::handleBrowserInput() {
   InputManager& input = InputManager::instance();
 
+  // P13: mpv owns the screen while page media plays — B stops it.
+  if (m_browserMediaPlaying) {
+    if (MpvPlayer::instance().pollExited()) {
+      m_browserMediaPlaying = false;
+    } else if (input.isButtonJustPressed(Button::B)) {
+      MpvPlayer::instance().stop();
+      m_browserMediaPlaying = false;
+    }
+    return;
+  }
+
   // B: Exit or back
   if (input.isButtonJustPressed(Button::B)) {
-    if (m_browserUrlInputMode) {
-      // Exit browser
-      BrowserManager::instance().close();
-      HtmlRenderer::instance().stop();
-      setState(UIState::MENU);
+    // Field edit eats B first (cancel the edit, stay on the page) — the
+    // footer promises B=Hủy. Without this, B would navigate back while
+    // the edit session stays live.
+    if (m_browserFieldEditing) {
+      cancelBrowserFieldEdit();
+      return;
+    }
+    // Settings overlay eats B (close it, stay in browser)
+    if (m_browserSettingsOpen) {
+      m_browserSettingsOpen = false;
+      return;
+    }
+    if (m_browserUrlFocused) {
+      // P8: leave the URL bar, back to page focus
+      m_browserUrlFocused = false;
     } else {
-      // Go back or exit to URL mode
-      if (HtmlRenderer::instance().canGoBack()) {
+      // P15.2: first B clears an active find, second B goes back.
+      // P18: nothing left to go back to → exit the browser (the old
+      // url-input-mode start screen is gone).
+      if (HtmlRenderer::instance().findCount() > 0) {
+        HtmlRenderer::instance().clearFind();
+        showToast("Đã xóa tìm kiếm", {150, 150, 160, 255}, 1200);
+      } else if (HtmlRenderer::instance().canGoBack()) {
         HtmlRenderer::instance().goBack();
       } else {
-        m_browserUrlInputMode = true;
+        BrowserManager::instance().close();
+        HtmlRenderer::instance().stop();
+        m_browserUrlFocused = false;
+        setState(UIState::MENU);
       }
     }
     return;
@@ -7105,53 +7552,138 @@ void UIManager::handleBrowserInput() {
       return;
     }
     if (input.isButtonJustPressed(Button::Y)) {
-      m_browserUrlInputMode = true;
+      openBrowserUrlEditor();
       return;
     }
   }
 
-  // Y: Toggle URL input mode
-  if (input.isButtonJustPressed(Button::Y)) {
-    m_browserUrlInputMode = !m_browserUrlInputMode;
+  // Y: quick URL entry — straight to the keyboard (P18: the old
+  // url-input-mode sample screen is gone).
+  // Not while editing a page <input> — there Y = backspace (field VK).
+  if (input.isButtonJustPressed(Button::Y) && !m_browserFieldEditing) {
+    openBrowserUrlEditor();
     return;
   }
 
-  if (m_browserUrlInputMode) {
-    // START: Navigate to URL
-    if (input.isButtonJustPressed(Button::START)) {
-      if (!m_browserUrl.empty()) {
-        m_browserUrlInputMode = false;
-        BrowserManager::instance().openUrl(m_browserUrl);
+  {
+    // P8: URL-bar focus (YouTube-style search input on top).
+    HtmlRenderer& html = HtmlRenderer::instance();
+    // Settings overlay eats everything except its own keys.
+    if (m_browserSettingsOpen) {
+      if (input.isButtonJustPressed(Button::SELECT)) {
+        m_browserSettingsOpen = false;
+        return;
+      }
+      if (input.isButtonJustPressed(Button::UP)) {
+        m_browserSettingsSel = (m_browserSettingsSel + 8) % 9;
+        return;
+      }
+      if (input.isButtonJustPressed(Button::DOWN)) {
+        m_browserSettingsSel = (m_browserSettingsSel + 1) % 9;
+        return;
+      }
+      if (input.isButtonJustPressed(Button::A)) {
+        toggleBrowserSetting(m_browserSettingsSel);
+        return;
       }
       return;
     }
-    // A: Open virtual keyboard to edit URL
-    if (input.isButtonJustPressed(Button::A)) {
-      VirtualKeyboard::reset(m_browserVk, true);
-      m_browserVk.query = m_browserUrl;
-      m_browserVk.charset = 1;  // URL-friendly charset
-      m_browserVk.maxLen = 100;
-      setState(UIState::BROWSER_INPUT);
-      return;
+    if (input.isButtonJustPressed(Button::SELECT)) {
+      // P8c: open feature settings (content mode only — field edit and
+      // URL input use SELECT for Telex/.vn already).
+      if (!m_browserFieldEditing) {
+        m_browserSettingsOpen = true;
+        m_browserSettingsSel = 0;
+        return;
+      }
     }
-  } else {
+    if (m_browserUrlFocused) {
+      if (input.isButtonJustPressed(Button::A)) {
+        openBrowserUrlEditor();
+        return;
+      }
+      if (input.isButtonJustPressed(Button::DOWN)) {
+        m_browserUrlFocused = false;
+        if (BrowserManager::instance().engineMode() == BrowserEngine::FULL) {
+          NetSurfRenderer::instance().focusFirst();
+        } else {
+          html.focusFirst();
+        }
+        return;
+      }
+      if (input.isButtonJustPressed(Button::L1)) {
+        html.pageUp(120);
+        return;
+      }
+      if (input.isButtonJustPressed(Button::R1)) {
+        html.pageDown(120);
+        return;
+      }
+      if (input.isButtonJustPressed(Button::START)) {
+        // Re-navigate current URL
+        std::string url = BrowserManager::instance().currentUrl();
+        if (url.empty()) url = m_browserUrl;
+        if (!url.empty()) {
+          m_browserUrlFocused = false;
+          BrowserManager::instance().openUrl(url);
+        }
+        return;
+      }
+      return;  // swallow UP/others while on URL bar
+    }
+    // UP at the absolute top of the page (widget 0 and scroll at 0) -> URL bar
+    if (input.isButtonJustPressed(Button::UP)) {
+      if (BrowserManager::instance().engineMode() == BrowserEngine::FULL) {
+        NetSurfEngine& ns = NetSurfEngine::instance();
+        if (ns.scrollY() <= 0 && (!ns.focusedBox() || ns.focusedBox()->y <= 80)) {
+          m_browserUrlFocused = true;
+          return;
+        }
+      } else {
+        if (html.focusIndex() <= 0 && html.scrollY() <= 0) {
+          m_browserUrlFocused = true;
+          return;
+        }
+      }
+    }
     // Browser page navigation mode (or field edit when active).
-    HtmlRenderer& html = HtmlRenderer::instance();
 
     // Phase 1 — audit P1-2c: detect transition false→true vào edit mode
     // của một <input>. Khi vào edit, init VK với giá trị hiện tại của
     // field để Telex transform hoạt động đúng từ đầu chuỗi (cursor ở 0).
     // Lưu value gốc để restore khi user bấm "Hủy".
-    if (html.isEditing() && !m_browserFieldEditing) {
+    // P17: engine-agnostic — LITE (html) và FULL (nsEng) dùng chung flow VK.
+    bool isFullEngine =
+        BrowserManager::instance().engineMode() == BrowserEngine::FULL;
+    NetSurfEngine& nsEng = NetSurfEngine::instance();
+    auto engIsEditing = [&]() -> bool {
+      return isFullEngine ? nsEng.isEditing() : html.isEditing();
+    };
+    auto engValue = [&]() -> std::string {
+      return isFullEngine ? nsEng.focusedInputValue() : html.focusedInputValue();
+    };
+    auto engMaxLen = [&]() -> int {
+      return isFullEngine ? nsEng.focusedInputMaxLen()
+                          : html.focusedInputMaxLen();
+    };
+    auto engSetValue = [&](const std::string& v) {
+      if (isFullEngine) nsEng.setFocusedInputValue(v);
+      else html.setFocusedInputValue(v);
+    };
+    auto engEndEdit = [&]() {
+      if (isFullEngine) nsEng.setEditing(false);
+      else html.handleInput(5);  // BTN_B → m_editingText=false
+    };
+    if (engIsEditing() && !m_browserFieldEditing) {
       m_browserFieldEditing = true;
-      m_browserFieldOriginal = html.focusedInputValue();
+      m_browserFieldOriginal = engValue();
       VirtualKeyboard::reset(m_browserVk, true);
       m_browserVk.query = m_browserFieldOriginal;
       m_browserVk.charset = 0;       // qwerty thường
-      m_browserVk.maxLen = html.focusedInputMaxLen();
+      m_browserVk.maxLen = engMaxLen();
       Logger::info("Browser: enter field edit, VK seeded with current text");
     }
-    if (!html.isEditing() && m_browserFieldEditing) {
+    if (!engIsEditing() && m_browserFieldEditing) {
       m_browserFieldEditing = false;
       Logger::info("Browser: exit field edit");
     }
@@ -7169,47 +7701,137 @@ void UIManager::handleBrowserInput() {
         VirtualKeyboard::move(m_browserVk, 0, -1, true);
       } else if (input.isButtonJustPressed(Button::RIGHT)) {
         VirtualKeyboard::move(m_browserVk, 0, 1, true);
-      } else if (input.isButtonJustPressed(Button::A)) {
+      } else if (input.isButtonRepeat(Button::A)) {
         VkAction act = VirtualKeyboard::pressA(m_browserVk, [](const char*) {}, true);
         if (act == VkAction::Commit) {
           // "Xong" — giữ value hiện tại (đã sync), đóng edit.
-          html.setFocusedInputValue(m_browserVk.query);
-          html.handleInput(5);  // BTN_B → m_editingText=false
+          engSetValue(m_browserVk.query);
+          engEndEdit();
         } else if (act == VkAction::Cancel) {
           // "Hủy" hoặc B với query rỗng — restore value gốc, đóng edit.
-          html.setFocusedInputValue(m_browserFieldOriginal);
-          html.handleInput(5);
+          engSetValue(m_browserFieldOriginal);
+          engEndEdit();
         } else {
           // None / Backspace — typeChar / popUtf8 đã thay đổi s.query.
-          html.setFocusedInputValue(m_browserVk.query);
+          engSetValue(m_browserVk.query);
         }
-      } else if (input.isButtonJustPressed(Button::X)) {
+      } else if (input.isButtonRepeat(Button::X)) {
         VirtualKeyboard::typeSpace(m_browserVk);
-        html.setFocusedInputValue(m_browserVk.query);
-      } else if (input.isButtonJustPressed(Button::Y)) {
+        engSetValue(m_browserVk.query);
+      } else if (input.isButtonRepeat(Button::Y)) {
         VirtualKeyboard::backspace(m_browserVk);
-        html.setFocusedInputValue(m_browserVk.query);
+        engSetValue(m_browserVk.query);
+      } else if (input.isButtonJustPressed(Button::L1)) {
+        m_browserVk.shift = !m_browserVk.shift;
+      } else if (input.isButtonJustPressed(Button::R1)) {
+        VirtualKeyboard::toggleSymbol(m_browserVk, [this](const char *msg) {
+          showToast(msg, {0, 180, 255, 255}, 1200);
+        });
+        engSetValue(m_browserVk.query);
+      } else if (input.isButtonJustPressed(Button::SELECT)) {
+        VirtualKeyboard::toggleTelex(m_browserVk, [this](const char *msg) {
+          showToast(msg, {0, 180, 255, 255}, 1200);
+        });
       } else if (input.isButtonJustPressed(Button::START)) {
         // Đóng edit (giữ value).
-        html.handleInput(5);
+        engEndEdit();
       }
     } else {
-      // Browser navigation mode (existing).
-      if (input.isButtonJustPressed(Button::UP)) {
-        html.handleInput(0);  // UP
-      } else if (input.isButtonJustPressed(Button::DOWN)) {
-        html.handleInput(1);  // DOWN
-      } else if (input.isButtonJustPressed(Button::LEFT)) {
-        html.handleInput(2);  // LEFT
-      } else if (input.isButtonJustPressed(Button::RIGHT)) {
-        html.handleInput(3);  // RIGHT
-      } else if (input.isButtonJustPressed(Button::A)) {
-        html.handleInput(4);  // A - Select
-      } else if (input.isButtonJustPressed(Button::L1)) {
-        // Phase 2 — audit M2: shoulder buttons give coarse page scroll.
-        html.pageUp(120);
-      } else if (input.isButtonJustPressed(Button::R1)) {
-        html.pageDown(120);
+      // Browser navigation mode
+      if (BrowserManager::instance().engineMode() == BrowserEngine::FULL) {
+        NetSurfEngine& ns = NetSurfEngine::instance();
+        if (input.isButtonJustPressed(Button::UP)) {
+          ns.navigate(NavDirection::UP);
+        } else if (input.isButtonJustPressed(Button::DOWN)) {
+          ns.navigate(NavDirection::DOWN);
+        } else if (input.isButtonJustPressed(Button::LEFT)) {
+          ns.navigate(NavDirection::LEFT);
+        } else if (input.isButtonJustPressed(Button::RIGHT)) {
+          ns.navigate(NavDirection::RIGHT);
+        } else if (input.isButtonJustPressed(Button::A)) {
+          // P17: form controls trước — link sau.
+          RenderBox* fb = ns.focusedBox();
+          bool handled = false;
+          if (fb && (fb->type == RenderBoxType::INPUT ||
+                     fb->type == RenderBoxType::BUTTON)) {
+            const std::string& t = fb->inputType;
+            if (fb->type == RenderBoxType::INPUT &&
+                (t == "text" || t == "password" || t == "textarea")) {
+              ns.setEditing(true);  // VK flow ở trên sẽ pick up frame sau
+              handled = true;
+            } else if (t == "checkbox" || t == "radio") {
+              ns.toggleFocusedCheck();
+              handled = true;
+            } else if (t == "select") {
+              ns.cycleFocusedSelect();
+              std::string opt = ns.focusedSelectOption();
+              if (!opt.empty())
+                showToast(opt, {0, 180, 255, 255}, 900);
+              handled = true;
+            } else if ((fb->type == RenderBoxType::BUTTON && t == "submit") ||
+                       (fb->type == RenderBoxType::INPUT &&
+                        (t == "submit" || t == "image"))) {
+              if (ns.submitFocusedForm())
+                showToast("Đang gửi...", {0, 180, 255, 255}, 1200);
+              else
+                showToast("Form không gửi được", {255, 120, 120, 255}, 1500);
+              handled = true;
+            } else {
+              // <button type="button"> — inert khi không có JS.
+              showToast("Nút này cần JavaScript", {150, 150, 150, 255}, 1200);
+              handled = true;
+            }
+          }
+          if (!handled) {
+            std::string link = ns.currentFocusedLink();
+            if (!link.empty()) {
+              std::string resolved = HtmlRenderer::instance().resolveUrl(link);
+              if (!resolved.empty()) {
+                BrowserManager::instance().openUrl(resolved);
+              }
+            }
+          }
+        } else if (input.isButtonJustPressed(Button::X)) {
+          if (html.canGoForward()) html.goForward();
+        } else if (input.isButtonJustPressed(Button::START)) {
+          openBrowserFindEditor();
+        } else if (input.isButtonJustPressed(Button::L1)) {
+          ns.scrollBy(-120);
+        } else if (input.isButtonJustPressed(Button::R1)) {
+          ns.scrollBy(120);
+        }
+      } else {
+        // Lite engine navigation
+        if (input.isButtonJustPressed(Button::UP)) {
+          html.handleInput(0);  // UP
+        } else if (input.isButtonJustPressed(Button::DOWN)) {
+          html.handleInput(1);  // DOWN
+        } else if (input.isButtonJustPressed(Button::LEFT)) {
+          html.handleInput(2);  // LEFT
+        } else if (input.isButtonJustPressed(Button::RIGHT)) {
+          html.handleInput(3);  // RIGHT
+        } else if (input.isButtonJustPressed(Button::A)) {
+          html.handleInput(4);  // A - Select
+        } else if (input.isButtonJustPressed(Button::X)) {
+          // P15.4: X = forward (B = back).
+          if (html.canGoForward()) html.goForward();
+        } else if (input.isButtonJustPressed(Button::START)) {
+          // P15.2: START = next match while searching, else new search.
+          if (html.findCount() > 0) {
+            html.findNext();
+            char buf[64];
+            snprintf(buf, sizeof(buf), "Kết quả %d/%d",
+                     html.findIndex() + 1, html.findCount());
+            showToast(buf, {0, 180, 255, 255}, 1200);
+          } else {
+            openBrowserFindEditor();
+          }
+        } else if (input.isButtonJustPressed(Button::L1)) {
+          // Phase 2 — audit M2: shoulder buttons give coarse page scroll.
+          html.pageUp(120);
+        } else if (input.isButtonJustPressed(Button::R1)) {
+          html.pageDown(120);
+        }
       }
     }
   }
@@ -7217,32 +7839,91 @@ void UIManager::handleBrowserInput() {
 
 // Browser URL input state - render
 void UIManager::renderBrowserInputState() {
-  // Draw background
-  drawRect(0, 0, 1024, 768, {10, 10, 15, 255}, true);
-
-  // Draw header
-  drawRect(0, 0, 1024, 64, {20, 20, 30, 255}, true);
-  drawRect(0, 63, 1024, 1, {60, 60, 80, 255}, true);
+  // 1. HEADER (Y 0..63)
+  drawRect(0, 0, 1024, 64, UiTheme::FOOTER_BG, true);
+  drawRect(0, 63, 1024, 1, UiTheme::FOOTER_LINE, true);
+  drawHeaderStatus();
 
   // Title
-  TTF_Font* titleFont = m_fontMedium;
+  TTF_Font* titleFont = m_fontMedium ? m_fontMedium : m_fontLarge;
   if (titleFont) {
-    drawText("NHẬP URL", 24, 18, {220, 220, 220, 255}, titleFont, false);
+    int hcy = textYCentered(0, 64, titleFont);
+    drawText(m_browserFindMode ? "TÌM TRONG TRANG" : "NHẬP ĐỊA CHỈ TRANG WEB", 24, hcy,
+             UiTheme::ACCENT_CYAN, titleFont, false);
   }
 
-  // Draw URL bar
-  drawRect(16, 40, 992, 44, {15, 18, 25, 255}, true);
-  drawRect(16, 40, 992, 44, {50, 55, 70, 255}, false);
+  // 2. THANH URL DƯỚI HEADER (Y 64..111, h = 48)
+  drawRect(0, 64, 1024, 48, {16, 18, 26, 255}, true);
+  drawRect(0, 111, 1024, 1, UiTheme::FOOTER_LINE, true);
+
+  // Draw URL box (x = 16, y = 70, w = 992, h = 36)
+  drawRect(16, 70, 992, 36, {22, 26, 36, 255}, true);
+  drawRect(16, 70, 992, 36, UiTheme::ACCENT_CYAN, false);
 
   // Draw URL text
   TTF_Font* urlFont = m_fontSmall ? m_fontSmall : m_fontMedium;
   if (urlFont) {
-    drawText(m_browserVk.query + " _", 24, 50, {180, 180, 180, 255}, urlFont, false);
+    int urlY = textYCentered(70, 36, urlFont);
+    drawText(truncateToWidth(m_browserVk.query + " _", urlFont, 960), 32, urlY,
+             {255, 255, 255, 255}, urlFont, false);
+  }
+
+  // 3. PILL HISTORY SEARCH & TRANG MẪU (NẰM NGAY DƯỚI THANH URL, Y = 118)
+  if (!m_browserFindMode) {
+    initBrowserHistory();
+    const int histPillH = 34, histPillGap = 10, histPillY = 118;
+    int count = (int)m_browserHistory.size();
+    if (count > 4) count = 4;
+    int widths[4];
+    int totalW = 0;
+    for (int i = 0; i < count; i++) {
+      widths[i] = m_ui.textWidth(m_browserHistory[i].label, m_fontMedium) + 36;
+      if (widths[i] < 120) widths[i] = 120;
+      totalW += widths[i] + (i ? histPillGap : 0);
+    }
+    int cx = (1024 - totalW) / 2;
+    for (int i = 0; i < count; i++) {
+      bool active = m_browserHistoryMode && (i == m_browserHistorySel);
+      m_ui.drawPill(cx, histPillY, widths[i], histPillH, m_browserHistory[i].label, active, m_fontMedium);
+      cx += widths[i] + histPillGap;
+    }
+    if (m_browserHistoryMode && m_browserHistorySel >= 0 && m_browserHistorySel < count) {
+      TTF_Font* hintF = m_fontSmall ? m_fontSmall : m_fontMedium;
+      if (hintF) {
+        drawText(m_browserHistory[m_browserHistorySel].url, 512, 160,
+                 UiTheme::ACCENT_CYAN, hintF, true);
+      }
+    }
+  }
+
+  // 4. PILL HẬU TỐ .COM .NET .VN (TRẢ LẠI NHƯ CŨ TRÊN BÀN PHÍM, Y = 400)
+  if (!m_browserFindMode) {
+    const int pillH = 40, pillGap = 10, pillY = 400;
+    int widths[kBrowserTldCount];
+    int totalW = 0;
+    for (int i = 0; i < kBrowserTldCount; i++) {
+      widths[i] = m_ui.textWidth(browserTldLabel(i), m_fontMedium) + 48;
+      totalW += widths[i] + (i ? pillGap : 0);
+    }
+    int cx = (1024 - totalW) / 2;
+    // Hint line
+    drawText(m_browserTldMode ? "Chọn hậu tố (A để thêm • UP: Lịch sử web)" : "UP: hậu tố nhanh .com .net .vn",
+             512, pillY - 30, {90, 105, 125, 255}, m_fontSmall, true);
+    for (int i = 0; i < kBrowserTldCount; i++) {
+      bool active = m_browserTldMode && (i == m_browserTldSel);
+      m_ui.drawPill(cx, pillY, widths[i], pillH, browserTldLabel(i), active, m_fontMedium);
+      cx += widths[i] + pillGap;
+    }
   }
 
   // Render virtual keyboard using UiRenderer
+  // Dim keyboard focus while pill mode is active.
+  VkState kbDraw = m_browserVk;
+  if (m_browserTldMode || m_browserHistoryMode) {
+    kbDraw.row = -1;
+  }
   static const char* actions[] = {"ABC", "123", "Cách", "Xóa", "Xong"};
-  m_ui.drawVirtualKeyboard(m_browserVk, 46, 452, 86, 46, 8, 6,
+  m_ui.drawVirtualKeyboard(kbDraw, 46, 452, 86, 46, 8, 6,
                            SDL_Color{0, 140, 230, 255},
                            SDL_Color{0, 180, 255, 255},
                            actions, true, true, 1);
@@ -7251,57 +7932,400 @@ void UIManager::renderBrowserInputState() {
   drawRect(0, 715, 1024, 53, {15, 15, 20, 255}, true);
   drawRect(0, 715, 1024, 1, {40, 40, 60, 255}, true);
 
-  drawAppFooter({
-    {UiTheme::PadBtn::B, "Hủy"},
-    {UiTheme::PadBtn::START, "Truy cập"},
-    {UiTheme::PadBtn::Y, "Xóa"}
-  });
+  if (m_browserHistoryMode) {
+    drawAppFooter({
+      {UiTheme::PadBtn::DPAD, "Chọn trang"},
+      {UiTheme::PadBtn::A, "Mở"},
+      {UiTheme::PadBtn::B, "Bàn phím"}
+    });
+  } else if (m_browserTldMode) {
+    drawAppFooter({
+      {UiTheme::PadBtn::DPAD, "Hậu tố"},
+      {UiTheme::PadBtn::A, "Thêm"},
+      {UiTheme::PadBtn::START, "Truy cập"},
+      {UiTheme::PadBtn::B, "Bàn phím"}
+    });
+  } else {
+    drawAppFooter({
+      {UiTheme::PadBtn::B, "Hủy"},
+      {UiTheme::PadBtn::A, "Chọn"},
+      {UiTheme::PadBtn::X, "Cách"},
+      {UiTheme::PadBtn::Y, "Xóa"},
+      {UiTheme::PadBtn::L1, "Hoa"},
+      {UiTheme::PadBtn::R1, "ABC/123"},
+      {UiTheme::PadBtn::SELECT, "Telex"},
+      {UiTheme::PadBtn::START, m_browserFindMode ? "Tìm" : "Truy cập"},
+    });
+  }
 }
 
 // Browser URL input state - handle input
+// Browser feature settings overlay (P8c)
+void UIManager::toggleBrowserSetting(int idx) {
+  BrowserSettings& s = BrowserManager::instance().settings();
+  switch (idx) {
+    case 0: s.images = !s.images; break;
+    case 1: s.css = !s.css; break;
+    case 2:  // font scale cycles 100 -> 120 -> 150
+      s.fontScalePct = (s.fontScalePct == 100) ? 120 : (s.fontScalePct == 120) ? 150 : 100;
+      break;
+    case 3: s.gifAnim = !s.gifAnim; break;
+    case 4: s.video = !s.video; break;
+    case 5: s.svg = !s.svg; break;
+    case 6: s.js = !s.js; break;
+    case 7: {
+      s.fullEngine = !s.fullEngine;
+      BrowserManager::instance().saveSettings();
+      HtmlRenderer::instance().refreshAfterSettings();
+      showToast(s.fullEngine ? "Chế độ duyệt: FULL (đầy đủ)" : "Chế độ duyệt: LITE (nhanh/portal)",
+                {0, 180, 255, 255}, 1500);
+      return;
+    }
+    case 8: s.article = !s.article; break;
+    default: return;
+  }
+  BrowserManager::instance().saveSettings();
+  // Re-render current page with the new settings (no refetch needed).
+  HtmlRenderer::instance().refreshAfterSettings();
+  const char* names[] = {"Ảnh", "CSS", "Cỡ chữ", "Ảnh động GIF",
+                         "Video trong trang", "SVG", "JavaScript",
+                         "Chế độ duyệt", "Chế độ bài viết"};
+  showToast(std::string(names[idx < 0 || idx > 8 ? 0 : idx]) + ": đã lưu",
+            {0, 180, 255, 255}, 1200);
+}
+
+void UIManager::renderBrowserSettings() {
+  // Dim + centered panel, drawn last (topmost).
+  drawRect(0, 0, 1024, 768, {0, 0, 0, 170}, true);
+  const int pw = 640, ph = 524, px = (1024 - pw) / 2, py = (768 - ph) / 2;
+  drawRect(px, py, pw, ph, {18, 22, 32, 255}, true);
+  drawRect(px, py, pw, ph, {0, 180, 255, 255}, false);
+  TTF_Font* titleF = m_fontLarge ? m_fontLarge : m_fontMedium;
+  TTF_Font* rowF = m_fontMedium ? m_fontMedium : m_fontSmall;
+  if (titleF) drawText("CÀI ĐẶT TRÌNH DUYỆT", 512, py + 18, {0, 180, 255, 255}, titleF, true);
+  const BrowserSettings& s = BrowserManager::instance().settings();
+  struct Row {
+    const char* label;
+    std::string value;
+    bool soon;
+  };
+  char scaleBuf[16];
+  snprintf(scaleBuf, sizeof(scaleBuf), "%d%%", s.fontScalePct);
+  Row rows[9] = {
+      {"Ảnh", s.images ? "Bật" : "Tắt", false},
+      {"CSS", s.css ? "Bật" : "Tắt", false},
+      {"Cỡ chữ", scaleBuf, false},
+      {"Ảnh động GIF", s.gifAnim ? "Bật" : "Tắt", true},
+      {"Video trong trang", s.video ? "Bật" : "Tắt", true},
+      {"SVG", s.svg ? "Bật" : "Tắt", true},
+      {"JavaScript", s.js ? "Bật" : "Tắt", true},
+      {"Chế độ duyệt", s.fullEngine ? "Full" : "Lite (Mặc định)", false},
+      {"Chế độ bài viết", s.article ? "Bật" : "Tắt", false},
+  };
+  for (int i = 0; i < 9; i++) {
+    int ry = py + 76 + i * 44;
+    bool sel = (i == m_browserSettingsSel);
+    if (sel) drawRect(px + 16, ry - 4, pw - 32, 40, {0, 70, 110, 255}, true);
+    SDL_Color lc = sel ? SDL_Color{255, 255, 255, 255} : SDL_Color{200, 205, 215, 255};
+    if (rowF) {
+      drawText(rows[i].label, px + 32, ry + 4, lc, rowF, false);
+      std::string v = rows[i].value;
+      if (rows[i].soon) v += " (Sắp có)";
+      SDL_Color vc = rows[i].soon ? SDL_Color{150, 150, 160, 255}
+                     : (rows[i].value == "Bật" || rows[i].value == "Full" ||
+                        rows[i].value == "Lite (Mặc định)" || rows[i].value == scaleBuf)
+                         ? SDL_Color{0, 200, 120, 255}
+                         : SDL_Color{200, 200, 200, 255};
+      int vw = m_ui.textWidth(v, rowF);
+      drawText(v, px + pw - 32 - vw, ry + 4, vc, rowF, false);
+    }
+  }
+  if (rowF) {
+    drawText("A: đổi • B/SELECT: đóng", 512, py + ph - 34,
+             {130, 140, 155, 255}, m_fontSmall ? m_fontSmall : rowF, true);
+  }
+}
+
+void UIManager::initBrowserHistory() {
+  if (!m_browserHistory.empty()) return;
+  m_browserHistory = {
+    {"VnExpress", "https://m.vnexpress.net"},
+    {"Wikipedia", "https://vi.m.wikipedia.org"},
+    {"Game Vui", "https://m.gamevui.vn"},
+    {"Tìm kiếm", "https://lite.duckduckgo.com/lite/"}
+  };
+}
+
+void UIManager::addBrowserHistory(const std::string& url) {
+  if (url.empty()) return;
+  initBrowserHistory();
+  auto it = std::find_if(m_browserHistory.begin(), m_browserHistory.end(),
+                         [&](const BrowserHistoryItem& item) { return item.url == url; });
+  if (it != m_browserHistory.end()) {
+    BrowserHistoryItem item = *it;
+    m_browserHistory.erase(it);
+    m_browserHistory.insert(m_browserHistory.begin(), item);
+  } else {
+    std::string label = url;
+    size_t p = label.find("://");
+    if (p != std::string::npos) label = label.substr(p + 3);
+    size_t s = label.find('/');
+    if (s != std::string::npos) label = label.substr(0, s);
+    m_browserHistory.insert(m_browserHistory.begin(), {label, url});
+    if (m_browserHistory.size() > 8) m_browserHistory.pop_back();
+  }
+}
+
+void UIManager::openBrowserUrlEditor() {  // P8: URLs are ASCII — telex would mangle "www"/"vn", so default OFF.
+  // Shift/symbol still available via the action row + R1.
+  initBrowserHistory();
+  VirtualKeyboard::reset(m_browserVk, false);
+  std::string cur = BrowserManager::instance().currentUrl();
+  m_browserVk.query = cur.empty() ? m_browserUrl : cur;
+  m_browserVk.charset = 1;  // URL-friendly charset
+  m_browserVk.maxLen = 100;
+  m_browserUrlFocused = false;
+  m_browserTldMode = false;
+  m_browserHistoryMode = false;
+  m_browserTldSel = 0;
+  m_browserHistorySel = 0;
+  setState(UIState::BROWSER_INPUT);
+}
+
+void UIManager::openBrowserFindEditor() {
+  // P15.2: Vietnamese queries need Telex; charset 0 (normal words).
+  VirtualKeyboard::reset(m_browserVk, true);
+  m_browserVk.query.clear();
+  m_browserVk.charset = 0;
+  m_browserVk.maxLen = 60;
+  m_browserUrlFocused = false;
+  m_browserTldMode = false;
+  m_browserHistoryMode = false;
+  m_browserTldSel = 0;
+  m_browserHistorySel = 0;
+  m_browserFindMode = true;
+  setState(UIState::BROWSER_INPUT);
+}
+
+void UIManager::commitBrowserFind() {
+  std::string q = m_browserVk.query;
+  m_browserTldMode = false;
+  m_browserHistoryMode = false;
+  m_browserFindMode = false;
+  setState(UIState::BROWSER);
+  if (q.empty()) return;
+  int n = HtmlRenderer::instance().findMatches(q);
+  if (n > 0) {
+    char buf[64];
+    snprintf(buf, sizeof(buf), "%d kết quả (START: tiếp)", n);
+    showToast(buf, {0, 180, 255, 255}, 2000);
+  } else {
+    showToast("Không tìm thấy", {200, 200, 200, 255}, 1500);
+  }
+}
+
+const char* UIManager::browserTldLabel(int idx) const {
+  // P8b: fast TLD suffixes — browser URL keyboard only.
+  switch (idx) {
+    case 0: return ".com";
+    case 1: return ".net";
+    case 2: return ".vn";
+    default: return "";
+  }
+}
+
+void UIManager::cancelBrowserFieldEdit() {
+  // B key while editing a page <input>: restore the original value and
+  // end the edit session (footer hint says B=Hủy). Both engines.
+  if (BrowserManager::instance().engineMode() == BrowserEngine::FULL) {
+    NetSurfEngine::instance().setFocusedInputValue(m_browserFieldOriginal);
+    NetSurfEngine::instance().setEditing(false);
+  } else {
+    HtmlRenderer::instance().setFocusedInputValue(m_browserFieldOriginal);
+    HtmlRenderer::instance().handleInput(5);  // BTN_B → m_editingText=false
+  }
+  m_browserFieldEditing = false;
+}
+
 void UIManager::handleBrowserInputKeyboard() {
   InputManager& input = InputManager::instance();
 
+  // Tier 1: History Search & Sample Sites pill mode (located directly under URL bar)
+  if (m_browserHistoryMode) {
+    initBrowserHistory();
+    int count = std::min((int)m_browserHistory.size(), 4);
+    if (input.isButtonJustPressed(Button::B)) {
+      m_browserHistoryMode = false;  // back to keyboard
+      return;
+    }
+    if (input.isButtonJustPressed(Button::DOWN)) {
+      // DOWN: jump down to TLD pills above keyboard
+      m_browserHistoryMode = false;
+      m_browserTldMode = true;
+      return;
+    }
+    if (input.isButtonJustPressed(Button::LEFT)) {
+      if (count > 0) m_browserHistorySel = (m_browserHistorySel + count - 1) % count;
+      return;
+    }
+    if (input.isButtonJustPressed(Button::RIGHT)) {
+      if (count > 0) m_browserHistorySel = (m_browserHistorySel + 1) % count;
+      return;
+    }
+    if (input.isButtonJustPressed(Button::A)) {
+      // P18: A on a history pill opens it immediately (1 press).
+      // (To tweak the URL instead, type in the keyboard below.)
+      if (m_browserHistorySel >= 0 && m_browserHistorySel < count) {
+        m_browserUrl = m_browserHistory[m_browserHistorySel].url;
+      } else {
+        m_browserUrl = m_browserVk.query;
+      }
+      m_browserHistoryMode = false;
+      m_browserTldMode = false;
+      setState(UIState::BROWSER);
+      if (!m_browserUrl.empty()) {
+        addBrowserHistory(m_browserUrl);
+        BrowserManager::instance().openUrl(m_browserUrl);
+      }
+      return;
+    }
+    if (input.isButtonJustPressed(Button::START)) {
+      if (m_browserHistorySel >= 0 && m_browserHistorySel < count) {
+        m_browserUrl = m_browserHistory[m_browserHistorySel].url;
+      } else {
+        m_browserUrl = m_browserVk.query;
+      }
+      m_browserHistoryMode = false;
+      m_browserTldMode = false;
+      setState(UIState::BROWSER);
+      if (!m_browserUrl.empty()) {
+        addBrowserHistory(m_browserUrl);
+        BrowserManager::instance().openUrl(m_browserUrl);
+      }
+      return;
+    }
+    return;
+  }
+
+  // Tier 2: TLD suffix pill mode (.com .net .vn restored above keyboard)
+  if (m_browserTldMode) {
+    if (input.isButtonJustPressed(Button::B) ||
+        input.isButtonJustPressed(Button::DOWN)) {
+      m_browserTldMode = false;  // back down to keyboard
+      return;
+    }
+    if (input.isButtonJustPressed(Button::UP)) {
+      // UP: jump up to History Search pills under URL bar
+      m_browserTldMode = false;
+      m_browserHistoryMode = true;
+      m_browserHistorySel = 0;
+      return;
+    }
+    if (input.isButtonJustPressed(Button::LEFT)) {
+      m_browserTldSel = (m_browserTldSel + kBrowserTldCount - 1) % kBrowserTldCount;
+      return;
+    }
+    if (input.isButtonJustPressed(Button::RIGHT)) {
+      m_browserTldSel = (m_browserTldSel + 1) % kBrowserTldCount;
+      return;
+    }
+    if (input.isButtonJustPressed(Button::A)) {
+      VirtualKeyboard::typeText(m_browserVk, browserTldLabel(m_browserTldSel));
+      m_browserTldMode = false;
+      return;
+    }
+    if (input.isButtonJustPressed(Button::START)) {
+      m_browserUrl = m_browserVk.query;
+      m_browserTldMode = false;
+      m_browserHistoryMode = false;
+      setState(UIState::BROWSER);
+      if (!m_browserUrl.empty()) {
+        addBrowserHistory(m_browserUrl);
+        BrowserManager::instance().openUrl(m_browserUrl);
+      }
+      return;
+    }
+    if (input.isButtonRepeat(Button::Y)) {
+      VirtualKeyboard::backspace(m_browserVk);
+      return;
+    }
+    return;
+  }
+
   // B: Cancel and go back
   if (input.isButtonJustPressed(Button::B)) {
+    m_browserTldMode = false;
+    m_browserHistoryMode = false;
+    m_browserFindMode = false;
     setState(UIState::BROWSER);
     return;
   }
 
-  // Y: Backspace
-  if (input.isButtonJustPressed(Button::Y)) {
+  // Y: Backspace (hold to delete fast — repeat)
+  if (input.isButtonRepeat(Button::Y)) {
     VirtualKeyboard::backspace(m_browserVk);
     return;
   }
 
-  // START: Navigate to URL
+  // START: Navigate to URL (or run find in find mode)
   if (input.isButtonJustPressed(Button::START)) {
+    if (m_browserFindMode) {
+      commitBrowserFind();
+      return;
+    }
     m_browserUrl = m_browserVk.query;
+    m_browserTldMode = false;
+    m_browserHistoryMode = false;
     setState(UIState::BROWSER);
     if (!m_browserUrl.empty()) {
+      addBrowserHistory(m_browserUrl);
       BrowserManager::instance().openUrl(m_browserUrl);
     }
     return;
   }
 
-  // Navigation
+  // Navigation (P8b: UP from row 0 enters TLD pills .com .net .vn as before)
   if (input.isButtonJustPressed(Button::UP)) {
-    VirtualKeyboard::move(m_browserVk, -1, 0, true);
+    if (m_browserVk.row == 0 && !m_browserFindMode) {
+      m_browserTldMode = true;
+      m_browserTldSel = 0;
+    } else {
+      VirtualKeyboard::move(m_browserVk, -1, 0, true);
+    }
   } else if (input.isButtonJustPressed(Button::DOWN)) {
     VirtualKeyboard::move(m_browserVk, 1, 0, true);
   } else if (input.isButtonJustPressed(Button::LEFT)) {
     VirtualKeyboard::move(m_browserVk, 0, -1, true);
   } else if (input.isButtonJustPressed(Button::RIGHT)) {
     VirtualKeyboard::move(m_browserVk, 0, 1, true);
-  } else if (input.isButtonJustPressed(Button::A)) {
+  } else if (input.isButtonJustPressed(Button::L1)) {
+    m_browserVk.shift = !m_browserVk.shift;
+  } else if (input.isButtonJustPressed(Button::R1)) {
+    VirtualKeyboard::toggleSymbol(m_browserVk, [this](const char *msg) {
+      showToast(msg, {0, 180, 255, 255}, 1200);
+    });
+  } else if (input.isButtonJustPressed(Button::SELECT)) {
+    VirtualKeyboard::toggleTelex(m_browserVk, [this](const char *msg) {
+      showToast(msg, {0, 180, 255, 255}, 1200);
+    });
+  } else if (input.isButtonRepeat(Button::X)) {
+    VirtualKeyboard::typeSpace(m_browserVk);
+  } else if (input.isButtonRepeat(Button::A)) {
     VkAction act = VirtualKeyboard::pressA(m_browserVk, [](const char*) {}, true);
     if (act == VkAction::Commit) {
-      m_browserUrl = m_browserVk.query;
-      setState(UIState::BROWSER);
-      if (!m_browserUrl.empty()) {
-        BrowserManager::instance().openUrl(m_browserUrl);
+      if (m_browserFindMode) {
+        commitBrowserFind();
+      } else {
+        m_browserUrl = m_browserVk.query;
+        m_browserTldMode = false;
+        setState(UIState::BROWSER);
+        if (!m_browserUrl.empty()) {
+          BrowserManager::instance().openUrl(m_browserUrl);
+        }
       }
     } else if (act == VkAction::Cancel) {
+      m_browserTldMode = false;
+      m_browserFindMode = false;
       setState(UIState::BROWSER);
     }
   }
@@ -8227,7 +9251,7 @@ void UIManager::renderYouTubeSearchState() {
   {
     static std::string s0, s1, s2, s3, s4;
     s0 = m_ytVk.shift ? "ABC" : "abc";
-    s1 = m_ytVk.telexMode ? "TELEX" : "US";
+    s1 = m_ytVk.symbolMode ? "123" : "ABC";
     s2 = "Cách";
     s3 = "Xóa";
     s4 = "Tìm";
@@ -8255,7 +9279,8 @@ void UIManager::renderYouTubeSearchState() {
                    {UiTheme::PadBtn::X, "Cách"},
                    {UiTheme::PadBtn::Y, "Xóa"},
                    {UiTheme::PadBtn::L1, "Hoa"},
-                   {UiTheme::PadBtn::R1, "Telex"},
+                   {UiTheme::PadBtn::R1, "ABC/123"},
+                   {UiTheme::PadBtn::SELECT, m_ytVk.telexMode ? "Telex: Bật" : "Telex: Tắt"},
                    {UiTheme::PadBtn::START, "Tìm"},
                    {UiTheme::PadBtn::B, "Thoát"}});
   }
@@ -9484,7 +10509,8 @@ void UIManager::renderYouTubeHomeModalOverlay() {
   drawAppFooter({{UiTheme::PadBtn::A, "Chọn"},
                  {UiTheme::PadBtn::Y, "Xóa"},
                  {UiTheme::PadBtn::L1, "Hoa"},
-                 {UiTheme::PadBtn::R1, "Telex"},
+                 {UiTheme::PadBtn::R1, "ABC/123"},
+                 {UiTheme::PadBtn::SELECT, m_ytVk.telexMode ? "Telex: Bật" : "Telex: Tắt"},
                  {UiTheme::PadBtn::START, "Tìm"},
                  {UiTheme::PadBtn::B, "Đóng"}});
 }

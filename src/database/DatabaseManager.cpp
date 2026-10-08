@@ -320,7 +320,12 @@ std::vector<GameRecord> DatabaseManager::getGamesBySystem(int systemId, int stat
         sql += " WHERE system_id = ?";
         hasWhere = true;
     }
-    if (stateFilter >= 0) {
+    if (stateFilter == 2) {
+        // Tab DRIVE: all games on Drive (either local_state = 0 or local_state = 1 with a valid cloud_file_id)
+        sql += hasWhere ? " AND (cloud_file_id IS NOT NULL AND cloud_file_id != '' OR local_state = 0)"
+                        : " WHERE (cloud_file_id IS NOT NULL AND cloud_file_id != '' OR local_state = 0)";
+        hasWhere = true;
+    } else if (stateFilter >= 0) {
         sql += hasWhere ? " AND local_state = " : " WHERE local_state = ";
         sql += std::to_string(stateFilter);
         hasWhere = true;

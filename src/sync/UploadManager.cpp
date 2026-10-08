@@ -118,6 +118,7 @@ std::vector<LocalGameInfo> UploadManager::scanLocalOnlyGames() {
             info.localPath = game.localPath;
             info.systemId = sys.id;
             info.systemCode = sys.code;
+            info.romDir = sys.romDir;
             info.cloudFileId = game.cloudFileId;
             info.needsUpload = true;
 
@@ -164,6 +165,8 @@ std::string UploadManager::findOrCreateDriveFolder(const std::string& folderName
     std::string createBody = "{\"name\":\"" + folderName + "\",\"mimeType\":\"application/vnd.google-apps.folder\"";
     if (!parentFolderId.empty()) {
         createBody += ",\"parents\":[\"" + parentFolderId + "\"]";
+    } else {
+        createBody += ",\"parents\":[\"root\"]";
     }
     createBody += "}";
 
@@ -184,34 +187,38 @@ std::string UploadManager::findOrCreateDriveFolder(const std::string& folderName
 }
 
 std::string UploadManager::getTargetFolderForGame(const LocalGameInfo& game, const std::string& token) {
-    // 1. Resolve Root Backup Folder ("RomCloud_Backup")
+    // 1. Resolve Root "Roms" Folder on Google Drive ("root/Roms")
     if (m_rootBackupFolderId.empty()) {
-        std::string configured = DatabaseManager::instance().getSetting("drive_backup_folder_id", "");
+        std::string configured = DatabaseManager::instance().getSetting("drive_roms_folder_id", "");
         if (!configured.empty()) {
             m_rootBackupFolderId = configured;
         } else {
-            m_rootBackupFolderId = findOrCreateDriveFolder("RomCloud_Backup", "", token);
+            // Find or create "Roms" folder directly under root
+            m_rootBackupFolderId = findOrCreateDriveFolder("Roms", "", token);
             if (!m_rootBackupFolderId.empty()) {
-                DatabaseManager::instance().setSetting("drive_backup_folder_id", m_rootBackupFolderId);
+                DatabaseManager::instance().setSetting("drive_roms_folder_id", m_rootBackupFolderId);
             }
         }
     }
 
     if (m_rootBackupFolderId.empty()) {
-        Logger::error("UploadManager: Could not resolve root backup folder on Drive");
+        Logger::error("UploadManager: Could not resolve root 'Roms' folder on Google Drive");
         return "";
     }
 
-    // 2. Resolve System Subfolder (e.g. "GBA", "FC", "PS")
-    std::string sysCode = game.systemCode.empty() ? "OTHER" : game.systemCode;
-    auto it = m_systemFolderCache.find(sysCode);
+    // 2. Resolve System Subfolder inside "Roms" (e.g. root/Roms/GBA, root/Roms/FC, root/Roms/PS)
+    // Ưu tiên romDir (ví dụ GBA, FC, SFC, PS...), fallback về systemCode
+    std::string pathName = !game.romDir.empty() ? game.romDir : (!game.systemCode.empty() ? game.systemCode : "OTHER");
+    auto it = m_systemFolderCache.find(pathName);
     if (it != m_systemFolderCache.end()) {
         return it->second;
     }
 
-    std::string sysFolderId = findOrCreateDriveFolder(sysCode, m_rootBackupFolderId, token);
+    // Tìm hoặc tự tạo mới thư mục hệ game nằm bên trong root/Roms
+    std::string sysFolderId = findOrCreateDriveFolder(pathName, m_rootBackupFolderId, token);
     if (!sysFolderId.empty()) {
-        m_systemFolderCache[sysCode] = sysFolderId;
+        m_systemFolderCache[pathName] = sysFolderId;
+        Logger::info("UploadManager: Destination folder ready at root/Roms/" + pathName + " (ID: " + sysFolderId + ")");
         return sysFolderId;
     }
 
@@ -289,6 +296,7 @@ void UploadManager::startUploadGames(const std::vector<int64_t>& gameIds) {
                 SystemRecord sys;
                 if (db.getSystemById(g.systemId, sys)) {
                     info.systemCode = sys.code;
+                    info.romDir = sys.romDir;
                 }
 
                 m_uploadQueue.push_back(info);

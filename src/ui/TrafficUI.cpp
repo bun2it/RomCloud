@@ -200,19 +200,20 @@ bool UIManager::handleTrafficInput() {
     }
     // Modal tìm kiếm mở thì route vào modal
     if (m_camModalOpen) {
-        bool a = input.isButtonJustPressed(Button::A);
+        bool a = input.isButtonRepeat(Button::A);
         bool b = input.isButtonJustPressed(Button::B);
         bool s = input.isButtonJustPressed(Button::START);
         bool u = input.isButtonJustPressed(Button::UP);
         bool d = input.isButtonJustPressed(Button::DOWN);
         bool l = input.isButtonJustPressed(Button::LEFT);
         bool r = input.isButtonJustPressed(Button::RIGHT);
-        bool x = input.isButtonJustPressed(Button::X);
-        bool y = input.isButtonJustPressed(Button::Y);
+        bool x = input.isButtonRepeat(Button::X);
+        bool y = input.isButtonRepeat(Button::Y);
         bool l1 = input.isButtonJustPressed(Button::L1);
         bool r1 = input.isButtonJustPressed(Button::R1);
+        bool sel = input.isButtonJustPressed(Button::SELECT);
         auto res = SearchInputModal::handleInput(m_camModalCfg, a, b, s, u, d,
-                                                 l, r, x, y, l1, r1);
+                                                 l, r, x, y, l1, r1, sel);
         if (res == SearchInputModal::Result::Commit) {
             m_camModalOpen = false;
             std::string q = m_camVk.query;

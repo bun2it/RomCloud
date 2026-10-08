@@ -335,4 +335,20 @@ bool InputManager::isButtonJustReleased(Button btn) const {
     return !m_currentStates[idx] && m_previousStates[idx];
 }
 
+bool InputManager::isButtonRepeat(Button btn) const {
+    int idx = static_cast<int>(btn);
+    if (idx < 0 || idx >= static_cast<int>(Button::COUNT)) return false;
+    // Edge first (also consumes the just-pressed latch).
+    if (isButtonJustPressed(btn)) return true;
+    // Then typematic while held.
+    if (m_currentStates[idx] && m_pressStartTime[idx] > 0) {
+        uint32_t now = SDL_GetTicks();
+        if (now - m_pressStartTime[idx] > 400 && now - m_lastRepeatTime[idx] > 70) {
+            const_cast<InputManager*>(this)->m_lastRepeatTime[idx] = now;
+            return true;
+        }
+    }
+    return false;
+}
+
 } // namespace RomCloud

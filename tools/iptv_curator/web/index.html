@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RomCloud IPTV Curator & OTA Publisher</title>
+  <link rel="stylesheet" href="app.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+</head>
+<body>
+  <!-- Header Bar -->
+  <header class="app-header">
+    <div class="header-left">
+      <div class="logo-badge">📺</div>
+      <div class="header-titles">
+        <h1>RomCloud IPTV Curator</h1>
+        <p class="subtitle">Lọc trùng lặp • Đo Ping độ trễ • Quản lý độ tin cậy • Xuất bản OTA</p>
+      </div>
+    </div>
+    <div class="header-right">
+      <div class="stat-pill" id="statChannelsPill">
+        <span class="dot online"></span>
+        <span id="statChannelsText">0 kênh chuẩn</span>
+      </div>
+      <button class="btn btn-primary" id="btnQuickExport" onclick="exportPlaylist()">
+        🚀 Xuất Bản OTA
+      </button>
+    </div>
+  </header>
+
+  <!-- Main Container -->
+  <main class="main-container">
+    <!-- Navigation Tabs -->
+    <nav class="nav-tabs">
+      <button class="tab-btn active" data-tab="tabChannels" onclick="switchTab('tabChannels')">
+        📺 Danh Sách Kênh (<span id="tabCountBadge">0</span>)
+      </button>
+      <button class="tab-btn" data-tab="tabSources" onclick="switchTab('tabSources')">
+        📥 Nguồn & Thêm M3U
+      </button>
+      <button class="tab-btn" data-tab="tabProbe" onclick="switchTab('tabProbe')">
+        ⚡ Kiểm Tra Ping & Luồng
+      </button>
+      <button class="tab-btn" data-tab="tabRules" onclick="switchTab('tabRules')">
+        ⚙️ Quy Tắc Gom Kênh
+      </button>
+      <button class="tab-btn" data-tab="tabExport" onclick="switchTab('tabExport')">
+        📦 Xuất Bản & Tải Về
+      </button>
+    </nav>
+
+    <!-- TAB 1: Danh Sách Kênh -->
+    <section id="tabChannels" class="tab-pane active">
+      <!-- Toolbar: Search + Filter -->
+      <div class="toolbar-card">
+        <div class="search-box">
+          <span class="search-icon">🔍</span>
+          <input type="text" id="searchInput" placeholder="Tìm tên kênh hoặc nhóm..." oninput="filterChannels()">
+        </div>
+        <div class="filter-group">
+          <label for="groupSelect">Nhóm:</label>
+          <select id="groupSelect" onchange="filterChannels()">
+            <option value="Tất cả">Tất cả nhóm</option>
+          </select>
+        </div>
+        <button class="btn btn-secondary" onclick="loadChannels()">🔄 Làm mới</button>
+      </div>
+
+      <!-- Channel Grid / List -->
+      <div class="channel-table-container">
+        <table class="channel-table">
+          <thead>
+            <tr>
+              <th style="width: 60px;">Logo</th>
+              <th>Tên Kênh Chuẩn</th>
+              <th>Nhóm Kênh</th>
+              <th>Số Nguồn</th>
+              <th>Ping / Trạng Thái Nguồn Chính</th>
+              <th>Thao Tác</th>
+            </tr>
+          </thead>
+          <tbody id="channelTableBody">
+            <tr>
+              <td colspan="6" class="text-center py-8 text-dim">Đang tải danh sách kênh...</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- TAB 2: Nguồn & Thêm M3U -->
+    <section id="tabSources" class="tab-pane">
+      <div class="grid-2-col">
+        <!-- Card 1: Upload File -->
+        <div class="card">
+          <div class="card-header">
+            <h3>📁 Kéo thả hoặc Tải lên File .m3u</h3>
+            <p class="card-desc">Hỗ trợ nhiều file M3U cùng lúc. Hệ thống sẽ tự động gộp và khử trùng lặp.</p>
+          </div>
+          <div class="drop-zone" id="dropZone">
+            <div class="drop-icon">📤</div>
+            <p>Kéo thả các file <b>.m3u / .m3u8</b> vào đây</p>
+            <p class="text-dim text-sm">hoặc nhấp chuột để chọn file từ máy tính</p>
+            <input type="file" id="fileInput" accept=".m3u,.m3u8,.txt" multiple style="display: none;">
+          </div>
+        </div>
+
+        <!-- Card 2: Thêm từ URL -->
+        <div class="card">
+          <div class="card-header">
+            <h3>🌐 Thêm Nguồn từ Link M3U Online</h3>
+            <p class="card-desc">Dán đường link playlist IPTV từ internet để tự động tải về.</p>
+          </div>
+          <div class="form-group">
+            <label for="m3uUrlInput">Đường dẫn M3U (HTTP/HTTPS):</label>
+            <input type="url" id="m3uUrlInput" placeholder="https://example.com/playlist.m3u">
+          </div>
+          <div class="form-actions">
+            <button class="btn btn-primary" onclick="addSourceUrl()">➕ Thêm Nguồn Online</button>
+            <button class="btn btn-secondary" onclick="loadDefaultRepoSource()">🔄 Nạp iptv/default.m3u</button>
+          </div>
+          <hr class="divider">
+          <div class="danger-zone">
+            <h4>Xóa làm mới danh sách</h4>
+            <p class="text-sm text-dim">Xóa bộ nhớ đệm kênh hiện tại để nhập lại từ đầu.</p>
+            <button class="btn btn-danger" onclick="clearAllSources()">🗑️ Xóa Toàn Bộ Nguồn Đã Nạp</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 3: Kiểm Tra Ping & Luồng -->
+    <section id="tabProbe" class="tab-pane">
+      <div class="card mb-6">
+        <div class="card-header flex-between">
+          <div>
+            <h3>⚡ Quét Kiểm Tra Độ Trễ & Tính Sống/Chết</h3>
+            <p class="card-desc">Kiểm tra đa luồng (30 luồng song song). Đo Ping ms, phát hiện link chết, cập nhật điểm uy tín.</p>
+          </div>
+          <button class="btn btn-accent" id="btnStartProbe" onclick="startHealthCheck()">
+            ▶️ Bắt Đầu Quét Toàn Bộ Luồng
+          </button>
+        </div>
+
+        <!-- Progress Box -->
+        <div class="progress-box" id="progressBox" style="display: none;">
+          <div class="progress-info">
+            <span id="progressText">Đang chuẩn bị quét...</span>
+            <span id="progressPctText">0%</span>
+          </div>
+          <div class="progress-track">
+            <div class="progress-fill" id="progressFill" style="width: 0%;"></div>
+          </div>
+          <div class="progress-stats">
+            <span class="badge badge-green" id="statAliveCount">🟢 0 Sống</span>
+            <span class="badge badge-red" id="statDeadCount">🔴 0 Chết / Lỗi</span>
+            <span class="badge badge-blue" id="statTotalChecked">Đã kiểm tra: 0 / 0</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Stats Grid -->
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-val text-cyan" id="statTotalStreams">0</div>
+          <div class="stat-lbl">Tổng số luồng URL trong DB</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-val text-green" id="statDbAlive">0</div>
+          <div class="stat-lbl">Luồng sống (ALIVE)</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-val text-amber" id="statDbStandby">0</div>
+          <div class="stat-lbl">Tạm thời chờ (STANDBY)</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-val text-red" id="statDbDead">0</div>
+          <div class="stat-lbl">Chết vĩnh viễn (DEAD $\ge 5$ lần)</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 4: Quy Tắc Gom Kênh -->
+    <section id="tabRules" class="tab-pane">
+      <div class="card">
+        <div class="card-header flex-between">
+          <div>
+            <h3>⚙️ Từ Điển Ánh Xạ Kênh & Nhóm Chuẩn</h3>
+            <p class="card-desc">Cấu hình các biến thể tên kênh (ví dụ: vtv 3, vtv3 hd -> VTV3) và nhóm tương ứng.</p>
+          </div>
+          <button class="btn btn-primary" onclick="saveRules()">💾 Lưu Quy Tắc</button>
+        </div>
+
+        <div class="grid-2-col mt-4">
+          <div>
+            <h4>Từ điển Kênh Chuẩn (JSON):</h4>
+            <textarea id="rulesChannelJson" rows="18" class="code-editor"></textarea>
+          </div>
+          <div>
+            <h4>Ánh xạ Nhóm Chuẩn (JSON):</h4>
+            <textarea id="rulesGroupJson" rows="18" class="code-editor"></textarea>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 5: Xuất Bản & Tải Về -->
+    <section id="tabExport" class="tab-pane">
+      <div class="card">
+        <div class="card-header">
+          <h3>🚀 Xuất Bản Playlist OTA Cho Máy Cầm Tay</h3>
+          <p class="card-desc">Tạo ra file M3U tinh gọn, chọn link ping thấp nhất cho mỗi kênh kèm mã SHA256 manifest.</p>
+        </div>
+
+        <div class="export-options">
+          <label class="checkbox-label">
+            <input type="checkbox" id="chkIncludeBackup" checked>
+            <span>Bao gồm 1 luồng dự phòng <b>(Backup)</b> cho mỗi kênh nếu có</span>
+          </label>
+        </div>
+
+        <div class="form-actions mt-4">
+          <button class="btn btn-primary" onclick="exportPlaylist()">
+            📦 Xuất File live.m3u & manifest.json
+          </button>
+          <button class="btn btn-success" onclick="publishToRomCloud()">
+            📲 Đẩy Trực Tiếp Vào RomCloud (iptv/)
+          </button>
+        </div>
+
+        <!-- Download links card -->
+        <div class="result-box mt-6" id="exportResultBox" style="display: none;">
+          <h4>✅ Đã xuất bản thành công:</h4>
+          <p id="exportSummaryText" class="text-sm text-dim mb-4"></p>
+          <div class="download-buttons">
+            <a href="/download/live.m3u" class="btn btn-secondary" download>
+              ⬇️ Tải file live.m3u
+            </a>
+            <a href="/download/manifest.json" class="btn btn-secondary" download>
+              ⬇️ Tải file iptv_manifest.json
+            </a>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Modal Chi Tiết Stream của 1 Kênh -->
+  <div class="modal-overlay" id="streamModal" style="display: none;">
+    <div class="modal-card">
+      <div class="modal-header flex-between">
+        <h3 id="modalChannelTitle">Chi Tiết Luồng</h3>
+        <button class="btn-close" onclick="closeStreamModal()">✕</button>
+      </div>
+      <div class="modal-body" id="modalChannelBody">
+        <!-- Streams list -->
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification -->
+  <div class="toast" id="toastBox"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>

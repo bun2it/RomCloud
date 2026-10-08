@@ -1,0 +1,82 @@
+{
+  "group_mappings": {
+    "VTV / Quốc Gia": [
+      "VTV",
+      "VTV / QUỐC GIA",
+      "KÊNH VTV",
+      "QUỐC GIA",
+      "TRUYỀN HÌNH QUỐC GIA",
+      "TH QUỐC GIA"
+    ],
+    "HTV / TP.HCM": [
+      "HTV",
+      "HTV / TP.HCM",
+      "TRUYỀN HÌNH TP.HCM",
+      "KÊNH HTV"
+    ],
+    "Thể Thao": [
+      "THỂ THAO",
+      "THỂ THAO QUỐC TẾ",
+      "THỂ THAO TRONG NƯỚC",
+      "⚽| THỂ THAO QUỐC TẾ",
+      "⚽ THỂ THAO",
+      "SPORTS",
+      "K+",
+      "K PLUS",
+      "CANAL+"
+    ],
+    "Tin Tức": [
+      "TIN TỨC",
+      "NEWS",
+      "THỜI SỰ",
+      "VTC"
+    ],
+    "Phim & Giải Trí": [
+      "PHIM",
+      "PHIM TRUYỆN",
+      "GIẢI TRÍ",
+      "ENTERTAINMENT",
+      "CINEMA",
+      "HBO"
+    ],
+    "Quốc Tế": [
+      "QUỐC TẾ",
+      "INTERNATIONAL",
+      "KÊNH NƯỚC NGOÀI",
+      "DISCOVERY",
+      "NATIONAL GEOGRAPHIC"
+    ]
+  },
+  "channel_aliases": {
+    "VTV1": ["vtv1", "vtv 1", "vtv 1 hd", "vtv1 hd", "vtv1 fhd", "vtv1 1080p", "vtv1 50fps"],
+    "VTV2": ["vtv2", "vtv 2", "vtv 2 hd", "vtv2 hd", "vtv2 fhd", "vtv2 1080p"],
+    "VTV3": ["vtv3", "vtv 3", "vtv 3 hd", "vtv3 hd", "vtv3 fhd", "vtv3 1080p", "vtv3 50fps"],
+    "VTV4": ["vtv4", "vtv 4", "vtv 4 hd", "vtv4 hd"],
+    "VTV5": ["vtv5", "vtv 5", "vtv 5 hd", "vtv5 hd"],
+    "VTV7": ["vtv7", "vtv 7", "vtv 7 hd", "vtv7 hd"],
+    "VTV8": ["vtv8", "vtv 8", "vtv 8 hd", "vtv8 hd"],
+    "VTV9": ["vtv9", "vtv 9", "vtv 9 hd", "vtv9 hd"],
+    "HTV7": ["htv7", "htv 7", "htv 7 hd", "htv7 hd"],
+    "HTV9": ["htv9", "htv 9", "htv 9 hd", "htv9 hd"],
+    "HTV Thể Thao": ["htv the thao", "htv thể thao", "htv the thao hd", "htv sports"],
+    "VTC1": ["vtc1", "vtc 1", "vtc 1 hd", "vtc1 hd"],
+    "VTC3": ["vtc3", "vtc 3", "vtc 3 hd", "vtc3 hd"],
+    "VTC14": ["vtc14", "vtc 14", "vtc 14 hd", "vtc14 hd"],
+    "K+ Sport 1": ["k+ sport 1", "k+ sport1", "k+sport 1", "k+ 1", "k+1", "k+ sport 1 hd"],
+    "K+ Sport 2": ["k+ sport 2", "k+ sport2", "k+sport 2", "k+ 2", "k+2", "k+ sport 2 hd"],
+    "K+ Cine": ["k+ cine", "k+ cine hd", "k+cine", "k+ ns"],
+    "K+ Action": ["k+ action", "k+ action hd", "k+action", "k+ pm"],
+    "Canal+ Sport": ["canal+ sport", "canal+ sport 2015", "canal + sport", "canal+ live 1"],
+    "Sky Sport F1": ["sky sport f1", "sky sports f1", "sky f1"],
+    "Sky Sport Tennis": ["sky sport tennis", "sky sports tennis"],
+    "TNT Sports 1": ["tnt sports 1", "tnt sports 1 4mbps", "tnt 1"],
+    "TNT Sports 2": ["tnt sports 2", "tnt sports 2 4mbps", "tnt 2"]
+  },
+  "strip_patterns": [
+    "\\[.*?\\]",
+    "\\(.*?\\)",
+    "\\b(fhd|uhd|hd|sd|4k|2k|1080p|720p|50fps|60fps|h265|hevc|raw|vip|backup|dự phòng)\\b",
+    "[⚽🔥📺⚡⭐♦️🔴]+",
+    "\\s+"
+  ]
+}

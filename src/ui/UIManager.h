@@ -39,6 +39,7 @@ enum class UIState {
   SEARCH,
   CONFIRM_DELETE,
   CONFIRM_BATCH_DELETE,
+  CONFIRM_UPLOAD,
   DISCLAIMER,
   CLOUD_LOGIN,
   SETTINGS,
@@ -72,6 +73,7 @@ enum class UIState {
   EXIT_REQUESTED
 };
 
+enum class LibraryTab { DRIVE = 0, SDCARD = 1 };
 enum class GameFilterMode { ALL = -1, LOCAL_ONLY = 1, CLOUD_ONLY = 0 };
 
 class UIManager {
@@ -105,6 +107,7 @@ private:
   TTF_Font *m_fontLarge = nullptr;
   TTF_Font *m_fontMedium = nullptr;
   TTF_Font *m_fontSmall = nullptr;
+  std::string m_fontPathUsed;  // P9: resolved TTF file for CSS font-size
 
   UIState m_currentState = UIState::MENU;
   std::vector<UIState> m_stateHistory; // stack cho B = back
@@ -444,11 +447,50 @@ private:
   void handleBrowserInput();
   void renderBrowserInputState();
   void handleBrowserInputKeyboard();
-  bool isBrowserUrlInputMode() const;
-  void setBrowserUrlInputMode(bool inputMode);
+  // P8: seed + open the URL editor (telex OFF — URLs are ASCII).
+  void openBrowserUrlEditor();
+  // Cancel a page <input> edit: restore the original value, end the
+  // session (B key while the field-edit VK overlay is up).
+  void cancelBrowserFieldEdit();
+  // P15.2: find-in-page editor (telex ON for Vietnamese queries).
+  void openBrowserFindEditor();
+  // P15.2: run the find and return to the page.
+  void commitBrowserFind();
+  // P8c: browser feature settings overlay.
+  void toggleBrowserSetting(int idx);
+  void renderBrowserSettings();
+  // P8b: TLD suffix pills for the URL keyboard (browser only).
+  static constexpr int kBrowserTldCount = 3;
+  const char* browserTldLabel(int idx) const;
   // Browser URL input
   VkState m_browserVk;
-  bool m_browserUrlInputMode = true;
+  // P15.2: find-in-page reuses the URL keyboard; commit searches, START
+  // jumps between matches while results are active.
+  bool m_browserFindMode = false;
+  // P8: URL-bar focus (YouTube-style). UP from the first page widget lands
+  // on the URL bar; A opens the URL keyboard; DOWN returns to the page.
+  bool m_browserUrlFocused = false;
+  // Browser feature settings overlay (SELECT in browser content mode).
+  bool m_browserSettingsOpen = false;
+  int m_browserSettingsSel = 0;
+  // P13: fullscreen media playback launched from the page (mpv owns screen).
+  bool m_browserMediaPlaying = false;
+  void pollBrowserMedia();
+  // Browser URL history & quick sample site pills (YouTube-style)
+  struct BrowserHistoryItem {
+    std::string label;
+    std::string url;
+  };
+  std::vector<BrowserHistoryItem> m_browserHistory;
+  int m_browserHistorySel = 0;
+  bool m_browserHistoryMode = false;
+  void initBrowserHistory();
+  void addBrowserHistory(const std::string& url);
+
+  // P8b: TLD suffix pills above the URL keyboard (like history pills).
+  // UP from keyboard row 0 enters pill mode; A appends the suffix.
+  bool m_browserTldMode = false;
+  int m_browserTldSel = 0;
   // Phase 1 — audit P1-2c: true khi user đang gõ vào một <input> trong page
   // (HtmlRenderer.m_editingText = true). UIManager sync giá trị giữa
   // m_browserVk.query (VirtualKeyboard Telex transform) và
@@ -457,13 +499,9 @@ private:
   // Value gốc của field khi mới vào edit mode — dùng để restore khi user
   // bấm "Hủy" (Cancel). Khi "Xong" (Commit) thì giữ value hiện tại.
   std::string m_browserFieldOriginal;
-  // Default landing page. We pick plain HTTP because:
-    //   1. Captive portals and most Wi-Fi login pages are HTTP-only.
-    //   2. HTTP exercises libcurl + DNS without needing libssl/ca-cert to be
-    //      on the device. If HTTP works but the user wants HTTPS later, they
-    //      can type https:// in the URL bar.
-    //   3. example.com is a stable IANA-reserved test domain (RFC 2606).
-    std::string m_browserUrl = "http://example.com";
+  // Default landing page: vnexpress.net (user's daily read; also exercises
+    // libcurl + DNS + CSS + images on every launch).
+    std::string m_browserUrl = "https://vnexpress.net";
   void syncExplorerDialogs();
   // Action dùng chung cho phím tắt (Y/X/MENU) và popup menu (A trên file)
   void expCopyCurrent();
@@ -643,6 +681,9 @@ private:
   YtItem buildYtItemFromPipe(const std::string &raw);
   void rebuildYtItems();
 
+  // Library Tab State (0: DRIVE, 1: SDCARD)
+  LibraryTab m_libraryTab = LibraryTab::DRIVE;
+
   // System Selection State
   int m_selectedSystemIndex = 0;
   std::vector<SystemRecord> m_cachedSystems;
@@ -708,6 +749,7 @@ private:
   void renderSearchState();
   void openConfirmDeleteDialog();
   void openConfirmBatchDeleteDialog();
+  void openConfirmUploadDialog();
   void renderConfirmDialogFromState();
   void renderConfirmDeleteDialog();
   void renderConfirmBatchDeleteDialog();

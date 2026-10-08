@@ -195,8 +195,11 @@ public:
     // Lay danh sach filename cua cac URL playlist can refresh
     std::vector<std::string> getStalePlaylistFiles() const;
 
+    // -----------------------------------------------------------------------
+    // OTA Update Playlist (tai playlist M3U moi nhat tu xa)
+    // -----------------------------------------------------------------------
+    bool updateOtaPlaylist(std::string& outMessage);
 
-    // Get channel by index
     IPTVChannel* getChannel(size_t index);
 
     // Ping cache lookup (URL -> ms; -2=chua do, -1=mat ket noi, >=0=ms)
