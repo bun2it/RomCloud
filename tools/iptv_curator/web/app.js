@@ -148,7 +148,13 @@ async function loadStats() {
     const data = await res.json();
 
     const distinct = data.cluster ? data.cluster.distinct_channels : 0;
-    document.getElementById("statChannelsText").textContent = `${distinct} kênh chuẩn`;
+    let aliveChCount = 0;
+    if (allChannels && allChannels.length > 0) {
+      aliveChCount = allChannels.filter(c => c.best_stream && c.best_stream.last_status === "ALIVE").length;
+    }
+
+    const headerText = aliveChCount > 0 ? `${distinct} kênh chuẩn (${aliveChCount} sống)` : `${distinct} kênh chuẩn`;
+    document.getElementById("statChannelsText").textContent = headerText;
     document.getElementById("tabCountBadge").textContent = distinct;
 
     if (data.db) {
@@ -156,10 +162,15 @@ async function loadStats() {
       const elAlive = document.getElementById("statDbAlive");
       const elStandby = document.getElementById("statDbStandby");
       const elDead = document.getElementById("statDbDead");
+      const lblAlive = document.getElementById("lblStatDbAlive");
+
       if (elTotal) elTotal.textContent = data.db.total_streams || 0;
       if (elAlive) elAlive.textContent = data.db.alive_streams || 0;
       if (elStandby) elStandby.textContent = data.db.standby_streams || 0;
       if (elDead) elDead.textContent = data.db.dead_streams || 0;
+      if (lblAlive && aliveChCount > 0) {
+        lblAlive.textContent = `Luồng sống ALIVE (Thuộc ${aliveChCount} kênh)`;
+      }
     }
   } catch (err) {
     console.error("Lỗi tải stats:", err);
