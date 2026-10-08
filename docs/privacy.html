@@ -1,82 +1,229 @@
 <!DOCTYPE html>
 <html lang="en">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Privacy Policy — RomCloud & BrickDrop</title>
-<link rel="stylesheet" href="assets/site.css">
-<script src="assets/site.js"></script></head>
-<body style="font-family:sans-serif;max-width:760px;margin:40px auto;padding:0 16px;line-height:1.7">
-<h1>Privacy Policy</h1>
-<p><strong>Updated: October 8, 2026.</strong><br>Contact: <a href="mailto:bun2it@gmail.com">bun2it@gmail.com</a></p>
-<p>This policy describes what data the apps <strong>RomCloud</strong> (game library manager for the TrimUI Brick handheld) and <strong>BrickDrop</strong> (offline file sharing between your own devices) collect, why they collect it, and what your choices are. It also covers this website.</p>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Privacy Policy — RomCloud</title>
+  <link rel="stylesheet" href="assets/site.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      max-width: 840px;
+      margin: 40px auto;
+      padding: 0 24px 80px;
+      line-height: 1.75;
+      color: #1f2937;
+      background-color: #f9fafb;
+    }
+    .container {
+      background: #ffffff;
+      padding: 40px 48px;
+      border-radius: 12px;
+      box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05), 0 2px 4px -2px rgba(0,0,0,0.05);
+      border: 1px solid #e5e7eb;
+    }
+    h1 {
+      font-size: 2.25rem;
+      font-weight: 700;
+      color: #111827;
+      margin-bottom: 0.5rem;
+      letter-spacing: -0.025em;
+    }
+    .meta-box {
+      background-color: #f3f4f6;
+      border-left: 4px solid #3b82f6;
+      padding: 12px 16px;
+      margin-bottom: 2rem;
+      font-size: 0.95rem;
+      color: #4b5563;
+      border-radius: 0 6px 6px 0;
+    }
+    h2 {
+      font-size: 1.35rem;
+      font-weight: 600;
+      color: #1f2937;
+      margin-top: 2rem;
+      margin-bottom: 0.75rem;
+      padding-bottom: 0.25rem;
+      border-bottom: 1px solid #f3f4f6;
+    }
+    h3 {
+      font-size: 1.1rem;
+      font-weight: 600;
+      color: #374151;
+      margin-top: 1.25rem;
+      margin-bottom: 0.5rem;
+    }
+    p, ul, ol {
+      margin-bottom: 1rem;
+    }
+    ul, ol {
+      padding-left: 1.5rem;
+    }
+    li {
+      margin-bottom: 0.5rem;
+    }
+    code {
+      background: #f1f5f9;
+      color: #0f172a;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 0.88em;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    }
+    a {
+      color: #2563eb;
+      text-decoration: underline;
+    }
+    a:hover {
+      color: #1d4ed8;
+    }
+    .highlight-card {
+      background: #eff6ff;
+      border: 1px solid #bfdbfe;
+      border-radius: 8px;
+      padding: 20px;
+      margin: 1.5rem 0;
+    }
+    .highlight-card h3 {
+      margin-top: 0;
+      color: #1e40af;
+    }
+    .footer-nav {
+      margin-top: 3rem;
+      padding-top: 1.5rem;
+      border-top: 1px solid #e5e7eb;
+      font-size: 0.9rem;
+      color: #6b7280;
+      display: flex;
+      justify-content: space-between;
+    }
+  </style>
+</head>
+<body>
+<div class="container">
+  <h1>Privacy Policy for RomCloud</h1>
+  <div class="meta-box">
+    <strong>Effective Date:</strong> October 8, 2026<br>
+    <strong>Application Name:</strong> RomCloud<br>
+    <strong>Homepage:</strong> <a href="https://www.romcloud.linkpc.net/">https://www.romcloud.linkpc.net/</a><br>
+    <strong>Developer / Contact Email:</strong> <a href="mailto:bun2it@gmail.com">bun2it@gmail.com</a>
+  </div>
 
-<h2>1. Data RomCloud collects and why</h2>
-<ul>
-<li><strong>Google account email address</strong> — obtained through Google OAuth 2.0. Used only to show which account is linked inside the app. We do not read your Gmail or contacts.</li>
-<li><strong>Google Drive files</strong> — RomCloud requests the <code>drive.file</code> scope (in some setups the broader <code>drive</code> scope). In practice the app only touches files it created itself or files you explicitly open or share with it: your game ROMs, save-data backups, and calendar data. It cannot browse or read the rest of your Drive, and it never deletes files you did not ask it to manage.</li>
-<li><strong>OAuth tokens</strong> (access token, refresh token, expiry time) — stored only in the app's on-device SQLite database (<code>data/library.db</code>, <code>settings</code> table) on your SD card. Tokens are never uploaded to our servers and never written to log files.</li>
-<li><strong>Device identifier</strong> — a value like <code>RC-xxxxxxxx</code>, generated as a SHA-256 hash on first run. It cannot be reversed into your hardware serial number.</li>
-<li><strong>Crash and error reports</strong> — when the app encounters an error, it may send: app version, device model, OS version, display resolution, free/total RAM and storage, network status, and the error message. This is used solely to diagnose and fix bugs.</li>
-<li><strong>GitHub personal access token</strong> — only if you choose to enter one (to enable automatic issue logging). Stored in <code>config/github_token</code> or the app settings on your device.</li>
-</ul>
+  <p>This Privacy Policy describes in detail how <strong>RomCloud</strong> ("we", "our", or "the application") accesses, collects, uses, stores, and protects your information, with special emphasis on Google User Data accessed via Google APIs and Google OAuth 2.0.</p>
+  
+  <p>RomCloud is a specialized handheld retro gaming library manager designed for handheld devices (including TrimUI Brick). We believe that privacy is a fundamental right. RomCloud does not run advertising, does not engage in behavioral profiling, and does not operate central user accounts or databases that store your personal files.</p>
 
-<h2>2. How Google sign-in works on a handheld</h2>
-<p>The TrimUI Brick has no web browser or keyboard, so RomCloud uses the OAuth 2.0 Device Authorization Flow: the handheld shows a QR code and a user code, you scan it with your phone and approve access there, and the handheld then receives its tokens directly from Google. Your Google password is never typed into — or seen by — the app.</p>
+  <h2>1. Google User Data We Access and Collect</h2>
+  <p>When you explicitly connect your Google Account to RomCloud using the Google OAuth 2.0 Device Authorization flow, RomCloud requests permission to access the following Google user data:</p>
+  <ul>
+    <li>
+      <strong>Google Account Information (Email and Profile Identifier):</strong>
+      <br><em>Scope:</em> <code>https://www.googleapis.com/auth/userinfo.email</code>, <code>openid</code>
+      <br><em>Purpose:</em> To authenticate your session and display your connected Google email address within the application settings so you can identify which account is currently active.
+    </li>
+    <li>
+      <strong>Google Drive Application Files:</strong>
+      <br><em>Scope:</em> <code>https://www.googleapis.com/auth/drive.file</code> (and optionally <code>https://www.googleapis.com/auth/drive</code> if requested for dedicated directory synchronization).
+      <br><em>Purpose:</em> To upload, download, and synchronize your personal game ROM files, save-game states (<code>.sav</code>, <code>.srm</code>, <code>.state</code>), screenshots, and backup configuration archives between your handheld console SD card and your personal Google Drive storage. RomCloud only accesses, modifies, or deletes files and folders created by RomCloud or files you specifically designate for synchronization.
+    </li>
+    <li>
+      <strong>OAuth Credentials (Access & Refresh Tokens):</strong>
+      <br><em>Purpose:</em> Temporary authentication tokens issued directly by Google's OAuth servers to maintain your authorized session without requiring you to re-authenticate on every backup or sync action.
+    </li>
+  </ul>
 
-<h2>3. Crash reports in detail</h2>
-<p>Error reports are sent through our relay (<code>romcloud-issue-relay.bun2it.workers.dev</code>) into a <strong>private</strong> GitHub repository (<code>bun2it/Romcloud_Logs</code>) that only the developer can read. Reports contain the technical details listed in section 1 and never contain your OAuth tokens, Google password, or Drive file contents.</p>
+  <div class="highlight-card">
+    <h3>Google API Services User Data Policy Compliance (Limited Use Disclosure)</h3>
+    <p><strong>RomCloud's use and transfer to any other app of information received from Google APIs will adhere to the <a href="https://developers.google.com/terms/api-services-user-data-policy" target="_blank" rel="noopener noreferrer">Google API Services User Data Policy</a>, including the Limited Use requirements.</strong></p>
+  </div>
 
-<h2>4. Data we do <em>not</em> collect</h2>
-<ul>
-<li>No advertising identifiers and no ads.</li>
-<li>No analytics SDKs or behavioral tracking.</li>
-<li>No location data, no contacts, no microphone or camera data.</li>
-<li>We do not sell personal data, and we do not share it with data brokers.</li>
-</ul>
+  <h2>2. How We Use and Restrict Google User Data</h2>
+  <p>We strictly govern our use of Google user data as follows:</p>
+  <ul>
+    <li><strong>Solely for User-Facing Features:</strong> Google user data is accessed solely to provide, maintain, and execute user-requested features—specifically cloud backup and synchronization of user gaming saves and ROM libraries.</li>
+    <li><strong>No Advertising or Marketing:</strong> Google user data is <strong>NEVER</strong> used to serve advertisements, retarget users, build advertising profiles, or monetize user activity in any way.</li>
+    <li><strong>No Sale or Commercial Transfer:</strong> We <strong>NEVER</strong> sell, rent, lease, or transfer your Google user data to data brokers, advertisers, or any commercial third parties.</li>
+    <li><strong>No Machine Learning or AI Model Training:</strong> Google user data is <strong>NEVER</strong> used to train, retrain, fine-tune, or develop generalized artificial intelligence (AI) models, large language models (LLMs), or machine learning systems.</li>
+    <li><strong>Human Access Restrictions:</strong> Humans will <strong>NOT</strong> inspect or read your Google user data, files, or tokens, except under the following strict conditions:
+      <ul>
+        <li>You provide explicit, affirmative written consent (such as requesting developer assistance to inspect a specific corrupted sync archive);</li>
+        <li>It is strictly necessary for security purposes (such as diagnosing a critical bug or investigating malicious abuse);</li>
+        <li>It is required to comply with applicable legal obligations, subpoenas, or court orders; or</li>
+        <li>The data is aggregated and anonymized for internal system operational metrics.</li>
+      </ul>
+    </li>
+  </ul>
 
-<h2>5. Where your data lives</h2>
-<ul>
-<li><strong>On your device (SD card):</strong> OAuth tokens, app settings, your game library database.</li>
-<li><strong>On Google's servers, under your own account:</strong> the Drive files you choose to sync.</li>
-<li><strong>In a private GitHub repository:</strong> anonymized crash reports (see section 3).</li>
-</ul>
-<p>We operate no user-account servers of our own; there is no RomCloud cloud account holding your data.</p>
+  <h2>3. How Google User Data is Stored, Protected, and Transferred</h2>
+  <ul>
+    <li><strong>Client-Side Local Storage:</strong> All OAuth tokens (access tokens, refresh tokens) and account metadata are stored locally on the user's handheld device in an encrypted/protected local SQLite database (<code>data/library.db</code>) located on your local SD card.</li>
+    <li><strong>No Intermediate Cloud Servers:</strong> RomCloud operates <strong>NO intermediary servers</strong> that store, cache, or intercept your Google Drive files or Google OAuth credentials. Communication occurs directly between your handheld console and Google's official API endpoints (<code>https://oauth2.googleapis.com</code> and <code>https://www.googleapis.com</code>) via industry-standard TLS/HTTPS encryption.</li>
+    <li><strong>Secure Transmission:</strong> All data in transit between your device and Google's servers is encrypted using modern TLS (Transport Layer Security) cryptographic protocols.</li>
+  </ul>
 
-<h2>6. Sharing with third parties</h2>
-<p>Personal data is shared only as needed to provide features you trigger:</p>
-<ul>
-<li><strong>Google APIs</strong> — when you sign in or sync with Google Drive.</li>
-<li><strong>GitHub</strong> — when a crash report is filed to the private logs repository.</li>
-</ul>
-<p>We do not share data with anyone else, and we never sell it.</p>
+  <h2>4. Data Retention and Deletion (Your Rights)</h2>
+  <p>You maintain complete control over your data at all times:</p>
+  <ul>
+    <li>
+      <strong>In-App Disconnect / Sign Out:</strong> You can disconnect your Google account at any time in RomCloud settings by selecting <em>"Đăng xuất" (Sign Out)</em>. This immediately deletes all stored OAuth access tokens, refresh tokens, and account emails from your device's local database.
+    </li>
+    <li>
+      <strong>Revoking Permissions via Google:</strong> You can immediately revoke RomCloud's access to your Google account at any time by visiting Google's official Security permissions portal:
+      <br><a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener noreferrer">https://myaccount.google.com/permissions</a>
+      <br>Once revoked, RomCloud can no longer access your Google Drive or account data.
+    </li>
+    <li>
+      <strong>Deleting Cloud Backups:</strong> Because RomCloud stores files directly in your personal Google Drive, you can view, download, or permanently delete your backed-up ROMs and save files at any time by opening Google Drive in any web browser or mobile app.
+    </li>
+    <li>
+      <strong>Deleting Local Device Data:</strong> You can erase all local settings, cached databases, and credentials by deleting the <code>/mnt/SDCARD/Apps/RomCloud/data/</code> directory on your SD card.
+    </li>
+    <li>
+      <strong>Requesting Data Deletion:</strong> If you have submitted any diagnostic logs or inquiries and wish to have them deleted from our records, email us at <a href="mailto:bun2it@gmail.com">bun2it@gmail.com</a>, and we will fulfill your request within 30 days.
+    </li>
+  </ul>
 
-<h2>7. Data retention</h2>
-<ul>
-<li>OAuth tokens and settings remain on your device until you sign out or delete the app data.</li>
-<li>Crash reports are kept only as long as needed to investigate and fix the reported bug.</li>
-<li>You can ask us to delete crash reports tied to your device identifier at any time via the contact email above.</li>
-</ul>
+  <h2>5. Other Non-Google Information We Collect</h2>
+  <p>To ensure system stability across handheld hardware revisions, the following non-Google diagnostic information may be collected:</p>
+  <ul>
+    <li><strong>Anonymous Device Identifier:</strong> A non-reversible SHA-256 hash (e.g. <code>RC-xxxxxxxx</code>) generated on initial launch to differentiate anonymous bug reports. It cannot be reverse-engineered to identify your hardware serial number or personal identity.</li>
+    <li><strong>Anonymous Crash / Error Telemetry:</strong> When an unhandled exception or system crash occurs, diagnostic information (application version, device model, free memory, display resolution, error code) may be relayed to a private GitHub bug tracker to fix software defects. These reports <strong>never</strong> include Google passwords, OAuth tokens, or Google Drive file contents.</li>
+    <li><strong>GitHub Token (Optional):</strong> If you provide a personal GitHub token to report bugs directly to your own repositories, it is stored strictly locally on your device.</li>
+  </ul>
 
-<h2>8. Your choices</h2>
-<ul>
-<li><strong>Sign out</strong> inside the RomCloud app at any time — this deletes the stored OAuth tokens from the device.</li>
-<li><strong>Revoke Google access</strong> at <a href="https://myaccount.google.com/permissions">myaccount.google.com/permissions</a> by removing RomCloud.</li>
-<li><strong>Delete local data</strong> by removing the app's data folder on your SD card (<code>/mnt/SDCARD/Apps/RomCloud/data</code> and <code>config</code>).</li>
-<li><strong>Disable crash reporting</strong> — remove the GitHub token / turn off issue logging in settings; the app keeps working.</li>
-</ul>
+  <h2>6. BrickDrop Protocol (Local-Only Transfers)</h2>
+  <p>The companion utility <strong>BrickDrop</strong> facilitates offline peer-to-peer file transfers between your local devices over Wi-Fi using the open LocalSend protocol. BrickDrop operates entirely offline within your local area network (LAN), requires no user accounts, sends no telemetry to cloud servers, and does not touch your Google account.</p>
 
-<h2>9. BrickDrop — offline by design</h2>
-<p>BrickDrop sends files <strong>directly between your own devices</strong> over your local Wi-Fi hotspot or LAN using the LocalSend protocol. There are no user accounts, nothing is uploaded to any cloud server, and our servers never see your files. Nearby-device discovery uses local-network broadcasts so your devices can find each other; no personal data leaves your network.</p>
+  <h2>7. Website Privacy (romcloud.linkpc.net)</h2>
+  <p>Our official website (<a href="https://www.romcloud.linkpc.net/">https://www.romcloud.linkpc.net/</a>) is a static website hosted via GitHub Pages. We do not use tracking cookies, analytics trackers, or third-party advertising scripts. Standard web server access logs collected by GitHub Pages are governed by the <a href="https://docs.github.com/en/site-policy/privacy-policies/github-privacy-statement" target="_blank" rel="noopener noreferrer">GitHub Privacy Statement</a>.</p>
 
-<h2>10. This website</h2>
-<p>This site is a set of static pages hosted on GitHub Pages. We do not set cookies, run analytics, or collect information from website visitors. If you email us, we use your message only to respond.</p>
+  <h2>8. Children's Online Privacy Protection (COPPA)</h2>
+  <p>RomCloud is a general-audience retro gaming utility and does not knowingly solicit or collect personal information from children under the age of 13. If you believe a child has provided us with personal information, please contact us immediately, and we will delete the data.</p>
 
-<h2>11. Children</h2>
-<p>Our apps are general-audience utilities and are not directed at children under 13. We do not knowingly collect data from children; if you believe a child has provided personal data, contact us and we will delete it.</p>
+  <h2>9. Changes to This Privacy Policy</h2>
+  <p>We may update this Privacy Policy from time to time to reflect changes in our practices or applicable legal requirements. When updates occur, we will revise the "Effective Date" at the top of this page. We encourage users to periodically review this page for the latest privacy practices.</p>
 
-<h2>12. Changes to this policy</h2>
-<p>We may update this policy as the apps evolve; the updated date at the top will change, and material changes will be noted on this site.</p>
+  <h2>10. Contact Us</h2>
+  <p>If you have any questions, concerns, or requests regarding this Privacy Policy, your Google User Data, or our privacy practices, please contact the developer directly:</p>
+  <p>
+    <strong>RomCloud Development Team</strong><br>
+    Email: <a href="mailto:bun2it@gmail.com">bun2it@gmail.com</a><br>
+    Website: <a href="https://www.romcloud.linkpc.net/">https://www.romcloud.linkpc.net/</a><br>
+    Project Repository: <a href="https://github.com/bun2it/RomCloud">https://github.com/bun2it/RomCloud</a>
+  </p>
 
-<h2>13. Contact</h2>
-<p>Questions about privacy: <a href="mailto:bun2it@gmail.com">bun2it@gmail.com</a>.</p>
+  <div class="footer-nav">
+    <div>&copy; 2026 RomCloud. All rights reserved.</div>
+    <div>
+      <a href="index.html">Home</a> &bull; 
+      <a href="terms.html">Terms</a> &bull; 
+      <a href="install.html">Install</a>
+    </div>
+  </div>
+</div>
 </body>
 </html>
