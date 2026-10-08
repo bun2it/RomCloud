@@ -398,7 +398,33 @@ class CuratorRequestHandler(BaseHTTPRequestHandler):
             if target_idx is not None and target_idx > 0:
                 item = streams.pop(target_idx)
                 streams.insert(0, item)
-            self.send_json({"success": True, "message": f"Đã đặt nguồn số 1 cho kênh {ch_name}"})
+        # 11. API: Kích hoạt ứng dụng VLC trên máy tính để phát stream trực tiếp
+        if path == "/api/open_vlc":
+            body = self.read_json_body()
+            url = body.get("url", "").strip()
+            if not url:
+                self.send_json({"success": False, "error": "Thiếu URL stream"}, status=400)
+                return
+            import subprocess
+            import platform
+            try:
+                sys_plat = platform.system()
+                if sys_plat == "Darwin":
+                    # macOS: chạy thẳng binary VLC nếu có, hoặc dùng open -a
+                    vlc_bin = "/Applications/VLC.app/Contents/MacOS/VLC"
+                    if os.path.exists(vlc_bin):
+                        subprocess.Popen([vlc_bin, url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    else:
+                        subprocess.Popen(["open", "-a", "VLC", url])
+                elif sys_plat == "Windows":
+                    # Windows: chạy vlc
+                    subprocess.Popen(["cmd", "/c", "start", "vlc", url], shell=True)
+                else:
+                    # Linux
+                    subprocess.Popen(["vlc", url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                self.send_json({"success": True, "message": "Đã khởi chạy VLC thành công"})
+            except Exception as e:
+                self.send_json({"success": False, "error": f"Lỗi khởi chạy VLC: {e}"}, status=500)
             return
 
         self.send_error(404, "Not Found: Invalid POST endpoint")

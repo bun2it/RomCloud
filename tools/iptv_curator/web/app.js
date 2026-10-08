@@ -405,6 +405,9 @@ function renderModalStreamItems(ch) {
           <button class="btn-action btn-action-play" onclick="playSingleStream('${safeChannelName}', '${safeUrl}', ${idx})">
             ▶ Phát luồng này
           </button>
+          <button class="btn-action" onclick="openInVlc('${escapeHtml(s.url)}')">
+            🎬 Mở VLC
+          </button>
           <button class="btn-action" onclick="copyToClipboard('${escapeHtml(s.url)}')">
             📋 Sao chép
           </button>
@@ -578,11 +581,31 @@ function copyPlayerUrl() {
   }
 }
 
-function openInVlc() {
-  if (!currentPlayingOriginalUrl) return;
-  copyToClipboard(currentPlayingOriginalUrl);
-  window.location.href = "vlc://" + currentPlayingOriginalUrl;
-  showToast("Đã copy link! Nếu máy đã cài VLC, link sẽ tự mở.");
+async function openInVlc(customUrl) {
+  const urlToPlay = customUrl || currentPlayingOriginalUrl;
+  if (!urlToPlay) {
+    showToast("Không tìm thấy link stream", true);
+    return;
+  }
+  showToast("⏳ Đang kích hoạt ứng dụng VLC trên máy tính...");
+  try {
+    const res = await fetch("/api/open_vlc", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: urlToPlay })
+    });
+    const data = await res.json();
+    if (data.success) {
+      showToast("🚀 Đã mở ứng dụng VLC thành công!");
+    } else {
+      // Fallback sao chép link nếu không gọi được lệnh hệ thống
+      copyToClipboard(urlToPlay);
+      showToast("Lỗi mở VLC: " + data.error + " (Đã copy link)", true);
+    }
+  } catch (err) {
+    copyToClipboard(urlToPlay);
+    showToast("Lỗi mạng: " + err + " (Đã copy link)", true);
+  }
 }
 
 // 8. Test Ping Đơn Lẻ Ngay Trong Modal
