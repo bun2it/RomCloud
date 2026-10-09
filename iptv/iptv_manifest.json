@@ -1,10 +1,11 @@
 {
-  "version": "20261009_085521",
-  "updated_at": "2026-10-09 08:55:21",
-  "channel_count": 397,
-  "total_streams": 412,
-  "sha256": "3f1f72553b95e613526f4d06e17a22351d31c473fc0bc11ee0b85a84657e8a06",
+  "version": "20261009_113104",
+  "updated_at": "2026-10-09 11:31:04",
+  "channel_count": 461,
+  "total_streams": 464,
+  "sha256": "aa44e1bf2707c06a1bef0e5860b213018c9ed63b90d8079a84c164da353babe7",
   "groups": [
+    "COLA TV",
     "GÀ VÀNG 33",
     "GÀ VÀNG 33 SV2",
     "HTV / TP.HCM",
@@ -28,6 +29,7 @@
     "🏀 COLA TV SV2",
     "🏀 COLA TV SV3",
     "🏐 GÀ VÀNG 24h",
+    "🏐 KHÁN ĐÀI TV",
     "📦 In The Box"
   ],
   "playlist_file": "live.m3u",
