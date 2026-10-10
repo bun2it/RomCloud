@@ -1,0 +1,7 @@
+{
+  "name": "romcloud-rcweb",
+  "version": "1.0.0",
+  "description": "Trình duyệt toàn màn hình của RomCloud (Electron kiosk trên Weston)",
+  "main": "main.js",
+  "private": true
+}

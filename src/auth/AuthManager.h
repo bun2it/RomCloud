@@ -59,6 +59,7 @@ public:
 
     // Returns a valid access token, auto-refreshing if expired
     std::string getValidAccessToken();
+    bool refreshAccessTokenNow();
 
     // Custom Client ID / Secret configuration
     void setCustomCredentials(const std::string& clientId, const std::string& clientSecret);

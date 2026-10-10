@@ -13,6 +13,7 @@ enum class RenderBoxType {
     INLINE,
     FLEX_ROW,
     FLEX_COLUMN,
+    GRID,  // P23
     TEXT,
     IMAGE,
     LINK,
@@ -57,6 +58,28 @@ struct RenderBox {
     int lineHeight = 32;
     uint8_t textAlign = 0;
 
+    // P21: extended CSS properties (mirrored from NetSurfComputedStyle).
+    int minHeight = 0;
+    int textIndent = 0;
+    int letterSpacing = 0;
+    int wordSpacing = 0;
+    int borderTopWidth = 0;
+    int borderRightWidth = 0;
+    int borderBottomWidth = 0;
+    int borderLeftWidth = 0;
+    uint8_t borderTopStyle = 0;
+    uint8_t borderRightStyle = 0;
+    uint8_t borderBottomStyle = 0;
+    uint8_t borderLeftStyle = 0;
+    uint32_t borderTopColor = 0x00000000;
+    uint32_t borderRightColor = 0x00000000;
+    uint32_t borderBottomColor = 0x00000000;
+    uint32_t borderLeftColor = 0x00000000;
+    int outlineWidth = 0;
+    uint32_t outlineColor = 0x00000000;
+    uint8_t outlineStyle = 0;
+    uint8_t listStylePosition = 0;
+
     // Interactive
     bool isFocusable = false;
     bool isFocused = false;
@@ -79,6 +102,25 @@ struct RenderBox {
     bool skipChildren = false;  // P17: input/textarea/select fold children in
     bool phantom = false;  // P17: hidden input — value submits, no layout/render
 
+    // P23: flex/grid (copied from NetSurfComputedStyle in createBoxTree).
+    int gapPx = 0;  // gap (flex) / grid-gap (grid)
+    std::vector<NetSurfComputedStyle::GridTrack> gridCols;  // grid-template-columns
+    // justify-content / align-items cho flex (lưu raw enum libcss để layout dùng)
+    uint8_t justifyContent = 0;
+    uint8_t alignItems = 0;
+    float flexGrow = 0.0f;
+    uint8_t floatSide = 0;  // P25: 0 = none, 1 = left, 2 = right
+
+    // P22: per-box JavaScript event handler storage. The bridge stores Duktape
+    // function refs (as void* opaque handles) keyed by event name. A click
+    // via JS or the renderer drains click handlers. setText / setClassList /
+    // setStyle also bump jsEpoch so the layout re-derives from the latest
+    // content without stale caches.
+    std::vector<void*> jsClickHandlers;  // duk_context_function refs (click only)
+    uint64_t jsEpoch = 0;                // bumped on any JS mutation to this box
+    bool jsHidden = false;               // element.style.display = 'none' from JS
+    bool jsChecked = false;              // checkbox/radio state from JS (overrides attr)
+
     // Hierarchy
     RenderBox* parent = nullptr;
     std::vector<std::unique_ptr<RenderBox>> children;
@@ -93,10 +135,12 @@ public:
     void setTextMeasurer(TextMeasureCallback measurer) { m_textMeasurer = measurer; }
 
     // Estimate text width in pixels (UTF-8 safe)
-    int measureText(const std::string& text, int fontSizePx) const;
+    int measureText(const std::string& text, int fontSizePx,
+                    int letterSpacing = 0, int wordSpacing = 0) const;
 
     // Word-wrap text into lines according to maxWidth
-    std::vector<std::string> wrapText(const std::string& text, int maxWidth, int fontSizePx) const;
+    std::vector<std::string> wrapText(const std::string& text, int maxWidth, int fontSizePx,
+                                      int letterSpacing = 0, int wordSpacing = 0) const;
 
     // Construct RenderBox tree from NetSurfStyledNode and compute 2D layout geometry
     std::unique_ptr<RenderBox> buildAndLayout(const NetSurfStyledNode* styledRoot,
@@ -115,6 +159,7 @@ private:
     void layoutBlockBox(RenderBox* box, int availableWidth, int& currentY, int currentX);
     void layoutFlexRowBox(RenderBox* box, int availableWidth, int& currentY, int currentX);
     void layoutFlexColumnBox(RenderBox* box, int availableWidth, int& currentY, int currentX);
+    void layoutGridBox(RenderBox* box, int availableWidth, int& currentY, int currentX);  // P23
     void layoutTextBox(RenderBox* box, int availableWidth, int& currentY, int currentX);
     void layoutImageBox(RenderBox* box, int availableWidth, int& currentY, int currentX);
     void layoutInlineWrapBox(RenderBox* box, int availableWidth, int& currentY, int currentX);

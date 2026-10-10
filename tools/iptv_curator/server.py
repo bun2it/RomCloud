@@ -25,6 +25,28 @@ PORT = 8080
 WEB_DIR = os.path.join(CUR_DIR, "web")
 REPO_ROOT = os.path.abspath(os.path.join(CUR_DIR, "..", ".."))
 
+# Đường dẫn file M3U chuẩn của người dùng
+USER_STANDARD_M3U = "/Users/tai/Library/CloudStorage/GoogleDrive-bun2it@gmail.com/My Drive/IPTV/iptv.m3u"
+
+
+def get_standard_m3u_path() -> str:
+    """Ưu tiên file chuẩn Google Drive của user nếu có, tự động đồng bộ sang iptv/default.m3u"""
+    if os.path.exists(USER_STANDARD_M3U):
+        repo_default = os.path.join(REPO_ROOT, "iptv", "default.m3u")
+        try:
+            with open(USER_STANDARD_M3U, "rb") as sf:
+                s_data = sf.read()
+            # Chỉ ghi đè nếu khác nội dung hoặc repo_default chưa có
+            if not os.path.exists(repo_default) or os.path.getsize(repo_default) != len(s_data):
+                with open(repo_default, "wb") as df:
+                    df.write(s_data)
+                print(f"[*] Đã đồng bộ file chuẩn IPTV từ Drive sang repo: {repo_default}")
+        except Exception as e:
+            print(f"[!] Không thể ghi đè repo default.m3u: {e}")
+        return USER_STANDARD_M3U
+    return os.path.join(REPO_ROOT, "iptv", "default.m3u")
+
+
 # Khởi tạo engine toàn cục
 engine = CuratorEngine(work_dir=CUR_DIR)
 
@@ -257,15 +279,15 @@ class CuratorRequestHandler(BaseHTTPRequestHandler):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
 
-        # 1. API: Nạp nguồn mặc định từ repo (iptv/default.m3u)
+        # 1. API: Nạp nguồn mặc định từ repo hoặc Google Drive của user
         if path == "/api/sources/load_default":
-            default_path = os.path.join(REPO_ROOT, "iptv", "default.m3u")
-            if os.path.exists(default_path):
-                cnt = engine.add_source_file(default_path)
+            target_path = get_standard_m3u_path()
+            if os.path.exists(target_path):
+                cnt = engine.add_source_file(target_path)
                 engine.process_and_cluster()
-                self.send_json({"success": True, "loaded_channels": cnt})
+                self.send_json({"success": True, "loaded_channels": cnt, "source_path": target_path})
             else:
-                self.send_json({"success": False, "error": "Không tìm thấy iptv/default.m3u"}, status=404)
+                self.send_json({"success": False, "error": f"Không tìm thấy file nguồn: {target_path}"}, status=404)
             return
 
         # 2. API: Thêm link M3U từ xa
@@ -348,6 +370,10 @@ class CuratorRequestHandler(BaseHTTPRequestHandler):
             body = self.read_json_body()
             include_backup = body.get("include_backup", True)
             publish_filters = body.get("publish_filters", None)
+            if "selected_groups" in body:
+                if publish_filters is None:
+                    publish_filters = {}
+                publish_filters["selected_groups"] = body["selected_groups"]
             res = engine.export(include_backup=include_backup, publish_filters=publish_filters)
             self.send_json({"success": True, "result": res})
             return
@@ -357,6 +383,10 @@ class CuratorRequestHandler(BaseHTTPRequestHandler):
             body = self.read_json_body() if self.headers.get("Content-Length") else {}
             include_backup = body.get("include_backup", True)
             publish_filters = body.get("publish_filters", None)
+            if "selected_groups" in body:
+                if publish_filters is None:
+                    publish_filters = {}
+                publish_filters["selected_groups"] = body["selected_groups"]
             dest_dir = os.path.join(REPO_ROOT, "iptv")
             res = engine.export(output_dir=dest_dir, include_backup=include_backup, publish_filters=publish_filters)
             self.send_json({
@@ -364,6 +394,102 @@ class CuratorRequestHandler(BaseHTTPRequestHandler):
                 "message": f"Đã xuất bản thành công vào thư mục {dest_dir}",
                 "result": res
             })
+            return
+
+        # 7b. API: Xuất bản, Git Commit & Push OTA trực tiếp lên GitHub (chỉ riêng iptv/)
+        if path == "/api/git_commit_push_ota":
+            body = self.read_json_body() if self.headers.get("Content-Length") else {}
+            include_backup = body.get("include_backup", True)
+            publish_filters = body.get("publish_filters", None)
+            if "selected_groups" in body:
+                if publish_filters is None:
+                    publish_filters = {}
+                publish_filters["selected_groups"] = body["selected_groups"]
+            dest_dir = os.path.join(REPO_ROOT, "iptv")
+            res = engine.export(output_dir=dest_dir, include_backup=include_backup, publish_filters=publish_filters)
+
+            manifest_file = os.path.join("iptv", "iptv_manifest.json")
+            playlist_file = os.path.join("iptv", "live.m3u")
+
+            try:
+                import subprocess
+                import datetime
+
+                # 1. Chỉ add duy nhất 2 file của iptv, tuyệt đối không đụng file mã nguồn khác
+                subprocess.run(
+                    ["git", "add", manifest_file, playlist_file],
+                    cwd=REPO_ROOT, capture_output=True, text=True, check=True
+                )
+
+                # 2. Kiểm tra xem có thay đổi nào trong stage không
+                diff_cmd = subprocess.run(
+                    ["git", "diff", "--cached", "--name-only"],
+                    cwd=REPO_ROOT, capture_output=True, text=True, check=True
+                )
+
+                if not diff_cmd.stdout.strip():
+                    self.send_json({
+                        "success": True,
+                        "message": "Playlist không có thay đổi nào mới so với commit trước đó.",
+                        "result": res
+                    })
+                    return
+
+                # 3. Commit riêng iptv: nếu commit gần nhất HEAD cũng là iptv thì amend để xóa commit cũ, giữ Git log gọn gàng
+                last_msg_cmd = subprocess.run(
+                    ["git", "log", "-1", "--pretty=%B"],
+                    cwd=REPO_ROOT, capture_output=True, text=True
+                )
+                last_msg = last_msg_cmd.stdout.strip()
+                now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                commit_msg = f"iptv: update OTA playlist ({now_str}) [skip ci]"
+
+                is_amend = last_msg.startswith("iptv:")
+                if is_amend:
+                    subprocess.run(
+                        ["git", "commit", "--amend", "-m", commit_msg],
+                        cwd=REPO_ROOT, capture_output=True, text=True, check=True
+                    )
+                    subprocess.run(
+                        ["git", "push", "--force-with-lease", "origin", "main"],
+                        cwd=REPO_ROOT, capture_output=True, text=True, check=True
+                    )
+                else:
+                    subprocess.run(
+                        ["git", "commit", "-m", commit_msg],
+                        cwd=REPO_ROOT, capture_output=True, text=True, check=True
+                    )
+                    subprocess.run(
+                        ["git", "push", "origin", "main"],
+                        cwd=REPO_ROOT, capture_output=True, text=True, check=True
+                    )
+
+                # 5. Lấy hash commit vừa tạo
+                rev_cmd = subprocess.run(
+                    ["git", "rev-parse", "--short", "HEAD"],
+                    cwd=REPO_ROOT, capture_output=True, text=True
+                )
+                commit_hash = rev_cmd.stdout.strip()
+
+                action_desc = "Ghi đè commit cũ (amend) & Push" if is_amend else "Tạo commit mới & Push"
+                self.send_json({
+                    "success": True,
+                    "message": f"Đã xuất bản, {action_desc} [{commit_hash}] lên GitHub thành công!",
+                    "commit_hash": commit_hash,
+                    "is_amended": is_amend,
+                    "result": res
+                })
+            except subprocess.CalledProcessError as e:
+                err_msg = e.stderr or e.stdout or str(e)
+                self.send_json({
+                    "success": False,
+                    "error": f"Lỗi Git: {err_msg}"
+                }, status=500)
+            except Exception as e:
+                self.send_json({
+                    "success": False,
+                    "error": f"Lỗi hệ thống: {e}"
+                }, status=500)
             return
 
         # 8. API: Cập nhật Rules & Cấu hình Ngưỡng Ping
@@ -453,12 +579,12 @@ class CuratorRequestHandler(BaseHTTPRequestHandler):
 
 
 def run_server(port: int = PORT):
-    # Tự động nạp default.m3u ban đầu nếu có
-    default_m3u = os.path.join(REPO_ROOT, "iptv", "default.m3u")
-    if os.path.exists(default_m3u):
-        cnt = engine.add_source_file(default_m3u)
+    # Tự động nạp file IPTV chuẩn ban đầu nếu có
+    target_m3u = get_standard_m3u_path()
+    if os.path.exists(target_m3u):
+        cnt = engine.add_source_file(target_m3u)
         engine.process_and_cluster()
-        print(f"[*] Tự động nạp {cnt} kênh từ iptv/default.m3u")
+        print(f"[*] Tự động nạp {cnt} kênh từ file chuẩn: {target_m3u}")
 
     server_address = ("", port)
     httpd = ThreadingHTTPServer(server_address, CuratorRequestHandler)

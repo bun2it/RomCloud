@@ -1,0 +1,41 @@
+[config]
+repeat_delay = 16
+repeat_rate = 40
+mouse_scale = 10
+mouse_delay = 16
+deadzone_mode = axial
+deadzone_scale = 10
+deadzone_x = 1800
+deadzone_y = 1800
+deadzone_triggers = 3000
+mouse_slow_scale = 30
+dpad_mouse_normalize = true
+
+[controls]
+# Mapping tay cầm của RC-Web (RomCloud tự định nghĩa, Tai chốt):
+# D-pad: trái = lui trang, phải = tới trang, lên/xuống = cuộn bước nhỏ
+# (phím mũi tên gốc của trang). L1/R1 = cuộn cả trang (PageUp/PageDown).
+# START = sửa địa chỉ (F6), SELECT = con trỏ (F9) — qua main.js.
+# B do RomCloud giữ (thoát theo tầng): F1 chỉ để main.js đóng lớp
+# phụ (bàn phím/con trỏ) trong lúc RomCloud nhường.
+#
+# QUAN TRỌNG — token gptokeyb2 là tên SDL theo VỊ TRÍ nút, không phải
+# chữ in trên máy TrimUI (bố cục Nintendo: A phải, B dưới, X trên, Y trái):
+#   token a = nút B vật lý (dưới)   token b = nút A vật lý (phải)
+#   token x = nút Y vật lý (trái)   token y = nút X vật lý (trên)
+# Bằng chứng máy thật 2026-10-10 (log rc-web.log phiên 10:59 UTC):
+# với bản cũ (a=f2, b=f1, x=enter, y=f3), Tai bấm Y thì gõ chữ
+# (x=enter -> Enter) và bấm X thì xoá (y=f3 -> F3) — khớp từng dòng.
+# Sơ đồ Tai chốt: A chọn, Y xoá, START tải web, B đóng/thoát, X trang chủ:
+a = f1
+b = enter
+x = f3
+y = f2
+l1 = pageup
+r1 = pagedown
+start = f6
+select = f9
+up = up
+down = down
+left = f7
+right = f8

@@ -118,12 +118,15 @@ $CXX_CMD -std=c++17 -O2 -Wall -Wextra \
     src/ui/ExplorerSync.cpp \
     src/browser/HtmlRenderer.cpp \
     src/browser/BrowserManager.cpp \
+    src/browser/chrome/ChromeBridge.cpp \
     src/browser/JsEngine.cpp \
     src/browser/SvgRaster.cpp \
     src/browser/netsurf/NetSurfBridge.cpp \
     src/browser/netsurf/NetSurfLayout.cpp \
     src/browser/netsurf/NetSurfRenderer.cpp \
     src/browser/netsurf/NetSurfEngine.cpp \
+    src/browser/netsurf/NetSurfJsBridge.cpp \
+    src/browser/netsurf/NetSurfWorkerBridge.cpp \
     build/nsgif_gif.o \
     build/nsgif_lzw.o \
     build/duktape.o \
@@ -132,6 +135,7 @@ $CXX_CMD -std=c++17 -O2 -Wall -Wextra \
     src/ui/WeatherUI.cpp \
     src/clock/ClockStore.cpp \
     src/ui/ClockUI.cpp \
+    src/screensaver/SaverEngine.cpp \
     src/market/WatchManager.cpp \
     src/ui/WatchUI.cpp \
     src/market/MarketManager.cpp \

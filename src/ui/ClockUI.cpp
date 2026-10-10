@@ -1295,4 +1295,23 @@ bool UIManager::handleCityPickerInput() {
   return true;
 }
 
+// P0 Screensaver: public API cho SaverEngine
+void UIManager::saverSetClockStyle(int style) {
+  if (style == 0 || style == 2) {
+    m_clkFsStyle = style;
+    // Reset animation state
+    for (int i = 0; i < 3; i++) {
+      m_fsD[i].cur.clear();
+      m_fsD[i].prev.clear();
+      m_fsD[i].ani = false;
+      m_fsD[i].prog = 0.0f;
+    }
+    m_fsLastKey = -1;
+  }
+}
+
+void UIManager::saverRenderClock() {
+  renderClockFullscreen();
+}
+
 } // namespace RomCloud

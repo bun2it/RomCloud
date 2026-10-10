@@ -823,8 +823,15 @@ bool IPTVManager::updateOtaPlaylist(std::string& outMessage) {
 
     Logger::info("IPTV: Checking OTA playlist update from: " + manifestUrl);
 
-    // 1. Fetch manifest
-    HttpResponse mResp = HttpClient::instance().get(manifestUrl, {}, 10);
+    // 1. Fetch manifest (kèm cache-busting để vượt qua Fastly CDN cache của raw.githubusercontent.com)
+    std::string cacheBuster = "?t=" + std::to_string(std::time(nullptr));
+    std::string fetchManifestUrl = manifestUrl + (manifestUrl.find('?') == std::string::npos ? cacheBuster : "&t=" + std::to_string(std::time(nullptr)));
+    std::vector<std::string> noCacheHeaders = {
+        "Cache-Control: no-cache, no-store, must-revalidate",
+        "Pragma: no-cache"
+    };
+
+    HttpResponse mResp = HttpClient::instance().get(fetchManifestUrl, noCacheHeaders, 10);
     std::string targetM3uUrl = playlistUrl;
     std::string otaVersion = "";
     std::string otaSha256 = "";
@@ -842,9 +849,10 @@ bool IPTVManager::updateOtaPlaylist(std::string& outMessage) {
         Logger::warn("IPTV: Could not fetch manifest, attempting direct playlist download from: " + playlistUrl);
     }
 
-    // 2. Fetch M3U playlist
-    Logger::info("IPTV: Fetching OTA M3U playlist from: " + targetM3uUrl);
-    HttpResponse pResp = HttpClient::instance().get(targetM3uUrl, {}, 25);
+    // 2. Fetch M3U playlist (kèm cache-busting)
+    std::string fetchM3uUrl = targetM3uUrl + (targetM3uUrl.find('?') == std::string::npos ? cacheBuster : "&t=" + std::to_string(std::time(nullptr)));
+    Logger::info("IPTV: Fetching OTA M3U playlist from: " + fetchM3uUrl);
+    HttpResponse pResp = HttpClient::instance().get(fetchM3uUrl, noCacheHeaders, 25);
     if (!pResp.success || pResp.body.empty() || (pResp.statusCode != 200 && pResp.statusCode != 206)) {
         outMessage = "Lỗi kết nối tải playlist OTA (HTTP " + std::to_string(pResp.statusCode) + "): " + pResp.error;
         Logger::error("IPTV OTA update error: " + outMessage);
@@ -1080,11 +1088,20 @@ static std::string resolveCappedHlsUrl(const std::string& url, int targetHeight 
             return url;
         }
 
-        if (resp.body.find("#EXT-X-STREAM-INF") == std::string::npos) {
-            return url;
-        }
+        // KHÔNG early-return khi thiếu STREAM-INF: media playlist (URL ghim
+        // thẳng variant 1080p kiểu FPT) sẽ được dò master cùng thư mục ở dưới.
 
         std::string effectiveUrl = !resp.effectiveUrl.empty() ? resp.effectiveUrl : url;
+        std::string baseForResolve = effectiveUrl; // đổi sang URL master cùng thư mục nếu dò thấy
+
+        // Đoán bandwidth từ tên variant kiểu FPT (avc1_5600000=10000 -> 5600000),
+        // dùng khi playlist không ghi BANDWIDTH/RESOLUTION.
+        auto guessUriBw = [](const std::string& u) -> int {
+            size_t p = u.find("avc1_");
+            if (p == std::string::npos) return 0;
+            long v = std::atol(u.c_str() + p + 5);
+            return (v >= 100000 && v <= 100000000) ? (int)v : 0;
+        };
 
         std::istringstream stream(resp.body);
         std::string line;
@@ -1092,6 +1109,7 @@ static std::string resolveCappedHlsUrl(const std::string& url, int targetHeight 
             int width = 0;
             int height = 0;
             int bandwidth = 0;
+            int uriBw = 0; // đoán từ tên file kiểu avc1_5600000
             std::string uri;
         };
         std::vector<Variant> variants;
@@ -1120,43 +1138,119 @@ static std::string resolveCappedHlsUrl(const std::string& url, int targetHeight 
                 hasVariant = true;
             } else if (hasVariant && !line.empty() && line[0] != '#') {
                 curVariant.uri = line;
+                curVariant.uriBw = guessUriBw(line);
                 variants.push_back(curVariant);
                 hasVariant = false;
             }
         }
 
+        // URL ghim thẳng media playlist 1080p (kiểu FPT avc1_5600000): dò master
+        // cùng thư mục (index/master/playlist.m3u8) để chọn lại variant <=720p.
+        if (variants.empty() && resp.body.find("#EXTINF") != std::string::npos) {
+            size_t qPos0 = baseForResolve.find('?');
+            std::string noQuery = (qPos0 != std::string::npos) ? baseForResolve.substr(0, qPos0) : baseForResolve;
+            // Chỉ dò master khi tên file gợi ý đây là 1 variant trong bộ
+            // multi-bitrate (tránh +6s cho stream đơn bitrate thật sự).
+            std::string lowName = noQuery;
+            for (char& c : lowName) c = (char)::tolower((unsigned char)c);
+            const char* hints[] = {"avc", "=", "1080", "720", "480", "360",
+                                   "chunklist", "variant", "rendition", "bitrate", "quality"};
+            bool looksVariant = false;
+            for (const char* h : hints) {
+                if (lowName.find(h) != std::string::npos) { looksVariant = true; break; }
+            }
+            if (looksVariant) {
+            size_t lastSlash = noQuery.rfind('/');
+            if (lastSlash != std::string::npos) {
+                std::string dir = noQuery.substr(0, lastSlash + 1);
+                const char* sibNames[] = {"index.m3u8", "master.m3u8", "playlist.m3u8"};
+                for (const char* nm : sibNames) {
+                    if (!variants.empty()) break;
+                    std::string sibUrl = dir + nm;
+                    // Bỏ qua nếu trùng chính URL đang phát
+                    if (sibUrl == noQuery) continue;
+                    HttpResponse sib = HttpClient::instance().get(sibUrl, {
+                        "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                    }, 3);
+                    if (!sib.success || sib.body.empty() ||
+                        sib.body.find("#EXT-X-STREAM-INF") == std::string::npos) continue;
+                    std::istringstream ss(sib.body);
+                    std::string ll;
+                    Variant cur; bool hasV = false;
+                    std::string upper;
+                    while (std::getline(ss, ll)) {
+                        while (!ll.empty() && (ll.back() == '\r' || ll.back() == '\n' || ll.back() == ' ')) ll.pop_back();
+                        if (ll.rfind("#EXT-X-STREAM-INF:", 0) == 0) {
+                            cur = Variant();
+                            upper = ll;
+                            for (char& c : upper) c = std::toupper((unsigned char)c);
+                            size_t rp = upper.find("RESOLUTION=");
+                            if (rp != std::string::npos) {
+                                size_t xp = upper.find_first_of("X", rp + 11);
+                                if (xp != std::string::npos) {
+                                    cur.width = std::atoi(ll.c_str() + rp + 11);
+                                    cur.height = std::atoi(ll.c_str() + xp + 1);
+                                }
+                            }
+                            size_t bp = upper.find("BANDWIDTH=");
+                            if (bp != std::string::npos) cur.bandwidth = std::atoi(ll.c_str() + bp + 10);
+                            hasV = true;
+                        } else if (hasV && !ll.empty() && ll[0] != '#') {
+                            cur.uri = ll;
+                            cur.uriBw = guessUriBw(ll);
+                            variants.push_back(cur);
+                            hasV = false;
+                        }
+                    }
+                    if (!variants.empty()) {
+                        baseForResolve = !sib.effectiveUrl.empty() ? sib.effectiveUrl : sibUrl;
+                        Logger::info("[IPTV] Found sibling master: " + baseForResolve);
+                    }
+                }
+            }
+            } // looksVariant
+        }
+
         if (variants.empty()) return url;
 
-        // Select best variant where height <= targetHeight (720) or bandwidth <= 4200000
+        // Ép cứng max 720p: ưu tiên height<=720, else bandwidth (tag hoặc đoán
+        // từ tên) <= 3.0Mbps. Không có variant nào đạt -> lấy bandwidth thấp nhất.
+        auto effBw = [](const Variant& v) -> int {
+            if (v.bandwidth > 0) return v.bandwidth;
+            return v.uriBw;
+        };
         const Variant* best = nullptr;
         for (const auto& v : variants) {
             bool matches = false;
             if (v.height > 0) {
                 matches = (v.height <= targetHeight);
-            } else if (v.bandwidth > 0) {
-                matches = (v.bandwidth <= 4200000);
+            } else {
+                int bw = effBw(v);
+                if (bw > 0) matches = (bw <= 3000000);
             }
             if (matches) {
-                if (!best || v.height > best->height || (v.height == best->height && v.bandwidth > best->bandwidth)) {
+                if (!best || v.height > best->height ||
+                    (v.height == best->height && effBw(v) > effBw(*best))) {
                     best = &v;
                 }
             }
         }
 
-        // If none <= targetHeight, pick the lowest resolution available
+        // If none <= targetHeight, pick the lowest bandwidth available
         if (!best) {
             for (const auto& v : variants) {
-                if (!best || (v.height > 0 && (best->height == 0 || v.height < best->height))) {
-                    best = &v;
-                }
+                if (!best) { best = &v; continue; }
+                int a = effBw(v), b = effBw(*best);
+                if (a > 0 && (b == 0 || a < b)) best = &v;
+                else if (b == 0 && v.height > 0 && (best->height == 0 || v.height < best->height)) best = &v;
             }
         }
 
         if (best && !best->uri.empty()) {
             std::string resolved = best->uri;
             if (resolved.find("http://") != 0 && resolved.find("https://") != 0) {
-                size_t qPos = effectiveUrl.find('?');
-                std::string baseUrlNoQuery = (qPos != std::string::npos) ? effectiveUrl.substr(0, qPos) : effectiveUrl;
+                size_t qPos = baseForResolve.find('?');
+                std::string baseUrlNoQuery = (qPos != std::string::npos) ? baseForResolve.substr(0, qPos) : baseForResolve;
 
                 if (!resolved.empty() && resolved[0] == '/') {
                     size_t protoEnd = baseUrlNoQuery.find("://");
@@ -1174,7 +1268,7 @@ static std::string resolveCappedHlsUrl(const std::string& url, int targetHeight 
                 }
 
                 if (qPos != std::string::npos && resolved.find('?') == std::string::npos) {
-                    resolved += effectiveUrl.substr(qPos);
+                    resolved += baseForResolve.substr(qPos);
                 }
             }
             Logger::info("[IPTV] Auto-capped stream to 720p direct variant (" + std::to_string(best->width) + "x" +
@@ -2512,7 +2606,13 @@ void IPTVManager::createDefaultPlaylist(const std::string& filepath) {
 
 static std::mutex s_pingMutex;
 
+// TẠM TẮT dò kênh chết (probe ping curl từng URL): mỗi lần lướt list là một
+// đợt fork curl tranh WiFi/CPU với mpv HLS. Bật lại = đổi false -> true.
+static constexpr bool kPingProbeEnabled = false;
+
 int IPTVManager::getCachedPing(const std::string &url) {
+    if (!kPingProbeEnabled) return -2; // "..." trung tính, không "Mất kết nối"
+    (void)url;
     std::lock_guard<std::mutex> lk(s_pingMutex);
     auto it = m_pingCache.find(url);
     if (it != m_pingCache.end()) return it->second;
@@ -2527,6 +2627,8 @@ void IPTVManager::clearPingCache() {
 }
 
 void IPTVManager::prefetchPings(const std::vector<std::string> &urls) {
+    if (!kPingProbeEnabled) return; // tạm tắt dò kênh chết
+    (void)urls;
     {
         std::lock_guard<std::mutex> lk(s_pingMutex);
         // Lọc URL chưa đo; hàng đợi chỉ giữ cửa sổ mới nhất (ghi đè).

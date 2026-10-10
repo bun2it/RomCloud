@@ -26,7 +26,7 @@ public:
 
     // Initialize renderer with SDL contexts
     void init(SDL_Renderer* renderer, TTF_Font* font,
-              const std::string& fontPath = "", int baseFontSize = 24);
+              const std::string& fontPath = "", int baseFontSize = 36);
 
     // Reset state & layout tree
     void reset();
@@ -90,7 +90,7 @@ private:
     SDL_Renderer* m_renderer = nullptr;
     TTF_Font* m_font = nullptr;
     std::string m_fontPath;
-    int m_baseFontSize = 24;
+    int m_baseFontSize = 36;
     std::unordered_map<int, TTF_Font*> m_fonts;
 
     std::unique_ptr<RenderBox> m_root;

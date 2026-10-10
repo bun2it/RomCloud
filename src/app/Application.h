@@ -13,6 +13,9 @@ public:
     void shutdown();
     void requestExit();
     void requestRestart() { m_exitCode = 42; requestExit(); }
+    // Handoff sang app ngoài (43 = RC-Web): launch.sh chạy xong
+    // khởi động lại app. Tương tự requestRestart.
+    void requestExitWithCode(int code) { m_exitCode = code; requestExit(); }
     int getExitCode() const { return m_exitCode; }
 
 private:

@@ -5,53 +5,82 @@
 
 namespace RomCloud {
 
+// P24: forward declaration (định nghĩa ở dưới trong file).
+static bool isAdJunk(const std::string& className, const std::string& id);
+
 NetSurfLayoutEngine& NetSurfLayoutEngine::instance() {
     static NetSurfLayoutEngine inst;
     return inst;
 }
 
-int NetSurfLayoutEngine::measureText(const std::string& text, int fontSizePx) const {
+int NetSurfLayoutEngine::measureText(const std::string& text, int fontSizePx,
+                                     int letterSpacing, int wordSpacing) const {
     if (text.empty() || fontSizePx <= 0) return 0;
+    int totalPx = 0;
     if (m_textMeasurer) {
-        return m_textMeasurer(text, fontSizePx);
+        totalPx = m_textMeasurer(text, fontSizePx);
+    } else {
+        // High-accuracy UTF-8 character length estimator
+        size_t i = 0;
+        while (i < text.size()) {
+            unsigned char c = static_cast<unsigned char>(text[i]);
+            if (c == ' ') {
+                totalPx += fontSizePx * 28 / 100; // Space width ~0.28em
+                i++;
+            } else if (c < 0x80) {
+                // ASCII character
+                if (c >= 'A' && c <= 'Z') {
+                    totalPx += fontSizePx * 65 / 100; // Capital letters ~0.65em
+                } else if (c == 'i' || c == 'l' || c == 'j' || c == '!' || c == '.' || c == ':') {
+                    totalPx += fontSizePx * 30 / 100; // Narrow letters ~0.30em
+                } else if (c == 'w' || c == 'm') {
+                    totalPx += fontSizePx * 78 / 100; // Wide letters ~0.78em
+                } else {
+                    totalPx += fontSizePx * 52 / 100; // Standard lowercase ~0.52em
+                }
+                i++;
+            } else {
+                // Multi-byte UTF-8 character (e.g. Vietnamese diacritics)
+                size_t n = 1;
+                if ((c & 0xE0) == 0xC0) n = 2;
+                else if ((c & 0xF0) == 0xE0) n = 3;
+                else if ((c & 0xF8) == 0xF0) n = 4;
+                totalPx += fontSizePx * 58 / 100; // Diacritic character ~0.58em
+                i += n;
+            }
+        }
     }
 
-    // High-accuracy UTF-8 character length estimator
-    int totalPx = 0;
-    size_t i = 0;
-    while (i < text.size()) {
-        unsigned char c = static_cast<unsigned char>(text[i]);
-        if (c == ' ') {
-            totalPx += fontSizePx * 28 / 100; // Space width ~0.28em
-            i++;
-        } else if (c < 0x80) {
-            // ASCII character
-            if (c >= 'A' && c <= 'Z') {
-                totalPx += fontSizePx * 65 / 100; // Capital letters ~0.65em
-            } else if (c == 'i' || c == 'l' || c == 'j' || c == '!' || c == '.' || c == ':') {
-                totalPx += fontSizePx * 30 / 100; // Narrow letters ~0.30em
-            } else if (c == 'w' || c == 'm') {
-                totalPx += fontSizePx * 78 / 100; // Wide letters ~0.78em
-            } else {
-                totalPx += fontSizePx * 52 / 100; // Standard lowercase ~0.52em
-            }
-            i++;
-        } else {
-            // Multi-byte UTF-8 character (e.g. Vietnamese diacritics)
-            size_t n = 1;
-            if ((c & 0xE0) == 0xC0) n = 2;
-            else if ((c & 0xF0) == 0xE0) n = 3;
-            else if ((c & 0xF8) == 0xF0) n = 4;
-            totalPx += fontSizePx * 58 / 100; // Diacritic character ~0.58em
-            i += n;
+    // P21: thêm letter-spacing (giữa mỗi cặp codepoint) + word-spacing (mỗi space).
+    if (letterSpacing > 0 || wordSpacing > 0) {
+        size_t codepoints = 0;
+        for (size_t k = 0; k < text.size(); ) {
+            unsigned char c = static_cast<unsigned char>(text[k]);
+            if ((c & 0xE0) == 0xC0) k += 2;
+            else if ((c & 0xF0) == 0xE0) k += 3;
+            else if ((c & 0xF8) == 0xF0) k += 4;
+            else k += 1;
+            codepoints++;
+        }
+        if (letterSpacing > 0 && codepoints > 1) {
+            totalPx += letterSpacing * ((int)codepoints - 1);
+        }
+        if (wordSpacing > 0) {
+            for (char c : text) if (c == ' ') totalPx += wordSpacing;
         }
     }
     return totalPx;
 }
 
-std::vector<std::string> NetSurfLayoutEngine::wrapText(const std::string& text, int maxWidth, int fontSizePx) const {
+std::vector<std::string> NetSurfLayoutEngine::wrapText(const std::string& text, int maxWidth, int fontSizePx,
+                                                      int letterSpacing, int wordSpacing) const {
     std::vector<std::string> lines;
     if (text.empty() || maxWidth <= 0) return lines;
+
+    // P21: truyền letter/word spacing xuống measureText để bẻ dòng đúng.
+    auto m = [&](const std::string& s) {
+        return measureText(s, fontSizePx, letterSpacing, wordSpacing);
+    };
 
     // Tokenize into words
     std::vector<std::string> words;
@@ -77,7 +106,7 @@ std::vector<std::string> NetSurfLayoutEngine::wrapText(const std::string& text, 
             if (pos + n > w.size()) n = w.size() - pos;
 
             std::string trial = cur + w.substr(pos, n);
-            if (measureText(trial, fontSizePx) <= maxWidth || cur.empty()) {
+            if (m(trial) <= maxWidth || cur.empty()) {
                 cur = trial;
                 pos += n;
             } else {
@@ -90,7 +119,7 @@ std::vector<std::string> NetSurfLayoutEngine::wrapText(const std::string& text, 
 
     std::string currentLine;
     for (const auto& w : words) {
-        if (measureText(w, fontSizePx) > maxWidth) {
+        if (m(w) > maxWidth) {
             if (!currentLine.empty()) {
                 lines.push_back(currentLine);
                 currentLine.clear();
@@ -100,7 +129,7 @@ std::vector<std::string> NetSurfLayoutEngine::wrapText(const std::string& text, 
         }
 
         std::string trial = currentLine.empty() ? w : currentLine + " " + w;
-        if (measureText(trial, fontSizePx) <= maxWidth) {
+        if (m(trial) <= maxWidth) {
             currentLine = trial;
         } else {
             if (!currentLine.empty()) lines.push_back(currentLine);
@@ -193,8 +222,8 @@ std::unique_ptr<RenderBox> NetSurfLayoutEngine::createBoxTree(const NetSurfStyle
         box->color = 0x222222FF;
     }
 
-    // Clamp font size strictly between 18px (metadata) and 32px (h1)
-    box->fontSize = std::max(18, std::min(32, fs));
+    // Scale font size x2 for handheld screen: between 28px and 64px
+    box->fontSize = std::max(28, std::min(64, fs * 2));
     box->fontWeight = node->style.fontWeight;
     box->lineHeight = (int)(box->fontSize * 1.35f);
     box->backgroundColor = node->style.backgroundColor;
@@ -204,6 +233,28 @@ std::unique_ptr<RenderBox> NetSurfLayoutEngine::createBoxTree(const NetSurfStyle
     box->height = node->style.heightPx;
     box->textAlign = node->style.textAlign;
 
+    // P21: extended CSS properties (mirror from computed style)
+    box->minHeight = node->style.minHeightPx > 0 ? node->style.minHeightPx : 0;
+    box->textIndent = node->style.textIndentPx;
+    box->letterSpacing = node->style.letterSpacingPx;
+    box->wordSpacing = node->style.wordSpacingPx;
+    box->borderTopWidth = node->style.borderTopWidthPx;
+    box->borderRightWidth = node->style.borderRightWidthPx;
+    box->borderBottomWidth = node->style.borderBottomWidthPx;
+    box->borderLeftWidth = node->style.borderLeftWidthPx;
+    box->borderTopStyle = node->style.borderTopStyle;
+    box->borderRightStyle = node->style.borderRightStyle;
+    box->borderBottomStyle = node->style.borderBottomStyle;
+    box->borderLeftStyle = node->style.borderLeftStyle;
+    box->borderTopColor = node->style.borderTopColor;
+    box->borderRightColor = node->style.borderRightColor;
+    box->borderBottomColor = node->style.borderBottomColor;
+    box->borderLeftColor = node->style.borderLeftColor;
+    box->outlineWidth = node->style.outlineWidthPx;
+    box->outlineColor = node->style.outlineColor;
+    box->outlineStyle = node->style.outlineStyle;
+    box->listStylePosition = node->style.listStylePosition;
+
     // P17: hidden inputs are phantoms — their value still submits, but they
     // take no layout space, never render, and are never focusable.
     if (tag == "input" && node->inputType == "hidden") {
@@ -211,6 +262,11 @@ std::unique_ptr<RenderBox> NetSurfLayoutEngine::createBoxTree(const NetSurfStyle
         box->phantom = true;
         box->skipChildren = true;
         return box;
+    }
+
+    // P24: bỏ quảng cáo — không tạo box, cả subtree biến mất khỏi layout.
+    if (isAdJunk(node->className, node->id)) {
+        return nullptr;
     }
 
     // Check if element has a valid hyperlink (href not empty)
@@ -223,11 +279,22 @@ std::unique_ptr<RenderBox> NetSurfLayoutEngine::createBoxTree(const NetSurfStyle
     // Determine RenderBox type and focusability (Requirement 3:
     // Only hyperlinks with href and input fields are focusable;
     // Plain text and non-hyperlink images are NEVER focusable)
-    bool isFlex = (node->style.display == 0x11 || node->style.display == 0x12);
-    bool isArticle = (tag == "article" || node->className.find("item-news") != std::string::npos ||
+    // P23: 0x12 = grid (tách khỏi flex).
+    bool isGrid = (node->style.display == 0x12);
+    bool isFlex = (node->style.display == 0x11);
+    // P24: chỉ list-item có class cụ thể mới ép flex row; <article> trần
+    // để block (hero: ảnh trên tiêu đề dưới, như mobile thật).
+    // P25: thêm art_item (vnexpress dùng class này), nhưng LOẠI hero
+    // (top-story/item_full_thumb/art_featured = ảnh full trên, chữ dưới).
+    bool isHero = (node->className.find("top-story") != std::string::npos ||
+                   node->className.find("item_full_thumb") != std::string::npos ||
+                   node->className.find("art_featured") != std::string::npos);
+    bool isNewsListItem = !isHero &&
+                     (node->className.find("item-news") != std::string::npos ||
                       node->className.find("item_news") != std::string::npos ||
                       node->className.find("news-item") != std::string::npos ||
-                      node->className.find("box-category") != std::string::npos);
+                      node->className.find("box-category") != std::string::npos ||
+                      node->className.find("art_item") != std::string::npos);
 
     bool hasChildImage = false;
     bool hasChildText = false;
@@ -244,13 +311,32 @@ std::unique_ptr<RenderBox> NetSurfLayoutEngine::createBoxTree(const NetSurfStyle
     }
     bool isNewsCard = (hasChildImage && hasChildText);
 
-    if (isFlex) {
+    // P26-fix: debug switch TẮT (0). Để 1 sẽ ép mọi box thành BLOCK và phá
+    // flex/grid/IMAGE → 23 test NetSurf core FAIL. Chỉ bật tạm khi debug
+    // pipeline; KHÔNG commit giá trị 1.
+    #define FORCE_LINEAR_LAYOUT 0
+    #if FORCE_LINEAR_LAYOUT
+    if (tag == "img" || tag == "video") {
+        box->type = RenderBoxType::IMAGE;
+    } else if (tag == "#text") {
+        box->type = RenderBoxType::TEXT;
+    } else {
+        box->type = RenderBoxType::BLOCK;
+    }
+    #else
+    if (isGrid) {
+        box->type = RenderBoxType::GRID;
+    } else if (isHero) {
+        // P25: hero (top-story/item_full_thumb) ép BLOCK — ảnh trên, chữ dưới.
+        // Check trước isFlex vì UA stylesheet cho .art_item display:flex.
+        box->type = RenderBoxType::BLOCK;
+    } else if (isFlex) {
         if (node->style.flexDirection == 0x02) {
             box->type = RenderBoxType::FLEX_COLUMN;
         } else {
             box->type = RenderBoxType::FLEX_ROW;
         }
-    } else if (isArticle || isNewsCard) {
+    } else if (isNewsListItem || isNewsCard) {
         box->type = RenderBoxType::FLEX_ROW;
     } else if (tag == "nav" || tag == "ul" || tag == "ol" ||
                node->className.find("nav") != std::string::npos ||
@@ -324,6 +410,7 @@ std::unique_ptr<RenderBox> NetSurfLayoutEngine::createBoxTree(const NetSurfStyle
         box->type = RenderBoxType::BLOCK;
         box->isFocusable = false;
     }
+    #endif  // FORCE_LINEAR_LAYOUT
 
     // Inline formatting flag: spans, links, text-level tags flow horizontally
     // inside their block (fixes "W/ikipedi/a" vertical stacking). Only trust
@@ -344,6 +431,14 @@ std::unique_ptr<RenderBox> NetSurfLayoutEngine::createBoxTree(const NetSurfStyle
         }
     }
 
+    // P23: copy flex/grid style sang box để layout dùng.
+    box->gapPx = node->style.gapPx;
+    box->gridCols = node->style.gridCols;
+    box->justifyContent = node->style.justifyContent;
+    box->alignItems = node->style.alignItems;
+    box->flexGrow = node->style.flexGrow;
+    box->floatSide = node->style.floatSide;  // P25
+
     // Recursively process children (P17: inputs fold theirs into value)
     if (!box->skipChildren) {
         for (const auto& childNode : node->children) {
@@ -352,6 +447,16 @@ std::unique_ptr<RenderBox> NetSurfLayoutEngine::createBoxTree(const NetSurfStyle
                 box->children.push_back(std::move(childBox));
             }
         }
+    }
+
+    // P25: float:left/right ~ flex row (vnexpress: thumb + title float cạnh nhau).
+    // Chỉ khi box đang là BLOCK và có >=2 con float.
+    if (box->type == RenderBoxType::BLOCK && box->children.size() >= 2) {
+        int floatCount = 0;
+        for (const auto& ch : box->children) {
+            if (ch->floatSide != 0) floatCount++;
+        }
+        if (floatCount >= 2) box->type = RenderBoxType::FLEX_ROW;
     }
 
     return box;
@@ -382,6 +487,9 @@ void NetSurfLayoutEngine::layoutBox(RenderBox* box, int availableWidth, int& cur
         case RenderBoxType::FLEX_COLUMN:
             layoutFlexColumnBox(box, availableWidth, currentY, currentX);
             break;
+        case RenderBoxType::GRID:  // P23
+            layoutGridBox(box, availableWidth, currentY, currentX);
+            break;
         case RenderBoxType::CONTAINER:
             layoutInlineWrapBox(box, availableWidth, currentY, currentX);
             break;
@@ -402,6 +510,39 @@ void NetSurfLayoutEngine::layoutBox(RenderBox* box, int availableWidth, int& cur
     }
 }
 
+// P24: strip quảng cáo — Tai yêu cầu loại bỏ các mục quảng cáo.
+// Match class/id chứa token quảng cáo (tránh false positive như "header").
+static bool isAdJunk(const std::string& className, const std::string& id) {
+    auto hasAdToken = [](const std::string& s) {
+        std::string low = s;
+        std::transform(low.begin(), low.end(), low.begin(), ::tolower);
+        const char* patterns[] = {"advert", "sponsor", "popup", "interstitial", nullptr};
+        for (int i = 0; patterns[i]; i++) {
+            if (low.find(patterns[i]) != std::string::npos) return true;
+        }
+        // "ad" đứng riêng (với separator hoặc đầu/cuối), không match "header"/"lead"
+        size_t p = 0;
+        while ((p = low.find("ad", p)) != std::string::npos) {
+            bool leftOk = (p == 0) || !isalnum((unsigned char)low[p - 1]);
+            bool rightOk = (p + 2 >= low.size()) || !isalnum((unsigned char)low[p + 2]);
+            if (leftOk && rightOk) return true;
+            p += 2;
+        }
+        return false;
+    };
+    return hasAdToken(className) || hasAdToken(id);
+}
+
+// P23: dịch cả subtree theo trục Y (dùng cho align-items sau khi layout xong).
+static void shiftSubtreeY(RenderBox* b, int dy) {
+    if (!b || dy == 0) return;
+    b->y += dy;
+    for (auto& ch : b->children) shiftSubtreeY(ch.get(), dy);
+}
+
+// P23: forward declaration (định nghĩa ở dưới trong file).
+static std::string firstInlineText(const RenderBox* b);
+
 void NetSurfLayoutEngine::layoutFlexRowBox(RenderBox* box, int availableWidth, int& currentY, int currentX) {
     box->x = currentX + box->marginLeft;
     box->y = currentY + box->marginTop;
@@ -410,85 +551,227 @@ void NetSurfLayoutEngine::layoutFlexRowBox(RenderBox* box, int availableWidth, i
     box->width = availW;
 
     int innerW = availW - box->paddingLeft - box->paddingRight;
-    const int gap = 16; // 16px standard flex gap
+    int gap = box->gapPx;  // P23: gap từ CSS, không hardcode nữa
 
-    // Separate direct children into fixed-width and flexible items
-    std::vector<RenderBox*> rowItems;
+    std::vector<RenderBox*> items;
     for (const auto& ch : box->children) {
-        rowItems.push_back(ch.get());
+        if (!ch->phantom) items.push_back(ch.get());
     }
-
-    if (rowItems.empty()) {
+    if (items.empty()) {
         box->height = box->paddingTop + box->paddingBottom;
         currentY = box->y + box->height + box->marginBottom;
         return;
     }
 
-    int totalGaps = (int)(rowItems.size() - 1) * gap;
-    int remainingW = innerW - totalGaps;
-    int flexGrowCount = 0;
-
-    auto hasImage = [](const RenderBox* b) {
+    // Pass 1: base width — widthPx có sẵn thì dùng; ảnh/thumbnail ước lượng;
+    // text đo chiều rộng; còn lại = 0 (flex item thuần, flex-grow chia sau).
+    // P24: item bọc ảnh (div > img) cũng được tính là thumbnail, không để width 0.
+    auto containsImage = [](const RenderBox* b) {
         if (!b) return false;
         if (b->type == RenderBoxType::IMAGE) return true;
-        if (b->className.find("thumb") != std::string::npos) return true;
-        for (const auto& ch : b->children) {
+        for (const auto& ch : b->children)
             if (ch->type == RenderBoxType::IMAGE) return true;
-            if (ch->className.find("thumb") != std::string::npos) return true;
-        }
         return false;
     };
-
-    // First pass: Allocate explicit or estimated widths
-    for (auto* item : rowItems) {
-        if (hasImage(item)) {
-            // News thumbnail column width: ~24-25% (~226px on 944px inner width)
-            item->width = (int)(innerW * 0.24f);
-            remainingW -= item->width;
-        } else if (item->width > 0) {
-            // Constrain fixed width to max 50% of row if multiple items exist
-            if (rowItems.size() > 1 && item->width > (int)(innerW * 0.50f)) {
-                item->width = (int)(innerW * 0.40f);
+    int totalBase = 0;
+    float totalGrow = 0;
+    for (auto* item : items) {
+        int w = item->width;  // -1/0 = auto
+        if (w <= 0) {
+            if (containsImage(item)) {
+                w = innerW / 4;  // thumbnail column
+            } else {
+                std::string t = !item->textContent.empty() ? item->textContent
+                                                           : firstInlineText(item);
+                if (!t.empty()) {
+                    w = measureText(t, item->fontSize) + 16;
+                    int cap = innerW * 3 / 5;
+                    if (w > cap) w = cap;
+                } else {
+                    w = 0;
+                }
             }
-            remainingW -= item->width;
-        } else {
-            flexGrowCount++;
+        }
+        item->width = w;
+        totalBase += w;
+        totalGrow += item->flexGrow;
+    }
+
+    // Pass 2: chia phần dư theo flex-grow (tỉ lệ).
+    int totalGaps = (int)(items.size() - 1) * gap;
+    int remaining = innerW - totalBase - totalGaps;
+    if (remaining > 0 && totalGrow > 0) {
+        int distributed = 0;
+        for (auto* item : items) {
+            if (item->flexGrow > 0) {
+                int add = (int)(remaining * item->flexGrow / totalGrow);
+                item->width += add;
+                distributed += add;
+            }
+        }
+        int rounding = remaining - distributed;  // số lẻ do làm tròn
+        if (rounding != 0) {
+            for (int i = (int)items.size() - 1; i >= 0; i--) {
+                if (items[i]->flexGrow > 0) { items[i]->width += rounding; break; }
+            }
         }
     }
 
-    // Allocate remaining width to flex-grow items (~74-75% for text column)
-    if (flexGrowCount > 0) {
-        int growW = std::max(remainingW / flexGrowCount, 120);
-        for (auto* item : rowItems) {
-            if (item->width <= 0 && !hasImage(item)) {
-                item->width = growW;
-            }
-        }
+    // Pass 3: justify-content.
+    // libcss enum: 0=inherit, 1=flex-start, 2=flex-end, 3=center,
+    //              4=space-between, 5=space-around, 6=space-evenly
+    int n = (int)items.size();
+    int contentW = 0;
+    for (auto* it : items) contentW += it->width;
+    int freeSpace = innerW - contentW - totalGaps;
+    if (freeSpace < 0) freeSpace = 0;
+
+    int startX = box->x + box->paddingLeft;
+    int effGap = gap;
+    uint8_t jc = box->justifyContent;
+    if (jc == 2) startX += freeSpace;                       // flex-end
+    else if (jc == 3) startX += freeSpace / 2;              // center
+    else if (jc == 4 && n > 1) effGap += freeSpace / (n - 1);  // space-between
+    else if (jc == 5 && n > 0) {                            // space-around
+        effGap += freeSpace / n;
+        startX += freeSpace / (2 * n);
+    } else if (jc == 6 && n > 0) {                          // space-evenly
+        effGap += freeSpace / (n + 1);
+        startX += freeSpace / (n + 1);
     }
 
-    // Second pass: Position flex row items side by side
-    int itemX = box->x + box->paddingLeft;
+    // Pass 4: layout từng item, đo chiều cao hàng.
     int itemY = box->y + box->paddingTop;
-    int maxHeight = 0;
-
-    for (auto* item : rowItems) {
-        int colY = itemY;
-        layoutBox(item, item->width, colY, itemX);
-
-        int colH = (colY - itemY);
-        maxHeight = std::max(maxHeight, colH);
-
-        itemX += item->width + gap;
+    int maxH = 0;
+    std::vector<int> itemHs;
+    itemHs.reserve(n);
+    int cx = startX;
+    for (auto* item : items) {
+        int cy = itemY;
+        layoutBox(item, item->width, cy, cx);
+        int h = cy - itemY;
+        itemHs.push_back(h);
+        if (h > maxH) maxH = h;
+        cx += item->width + effGap;
     }
 
-    box->height = maxHeight + box->paddingTop + box->paddingBottom;
+    // Pass 5: align-items.
+    // libcss enum: 0=inherit, 1=stretch, 2=flex-start, 3=flex-end,
+    //              4=center, 5=baseline
+    uint8_t ai = box->alignItems;
+    for (size_t i = 0; i < items.size(); i++) {
+        if (ai == 3) shiftSubtreeY(items[i], maxH - itemHs[i]);
+        else if (ai == 4 || ai == 5) shiftSubtreeY(items[i], (maxH - itemHs[i]) / 2);
+        else if (ai == 1 || ai == 0) items[i]->height = maxH;  // stretch
+    }
+
+    box->height = maxH + box->paddingTop + box->paddingBottom;
     currentY = box->y + box->height + box->marginBottom;
 }
 
 void NetSurfLayoutEngine::layoutFlexColumnBox(RenderBox* box, int availableWidth, int& currentY, int currentX) {
-    layoutBlockBox(box, availableWidth, currentY, currentX);
+    // P23: flex column = xếp dọc + gap. Không gap thì dùng block cũ.
+    if (box->gapPx <= 0) {
+        layoutBlockBox(box, availableWidth, currentY, currentX);
+        return;
+    }
+    box->x = currentX + box->marginLeft;
+    box->y = currentY + box->marginTop;
+    int availW = availableWidth - box->marginLeft - box->marginRight;
+    box->width = availW;
+    int innerW = availW - box->paddingLeft - box->paddingRight;
+    int childX = box->x + box->paddingLeft;
+    int flowY = box->y + box->paddingTop;
+    bool first = true;
+    for (const auto& ch : box->children) {
+        if (ch->phantom) continue;
+        if (!first) flowY += box->gapPx;
+        first = false;
+        int cy = flowY;
+        layoutBox(ch.get(), innerW, cy, childX);
+        flowY = cy;
+    }
+    int measuredH = flowY - (box->y + box->paddingTop);
+    box->height = measuredH + box->paddingTop + box->paddingBottom;
+    currentY = box->y + box->height + box->marginBottom;
 }
 
+void NetSurfLayoutEngine::layoutGridBox(RenderBox* box, int availableWidth, int& currentY, int currentX) {
+    box->x = currentX + box->marginLeft;
+    box->y = currentY + box->marginTop;
+    int availW = availableWidth - box->marginLeft - box->marginRight;
+    box->width = availW;
+    int innerW = availW - box->paddingLeft - box->paddingRight;
+    int gap = box->gapPx;
+
+    std::vector<RenderBox*> items;
+    for (const auto& ch : box->children) {
+        if (!ch->phantom) items.push_back(ch.get());
+    }
+    if (items.empty()) {
+        box->height = box->paddingTop + box->paddingBottom;
+        currentY = box->y + box->height + box->marginBottom;
+        return;
+    }
+
+    // Số cột: từ grid-template-columns, không có thì chia đều (tối đa 4).
+    int ncols = (int)box->gridCols.size();
+    if (ncols <= 0) {
+        ncols = std::min((int)items.size(), 4);
+        if (ncols <= 0) ncols = 1;
+    }
+
+    // Tính width từng cột: px cố định, % theo innerW, fr chia phần còn lại.
+    std::vector<int> colW(ncols, 0);
+    if (!box->gridCols.empty()) {
+        int fixedTotal = 0;
+        float frTotal = 0;
+        for (int i = 0; i < ncols; i++) {
+            const auto& t = box->gridCols[i];
+            if (t.kind == 0) { colW[i] = (int)t.value; fixedTotal += colW[i]; }
+            else if (t.kind == 1) {
+                colW[i] = (int)(innerW * t.value / 100.0f);
+                fixedTotal += colW[i];
+            } else { frTotal += t.value; }
+        }
+        int frSpace = innerW - fixedTotal - (ncols - 1) * gap;
+        if (frSpace < 0) frSpace = 0;
+        for (int i = 0; i < ncols; i++) {
+            if (box->gridCols[i].kind == 2 && frTotal > 0)
+                colW[i] = (int)(frSpace * box->gridCols[i].value / frTotal);
+        }
+    } else {
+        int gw = (innerW - (ncols - 1) * gap) / ncols;
+        for (int i = 0; i < ncols; i++) colW[i] = gw;
+    }
+    for (int i = 0; i < ncols; i++) if (colW[i] < 40) colW[i] = 40;
+
+    // Xếp item theo hàng: mỗi hàng cao bằng item cao nhất hàng đó.
+    int gx = box->x + box->paddingLeft;
+    int gy = box->y + box->paddingTop;
+    size_t idx = 0;
+    while (idx < items.size()) {
+        int rowH = 0;
+        std::vector<int> rowHs;
+        int cx = gx;
+        size_t rowEnd = std::min(idx + (size_t)ncols, items.size());
+        for (size_t k = idx; k < rowEnd; k++) {
+            int c = (int)(k - idx);
+            int cy = gy;
+            layoutBox(items[k], colW[c], cy, cx);
+            int h = cy - gy;
+            rowHs.push_back(h);
+            if (h > rowH) rowH = h;
+            cx += colW[c] + gap;
+        }
+        idx = rowEnd;
+        gy += rowH + gap;
+    }
+    int totalH = gy - gap - (box->y + box->paddingTop);  // trừ gap thừa cuối
+    if (totalH < 0) totalH = 0;
+    box->height = totalH + box->paddingTop + box->paddingBottom;
+    currentY = box->y + box->height + box->marginBottom;
+}
 void NetSurfLayoutEngine::layoutBlockBox(RenderBox* box, int availableWidth, int& currentY, int currentX) {
     box->x = currentX + box->marginLeft;
     box->y = currentY + box->marginTop;
@@ -503,7 +786,9 @@ void NetSurfLayoutEngine::layoutBlockBox(RenderBox* box, int availableWidth, int
     // Legacy: a block carrying its own text (e.g. #text before the TEXT
     // split) draws it as wrapped lines at the top.
     if (!box->textContent.empty() && box->children.empty()) {
-        box->lines = wrapText(box->textContent, innerW, box->fontSize);
+        // P21: truyền letter/word spacing để bẻ dòng đúng.
+        box->lines = wrapText(box->textContent, innerW, box->fontSize,
+                              box->letterSpacing, box->wordSpacing);
         int textH = (int)box->lines.size() * box->lineHeight;
         flowY += textH;
     }
@@ -528,6 +813,10 @@ void NetSurfLayoutEngine::layoutBlockBox(RenderBox* box, int availableWidth, int
     int measuredH = flowY - (box->y + box->paddingTop);
     box->height = std::max(measuredH + box->paddingTop + box->paddingBottom,
                            box->height > 0 ? box->height : 0);
+    // P21: min-height clamp — box không được thấp hơn minHeight.
+    if (box->minHeight > 0 && box->height < box->minHeight) {
+        box->height = box->minHeight;
+    }
 
     currentY = box->y + box->height + box->marginBottom;
 }
@@ -564,8 +853,8 @@ void NetSurfLayoutEngine::layoutInlineRun(RenderBox* parent, size_t begin, size_
     for (size_t k = begin; k < end; k++) {
         RenderBox* ib = parent->children[k].get();
         std::string text = firstInlineText(ib);
-        int fs = ib->fontSize > 0 ? ib->fontSize : 22;
-        int lh = ib->lineHeight > 0 ? ib->lineHeight : 32;
+        int fs = ib->fontSize > 0 ? ib->fontSize : 36;
+        int lh = ib->lineHeight > 0 ? ib->lineHeight : 48;
 
         if (text.empty()) {
             // Inline with no text (e.g. <a><img></a>): treat as a block so
@@ -626,8 +915,14 @@ void NetSurfLayoutEngine::layoutTextBox(RenderBox* box, int availableWidth, int&
     box->y = currentY + box->marginTop;
     box->width = availableWidth - box->marginLeft - box->marginRight;
 
-    box->lines = wrapText(box->textContent, box->width, box->fontSize);
+    // P21: truyền letter/word spacing xuống wrapText.
+    box->lines = wrapText(box->textContent, box->width, box->fontSize,
+                          box->letterSpacing, box->wordSpacing);
     box->height = (int)box->lines.size() * box->lineHeight;
+    // P21: min-height clamp cũng áp dụng cho text box.
+    if (box->minHeight > 0 && box->height < box->minHeight) {
+        box->height = box->minHeight;
+    }
 
     currentY = box->y + box->height + box->marginBottom;
 }
@@ -671,7 +966,7 @@ void NetSurfLayoutEngine::layoutInlineWrapBox(RenderBox* box, int availableWidth
         // Measure child width
         int childW = 0;
         if (!child->textContent.empty()) {
-            childW = measureText(child->textContent, child->fontSize > 0 ? child->fontSize : 22) + 12;
+            childW = measureText(child->textContent, child->fontSize > 0 ? child->fontSize : 36) + 12;
         } else if (!child->children.empty()) {
             std::string subTxt;
             for (const auto& sub : child->children) {
@@ -681,7 +976,7 @@ void NetSurfLayoutEngine::layoutInlineWrapBox(RenderBox* box, int availableWidth
                 }
             }
             if (!subTxt.empty()) {
-                childW = measureText(subTxt, child->fontSize > 0 ? child->fontSize : 22) + 16;
+                childW = measureText(subTxt, child->fontSize > 0 ? child->fontSize : 36) + 16;
             } else {
                 childW = 80;
             }

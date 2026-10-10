@@ -23,8 +23,10 @@
 
 
 #include <algorithm>
+#include <cctype>
 #include <cstring>
 #include <dirent.h>
+#include <set>
 #include <fcntl.h>
 #include <fstream>
 #include <iomanip>
@@ -1008,7 +1010,6 @@ std::string WebServer::buildHtmlResponse() {
     <!-- Header -->
     <header>
       <div class="logo-area">
-        <span class="logo-icon">🎮</span>
         <div>
           <span class="logo-text">RomCloud</span>
           <span class="device-badge">TrimUI Brick / Smart Pro</span>
@@ -1017,46 +1018,46 @@ std::string WebServer::buildHtmlResponse() {
       <div class="header-stats">
         <div class="stat-pill" id="head-auth-pill">Drive: <b>Đang tải...</b></div>
         <div class="stat-pill" id="head-storage-pill">SD: <b>Đang tải...</b></div>
-        <div class="stat-pill">Games: <b id="head-local-count">)HTML" +
+        <div class="stat-pill">Game: <b id="head-local-count">)HTML" +
       std::to_string(totalLocal) +
-      R"HTML(</b> thẻ / <b id="head-cloud-count">)HTML" +
-      std::to_string(totalCloud) + R"HTML(</b> cloud</div>
-        <button class="btn btn-danger hide-mobile" id="btn-head-logout" onclick="logoutGoogleDrive()" style="display:none; padding: 4px 10px; font-size: 11px;">🚪 Đăng xuất</button>
+      R"HTML(</b> trên thẻ · <b id="head-cloud-count">)HTML" +
+      std::to_string(totalCloud) + R"HTML(</b> trên Drive</div>
+        <button class="btn btn-danger hide-mobile" id="btn-head-logout" onclick="logoutGoogleDrive()" style="display:none; padding: 4px 10px; font-size: 11px;">Đăng xuất</button>
       </div>
     </header>
 
     <!-- Offline / Unlinked Warning Banner -->
     <div id="unlinked-warning-banner" style="display: none; padding: 12px 18px; background: rgba(245, 158, 11, 0.12); border: 1px solid #f59e0b; border-radius: var(--radius); margin-bottom: 20px; font-size: 13px; color: #fef3c7;">
-      ⚠️ <b>Thiết bị TrimUI đang ở chế độ Đăng xuất / Offline:</b> Chỉ hiển thị các game ĐÃ TẢI về thẻ nhớ. Để tìm kiếm và tải thêm kho game từ Google Drive, vui lòng <a href="javascript:void(0)" onclick="switchTab('tab-storage')" style="color: #38bdf8; font-weight: 700; text-decoration: underline;">bấm vào đây để kết nối lại Google Drive</a>.
+      <b>Chưa kết nối Google Drive:</b> chỉ hiện game đã có trên thẻ nhớ. <a href="javascript:void(0)" onclick="switchTab('tab-storage')" style="color: #38bdf8; font-weight: 700; text-decoration: underline;">Kết nối Google Drive</a> để xem và tải thêm game.
     </div>
 
     <!-- OTA Push Notification Banner -->
     <div id="ota-push-banner" style="display: none; background: linear-gradient(135deg, #1e1b4b, #312e81, #1e40af); border: 1px solid #6366f1; border-radius: var(--radius); padding: 14px 20px; margin-bottom: 20px; box-shadow: 0 4px 20px rgba(99, 102, 241, 0.35);">
       <div style="display: flex; justify-content: space-between; align-items: center; gap: 15px; flex-wrap: wrap;">
         <div style="display: flex; align-items: center; gap: 12px;">
-          <span style="font-size: 26px;">🎉</span>
           <div>
-            <div style="font-weight: 700; font-size: 15px; color: #fff;">ĐÃ CÓ BẢN CẬP NHẬT MỚI: <span id="ota-push-version" style="color: #38bdf8;">v1.0.x</span>!</div>
-            <div id="ota-push-notes" style="font-size: 12px; color: #cbd5e1; margin-top: 2px;">Bản cập nhật chứa các tính năng và sửa lỗi mới nhất.</div>
+            <div style="font-weight: 700; font-size: 15px; color: #fff;">Có bản cập nhật mới: <span id="ota-push-version" style="color: #38bdf8;">v1.0.x</span></div>
+            <div id="ota-push-notes" style="font-size: 12px; color: #cbd5e1; margin-top: 2px;">Gồm tính năng mới và các sửa lỗi.</div>
           </div>
         </div>
         <div style="display: flex; gap: 8px;">
-          <button class="btn btn-primary" onclick="quickApplyOta()" style="background: var(--green); border-color: var(--green-border); font-weight: 700;">🚀 Cập nhật ngay</button>
-          <button class="btn btn-secondary" onclick="document.getElementById('ota-push-banner').style.display='none';" style="padding: 6px 12px;">✕ Đóng</button>
+          <button class="btn btn-primary" onclick="quickApplyOta()" style="background: var(--green); border-color: var(--green-border); font-weight: 700;">Cập nhật ngay</button>
+          <button class="btn btn-secondary" onclick="document.getElementById('ota-push-banner').style.display='none';" style="padding: 6px 12px;">Đóng</button>
         </div>
       </div>
     </div>
 
     <!-- Navigation Tabs -->
     <div class="tab-bar">
-      <button class="tab-btn active" onclick="switchTab('tab-roms')">🎮 Quản lý ROM</button>
-      <button class="tab-btn" onclick="switchTab('tab-queue')">📥 Hàng đợi tải <span class="badge" id="nav-queue-badge">0</span></button>
-      <button class="tab-btn" onclick="switchTab('tab-storage')">☁️ Đồng bộ &amp; Thẻ nhớ</button>
-      <button class="tab-btn" onclick="switchTab('tab-iptv')">📺 IPTV</button>
-      <button class="tab-btn" onclick="switchTab('tab-ota')" id="nav-tab-ota">🚀 Cập nhật OTA <span class="badge" id="ota-nav-badge" style="display: none; background: #ef4444; color: #fff; margin-left: 4px; padding: 2px 6px; border-radius: 8px; font-size: 10px;">NEW</span></button>
-      <button class="tab-btn" onclick="switchTab('tab-cal')">📅 Lịch phone</button>
-      <button class="tab-btn" onclick="switchTab('tab-alarm')">⏰ Báo thức</button>
-      <button class="tab-btn" onclick="switchTab('tab-watch')">📈 Theo dõi giá</button>
+      <button class="tab-btn active" onclick="switchTab('tab-roms')">Quản lý ROM</button>
+      <button class="tab-btn" onclick="switchTab('tab-queue')">Hàng đợi tải <span class="badge" id="nav-queue-badge">0</span></button>
+      <button class="tab-btn" onclick="switchTab('tab-storage')">Đồng bộ &amp; Thẻ nhớ</button>
+      <button class="tab-btn" onclick="switchTab('tab-iptv')">IPTV</button>
+      <button class="tab-btn" onclick="switchTab('tab-saver')">Hình nền</button>
+      <button class="tab-btn" onclick="switchTab('tab-ota')" id="nav-tab-ota">Cập nhật <span class="badge" id="ota-nav-badge" style="display: none; background: #ef4444; color: #fff; margin-left: 4px; padding: 2px 6px; border-radius: 8px; font-size: 10px;">Mới</span></button>
+      <button class="tab-btn" onclick="switchTab('tab-cal')">Lịch</button>
+      <button class="tab-btn" onclick="switchTab('tab-alarm')">Báo thức</button>
+      <button class="tab-btn" onclick="switchTab('tab-watch')">Theo dõi giá</button>
     </div>
 
     <!-- TAB 1: ROM MANAGER -->
@@ -1065,10 +1066,10 @@ std::string WebServer::buildHtmlResponse() {
       <div class="storage-architecture-banner">
         <div class="arch-card arch-public">
           <div class="arch-header">
-            <h4>🌐 1. Kho Game Công cộng (Public Drive)</h4>
+            <h4>1. Kho game chung</h4>
             <span class="sys-tag" style="background:#075985;color:#bae6fd;">CHỈ TẢI VỀ</span>
           </div>
-          <p>Kho ROM chung tải qua link chia sẻ Google Drive (không cần đăng nhập). Bạn có thể tìm kiếm và bấm <b>[📥 Tải về]</b> bất kỳ game nào về máy TrimUI.</p>
+          <p>Kho game dùng chung qua link Google Drive, không cần đăng nhập. Tìm game rồi tải về máy.</p>
           <div class="arch-status" id="arch-public-status">
             Nguồn: <b id="arch-public-url" style="color:var(--accent);">Đang tải...</b>
           </div>
@@ -1078,16 +1079,16 @@ std::string WebServer::buildHtmlResponse() {
 
         <div class="arch-card arch-sd">
           <div class="arch-header">
-            <h4>💾 2. Thẻ nhớ MicroSD (Máy TrimUI)</h4>
-            <span class="sys-tag" style="background:#065f46;color:#a7f3d0;">ĐÃ CÓ TRÊN MÁY</span>
+            <h4>2. Thẻ nhớ trên máy</h4>
+            <span class="sys-tag" style="background:#065f46;color:#a7f3d0;">CÓ TRÊN MÁY</span>
           </div>
-          <p>Các ROM đã tải về nằm tại <code>/mnt/SDCARD/Roms/</code>. Bạn có thể mở máy lên chơi ngay hoặc bấm <b>[📤 Sao lưu]</b> để đưa lên Drive cá nhân.</p>
+          <p>Game đã tải nằm ở <code>/mnt/SDCARD/Roms/</code>. Chơi ngay trên máy, hoặc sao lưu lên Drive cá nhân.</p>
           <div class="arch-status">
             Trạng thái: <b id="arch-local-status" style="color:var(--green);">-- game trên thẻ</b>
           </div>
           <div style="display:flex; gap:6px; margin-top:4px;">
-            <button class="btn btn-secondary" onclick="startAutoScrapeSd()" style="font-size:11.5px;padding:6px 10px;flex:1;border-color:#0284c7;color:#38bdf8;" title="Tự động cào ảnh bìa và thông tin cho toàn bộ ROM trên thẻ nhớ (ScreenScraper / Libretro)">🎨 Tự động cào ảnh thẻ SD</button>
-            <button class="btn btn-secondary" onclick="openDoctorModal()" style="font-size:11.5px;padding:6px 10px;flex:1;border-color:#10b981;color:#34d399;font-weight:600;" title="Bác sĩ ROM: Tự động phát hiện ROM đặt sai thư mục Emulator và chuyển về đúng hệ máy">🩺 Sửa ROM lạc chỗ</button>
+            <button class="btn btn-secondary" onclick="startAutoScrapeSd()" style="font-size:11.5px;padding:6px 10px;flex:1;border-color:#0284c7;color:#38bdf8;" title="Tự lấy ảnh bìa và thông tin cho mọi game trên thẻ">Lấy ảnh bìa thẻ SD</button>
+            <button class="btn btn-secondary" onclick="openDoctorModal()" style="font-size:11.5px;padding:6px 10px;flex:1;border-color:#10b981;color:#34d399;font-weight:600;" title="Tìm ROM đặt sai thư mục và chuyển về đúng hệ máy">Sửa ROM sai thư mục</button>
           </div>
         </div>
 
@@ -1095,16 +1096,16 @@ std::string WebServer::buildHtmlResponse() {
 
         <div class="arch-card arch-private">
           <div class="arch-header">
-            <h4>☁️ 3. Google Drive Cá nhân (Sao lưu)</h4>
-            <span class="sys-tag" style="background:#5b21b6;color:#ddd6fe;">BACKUP RIÊNG</span>
+            <h4>3. Drive cá nhân (sao lưu)</h4>
+            <span class="sys-tag" style="background:#5b21b6;color:#ddd6fe;">SAO LƯU RIÊNG</span>
           </div>
-          <p>Lưu trữ dự phòng toàn bộ ROM thẻ nhớ vào thư mục <code>RomCloud_Backup</code> trên Drive cá nhân (qua Access/Refresh Token) để phòng khi hỏng thẻ.</p>
+          <p>Sao lưu toàn bộ game trên thẻ vào thư mục <code>Roms</code> trên Drive của bạn, phòng khi thẻ hỏng.</p>
           <div class="arch-status" id="arch-backup-status-wrap">
             Quyền: <b id="arch-backup-badge" style="color:var(--yellow);">Đang kiểm tra...</b>
           </div>
           <div style="display:flex; gap:6px; margin-top:4px;">
-            <button class="btn btn-primary" id="btn-arch-backup-all" onclick="uploadAllGamesToDrive()" style="background:var(--purple);border-color:#9333ea;font-size:11.5px;padding:6px 10px;flex:1;">📤 Sao lưu toàn bộ thẻ lên Drive</button>
-            <button class="btn btn-secondary" onclick="switchTab('tab-storage')" style="font-size:11.5px;padding:6px 10px;" title="Cài đặt hoặc kiểm tra Token sao lưu">⚙️ Token</button>
+            <button class="btn btn-primary" id="btn-arch-backup-all" onclick="uploadAllGamesToDrive()" style="background:var(--purple);border-color:#9333ea;font-size:11.5px;padding:6px 10px;flex:1;">Sao lưu cả thẻ lên Drive</button>
+            <button class="btn btn-secondary" onclick="switchTab('tab-storage')" style="font-size:11.5px;padding:6px 10px;" title="Cài đặt sao lưu Drive">Cài đặt</button>
           </div>
         </div>
       </div>
@@ -1112,7 +1113,7 @@ std::string WebServer::buildHtmlResponse() {
       <div class="controls-bar">
         <div class="search-row">
           <div class="search-input-wrap">
-            <input type="text" id="rom-search" class="search-input" placeholder="🔍 Nhập tên game hoặc tên file ROM để tìm kiếm ngay..." oninput="onSearchInput()">
+            <input type="text" id="rom-search" class="search-input" placeholder="Tìm theo tên game hoặc tên file..." oninput="onSearchInput()">
             <button id="search-clear-btn" class="search-clear" onclick="clearSearch()">&times;</button>
           </div>
         </div>
@@ -1120,8 +1121,8 @@ std::string WebServer::buildHtmlResponse() {
         <div class="filter-pills-row">
           <div class="state-filter-group">
             <button class="pill-btn active" id="filter-state-all" onclick="setStateFilter(-1)">Tất cả</button>
-            <button class="pill-btn" id="filter-state-local" onclick="setStateFilter(1)">🟢 Trên thẻ SD (Có thể Sao lưu)</button>
-            <button class="pill-btn" id="filter-state-cloud" onclick="setStateFilter(0)">☁️ Kho Public (Chưa tải về)</button>
+            <button class="pill-btn" id="filter-state-local" onclick="setStateFilter(1)">Trên thẻ SD</button>
+            <button class="pill-btn" id="filter-state-cloud" onclick="setStateFilter(0)">Kho chung (chưa tải)</button>
           </div>
           <div id="system-pills-container" style="display: flex; gap: 6px;">
             <!-- Rendered by JS -->
@@ -1147,14 +1148,14 @@ std::string WebServer::buildHtmlResponse() {
               </select>
             </div>
 
-            <button class="btn btn-secondary" onclick="batchScrapeCurrentPage()" id="btn-batch-scrape" style="font-size: 12px; padding: 6px 12px;" title="Cào tự động toàn bộ ảnh bìa và thông tin cốt truyện cho các game ở trang này">🎨 Cào trang này</button>
-            <button class="btn btn-secondary" onclick="startAutoScrapeSd()" id="btn-auto-scrape-sd" style="font-size: 12px; padding: 6px 12px; border-color: #0284c7; color: #38bdf8;" title="Tự động cào ảnh bìa và thông tin cho tất cả ROM đang có trên thẻ nhớ TrimUI (chạy ngầm)">🎨 Cào toàn bộ thẻ SD</button>
-            <button class="btn btn-secondary" onclick="uploadAllGamesToDrive()" id="btn-batch-backup" style="font-size: 12px; padding: 6px 12px; border-color: #9333ea; color: #c084fc;" title="Sao lưu tất cả ROM hiện có trên thẻ nhớ TrimUI lên Google Drive cá nhân (/RomCloud_Backup)">📤 Sao lưu thẻ lên Drive</button>
-            <button class="btn btn-secondary" onclick="openDoctorModal()" id="btn-toolbar-doctor" style="font-size: 12px; padding: 6px 12px; border-color: #10b981; color: #34d399; font-weight: 600;" title="Bác sĩ ROM: Tự động phát hiện ROM đặt sai thư mục Emulator và chuyển về đúng hệ máy để chơi được ngay">🩺 Bác sĩ ROM</button>
+            <button class="btn btn-secondary" onclick="batchScrapeCurrentPage()" id="btn-batch-scrape" style="font-size: 12px; padding: 6px 12px;" title="Lấy ảnh bìa và thông tin cho các game ở trang này">Lấy bìa trang này</button>
+            <button class="btn btn-secondary" onclick="startAutoScrapeSd()" id="btn-auto-scrape-sd" style="font-size: 12px; padding: 6px 12px; border-color: #0284c7; color: #38bdf8;" title="Lấy ảnh bìa và thông tin cho mọi game trên thẻ (chạy ngầm)">Lấy bìa cả thẻ SD</button>
+            <button class="btn btn-secondary" onclick="uploadAllGamesToDrive()" id="btn-batch-backup" style="font-size: 12px; padding: 6px 12px; border-color: #9333ea; color: #c084fc;" title="Sao lưu mọi game trên thẻ lên Drive của bạn (thư mục Roms)">Sao lưu thẻ lên Drive</button>
+            <button class="btn btn-secondary" onclick="openDoctorModal()" id="btn-toolbar-doctor" style="font-size: 12px; padding: 6px 12px; border-color: #10b981; color: #34d399; font-weight: 600;" title="Tìm ROM đặt sai thư mục và chuyển về đúng hệ máy">Sửa ROM sai thư mục</button>
 
             <div class="view-toggle-group">
-              <button class="view-toggle-btn active" id="btn-view-list" onclick="setViewMode('list')" title="Chế độ Danh sách (List View)">☰ Bảng</button>
-              <button class="view-toggle-btn" id="btn-view-grid" onclick="setViewMode('grid')" title="Chế độ Lưới bìa game (Grid View)">☷ Lưới thẻ</button>
+              <button class="view-toggle-btn active" id="btn-view-list" onclick="setViewMode('list')" title="Xem dạng bảng">Bảng</button>
+              <button class="view-toggle-btn" id="btn-view-grid" onclick="setViewMode('grid')" title="Xem dạng lưới">Lưới</button>
             </div>
           </div>
         </div>
@@ -1172,7 +1173,7 @@ std::string WebServer::buildHtmlResponse() {
               </tr>
             </thead>
             <tbody id="game-table-body">
-              <tr><td colspan="5" style="text-align: center; padding: 30px; color: var(--text-dim);">Đang tải dữ liệu từ máy TrimUI...</td></tr>
+              <tr><td colspan="5" style="text-align: center; padding: 30px; color: var(--text-dim);">Đang tải dữ liệu...</td></tr>
             </tbody>
           </table>
         </div>
@@ -1211,7 +1212,7 @@ std::string WebServer::buildHtmlResponse() {
             <span class="sys-tag sys-default" id="dl-sys-tag">GBA</span>
             <span style="font-size: 18px; font-weight: 700; margin-left: 8px;" id="dl-title">Pokemon Emerald</span>
           </div>
-          <button class="btn btn-danger" onclick="cancelActiveDownload()">✕ Hủy tải</button>
+          <button class="btn btn-danger" onclick="cancelActiveDownload()">Hủy tải</button>
         </div>
         <div style="font-size: 12px; color: #cbd5e1; font-family: monospace;" id="dl-file">pokemon.gba</div>
         <div class="progress-track">
@@ -1226,11 +1227,11 @@ std::string WebServer::buildHtmlResponse() {
 
       <div class="card">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;">
-          <h3>📥 Hàng đợi tải về (<span id="queue-count-num">0</span>)</h3>
-          <button class="btn btn-secondary" onclick="clearAllQueue()">🗑️ Xóa toàn bộ hàng đợi</button>
+          <h3>Hàng đợi tải về (<span id="queue-count-num">0</span>)</h3>
+          <button class="btn btn-secondary" onclick="clearAllQueue()">Xóa hết hàng đợi</button>
         </div>
         <div id="queue-list-container">
-          <p style="color: var(--text-dim); text-align: center; padding: 20px;">Hàng đợi tải về hiện đang trống.</p>
+          <p style="color: var(--text-dim); text-align: center; padding: 20px;">Chưa có game nào đang chờ tải.</p>
         </div>
       </div>
     </div>
@@ -1239,7 +1240,7 @@ std::string WebServer::buildHtmlResponse() {
     <div id="tab-storage" class="tab-content">
       <div class="grid-2">
         <div class="card">
-          <h3>💾 Dung lượng thẻ nhớ MicroSD</h3>
+          <h3>Dung lượng thẻ nhớ</h3>
           <div class="storage-bar">
             <div class="storage-used" id="storage-bar-fill" style="width: 30%;"></div>
           </div>
@@ -1249,12 +1250,12 @@ std::string WebServer::buildHtmlResponse() {
             <span>Tổng: <b id="storage-total-txt">-- GB</b></span>
           </div>
           <p style="font-size: 12px; color: var(--text-dim); line-height: 1.6;">
-            ROM game tải về sẽ được đặt tại <code>/mnt/SDCARD/Roms/&lt;HỆ_MÁY&gt;/</code>. Khi rút thẻ nhớ hoặc cập nhật firmware TrimUI, toàn bộ game được giữ nguyên.
+            Game tải về lưu trong <code>/mnt/SDCARD/Roms/&lt;HỆ_MÁY&gt;/</code>. Rút thẻ hay cập nhật máy, game vẫn còn nguyên.
           </p>
         </div>
 
         <div class="card">
-          <h3>☁️ Đồng bộ Google Drive</h3>
+          <h3>Đồng bộ Google Drive</h3>
           <div id="drive-connection-status" style="margin-bottom: 12px; font-size: 13px;">
             Trạng thái: <b style="color:var(--text-dim);">Đang kiểm tra...</b>
           </div>
@@ -1263,104 +1264,99 @@ std::string WebServer::buildHtmlResponse() {
       lastSyncTime + R"HTML(</b>
           </p>
           <div style="display: flex; gap: 10px; margin-bottom: 16px; flex-wrap: wrap;">
-            <button class="btn btn-primary" id="btn-trigger-sync" onclick="triggerSync()">🔄 Quét &amp; Đồng bộ lại ngay</button>
-            <button class="btn btn-danger" id="btn-tab-logout" onclick="logoutGoogleDrive()" style="display: none;">🚪 Đăng xuất khỏi Google Drive</button>
+            <button class="btn btn-primary" id="btn-trigger-sync" onclick="triggerSync()">Quét và đồng bộ ngay</button>
+            <button class="btn btn-danger" id="btn-tab-logout" onclick="logoutGoogleDrive()" style="display: none;">Đăng xuất Google Drive</button>
           </div>
           <div id="sync-status-box" style="display: none; padding: 12px; background: var(--card-alt); border-radius: 8px; font-size: 13px; margin-top: 10px;">
-            <div id="sync-status-txt">Đang quét thư mục Google Drive...</div>
+            <div id="sync-status-txt">Đang quét thư mục Drive...</div>
           </div>
 
           <form id="form-connect-drive" onsubmit="handleConnectSubmit(event)" autocomplete="off" style="margin-top: 18px; border-top: 1px solid var(--border); padding-top: 14px;">
-            <label style="font-size: 12px; font-weight: 600; color: var(--accent); display: block; margin-bottom: 4px;">📥 1. Kho ROM Tải về (Link Google Drive Công khai):</label>
-            <p style="font-size: 11px; color: var(--text-muted); margin-bottom: 8px;">Dán link thư mục Google Drive chứa game để duyệt và tải ROM về máy TrimUI (hoàn toàn miễn phí, không cần đăng nhập).</p>
+            <label style="font-size: 12px; font-weight: 600; color: var(--accent); display: block; margin-bottom: 4px;">1. Kho game tải về (link Drive chia sẻ):</label>
+            <p style="font-size: 11px; color: var(--text-muted); margin-bottom: 8px;">Dán link thư mục Drive chứa game để xem và tải về máy. Miễn phí, không cần đăng nhập.</p>
             <div style="display: flex; gap: 8px; flex-wrap: wrap;">
               <input type="text" id="input-drive-url" name="drive_url" value=")HTML" +
       savedDriveUrl +
       R"HTML(" placeholder="https://drive.google.com/drive/folders/... (Dán link vào đây)" autocomplete="off" style="flex: 1; min-width: 220px; padding: 8px 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: #fff; font-size: 12px;" required>
-              <button type="submit" class="btn btn-primary">🔗 Kết nối &amp; Quét ngay</button>
-              <button type="button" class="btn btn-secondary" onclick="clearDriveInput()">✕ Xóa trắng</button>
+              <button type="submit" class="btn btn-primary">Kết nối và quét</button>
+              <button type="button" class="btn btn-secondary" onclick="clearDriveInput()">Xóa</button>
             </div>
           </form>
 
           <div style="margin-top: 20px; border-top: 1px solid var(--border); padding-top: 16px;">
-            <label style="font-size: 13px; font-weight: 700; color: var(--purple); display: block; margin-bottom: 6px;">📤 2. Nơi Sao lưu Cá nhân (Upload / Backup lên Google Drive):</label>
+            <label style="font-size: 13px; font-weight: 700; color: var(--purple); display: block; margin-bottom: 6px;">2. Sao lưu lên Drive của bạn:</label>
             <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 12px; line-height: 1.5;">
-              Thư mục công cộng chỉ cho phép tải ROM về máy. Để sao lưu ROM và file save từ thẻ nhớ máy TrimUI lên tài khoản Google Drive của riêng bạn, bạn cần cấp Access Token hoặc Refresh Token cá nhân:
+              Muốn sao lưu game và file save từ thẻ lên Drive riêng, hãy đăng nhập Google:
             </p>
 
             <div id="backup-perm-status" style="font-size: 12px; margin-bottom: 14px; padding: 10px 14px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px;">
-              Trạng thái quyền sao lưu: <b id="backup-perm-badge" style="color:var(--yellow);">Đang kiểm tra...</b>
+              Quyền sao lưu: <b id="backup-perm-badge" style="color:var(--yellow);">Đang kiểm tra...</b>
             </div>
 
-            <!-- Hướng dẫn chi tiết Google OAuth 2.0 Playground -->
-            <details style="margin-bottom: 16px; background: var(--card-alt); border: 1px solid rgba(168, 85, 247, 0.35); border-radius: 8px; padding: 12px 14px;" open>
-              <summary style="font-size: 13px; font-weight: 700; color: #c084fc; cursor: pointer; user-select: none; outline: none;">
-                📖 Hướng dẫn chi tiết lấy Token qua Google OAuth 2.0 Playground (Bấm để xem/thu gọn)
-              </summary>
-              <div style="margin-top: 12px; font-size: 12px; line-height: 1.6; color: #cbd5e1;">
-                <p style="margin-bottom: 10px;">
-                  Để lấy <b>Refresh Token</b> hoặc <b>Access Token</b> của Google Drive cá nhân (thường dùng cho các ứng dụng hoặc script tự động sao lưu), cách nhanh nhất và phổ biến nhất là sử dụng công cụ <b>Google OAuth 2.0 Playground</b>:
-                </p>
-
-                <div style="background: var(--bg); border-left: 3px solid #38bdf8; padding: 8px 12px; margin-bottom: 10px; border-radius: 0 6px 6px 0;">
-                  <b style="color: #38bdf8;">1. Truy cập OAuth 2.0 Playground:</b><br>
-                  <b>Bước 1:</b> Mở trình duyệt và truy cập vào trang web chính thức: 
-                  <a href="https://developers.google.com/oauthplayground" target="_blank" rel="noopener noreferrer" style="color: #38bdf8; text-decoration: underline; font-weight: 600;">https://developers.google.com/oauthplayground ↗</a><br>
-                  <span style="color: var(--text-dim);">🔍 <i>Cách kiểm tra thành công:</i> Bạn sẽ thấy giao diện gồm các bước cấu hình (Step 1, Step 2, Step 3) ở cột bên trái.</span>
+            <!-- Khối Đăng nhập Google 1 chạm chính thức -->
+            <div id="google-auth-box" style="background: var(--card-alt); border: 1px solid rgba(168, 85, 247, 0.4); border-radius: 10px; padding: 16px; margin-bottom: 16px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+                <div>
+                  <h4 style="margin: 0 0 4px 0; color: #fff; font-size: 14px; display: flex; align-items: center; gap: 8px;">
+                    <svg width="18" height="18" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/></svg>
+                    Đăng nhập Google
+                  </h4>
+                  <p style="margin: 0; font-size: 12px; color: var(--text-muted);">RomCloud đã được Google phê duyệt. Đăng nhập để lưu game và file save vào Drive của bạn.</p>
                 </div>
-
-                <div style="background: var(--bg); border-left: 3px solid #38bdf8; padding: 8px 12px; margin-bottom: 10px; border-radius: 0 6px 6px 0;">
-                  <b style="color: #38bdf8;">2. Chọn phạm vi quyền (Scope) của Google Drive:</b><br>
-                  <b>Bước 2:</b> Ở cột bên trái, tìm và mở rộng mục <b>Drive API v3</b>.<br>
-                  Tìm và tích chọn quyền: <code style="background: rgba(255,255,255,0.08); padding: 2px 5px; border-radius: 4px; color: #93c5fd;">https://www.googleapis.com/auth/drive</code> (hoặc <code style="background: rgba(255,255,255,0.08); padding: 2px 5px; border-radius: 4px; color: #93c5fd;">https://www.googleapis.com/auth/drive.file</code> tùy thuộc vào việc bạn muốn cấp quyền truy cập toàn bộ Drive hay chỉ các file do ứng dụng tạo).<br>
-                  <span style="color: var(--text-dim);">🔍 <i>Cách kiểm tra thành công:</i> Ô vuông tương ứng đã được tích chọn và hiển thị trong danh sách scope được chọn.</span>
-                </div>
-
-                <div style="background: var(--bg); border-left: 3px solid #38bdf8; padding: 8px 12px; margin-bottom: 10px; border-radius: 0 6px 6px 0;">
-                  <b style="color: #38bdf8;">3. Cấp quyền truy cập (Authorize APIs):</b><br>
-                  <b>Bước 3:</b> Nhấn vào nút <b>Authorize APIs</b> màu xanh dương ở phía dưới danh sách scope.<br>
-                  - Đăng nhập bằng tài khoản Google của bạn.<br>
-                  - Nếu xuất hiện cảnh báo <i>"Google hasn't verified this app"</i> (Ứng dụng chưa được Google xác minh), bạn bấm vào chữ <b>Advanced</b> (Nâng cao) rồi chọn <b>Go to unknown app</b> (Đi tới ứng dụng - không an toàn).<br>
-                  - Nhấn <b>Allow</b> (Cho phép) để cấp quyền cho ứng dụng.<br>
-                  <span style="color: var(--text-dim);">🔍 <i>Cách kiểm tra thành công:</i> Trình duyệt tự động chuyển hướng ngược lại trang OAuth Playground và giao diện tự động nhảy sang bước tiếp theo (Step 2).</span>
-                </div>
-
-                <div style="background: var(--bg); border-left: 3px solid #38bdf8; padding: 8px 12px; margin-bottom: 10px; border-radius: 0 6px 6px 0;">
-                  <b style="color: #38bdf8;">4. Trao đổi mã để lấy Token:</b><br>
-                  <b>Bước 4:</b> Ở mục <b>Step 2 (Exchange authorization code for tokens)</b>, nhấn vào nút <b>Exchange authorization code for tokens</b>.<br>
-                  <span style="color: var(--text-dim);">🔍 <i>Cách kiểm tra thành công:</i> Chuyển sang Step 3, các ô thông tin sẽ xuất hiện đầy đủ gồm <b>Access Token</b> (chuỗi bắt đầu bằng <code>ya29...</code>) và <b>Refresh Token</b> (chuỗi bắt đầu bằng <code>1//...</code>). Bạn chỉ cần sao chép (copy) chuỗi mã này để dán vào ô bên dưới.</span>
-                </div>
-
-                <div style="background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.35); padding: 10px 14px; border-radius: 6px; margin-top: 10px;">
-                  <b style="color: #fca5a5;">⚠️ Lưu ý bảo mật quan trọng:</b>
-                  <ul style="margin: 4px 0 0 18px; padding: 0; color: #fecaca; font-size: 11px; line-height: 1.5;">
-                    <li>Refresh Token cho phép truy cập liên tục vào Google Drive của bạn mà không cần đăng nhập lại, do đó tuyệt đối không chia sẻ mã này cho người khác hoặc công khai lên mạng.</li>
-                    <li>Nếu ứng dụng của bạn trên Google Cloud đang ở chế độ kiểm thử (Testing), Refresh Token có thể hết hạn sau 7 ngày. Hãy chuyển trạng thái ứng dụng sang <b>In Production</b> (Đang hoạt động) trong Google Cloud Console nếu muốn dùng lâu dài.</li>
-                    <li><b>Gợi ý nhanh:</b> Bạn có thể copy ô <b>Access token</b> (chuỗi bắt đầu bằng <code>ya29...</code>) dán vào ô bên dưới rồi bấm <b>"Kích hoạt Sao lưu"</b> để dùng ngay tức thì!</li>
-                  </ul>
+                <div style="display: flex; gap: 8px;">
+                  <button type="button" class="btn btn-primary" id="btn-google-login-start" onclick="startGoogleDeviceLogin()" style="background: linear-gradient(135deg, #4285F4, #34A853); font-weight: 600; padding: 10px 18px; border: none; box-shadow: 0 4px 12px rgba(66, 133, 244, 0.35);">
+                    Đăng nhập Google
+                  </button>
+                  <button type="button" class="btn btn-secondary" id="btn-clear-personal-token" onclick="clearPersonalToken()" style="display: none;">Hủy quyền sao lưu</button>
                 </div>
               </div>
-            </details>
 
-            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-              <input type="text" id="input-personal-token" placeholder="Dán Access Token (ya29...) hoặc Refresh Token (1//...) vào đây" autocomplete="off" onkeydown="if(event.key==='Enter') savePersonalToken()" style="flex: 1; min-width: 240px; padding: 10px 14px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: #fff; font-size: 13px;">
-              <button type="button" class="btn btn-primary" id="btn-save-personal-token" onclick="savePersonalToken()" style="background: var(--purple);">💾 Kích hoạt Sao lưu</button>
-              <button type="button" class="btn btn-secondary" id="btn-clear-personal-token" onclick="clearPersonalToken()" style="display: none;">✕ Hủy sao lưu cá nhân</button>
+              <!-- Trạng thái chờ User Code -->
+              <div id="google-device-prompt" style="display: none; margin-top: 14px; padding: 14px; background: rgba(66, 133, 244, 0.08); border: 1px solid rgba(66, 133, 244, 0.3); border-radius: 8px;">
+                <div style="font-size: 13px; font-weight: 600; color: #93c5fd; margin-bottom: 6px;">Bước 1: Mở trang xác nhận của Google:</div>
+                <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 12px; flex-wrap: wrap;">
+                  <a id="google-verify-link" href="https://www.google.com/device" target="_blank" rel="noopener noreferrer" class="btn btn-primary" style="text-decoration: none; padding: 7px 14px; font-size: 12px; background: #2563eb;">
+                    Mở google.com/device
+                  </a>
+                  <span style="font-size: 12px; color: var(--text-dim);">hoặc mở trên điện thoại: <code>https://www.google.com/device</code></span>
+                </div>
+                <div style="font-size: 13px; font-weight: 600; color: #93c5fd; margin-bottom: 6px;">Bước 2: Nhập mã này:</div>
+                <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
+                  <div id="google-user-code-display" style="font-size: 26px; font-weight: 800; letter-spacing: 4px; color: #fbbf24; background: rgba(0,0,0,0.4); padding: 6px 16px; border-radius: 6px; border: 1px dashed rgba(251, 191, 36, 0.6); user-select: all;">----</div>
+                  <button type="button" class="btn btn-secondary" onclick="copyUserCode()" style="padding: 6px 12px; font-size: 12px;">Chép mã</button>
+                  <button type="button" class="btn btn-danger" onclick="cancelGoogleDeviceLogin()" style="padding: 6px 12px; font-size: 12px;">Hủy</button>
+                </div>
+                <div id="google-login-timer" style="margin-top: 10px; font-size: 11px; color: var(--text-dim);">Đang chờ bạn xác nhận trên Google. Xong sẽ tự đăng nhập.</div>
+              </div>
             </div>
-            <div id="personal-token-status" style="margin-top: 8px; font-size: 12px;"></div>
+
+            <!-- Tùy chọn nâng cao: Dán Token thủ công -->
+            <details style="margin-bottom: 16px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px;">
+              <summary style="font-size: 12px; font-weight: 600; color: var(--text-dim); cursor: pointer; user-select: none;">
+                Nâng cao: nhập token thủ công
+              </summary>
+              <div style="margin-top: 10px;">
+                <p style="font-size: 11px; color: var(--text-muted); margin-bottom: 8px;">Tự dán Access Token (ya29...) hoặc Refresh Token:</p>
+                <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                  <input type="text" id="input-personal-token" placeholder="Dán Access Token (ya29...) hoặc Refresh Token (1//...) vào đây" autocomplete="off" onkeydown="if(event.key==='Enter') savePersonalToken()" style="flex: 1; min-width: 240px; padding: 8px 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: #fff; font-size: 12px;">
+                  <button type="button" class="btn btn-secondary" id="btn-save-personal-token" onclick="savePersonalToken()">Lưu token</button>
+                </div>
+                <div id="personal-token-status" style="margin-top: 6px; font-size: 11px;"></div>
+              </div>
+            </details>
           </div>
         </div>
 
         <div class="card" style="margin-top: 20px;">
-          <h3>🛠️ Hỗ trợ &amp; Chẩn đoán Lỗi (Debug Log)</h3>
+          <h3>Gửi log khi gặp lỗi</h3>
           <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 14px;">
-            Nếu gặp sự cố trong quá trình sử dụng (không phát được video, lỗi mạng, lỗi đồng bộ), bạn có thể bấm tải file <code>debug.log</code> bên dưới gửi cho Developer để được kiểm tra và xử lý nhanh nhất.
+            Gặp lỗi (mạng, đồng bộ, phát video...)? Tải file <code>debug.log</code> dưới đây và gửi cho người phát triển để được hỗ trợ.
           </p>
           <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
             <a href="/debug.log" download="debug.log" class="btn btn-primary" style="text-decoration: none; display: inline-flex; align-items: center; gap: 6px;">
-              📥 Tải file debug.log gửi Developer
+              Tải debug.log
             </a>
-            <span style="font-size: 12px; color: var(--text-dim);">Hoặc lấy trực tiếp trên thẻ nhớ tại: <code>Apps/RomCloud/debug.log</code></span>
+            <span style="font-size: 12px; color: var(--text-dim);">Hoặc lấy trực tiếp trên thẻ: <code>Apps/RomCloud/debug.log</code></span>
           </div>
         </div>
       </div>
@@ -1371,21 +1367,21 @@ std::string WebServer::buildHtmlResponse() {
       <div style="max-width: 900px; margin: 0 auto;">
         <div class="card" style="margin-bottom: 20px;">
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-            <h3 style="margin: 0;">📺 Quản lý Nguồn Kênh IPTV</h3>
+            <h3 style="margin: 0;">Nguồn kênh IPTV</h3>
             <span id="iptv-total-summary" style="font-size: 13px; font-weight: 600; color: var(--accent); background: rgba(0, 180, 216, 0.1); padding: 4px 10px; border-radius: 6px;">Đang tải...</span>
           </div>
           <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 16px;">
-            Thêm, quản lý hoặc xóa các nguồn danh sách kênh (.m3u, .m3u8 hoặc URL). Tên nguồn sẽ hiển thị trực tiếp ở <b>cột ngoài cùng bên phải</b> trên màn hình danh sách kênh máy TrimUI.
+            Thêm, sửa hoặc xóa nguồn kênh (.m3u, .m3u8 hoặc link). Tên nguồn hiện ở cột bên phải trong danh sách kênh trên máy.
           </p>
 
           <!-- Current Sources Table -->
           <div style="margin-top: 15px;">
             <h4 style="margin-bottom: 10px; display: flex; align-items: center; gap: 8px;">
-              📋 Danh sách nguồn kênh đã cài đặt
-              <button class="btn btn-secondary" onclick="loadIptvSources()" style="padding: 3px 8px; font-size: 11px;">🔄 Làm mới</button>
+              Nguồn kênh đã thêm
+              <button class="btn btn-secondary" onclick="loadIptvSources()" style="padding: 3px 8px; font-size: 11px;">Làm mới</button>
             </h4>
             <div id="iptv-sources-container" style="background: var(--card-alt); border-radius: 10px; border: 1px solid var(--border); overflow: hidden;">
-              <div style="padding: 20px; text-align: center; color: var(--text-muted);">Đang tải danh sách nguồn...</div>
+              <div style="padding: 20px; text-align: center; color: var(--text-muted);">Đang tải...</div>
             </div>
           </div>
         </div>
@@ -1394,37 +1390,37 @@ std::string WebServer::buildHtmlResponse() {
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 20px;">
           <!-- Quick Add URL -->
           <div class="card">
-            <h4 style="margin-bottom: 8px;">🔗 Thêm nguồn từ URL</h4>
+            <h4 style="margin-bottom: 8px;">Thêm nguồn từ link</h4>
             <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 14px;">
-              Dán link playlist M3U/M3U8 trực tiếp từ nhà mạng hoặc dịch vụ IPTV.
+              Dán link danh sách kênh M3U/M3U8 từ nhà cung cấp.
             </p>
             <div style="margin-bottom: 10px;">
-              <label style="font-size: 12px; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 4px;">Tên nguồn hiển thị (tùy chọn):</label>
-              <input type="text" id="iptv-url-name" placeholder="Ví dụ: Kênh Việt Nam, Thể Thao..." class="search-input" style="width: 100%; box-sizing: border-box; padding: 9px 12px;">
+              <label style="font-size: 12px; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 4px;">Tên nguồn (không bắt buộc):</label>
+              <input type="text" id="iptv-url-name" placeholder="Ví dụ: Kênh Việt Nam, Thể thao..." class="search-input" style="width: 100%; box-sizing: border-box; padding: 9px 12px;">
             </div>
             <div style="margin-bottom: 14px;">
-              <label style="font-size: 12px; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 4px;">Đường dẫn URL Playlist:</label>
+              <label style="font-size: 12px; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 4px;">Link danh sách kênh:</label>
               <input type="text" id="iptv-url" placeholder="https://example.com/playlist.m3u" class="search-input" style="width: 100%; box-sizing: border-box; padding: 9px 12px;">
             </div>
-            <button class="btn btn-primary" id="btn-add-iptv-url" onclick="addIptvUrl()" style="width: 100%; padding: 10px; font-weight: 600;">➕ Tải & Thêm Nguồn URL</button>
+            <button class="btn btn-primary" id="btn-add-iptv-url" onclick="addIptvUrl()" style="width: 100%; padding: 10px; font-weight: 600;">Tải và thêm nguồn</button>
             <div id="iptv-url-status" style="margin-top: 10px; font-size: 12.5px; display: none;"></div>
           </div>
 
           <!-- Upload Form -->
           <div class="card">
-            <h4 style="margin-bottom: 8px;">📤 Tải lên file Playlist (.m3u, .m3u8)</h4>
+            <h4 style="margin-bottom: 8px;">Tải lên file danh sách (.m3u, .m3u8)</h4>
             <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 14px;">
-              Tải file playlist có sẵn trên máy tính/điện thoại của bạn lên máy TrimUI.
+              Chuyển file danh sách kênh từ máy tính hoặc điện thoại lên máy.
             </p>
             <div style="margin-bottom: 10px;">
-              <label style="font-size: 12px; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 4px;">Tên nguồn hiển thị (tùy chọn):</label>
-              <input type="text" id="iptv-file-name" placeholder="Để trống sẽ tự động lấy tên file" class="search-input" style="width: 100%; box-sizing: border-box; padding: 9px 12px;">
+              <label style="font-size: 12px; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 4px;">Tên nguồn (không bắt buộc):</label>
+              <input type="text" id="iptv-file-name" placeholder="Để trống sẽ dùng tên file" class="search-input" style="width: 100%; box-sizing: border-box; padding: 9px 12px;">
             </div>
             <div style="margin-bottom: 14px;">
               <label style="font-size: 12px; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 4px;">Chọn file M3U/M3U8:</label>
               <input type="file" id="iptv-file" accept=".m3u,.m3u8" style="width: 100%; box-sizing: border-box; padding: 8px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; color: var(--text);">
             </div>
-            <button class="btn btn-primary" id="btn-upload-iptv" onclick="uploadIptvPlaylist()" style="width: 100%; padding: 10px; font-weight: 600;">📤 Upload Playlist</button>
+            <button class="btn btn-primary" id="btn-upload-iptv" onclick="uploadIptvPlaylist()" style="width: 100%; padding: 10px; font-weight: 600;">Tải lên</button>
             <div id="iptv-file-status" style="margin-top: 10px; font-size: 12.5px; display: none;"></div>
           </div>
         </div>
@@ -1448,9 +1444,8 @@ std::string WebServer::buildHtmlResponse() {
             .then(d => {
               if (!d.success || !d.sources || d.sources.length === 0) {
                 container.innerHTML = '<div style="padding: 24px; text-align: center; color: var(--text-muted);">'
-                  + '<div style="font-size: 24px; margin-bottom: 6px;">📺</div>'
                   + '<b>Chưa có nguồn kênh nào</b><br>'
-                  + '<span style="font-size: 12px;">Hãy thêm nguồn bằng đường link URL hoặc upload file playlist bên dưới.</span></div>';
+                  + '<span style="font-size: 12px;">Thêm nguồn bằng link hoặc tải file danh sách kênh ở dưới.</span></div>';
                 if (summaryEl) summaryEl.textContent = '0 nguồn • 0 kênh';
                 return;
               }
@@ -1473,8 +1468,8 @@ std::string WebServer::buildHtmlResponse() {
               d.sources.forEach((s) => {
                 const isUrl = s.type === 'url';
                 const typeBadge = isUrl
-                  ? '<span style="background: #1e3a5f; color: #38bdf8; padding: 2px 7px; border-radius: 4px; font-size: 11px; font-weight: 600;">URL Link</span>'
-                  : '<span style="background: #1e293b; color: #94a3b8; padding: 2px 7px; border-radius: 4px; font-size: 11px; font-weight: 600;">File Upload</span>';
+                  ? '<span style="background: #1e3a5f; color: #38bdf8; padding: 2px 7px; border-radius: 4px; font-size: 11px; font-weight: 600;">Link</span>'
+                  : '<span style="background: #1e293b; color: #94a3b8; padding: 2px 7px; border-radius: 4px; font-size: 11px; font-weight: 600;">File tải lên</span>';
                 
                 const subText = isUrl ? (s.url || s.filename) : s.filename;
 
@@ -1490,10 +1485,10 @@ std::string WebServer::buildHtmlResponse() {
                   + '<div style="display: flex; gap: 6px; justify-content: center;">';
                 
                 if (isUrl && s.url) {
-                  html += '<button class="btn btn-secondary" onclick="reloadIptvUrl(\'' + escapeHtml(s.url) + '\', \'' + escapeHtml(s.name) + '\')" style="padding: 4px 8px; font-size: 11.5px;" title="Tải lại kênh từ link">🔄</button>';
+                  html += '<button class="btn btn-secondary" onclick="reloadIptvUrl(\'' + escapeHtml(s.url) + '\', \'' + escapeHtml(s.name) + '\')" style="padding: 4px 8px; font-size: 11.5px;" title="Tải lại kênh từ link">Tải lại</button>';
                 }
                 
-                html += '<button class="btn btn-danger" onclick="deleteIptvSource(\'' + escapeHtml(s.filename) + '\', \'' + escapeHtml(s.name) + '\')" style="padding: 4px 10px; font-size: 11.5px;">🗑️ Xóa</button>'
+                html += '<button class="btn btn-danger" onclick="deleteIptvSource(\'' + escapeHtml(s.filename) + '\', \'' + escapeHtml(s.name) + '\')" style="padding: 4px 10px; font-size: 11.5px;">Xóa</button>'
                   + '</div>'
                   + '</td>'
                   + '</tr>';
@@ -1537,20 +1532,20 @@ std::string WebServer::buildHtmlResponse() {
               if (d.success) {
                 if (statusEl) {
                   statusEl.style.color = 'var(--green)';
-                  statusEl.textContent = '✅ Đã cập nhật: ' + d.channels + ' kênh!';
+                  statusEl.textContent = 'Đã cập nhật: ' + d.channels + ' kênh.';
                 }
                 loadIptvSources();
               } else {
                 if (statusEl) {
                   statusEl.style.color = 'var(--red)';
-                  statusEl.textContent = '❌ Lỗi: ' + (d.error || 'Cập nhật thất bại');
+                  statusEl.textContent = 'Lỗi: ' + (d.error || 'Cập nhật thất bại');
                 }
               }
             })
             .catch(e => {
               if (statusEl) {
                 statusEl.style.color = 'var(--red)';
-                statusEl.textContent = '❌ Lỗi: ' + e;
+                statusEl.textContent = 'Lỗi: ' + e;
               }
             });
         }
@@ -1565,38 +1560,38 @@ std::string WebServer::buildHtmlResponse() {
           const name = (nameInput.value || '').trim();
 
           if (!url) {
-            alert('Vui lòng nhập đường dẫn URL playlist');
+            alert('Hãy dán link danh sách kênh');
             urlInput.focus();
             return;
           }
 
           btn.disabled = true;
-          btn.textContent = '⏳ Đang tải & phân tích kênh...';
+          btn.textContent = 'Đang tải kênh...';
           statusEl.style.display = 'block';
           statusEl.style.color = 'var(--accent)';
-          statusEl.textContent = 'Đang kết nối tới máy chủ IPTV và nạp danh sách kênh...';
+          statusEl.textContent = 'Đang tải danh sách kênh...';
 
           fetch('/api/iptv/add?url=' + encodeURIComponent(url) + '&name=' + encodeURIComponent(name))
             .then(r => r.json())
             .then(d => {
               btn.disabled = false;
-              btn.textContent = '➕ Tải & Thêm Nguồn URL';
+              btn.textContent = 'Tải và thêm nguồn';
               if (d.success) {
                 statusEl.style.color = 'var(--green)';
-                statusEl.textContent = '✅ Đã thêm thành công! Tìm thấy ' + d.channels + ' kênh TV.';
+                statusEl.textContent = 'Đã thêm. Tìm thấy ' + d.channels + ' kênh.';
                 urlInput.value = '';
                 nameInput.value = '';
                 loadIptvSources();
               } else {
                 statusEl.style.color = 'var(--red)';
-                statusEl.textContent = '❌ Thất bại: ' + (d.error || 'Không thể tải danh sách');
+                statusEl.textContent = 'Thất bại: ' + (d.error || 'Không tải được danh sách');
               }
             })
             .catch(err => {
               btn.disabled = false;
-              btn.textContent = '➕ Tải & Thêm Nguồn URL';
+              btn.textContent = 'Tải và thêm nguồn';
               statusEl.style.color = 'var(--red)';
-              statusEl.textContent = '❌ Lỗi kết nối: ' + err;
+              statusEl.textContent = 'Lỗi kết nối: ' + err;
             });
         }
 
@@ -1607,7 +1602,7 @@ std::string WebServer::buildHtmlResponse() {
           const statusEl = document.getElementById('iptv-file-status');
 
           if (!fileInput.files[0]) {
-            alert('Vui lòng chọn file playlist (.m3u, .m3u8)');
+            alert('Hãy chọn file .m3u hoặc .m3u8');
             return;
           }
 
@@ -1615,10 +1610,10 @@ std::string WebServer::buildHtmlResponse() {
           const name = (nameInput.value || '').trim();
 
           btn.disabled = true;
-          btn.textContent = '⏳ Đang upload...';
+          btn.textContent = 'Đang tải lên...';
           statusEl.style.display = 'block';
           statusEl.style.color = 'var(--accent)';
-          statusEl.textContent = 'Đang tải file lên máy TrimUI...';
+          statusEl.textContent = 'Đang gửi file lên máy...';
 
           const formData = new FormData();
           formData.append('file', file);
@@ -1628,23 +1623,23 @@ std::string WebServer::buildHtmlResponse() {
             .then(r => r.json())
             .then(d => {
               btn.disabled = false;
-              btn.textContent = '📤 Upload Playlist';
+              btn.textContent = 'Tải lên';
               if (d.success) {
                 statusEl.style.color = 'var(--green)';
-                statusEl.textContent = '✅ Upload thành công: ' + d.channels + ' kênh TV!';
+                statusEl.textContent = 'Đã tải lên: ' + d.channels + ' kênh.';
                 fileInput.value = '';
                 nameInput.value = '';
                 loadIptvSources();
               } else {
                 statusEl.style.color = 'var(--red)';
-                statusEl.textContent = '❌ Lỗi: ' + (d.error || 'Upload thất bại');
+                statusEl.textContent = 'Lỗi: ' + (d.error || 'Tải lên thất bại');
               }
             })
             .catch(err => {
               btn.disabled = false;
-              btn.textContent = '📤 Upload Playlist';
+              btn.textContent = 'Tải lên';
               statusEl.style.color = 'var(--red)';
-              statusEl.textContent = '❌ Lỗi kết nối: ' + err;
+              statusEl.textContent = 'Lỗi kết nối: ' + err;
             });
         }
 
@@ -1652,17 +1647,174 @@ std::string WebServer::buildHtmlResponse() {
       </script>
     </div>
 
+    <!-- TAB: HÌNH NỀN (screensaver slideshow) -->
+    <div id="tab-saver" class="tab-content">
+      <div class="card">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+          <h3 style="margin: 0;">Ảnh trình chiếu (Picture frame)</h3>
+          <span id="saver-total-summary" style="font-size: 13px; font-weight: 600; color: var(--accent); background: rgba(0, 180, 216, 0.1); padding: 4px 10px; border-radius: 6px;">Đang tải...</span>
+        </div>
+        <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 14px;">
+          Ảnh trong thư mục <b>screensaver/photos</b> trên thẻ nhớ. Mở app Hình nền &gt; Picture frame trên máy để xem slideshow.
+        </p>
+        <div id="saver-photos-container" style="background: var(--card-alt); border-radius: 10px; border: 1px solid var(--border); overflow: hidden;">
+        </div>
+      </div>
+
+      <div class="card">
+        <h4 style="margin-bottom: 8px;">Tải ảnh lên (.jpg, .jpeg, .png)</h4>
+        <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 14px;">
+          Kéo &amp; thả ảnh vào khung dưới, hoặc bấm để chọn nhiều file cùng lúc.
+        </p>
+        <div id="saver-dropzone" style="border: 2px dashed var(--border); border-radius: 10px; padding: 28px 16px; text-align: center; color: var(--text-muted); font-size: 13px; cursor: pointer; margin-bottom: 14px; transition: border-color 0.15s, background 0.15s;">
+          Kéo &amp; thả ảnh vào đây<br>
+          <span style="font-size: 12px;">hoặc bấm để chọn file</span>
+          <div id="saver-pending" style="margin-top: 8px; font-size: 12px; color: var(--accent);"></div>
+        </div>
+        <input type="file" id="saver-file" accept=".jpg,.jpeg,.png" multiple style="display: none;">
+        <button class="btn btn-primary" id="btn-upload-saver" onclick="uploadSaverPhotos()" style="width: 100%; padding: 10px; font-weight: 600;">Tải lên</button>
+        <div id="saver-upload-status" style="margin-top: 10px; font-size: 12.5px; display: none;"></div>
+      </div>
+
+      <script>
+        let saverPendingFiles = [];
+
+        function saverDropzone() { return document.getElementById('saver-dropzone'); }
+
+        function saverShowPending() {
+          const el = document.getElementById('saver-pending');
+          if (!el) return;
+          el.textContent = saverPendingFiles.length > 0
+            ? ('Đã chọn ' + saverPendingFiles.length + ' ảnh: ' + saverPendingFiles.slice(0, 3).map(f => f.name).join(', ') + (saverPendingFiles.length > 3 ? '...' : ''))
+            : '';
+        }
+
+        function initSaverDropzone() {
+          const dz = saverDropzone();
+          const fi = document.getElementById('saver-file');
+          if (!dz || !fi || dz.dataset.bound) return;
+          dz.dataset.bound = '1';
+          dz.addEventListener('click', () => fi.click());
+          fi.addEventListener('change', () => {
+            saverPendingFiles = Array.from(fi.files || []);
+            saverShowPending();
+          });
+          ['dragenter', 'dragover'].forEach(ev => dz.addEventListener(ev, (e) => {
+            e.preventDefault();
+            dz.style.borderColor = 'var(--accent)';
+            dz.style.background = 'rgba(0, 180, 216, 0.08)';
+          }));
+          ['dragleave', 'drop'].forEach(ev => dz.addEventListener(ev, (e) => {
+            e.preventDefault();
+            dz.style.borderColor = 'var(--border)';
+            dz.style.background = 'transparent';
+          }));
+          dz.addEventListener('drop', (e) => {
+            const files = Array.from((e.dataTransfer && e.dataTransfer.files) || []);
+            saverPendingFiles = files.filter(f => /\.(jpe?g|png)$/i.test(f.name));
+            saverShowPending();
+          });
+        }
+
+        function loadSaverPhotos() {
+          const container = document.getElementById('saver-photos-container');
+          const summaryEl = document.getElementById('saver-total-summary');
+          if (!container) return;
+          fetch('/api/saver/photos')
+            .then(r => r.json())
+            .then(d => {
+              if (!d.success || !d.photos || d.photos.length === 0) {
+                container.innerHTML = '<div style="padding: 24px; text-align: center; color: var(--text-muted);">'
+                  + '<b>Chưa có ảnh nào</b><br>'
+                  + '<span style="font-size: 12px;">Kéo &amp; thả ảnh vào khung bên dưới để tải lên.</span></div>';
+                if (summaryEl) summaryEl.textContent = '0 ảnh';
+                return;
+              }
+              if (summaryEl) summaryEl.textContent = d.photos.length + ' ảnh';
+              let html = '<table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 13px;">'
+                + '<thead style="background: rgba(255,255,255,0.03); border-bottom: 1px solid var(--border); color: var(--text-muted); font-size: 12px;">'
+                + '<tr><th style="padding: 10px 14px;">TÊN FILE</th>'
+                + '<th style="padding: 10px 14px; text-align: right;">DUNG LƯỢNG</th>'
+                + '<th style="padding: 10px 14px; text-align: center;">THAO TÁC</th></tr>'
+                + '</thead><tbody>';
+              d.photos.forEach((p) => {
+                html += '<tr style="border-bottom: 1px solid var(--border);">'
+                  + '<td style="padding: 12px 14px; font-weight: 600; color: var(--text); font-size: 14px; word-break: break-all;">' + escapeHtml(p.file) + '</td>'
+                  + '<td style="padding: 12px 14px; text-align: right; color: var(--text-muted);">' + formatBytes(p.size) + '</td>'
+                  + '<td style="padding: 12px 14px; text-align: center;">'
+                  + '<button class="btn btn-secondary" style="font-size: 12px; padding: 5px 12px; border-color: var(--red); color: var(--red);" onclick="deleteSaverPhoto(\'' + escapeHtml(p.file).replace(/'/g, "\\'") + '\')">Xóa</button>'
+                  + '</td></tr>';
+              });
+              container.innerHTML = html + '</tbody></table>';
+            })
+            .catch(() => {
+              if (summaryEl) summaryEl.textContent = 'Lỗi tải';
+            });
+        }
+
+        function deleteSaverPhoto(file) {
+          if (!confirm('Xóa ảnh "' + file + '" khỏi máy?')) return;
+          fetch('/api/saver/delete?file=' + encodeURIComponent(file))
+            .then(r => r.json())
+            .then(d => {
+              if (d.success) loadSaverPhotos();
+              else alert('Không xóa được: ' + (d.error || 'lỗi không rõ'));
+            })
+            .catch(err => alert('Lỗi kết nối: ' + err));
+        }
+
+        async function uploadSaverPhotos() {
+          const fileInput = document.getElementById('saver-file');
+          const btn = document.getElementById('btn-upload-saver');
+          const statusEl = document.getElementById('saver-upload-status');
+          let files = saverPendingFiles.length > 0
+            ? saverPendingFiles
+            : Array.from((fileInput && fileInput.files) || []);
+          files = files.filter(f => /\.(jpe?g|png)$/i.test(f.name));
+          if (files.length === 0) {
+            alert('Hãy chọn hoặc kéo thả ít nhất 1 ảnh .jpg / .png');
+            return;
+          }
+          btn.disabled = true;
+          statusEl.style.display = 'block';
+          let ok = 0, fail = 0;
+          for (let i = 0; i < files.length; i++) {
+            statusEl.style.color = 'var(--accent)';
+            statusEl.textContent = 'Đang gửi ' + (i + 1) + '/' + files.length + ': ' + files[i].name + '...';
+            const formData = new FormData();
+            formData.append('file', files[i]);
+            try {
+              const r = await fetch('/api/saver/upload', { method: 'POST', body: formData });
+              const d = await r.json();
+              if (d.success) ok++; else fail++;
+            } catch (err) { fail++; }
+          }
+          btn.disabled = false;
+          btn.textContent = 'Tải lên';
+          saverPendingFiles = [];
+          if (fileInput) fileInput.value = '';
+          saverShowPending();
+          statusEl.style.color = fail === 0 ? 'var(--green)' : 'var(--red)';
+          statusEl.textContent = 'Xong: ' + ok + ' ảnh thành công' + (fail > 0 ? ', ' + fail + ' ảnh lỗi.' : '.');
+          loadSaverPhotos();
+        }
+
+        initSaverDropzone();
+        loadSaverPhotos();
+      </script>
+    </div>
+
     <!-- TAB 5: OTA UPDATE -->
     <div id="tab-ota" class="tab-content">
       <div class="card" style="max-width: 600px; margin: 0 auto;">
-        <h3>🚀 Cập nhật ứng dụng RomCloud (OTA)</h3>
+        <h3>Cập nhật RomCloud</h3>
         <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 16px;">
           Phiên bản trên máy hiện tại: <b style="color: var(--accent);">v)HTML" +
       UpdateManager::instance().getCurrentVersion() + R"HTML(</b>
         </p>
 
         <div style="display: flex; gap: 10px; margin-bottom: 16px;">
-          <button class="btn btn-primary" id="btn-ota-check" onclick="checkOtaUpdate()">Kiểm tra bản cập nhật mới</button>
+          <button class="btn btn-primary" id="btn-ota-check" onclick="checkOtaUpdate()">Kiểm tra cập nhật</button>
           <button class="btn btn-primary" id="btn-ota-install" onclick="startOtaUpdate()" style="display: none; background: var(--green);">Cập nhật ngay</button>
         </div>
 
@@ -1681,43 +1833,42 @@ std::string WebServer::buildHtmlResponse() {
       <!-- CARD: SCREENSCRAPER.FR CONFIGURATION -->
       <div class="card" style="margin-top: 20px; border-color: rgba(2, 132, 199, 0.4);">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-          <h3>🎨 Cấu hình ScreenScraper.fr (Bộ Cào Ảnh Bìa & Thông Tin Game)</h3>
-          <span class="badge" style="background:#0284c7; color:#fff; font-size:11px; padding:3px 8px;">CHUẨN QUỐC TẾ</span>
+          <h3>Tài khoản ScreenScraper (lấy ảnh bìa)</h3>
         </div>
         <p style="font-size: 12.5px; color: var(--text-muted); line-height: 1.5; margin-bottom: 12px;">
-          RomCloud kết hợp cơ sở dữ liệu chuyên biệt <b>ScreenScraper.fr</b> (chuẩn quốc tế của Skraper trên PC, Skyscraper, Batocera) và kho ảnh chính thức <b>Libretro Thumbnails</b>. Hệ thống hoàn toàn không dùng Wikipedia để bảo đảm ảnh bìa và cốt truyện chính xác 100%.
+          Ảnh bìa và thông tin game lấy từ <b>ScreenScraper.fr</b> và <b>Libretro Thumbnails</b>. Có tài khoản ScreenScraper sẽ lấy nhanh và đầy đủ hơn.
         </p>
 
         <form id="form-screenscraper-config" onsubmit="saveScreenScraperConfig(event)" style="display: flex; flex-direction: column; gap: 10px;">
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
             <div>
-              <label style="font-size: 11.5px; color: var(--text-dim); display: block; margin-bottom: 4px;">Tên tài khoản ScreenScraper (ssid):</label>
+              <label style="font-size: 11.5px; color: var(--text-dim); display: block; margin-bottom: 4px;">Tên tài khoản ScreenScraper:</label>
               <input type="text" id="input-ss-user" placeholder="Ví dụ: myusername" style="width: 100%; padding: 8px 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: #fff; font-size: 12px;">
             </div>
             <div>
-              <label style="font-size: 11.5px; color: var(--text-dim); display: block; margin-bottom: 4px;">Mật khẩu ScreenScraper (sspassword):</label>
+              <label style="font-size: 11.5px; color: var(--text-dim); display: block; margin-bottom: 4px;">Mật khẩu ScreenScraper:</label>
               <input type="password" id="input-ss-pass" placeholder="•••••••• (để trống nếu không đổi)" style="width: 100%; padding: 8px 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: #fff; font-size: 12px;">
             </div>
           </div>
 
           <details style="font-size: 11.5px; color: var(--text-dim);">
-            <summary style="cursor: pointer; color: #38bdf8;">⚙️ Tùy chọn Developer ID & Dev Password (nâng cao - không bắt buộc)</summary>
+            <summary style="cursor: pointer; color: #38bdf8;">Nâng cao: mã nhà phát triển (không bắt buộc)</summary>
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 8px;">
               <div>
-                <label style="font-size: 11px; display: block; margin-bottom: 3px;">Developer ID (devid):</label>
+                <label style="font-size: 11px; display: block; margin-bottom: 3px;">Mã nhà phát triển:</label>
                 <input type="text" id="input-ss-devid" placeholder="Mặc định: bun2it" style="width: 100%; padding: 6px 8px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: #fff; font-size: 11px;">
               </div>
               <div>
-                <label style="font-size: 11px; display: block; margin-bottom: 3px;">Developer Password (devpassword):</label>
+                <label style="font-size: 11px; display: block; margin-bottom: 3px;">Mật khẩu nhà phát triển:</label>
                 <input type="password" id="input-ss-devpass" placeholder="Mặc định của RomCloud" style="width: 100%; padding: 6px 8px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: #fff; font-size: 11px;">
               </div>
             </div>
           </details>
 
           <div style="display: flex; gap: 8px; margin-top: 6px; flex-wrap: wrap;">
-            <button type="submit" class="btn btn-primary" style="font-size: 12px; padding: 7px 14px;">💾 Lưu cấu hình ScreenScraper</button>
-            <button type="button" class="btn btn-secondary" onclick="testScreenScraperConn()" style="font-size: 12px; padding: 7px 14px;">🔌 Kiểm tra kết nối</button>
-            <a href="https://www.screenscraper.fr/" target="_blank" rel="noopener noreferrer" class="btn btn-secondary" style="font-size: 12px; padding: 7px 14px; text-decoration: none;">🌐 Đăng ký tài khoản miễn phí ↗</a>
+            <button type="submit" class="btn btn-primary" style="font-size: 12px; padding: 7px 14px;">Lưu</button>
+            <button type="button" class="btn btn-secondary" onclick="testScreenScraperConn()" style="font-size: 12px; padding: 7px 14px;">Kiểm tra kết nối</button>
+            <a href="https://www.screenscraper.fr/" target="_blank" rel="noopener noreferrer" class="btn btn-secondary" style="font-size: 12px; padding: 7px 14px; text-decoration: none;">Đăng ký tài khoản (miễn phí)</a>
           </div>
           <div id="ss-test-status" style="font-size: 12px; margin-top: 4px; display: none;"></div>
         </form>
@@ -1727,15 +1878,15 @@ std::string WebServer::buildHtmlResponse() {
   <div id="game-detail-modal" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.8); z-index: 1000; align-items: center; justify-content: center; padding: 20px; backdrop-filter: blur(4px);">
     <div style="background: var(--card-bg); border: 1px solid var(--border); border-radius: 12px; max-width: 680px; width: 100%; max-height: 90vh; overflow-y: auto; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5);">
       <div style="padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center;">
-        <h3 id="modal-game-title" style="margin: 0; font-size: 17px; color: #fff; font-weight: 700;">Chi tiết ROM Game</h3>
-        <button type="button" class="btn btn-secondary" onclick="closeGameModal()" style="padding: 4px 10px; font-size: 14px;">✕</button>
+        <h3 id="modal-game-title" style="margin: 0; font-size: 17px; color: #fff; font-weight: 700;">Chi tiết game</h3>
+        <button type="button" class="btn btn-secondary" onclick="closeGameModal()" style="padding: 4px 10px; font-size: 14px;">Đóng</button>
       </div>
       <div style="padding: 20px; display: flex; gap: 20px; flex-wrap: wrap;">
         <!-- Left: Cover Art -->
         <div style="flex: 0 0 160px; text-align: center;">
           <div id="modal-cover-wrap" style="width: 160px; height: 210px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; display: flex; align-items: center; justify-content: center;">
             <img id="modal-cover-img" src="" alt="Cover" style="width: 100%; height: 100%; object-fit: contain; display: none;">
-            <div id="modal-cover-placeholder" style="font-size: 40px; color: var(--text-dim);">🎮</div>
+            <div id="modal-cover-placeholder" style="font-size: 14px; color: var(--text-dim);">Chưa có bìa</div>
           </div>
           <span id="modal-sys-tag" class="sys-tag sys-default" style="margin-top: 10px; display: inline-block;">GBA</span>
         </div>
@@ -1744,33 +1895,33 @@ std::string WebServer::buildHtmlResponse() {
           <div style="font-size: 12px; color: var(--text-dim); font-family: monospace; margin-bottom: 10px;" id="modal-game-filename">filename.gba</div>
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 14px; font-size: 12px;">
             <div style="background: var(--card-alt); padding: 8px 10px; border-radius: 6px;">
-              <span style="color: var(--text-dim); display: block; font-size: 11px;">📅 Năm phát hành</span>
+              <span style="color: var(--text-dim); display: block; font-size: 11px;">Năm phát hành</span>
               <b id="modal-release-year" style="color: #fff;">--</b>
             </div>
             <div style="background: var(--card-alt); padding: 8px 10px; border-radius: 6px;">
-              <span style="color: var(--text-dim); display: block; font-size: 11px;">🏷️ Thể loại</span>
+              <span style="color: var(--text-dim); display: block; font-size: 11px;">Thể loại</span>
               <b id="modal-genre" style="color: #38bdf8;">--</b>
             </div>
             <div style="background: var(--card-alt); padding: 8px 10px; border-radius: 6px;">
-              <span style="color: var(--text-dim); display: block; font-size: 11px;">🏢 Nhà phát triển</span>
+              <span style="color: var(--text-dim); display: block; font-size: 11px;">Nhà phát triển</span>
               <b id="modal-developer" style="color: #cbd5e1;">--</b>
             </div>
             <div style="background: var(--card-alt); padding: 8px 10px; border-radius: 6px;">
-              <span style="color: var(--text-dim); display: block; font-size: 11px;">💾 Dung lượng / Trạng thái</span>
+              <span style="color: var(--text-dim); display: block; font-size: 11px;">Dung lượng / Trạng thái</span>
               <b id="modal-status" style="color: #fff;">--</b>
             </div>
           </div>
-          <div style="margin-bottom: 6px; font-size: 12px; font-weight: 600; color: var(--text-muted);">📖 Tóm tắt &amp; Cốt truyện game:</div>
+          <div style="margin-bottom: 6px; font-size: 12px; font-weight: 600; color: var(--text-muted);">Giới thiệu:</div>
           <div id="modal-description" style="font-size: 12px; color: #cbd5e1; line-height: 1.6; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px; max-height: 140px; overflow-y: auto;">
-            Chưa có dữ liệu mô tả cho game này. Bấm "Cào lại Bìa &amp; Thông tin" bên dưới để tìm nạp tự động.
+            Chưa có giới thiệu. Bấm "Lấy lại bìa và thông tin" ở dưới để tự tìm.
           </div>
 
           <!-- MANUAL SCRAPER REFINEMENT SEARCH (LIKE SCRAPE-EDIT) -->
           <div style="margin-top: 14px; border-top: 1px solid var(--border); padding-top: 10px;">
-            <div style="font-size: 11.5px; font-weight: 600; color: #38bdf8; margin-bottom: 6px;">🔍 Tìm kiếm &amp; Chọn bìa thủ công (ScreenScraper / Libretro):</div>
+            <div style="font-size: 11.5px; font-weight: 600; color: #38bdf8; margin-bottom: 6px;">Tìm bìa khác (ScreenScraper / Libretro):</div>
             <div style="display: flex; gap: 6px;">
               <input type="text" id="modal-search-query" placeholder="Nhập tên game để tìm..." style="flex: 1; padding: 6px 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: #fff; font-size: 12px;">
-              <button type="button" class="btn btn-secondary" onclick="searchModalScraperCandidates()" style="font-size: 11px; padding: 6px 12px; border-color: #0284c7; color: #38bdf8;">🔎 Tìm kiếm</button>
+              <button type="button" class="btn btn-secondary" onclick="searchModalScraperCandidates()" style="font-size: 11px; padding: 6px 12px; border-color: #0284c7; color: #38bdf8;">Tìm</button>
             </div>
             <div id="modal-candidates-list" style="margin-top: 8px; max-height: 180px; overflow-y: auto; display: none; flex-direction: column; gap: 6px;"></div>
           </div>
@@ -1778,8 +1929,8 @@ std::string WebServer::buildHtmlResponse() {
       </div>
       <div style="padding: 12px 20px; border-top: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
         <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-          <button type="button" class="btn btn-primary" id="btn-modal-scrape" onclick="scrapeCurrentModalGame()" style="background: var(--purple);">🎨 Cào lại Bìa &amp; Thông tin</button>
-          <button type="button" class="btn btn-primary" id="btn-modal-backup" onclick="uploadCurrentModalGame()" style="background: #7c3aed; border-color: #6d28d9; display: none;">📤 Sao lưu lên Drive cá nhân</button>
+          <button type="button" class="btn btn-primary" id="btn-modal-scrape" onclick="scrapeCurrentModalGame()" style="background: var(--purple);">Lấy lại bìa và thông tin</button>
+          <button type="button" class="btn btn-primary" id="btn-modal-backup" onclick="uploadCurrentModalGame()" style="background: #7c3aed; border-color: #6d28d9; display: none;">Sao lưu lên Drive</button>
         </div>
         <button type="button" class="btn btn-secondary" onclick="closeGameModal()">Đóng</button>
       </div>
@@ -1791,20 +1942,19 @@ std::string WebServer::buildHtmlResponse() {
     <div style="background: var(--card-bg); border: 1px solid #10b981; border-radius: 12px; width: 100%; max-width: 680px; max-height: 85vh; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 20px 40px rgba(0,0,0,0.6);">
       <div style="padding: 14px 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; background: rgba(16,185,129,0.1);">
         <div style="display: flex; align-items: center; gap: 10px;">
-          <span style="font-size: 22px;">🩺</span>
           <div>
-            <h3 style="margin: 0; font-size: 16px; color: #fff; font-weight: 700;">Bác Sĩ ROM - Tự Động Sửa ROM Đặt Sai Emulator</h3>
-            <span style="font-size: 11.5px; color: var(--text-dim);">Tự động phát hiện ROM bỏ nhầm thư mục và dời về đúng hệ máy</span>
+            <h3 style="margin: 0; font-size: 16px; color: #fff; font-weight: 700;">Sửa ROM sai thư mục</h3>
+            <span style="font-size: 11.5px; color: var(--text-dim);">Tìm ROM đặt sai thư mục và chuyển về đúng hệ máy</span>
           </div>
         </div>
-        <button type="button" class="btn btn-secondary" onclick="closeDoctorModal()" style="padding: 4px 10px; font-size: 14px;">✕</button>
+        <button type="button" class="btn btn-secondary" onclick="closeDoctorModal()" style="padding: 4px 10px; font-size: 14px;">Đóng</button>
       </div>
 
       <div style="padding: 16px 20px; overflow-y: auto; flex: 1;">
         <!-- Status / Audit Card -->
         <div id="doctor-loading" style="display: none; text-align: center; padding: 30px;">
-          <div style="font-size: 28px; animation: spin 1.5s linear infinite; display: inline-block;">⏳</div>
-          <div style="margin-top: 10px; color: #e2e8f0; font-size: 14px;">Đang khám và quét toàn bộ thư mục ROM trên thẻ nhớ TrimUI...</div>
+          <div style="font-size: 28px; animation: spin 1.5s linear infinite; display: inline-block;">…</div>
+          <div style="margin-top: 10px; color: #e2e8f0; font-size: 14px;">Đang quét thư mục game trên thẻ...</div>
         </div>
 
         <div id="doctor-results" style="display: block;">
@@ -1816,18 +1966,18 @@ std::string WebServer::buildHtmlResponse() {
 
         <!-- Drag & Drop Upload Zone -->
         <div style="margin-top: 16px; padding: 14px; border: 2px dashed rgba(16,185,129,0.4); border-radius: 8px; background: rgba(16,185,129,0.04); text-align: center;">
-          <div style="font-size: 13px; font-weight: 600; color: #34d399; margin-bottom: 4px;">📥 Nạp ROM Mới Tự Động (Chọn file từ Máy tính / Điện thoại)</div>
-          <div style="font-size: 11.5px; color: var(--text-dim); margin-bottom: 10px;">Thả file ROM bất kỳ vào đây, hệ thống sẽ tự nhận diện và cất vào đúng thư mục Emulator trên máy!</div>
+          <div style="font-size: 13px; font-weight: 600; color: #34d399; margin-bottom: 4px;">Thêm ROM mới (từ máy tính / điện thoại)</div>
+          <div style="font-size: 11.5px; color: var(--text-dim); margin-bottom: 10px;">Thả file ROM vào đây, máy tự nhận diện và đặt vào đúng thư mục.</div>
           <input type="file" id="doctor-file-input" style="display: none;" onchange="uploadAutoRomFile(this.files[0])">
-          <button type="button" class="btn btn-secondary" onclick="document.getElementById('doctor-file-input').click()" style="font-size: 12px; padding: 6px 14px; border-color: #10b981; color: #34d399;">📁 Chọn File ROM</button>
+          <button type="button" class="btn btn-secondary" onclick="document.getElementById('doctor-file-input').click()" style="font-size: 12px; padding: 6px 14px; border-color: #10b981; color: #34d399;">Chọn file ROM</button>
           <div id="doctor-upload-status" style="margin-top: 8px; font-size: 12px; display: none;"></div>
         </div>
       </div>
 
       <div style="padding: 12px 20px; border-top: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; background: rgba(0,0,0,0.2);">
-        <button type="button" class="btn btn-secondary" onclick="runDoctorAudit()">🔄 Khám lại</button>
+        <button type="button" class="btn btn-secondary" onclick="runDoctorAudit()">Quét lại</button>
         <div style="display: flex; gap: 8px;">
-          <button type="button" class="btn btn-primary" id="btn-doctor-fix" onclick="executeDoctorFix()" style="background: #10b981; border-color: #059669; font-weight: 600;">🩺 Tự Động Chuyển Về Đúng Emulator</button>
+          <button type="button" class="btn btn-primary" id="btn-doctor-fix" onclick="executeDoctorFix()" style="background: #10b981; border-color: #059669; font-weight: 600;">Chuyển về đúng thư mục</button>
           <button type="button" class="btn btn-secondary" onclick="closeDoctorModal()">Đóng</button>
         </div>
       </div>
@@ -1836,11 +1986,10 @@ std::string WebServer::buildHtmlResponse() {
 
     <div id="tab-cal" class="tab-content">
       <div class="card" style="max-width: 720px; margin: 0 auto;">
-        <h3>📅 Lịch phone → Brick</h3>
+        <h3>Lịch từ điện thoại</h3>
         <p style="font-size: 12.5px; color: var(--text-muted); line-height: 1.6; margin-bottom: 14px;">
-          Dán <b>link ICS bí mật</b> (Google Calendar: Cài đặt → Tích hợp → Địa chỉ bí mật iCal;
-          iCloud: app Lịch → chia sẻ → link công khai) — Brick tự tải và refresh mỗi ngày.
-          Hoặc dán nội dung <b>.ics</b> / thêm việc lẻ bên dưới.
+          Dán link lịch (Google Calendar: Cài đặt → Tích hợp → Địa chỉ bí mật iCal; iCloud: chia sẻ lịch → link công khai). Máy tự cập nhật mỗi ngày.
+          Cũng có thể dán nội dung file <b>.ics</b> hoặc thêm việc ở dưới.
         </p>
         <div style="display: flex; gap: 8px; margin-bottom: 10px;">
           <input type="text" id="cal-url-name" placeholder="Tên (vd Lịch Google)" style="flex: 0 0 180px; padding: 8px 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: #fff; font-size: 12px;">
@@ -1853,7 +2002,7 @@ std::string WebServer::buildHtmlResponse() {
           <div style="display: flex; gap: 8px; margin-top: 6px;">
             <input type="text" id="cal-ics-name" placeholder="Tên nguồn" style="flex: 0 0 180px; padding: 8px 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: #fff; font-size: 12px;">
             <button class="btn btn-secondary" onclick="calImport()">Nhập ICS</button>
-            <button class="btn btn-secondary" onclick="calRefresh()">🔄 Refresh link</button>
+            <button class="btn btn-secondary" onclick="calRefresh()">Làm mới link</button>
           </div>
         </div>
         <div style="display: flex; gap: 8px; margin-bottom: 14px; align-items: end;">
@@ -1863,7 +2012,7 @@ std::string WebServer::buildHtmlResponse() {
           <input type="time" id="cal-m-time" style="padding: 7px 8px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: #fff; font-size: 12px;"></div>
           <div style="flex: 1;"><label style="font-size: 11px; color: var(--text-dim); display: block; margin-bottom: 3px;">Việc</label>
           <input type="text" id="cal-m-title" placeholder="Tiêu đề" style="width: 100%; padding: 8px 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: #fff; font-size: 12px;"></div>
-          <button class="btn btn-primary" onclick="calAddManual()">＋ Thêm</button>
+          <button class="btn btn-primary" onclick="calAddManual()">Thêm</button>
         </div>
         <h4 style="font-size: 13px; margin: 10px 0 6px;">Nguồn lịch</h4>
         <div id="cal-sources" style="font-size: 12px; display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px;"></div>
@@ -1873,32 +2022,32 @@ std::string WebServer::buildHtmlResponse() {
     </div>
     <div id="tab-alarm" class="tab-content">
       <div class="card" style="max-width: 720px; margin: 0 auto;">
-        <h3>⏰ Báo thức trên Brick</h3>
+        <h3>Báo thức</h3>
         <p style="font-size: 12.5px; color: var(--text-muted); line-height: 1.6; margin-bottom: 14px;">
-          Thêm/sửa báo thức bằng bàn phím thay vì bấm D-pad. Tối đa 10 báo thức.
-          Chế độ: 0 = Chuông+Rung, 1 = Chuông, 2 = Rung.
+          Thêm báo thức tại đây cho nhanh. Tối đa 10 báo thức.
+          Kiểu báo: 0 = chuông + rung, 1 = chuông, 2 = rung.
         </p>
         <div style="display: flex; gap: 8px; margin-bottom: 14px; align-items: end;">
           <div><label style="font-size: 11px; color: var(--text-dim); display: block; margin-bottom: 3px;">Giờ</label>
           <input type="number" id="alarm-hour" min="0" max="23" value="7" style="width: 80px; padding: 8px 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: #fff; font-size: 13px;"></div>
           <div><label style="font-size: 11px; color: var(--text-dim); display: block; margin-bottom: 3px;">Phút</label>
           <input type="number" id="alarm-min" min="0" max="59" value="0" style="width: 80px; padding: 8px 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: #fff; font-size: 13px;"></div>
-          <button class="btn btn-primary" onclick="alarmAdd()">＋ Thêm</button>
+          <button class="btn btn-primary" onclick="alarmAdd()">Thêm</button>
         </div>
         <div id="alarm-list" style="font-size: 13px; display: flex; flex-direction: column; gap: 8px;"></div>
       </div>
     </div>
     <div id="tab-watch" class="tab-content">
       <div class="card" style="max-width: 720px; margin: 0 auto;">
-        <h3>📈 Mã theo dõi (crypto + chứng khoán VN)</h3>
+        <h3>Theo dõi giá (coin và chứng khoán)</h3>
         <p style="font-size: 12.5px; color: var(--text-muted); line-height: 1.6; margin-bottom: 14px;">
-          Tối đa 4 mã, hiển thị lưới 2×2 trên tab Thị trường của Brick.
-          Crypto dùng Yahoo Finance (vd BTC, ETH, SOL), cổ phiếu VN dùng mã HOSE (vd VCB, HPG, FPT).
+          Tối đa 4 mã, hiện trên mục Thị trường của máy.
+          Coin: BTC, ETH, SOL... Cổ phiếu VN: mã sàn HOSE như VCB, HPG, FPT.
         </p>
         <div style="display: flex; gap: 8px; margin-bottom: 14px; align-items: end;">
           <div style="flex: 1;"><label style="font-size: 11px; color: var(--text-dim); display: block; margin-bottom: 3px;">Các mã (cách nhau dấu phẩy)</label>
           <input type="text" id="watch-symbols" placeholder="BTC,ETH,VCB,HPG" style="width: 100%; padding: 8px 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: #fff; font-size: 13px; text-transform: uppercase;"></div>
-          <button class="btn btn-primary" onclick="watchSave()">💾 Lưu</button>
+          <button class="btn btn-primary" onclick="watchSave()">Lưu</button>
         </div>
         <div id="watch-list" style="font-size: 13px; display: flex; gap: 8px; flex-wrap: wrap;"></div>
       </div>
@@ -1908,10 +2057,10 @@ std::string WebServer::buildHtmlResponse() {
   <div id="active-upload-floating">
     <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6px;">
       <div>
-        <span class="badge" style="background:#9333ea;color:#fff;font-size:10px;padding:2px 6px;">📤 SAO LƯU DRIVE</span>
+        <span class="badge" style="background:#9333ea;color:#fff;font-size:10px;padding:2px 6px;">ĐANG SAO LƯU</span>
         <span style="font-size: 13.5px; font-weight: 700; margin-left: 6px; color:#fff;" id="upload-float-title">Game Title</span>
       </div>
-      <button class="btn btn-secondary" onclick="cancelActiveUpload()" style="padding: 2px 8px; font-size: 11px;">✕ Hủy</button>
+      <button class="btn btn-secondary" onclick="cancelActiveUpload()" style="padding: 2px 8px; font-size: 11px;">Hủy</button>
     </div>
     <div style="font-size: 11px; color: #cbd5e1; font-family: monospace; margin-bottom: 4px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" id="upload-float-file">filename.bin</div>
     <div class="progress-track" style="margin: 6px 0; height: 8px; background: rgba(0,0,0,0.4);">
@@ -1928,10 +2077,10 @@ std::string WebServer::buildHtmlResponse() {
   <div id="active-scrape-floating" style="display: none; position: fixed; bottom: 20px; left: 20px; z-index: 9999; background: rgba(15, 23, 42, 0.95); border: 1px solid #0284c7; border-radius: 10px; padding: 12px 16px; width: 340px; box-shadow: 0 10px 25px rgba(0,0,0,0.6); backdrop-filter: blur(8px);">
     <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6px;">
       <div>
-        <span class="badge" style="background:#0284c7;color:#fff;font-size:10px;padding:2px 6px;">🎨 ĐANG CÀO DỮ LIỆU</span>
+        <span class="badge" style="background:#0284c7;color:#fff;font-size:10px;padding:2px 6px;">ĐANG LẤY THÔNG TIN</span>
         <span style="font-size: 13px; font-weight: 700; margin-left: 6px; color:#fff;" id="scrape-float-title">Game Title</span>
       </div>
-      <button class="btn btn-secondary" onclick="cancelAutoScrape()" style="padding: 2px 8px; font-size: 11px;">✕ Hủy</button>
+      <button class="btn btn-secondary" onclick="cancelAutoScrape()" style="padding: 2px 8px; font-size: 11px;">Hủy</button>
     </div>
     <div style="font-size: 11px; color: #94a3b8; margin-bottom: 4px;" id="scrape-float-sys">Hệ máy: SYS</div>
     <div class="progress-track" style="margin: 6px 0; height: 8px; background: rgba(0,0,0,0.4);">
@@ -2035,6 +2184,9 @@ std::string WebServer::buildHtmlResponse() {
       if (tabId === 'tab-iptv' && typeof loadIptvSources === 'function') {
         loadIptvSources();
       }
+      if (tabId === 'tab-saver' && typeof loadSaverPhotos === 'function') {
+        loadSaverPhotos();
+      }
       if (tabId === 'tab-cal' && typeof loadCalSources === 'function') {
         loadCalSources();
         loadCalEvents();
@@ -2116,8 +2268,8 @@ std::string WebServer::buildHtmlResponse() {
         lastLoadedGames = { games: data.games, total: data.total };
         renderGames(data.games, data.total);
       } catch (e) {
-        if (tbody) tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; padding: 25px; color: var(--red);">Lỗi nạp dữ liệu. Vui lòng thử lại.</td></tr>`;
-        if (gridWrap) gridWrap.innerHTML = `<div style="grid-column: 1 / -1; text-align: center; padding: 40px; color: var(--red);">Lỗi nạp dữ liệu. Vui lòng thử lại.</div>`;
+        if (tbody) tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; padding: 25px; color: var(--red);">Lỗi tải dữ liệu. Thử lại nhé.</td></tr>`;
+        if (gridWrap) gridWrap.innerHTML = `<div style="grid-column: 1 / -1; text-align: center; padding: 40px; color: var(--red);">Lỗi tải dữ liệu. Thử lại nhé.</div>`;
       }
     }
 
@@ -2134,10 +2286,9 @@ std::string WebServer::buildHtmlResponse() {
 
       if (!isDriveLinked) {
         const unlinkedMsg = `
-          <div style="font-size: 38px; margin-bottom: 12px;">☁️❌</div>
-          <div style="font-size: 16px; font-weight: 700; color: #fef3c7; margin-bottom: 6px;">Google Drive chưa được kết nối (Đã ngắt kết nối)</div>
-          <div style="font-size: 13px; color: var(--text-muted); margin-bottom: 18px;">Chỉ khi còn kết nối Google Drive thì hệ thống mới hiển thị danh mục ROM game.</div>
-          <button class="btn btn-primary" onclick="switchTab('tab-storage')">🔗 Kết nối Google Drive ngay</button>
+          <div style="font-size: 16px; font-weight: 700; color: #fef3c7; margin-bottom: 6px;">Chưa kết nối Google Drive</div>
+          <div style="font-size: 13px; color: var(--text-muted); margin-bottom: 18px;">Kết nối Google Drive để xem danh sách game.</div>
+          <button class="btn btn-primary" onclick="switchTab('tab-storage')">Kết nối Google Drive</button>
         `;
         if (tbody) tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; padding: 50px 20px; color: var(--text-dim);">${unlinkedMsg}</td></tr>`;
         if (gridWrap) gridWrap.innerHTML = `<div style="grid-column: 1 / -1; text-align: center; padding: 60px 20px; color: var(--text-dim);">${unlinkedMsg}</div>`;
@@ -2162,8 +2313,8 @@ std::string WebServer::buildHtmlResponse() {
       if (btnLast) btnLast.disabled = (currentPage >= maxPages);
 
       if (!games || games.length === 0) {
-        if (tbody) tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; padding: 30px; color: var(--text-dim);">Không tìm thấy game nào phù hợp với bộ lọc.</td></tr>`;
-        if (gridWrap) gridWrap.innerHTML = `<div style="grid-column: 1 / -1; text-align: center; padding: 40px 20px; color: var(--text-dim);">Không tìm thấy game nào phù hợp với bộ lọc.</div>`;
+        if (tbody) tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; padding: 30px; color: var(--text-dim);">Không có game nào khớp bộ lọc.</td></tr>`;
+        if (gridWrap) gridWrap.innerHTML = `<div style="grid-column: 1 / -1; text-align: center; padding: 40px 20px; color: var(--text-dim);">Không có game nào khớp bộ lọc.</div>`;
         return;
       }
 
@@ -2174,53 +2325,53 @@ std::string WebServer::buildHtmlResponse() {
         let statusBadge = '';
         let statusPillClass = '';
         let statusPillText = '';
-        const detailBtn = `<button class="btn btn-secondary" onclick="openGameModal(${g.id})" title="Xem chi tiết & Cốt truyện game">ℹ️ Chi tiết</button>`;
-        const scrapeBtn = `<button class="btn btn-secondary" onclick="scrapeBoxart(${g.id})" title="Cào ảnh bìa & thông tin game">🎨 Scrape</button>`;
+        const detailBtn = `<button class="btn btn-secondary" onclick="openGameModal(${g.id})" title="Xem chi tiết game">Chi tiết</button>`;
+        const scrapeBtn = `<button class="btn btn-secondary" onclick="scrapeBoxart(${g.id})" title="Lấy ảnh bìa và thông tin game">Lấy bìa</button>`;
         let tableActions = '';
         let gridActions = '';
 
         if (g.local_state === 1) {
-          statusBadge = `<span class="status-badge status-local" title="ROM này đã có trên thẻ nhớ TrimUI">🟢 Trên thẻ SD</span>`;
+          statusBadge = `<span class="status-badge status-local" title="Đã có trên thẻ nhớ">Trên thẻ SD</span>`;
           statusPillClass = 'status-local';
-          statusPillText = '🟢 Trên thẻ SD';
-          const backupBtn = `<button class="btn btn-primary" onclick="uploadGameToDrive(${g.id}, '${escapeHtml(g.title)}')" style="background:var(--purple);border-color:#9333ea;" title="Sao lưu ROM này từ thẻ nhớ lên Google Drive cá nhân (/RomCloud_Backup)">📤 Sao lưu</button>`;
+          statusPillText = 'Trên thẻ SD';
+          const backupBtn = `<button class="btn btn-primary" onclick="uploadGameToDrive(${g.id}, '${escapeHtml(g.title)}')" style="background:var(--purple);border-color:#9333ea;" title="Sao lưu game này lên Drive của bạn (thư mục Roms)">Sao lưu</button>`;
           tableActions = `
             ${backupBtn}
             ${detailBtn}
             ${scrapeBtn}
-            <button class="btn btn-danger" onclick="deleteRom(${g.id}, '${escapeHtml(g.title)}')">🗑️ Xóa</button>
+            <button class="btn btn-danger" onclick="deleteRom(${g.id}, '${escapeHtml(g.title)}')">Xóa</button>
           `;
           gridActions = `
             ${backupBtn}
             ${detailBtn}
             ${scrapeBtn}
-            <button class="btn btn-danger" onclick="deleteRom(${g.id}, '${escapeHtml(g.title)}')">🗑️ Xóa</button>
+            <button class="btn btn-danger" onclick="deleteRom(${g.id}, '${escapeHtml(g.title)}')">Xóa</button>
           `;
         } else if (g.in_queue) {
-          statusBadge = `<span class="status-badge status-queue" title="Đang chờ tải về máy TrimUI">⏳ Đang tải về</span>`;
+          statusBadge = `<span class="status-badge status-queue" title="Đang chờ tải về máy">Đang tải về</span>`;
           statusPillClass = 'status-queue';
-          statusPillText = '⏳ Đang tải';
-          tableActions = `${detailBtn} ${scrapeBtn} <button class="btn btn-secondary" onclick="removeFromQueue(${g.id})">✕ Bỏ</button>`;
-          gridActions = `${detailBtn} ${scrapeBtn} <button class="btn btn-secondary" onclick="removeFromQueue(${g.id})">✕ Bỏ</button>`;
+          statusPillText = 'Đang tải';
+          tableActions = `${detailBtn} ${scrapeBtn} <button class="btn btn-secondary" onclick="removeFromQueue(${g.id})">Bỏ</button>`;
+          gridActions = `${detailBtn} ${scrapeBtn} <button class="btn btn-secondary" onclick="removeFromQueue(${g.id})">Bỏ</button>`;
         } else {
-          statusBadge = `<span class="status-badge status-cloud" title="ROM trên kho Google Drive công khai, chưa tải về thẻ nhớ">☁️ Kho Public</span>`;
+          statusBadge = `<span class="status-badge status-cloud" title="Trên kho Drive chung, chưa tải về thẻ">Kho chung</span>`;
           statusPillClass = 'status-cloud';
-          statusPillText = '☁️ Kho Public';
-          tableActions = `${detailBtn} ${scrapeBtn} <button class="btn btn-primary" onclick="downloadGame(${g.id})" title="Tải ROM này từ kho Public về thẻ nhớ TrimUI">📥 Tải về máy</button>`;
-          gridActions = `${detailBtn} ${scrapeBtn} <button class="btn btn-primary" onclick="downloadGame(${g.id})" title="Tải ROM này từ kho Public về thẻ nhớ TrimUI">📥 Tải về máy</button>`;
+          statusPillText = 'Kho chung';
+          tableActions = `${detailBtn} ${scrapeBtn} <button class="btn btn-primary" onclick="downloadGame(${g.id})" title="Tải game này về thẻ nhớ">Tải về máy</button>`;
+          gridActions = `${detailBtn} ${scrapeBtn} <button class="btn btn-primary" onclick="downloadGame(${g.id})" title="Tải game này về thẻ nhớ">Tải về máy</button>`;
         }
 
         let metaBadges = '';
-        if (g.release_year) metaBadges += `<span class="badge" style="background:#334155;color:#94a3b8;font-size:10px;padding:2px 6px;margin-right:4px;">📅 ${escapeHtml(g.release_year)}</span>`;
-        if (g.genre) metaBadges += `<span class="badge" style="background:#1e293b;border:1px solid #475569;color:#38bdf8;font-size:10px;padding:2px 6px;">🏷️ ${escapeHtml(g.genre)}</span>`;
+        if (g.release_year) metaBadges += `<span class="badge" style="background:#334155;color:#94a3b8;font-size:10px;padding:2px 6px;margin-right:4px;">${escapeHtml(g.release_year)}</span>`;
+        if (g.genre) metaBadges += `<span class="badge" style="background:#1e293b;border:1px solid #475569;color:#38bdf8;font-size:10px;padding:2px 6px;">${escapeHtml(g.genre)}</span>`;
 
         let coverHtml = '';
         if (g.has_cover) {
-          coverHtml = `<img class="card-cover-img" src="/api/cover?game_id=${g.id}" alt="${escapeHtml(g.title)}" loading="lazy" onerror="this.onerror=null;this.parentElement.innerHTML='<div class=\\'card-cover-placeholder\\'><div class=\\'card-cover-icon\\'>🎮</div><span style=\\'font-size:11px;\\'>${escapeHtml(g.sys_code || 'GAME')}</span></div>';">`;
+          coverHtml = `<img class="card-cover-img" src="/api/cover?game_id=${g.id}" alt="${escapeHtml(g.title)}" loading="lazy" onerror="this.onerror=null;this.parentElement.innerHTML='<div class=\\'card-cover-placeholder\\'><div class=\\'card-cover-icon\\'>ROM</div><span style=\\'font-size:11px;\\'>${escapeHtml(g.sys_code || 'GAME')}</span></div>';">`;
         } else {
           coverHtml = `
             <div class="card-cover-placeholder">
-              <div class="card-cover-icon">🎮</div>
+              <div class="card-cover-icon">ROM</div>
               <span style="font-size: 11px; font-weight: 600; letter-spacing: 0.5px;">${escapeHtml(g.sys_code || 'GAME')}</span>
             </div>
           `;
@@ -2252,10 +2403,10 @@ std::string WebServer::buildHtmlResponse() {
                 <div class="card-title" title="${escapeHtml(g.title)}" style="cursor: pointer;" onclick="openGameModal(${g.id})">${escapeHtml(g.title)}</div>
                 <div class="card-file" title="${escapeHtml(g.filename)}">${escapeHtml(g.filename)}</div>
                 <div class="card-meta">
-                  <span>💾 ${g.size_str || '0 B'}</span>
-                  ${g.release_year ? `<span style="margin-left: 6px; color: #94a3b8;">📅 ${escapeHtml(g.release_year)}</span>` : ''}
+                  <span>${g.size_str || '0 B'}</span>
+                  ${g.release_year ? `<span style="margin-left: 6px; color: #94a3b8;">${escapeHtml(g.release_year)}</span>` : ''}
                 </div>
-                ${g.genre ? `<div style="font-size: 11px; color: #38bdf8; margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">🏷️ ${escapeHtml(g.genre)}</div>` : ''}
+                ${g.genre ? `<div style="font-size: 11px; color: #38bdf8; margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(g.genre)}</div>` : ''}
               </div>
               <div class="card-actions">
                 ${gridActions}
@@ -2305,14 +2456,14 @@ std::string WebServer::buildHtmlResponse() {
           return;
         }
 
-        document.getElementById('modal-game-title').textContent = g.title || 'Game ROM';
+        document.getElementById('modal-game-title').textContent = g.title || 'Game';
         document.getElementById('modal-game-filename').textContent = g.filename || '';
         document.getElementById('modal-sys-tag').textContent = g.sys_code || 'GAME';
-        document.getElementById('modal-release-year').textContent = g.release_year || 'Chưa có thông tin';
+        document.getElementById('modal-release-year').textContent = g.release_year || 'Chưa rõ';
         document.getElementById('modal-genre').textContent = g.genre || 'Chưa phân loại';
         document.getElementById('modal-developer').textContent = g.developer || 'Chưa rõ';
-        document.getElementById('modal-status').innerHTML = `${g.size_str || '0 B'} • ${g.local_state === 1 ? '<span style="color:var(--green);">🟢 Đã tải về máy</span>' : '<span style="color:var(--accent);">☁️ Trên Google Drive</span>'}`;
-        document.getElementById('modal-description').textContent = g.description || 'Chưa có dữ liệu mô tả cho game này. Bấm nút "Cào lại Bìa & Thông tin" bên dưới để tìm nạp tự động từ Libretro và Wikipedia.';
+        document.getElementById('modal-status').innerHTML = `${g.size_str || '0 B'} • ${g.local_state === 1 ? '<span style="color:var(--green);">Đã tải về máy</span>' : '<span style="color:var(--accent);">Trên Drive</span>'}`;
+        document.getElementById('modal-description').textContent = g.description || 'Chưa có giới thiệu. Bấm "Lấy lại bìa và thông tin" để tự tìm.';
 
         const img = document.getElementById('modal-cover-img');
         const placeholder = document.getElementById('modal-cover-placeholder');
@@ -2349,12 +2500,12 @@ std::string WebServer::buildHtmlResponse() {
       const qInput = document.getElementById('modal-search-query');
       const query = (qInput ? qInput.value : '').trim();
       const sysTag = document.getElementById('modal-sys-tag')?.textContent || '';
-      if (!query) { showToast('Vui lòng nhập tên game để tìm kiếm.'); return; }
+      if (!query) { showToast('Hãy nhập tên game để tìm.'); return; }
 
       const cList = document.getElementById('modal-candidates-list');
       if (cList) {
         cList.style.display = 'flex';
-        cList.innerHTML = '<div style="color:var(--text-dim); padding:10px; text-align:center;">⏳ Đang tìm kiếm trên ScreenScraper &amp; Libretro...</div>';
+        cList.innerHTML = '<div style="color:var(--text-dim); padding:10px; text-align:center;">Đang tìm trên ScreenScraper &amp; Libretro...</div>';
       }
 
       try {
@@ -2367,7 +2518,7 @@ std::string WebServer::buildHtmlResponse() {
         modalCandidatesCache = data.candidates || [];
 
         if (!modalCandidatesCache.length) {
-          if (cList) cList.innerHTML = '<div style="color:var(--text-dim); padding:10px; text-align:center;">Không tìm thấy kết quả phù hợp. Hãy thử tên ngắn gọn hơn.</div>';
+          if (cList) cList.innerHTML = '<div style="color:var(--text-dim); padding:10px; text-align:center;">Không tìm thấy. Thử tên ngắn hơn.</div>';
           return;
         }
 
@@ -2376,13 +2527,13 @@ std::string WebServer::buildHtmlResponse() {
           html += `
             <div style="display:flex; gap:10px; align-items:center; background:var(--bg); border:1px solid var(--border); border-radius:6px; padding:8px 10px;">
               <div style="width:40px; height:50px; flex-shrink:0; background:#000; border-radius:4px; overflow:hidden; display:flex; align-items:center; justify-content:center;">
-                ${c.cover_url ? `<img src="${c.cover_url}" style="width:100%; height:100%; object-fit:cover;" onerror="this.style.display='none';">` : '🎮'}
+                ${c.cover_url ? `<img src="${c.cover_url}" style="width:100%; height:100%; object-fit:cover;" onerror="this.style.display='none';">` : ''}
               </div>
               <div style="flex:1; min-width:0;">
                 <div style="font-size:12px; font-weight:600; color:#fff; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(c.title)}</div>
                 <div style="font-size:11px; color:var(--text-dim);">${escapeHtml(c.source || '')} ${c.release_year ? '• ' + c.release_year : ''}</div>
               </div>
-              <button type="button" class="btn btn-primary" onclick="applySelectedCandidate(${idx})" style="font-size:11px; padding:4px 10px; white-space:nowrap;">Áp dụng bìa này</button>
+              <button type="button" class="btn btn-primary" onclick="applySelectedCandidate(${idx})" style="font-size:11px; padding:4px 10px; white-space:nowrap;">Dùng bìa này</button>
             </div>
           `;
         });
@@ -2396,7 +2547,7 @@ std::string WebServer::buildHtmlResponse() {
       const c = modalCandidatesCache[idx];
       if (!c || !currentModalGameId) return;
 
-      showToast('⏳ Đang tải và áp dụng ảnh bìa...');
+      showToast('Đang áp dụng ảnh bìa...');
       try {
         const params = new URLSearchParams();
         params.append('game_id', currentModalGameId);
@@ -2413,20 +2564,20 @@ std::string WebServer::buildHtmlResponse() {
           body: params.toString()
         });
         const data = await res.json();
-        showToast(data.message || 'Đã áp dụng thông tin & ảnh bìa game!');
+        showToast(data.message || 'Đã áp dụng bìa và thông tin!');
         await openGameModal(currentModalGameId);
         loadGames();
       } catch (e) {
-        showToast('❌ Lỗi khi áp dụng bìa game.');
+        showToast('Lỗi khi áp dụng bìa.');
       }
     }
 
     async function scrapeCurrentModalGame() {
       if (!currentModalGameId) return;
       const btn = document.getElementById('btn-modal-scrape');
-      const origText = btn ? btn.innerHTML : '🎨 Cào lại Bìa & Thông tin';
-      if (btn) { btn.disabled = true; btn.innerHTML = '⏳ Đang cào dữ liệu...'; }
-      showToast('⏳ Đang tìm kiếm ảnh bìa và thông tin trên ScreenScraper & Libretro...');
+      const origText = btn ? btn.innerHTML : 'Lấy lại bìa và thông tin';
+      if (btn) { btn.disabled = true; btn.innerHTML = 'Đang lấy dữ liệu...'; }
+      showToast('Đang tìm bìa và thông tin trên ScreenScraper & Libretro...');
 
       try {
         const res = await fetch('/api/scrape_cover', {
@@ -2435,11 +2586,11 @@ std::string WebServer::buildHtmlResponse() {
           body: `game_id=${currentModalGameId}`
         });
         const data = await res.json();
-        showToast(data.message || 'Cào dữ liệu hoàn tất!');
+        showToast(data.message || 'Đã lấy bìa và thông tin xong!');
         await openGameModal(currentModalGameId);
         loadGames();
       } catch (e) {
-        showToast('Lỗi khi cào dữ liệu game.');
+        showToast('Lỗi khi lấy dữ liệu game.');
       } finally {
         if (btn) { btn.disabled = false; btn.innerHTML = origText; }
       }
@@ -2505,7 +2656,7 @@ std::string WebServer::buildHtmlResponse() {
             summaryBox.style.background = 'rgba(16,185,129,0.15)';
             summaryBox.style.border = '1px solid #10b981';
             summaryBox.style.color = '#34d399';
-            summaryBox.innerHTML = '<b>✅ Tuyệt vời!</b> Toàn bộ ROM trên thẻ nhớ của bạn đều đang nằm đúng thư mục Emulator chuẩn của TrimUI. Không phát hiện ROM nào bị lạc chỗ.';
+            summaryBox.innerHTML = '<b>Mọi game đều đúng thư mục.</b> Không có ROM nào đặt sai chỗ.';
           }
           if (fixBtn) fixBtn.style.display = 'none';
         } else {
@@ -2513,12 +2664,12 @@ std::string WebServer::buildHtmlResponse() {
             summaryBox.style.background = 'rgba(245,158,11,0.15)';
             summaryBox.style.border = '1px solid #f59e0b';
             summaryBox.style.color = '#fbbf24';
-            summaryBox.innerHTML = `<b>⚠️ Phát hiện ${doctorAuditItems.length} ROM đang đặt sai thư mục!</b><br>Các game này có thể không chạy được hoặc bị lỗi nếu không dời về đúng Emulator. Bấm nút màu xanh bên dưới để RomCloud tự động sắp xếp lại.`;
+            summaryBox.innerHTML = `<b>Có ${doctorAuditItems.length} ROM đặt sai thư mục.</b><br>Các game này có thể không chạy được. Bấm nút xanh ở dưới để tự chuyển về đúng chỗ.`;
           }
           if (fixBtn) {
             fixBtn.style.display = 'inline-block';
             fixBtn.disabled = false;
-            fixBtn.innerHTML = `🩺 Tự Động Chuyển ${doctorAuditItems.length} ROM Về Đúng Emulator`;
+            fixBtn.innerHTML = `Chuyển ${doctorAuditItems.length} ROM về đúng thư mục`;
           }
 
           if (itemsWrap) {
@@ -2528,9 +2679,9 @@ std::string WebServer::buildHtmlResponse() {
                   <div style="font-weight: 600; color: #fff; font-size: 13px; text-overflow: ellipsis; overflow: hidden; white-space: nowrap;">${escapeHtml(item.filename)}</div>
                   <div style="font-size: 11.5px; color: var(--text-dim); margin-top: 3px;">
                     Hiện tại: <span style="color: #f87171; background: rgba(239,68,68,0.15); padding: 1px 6px; border-radius: 4px; font-weight: 600;">/Roms/${escapeHtml(item.current_system)}</span>
-                    ➔ Cần dời về: <span style="color: #34d399; background: rgba(16,185,129,0.15); padding: 1px 6px; border-radius: 4px; font-weight: 600;">/Roms/${escapeHtml(item.detected_system)} (${escapeHtml(item.detected_name)})</span>
+                    Chuyển về: <span style="color: #34d399; background: rgba(16,185,129,0.15); padding: 1px 6px; border-radius: 4px; font-weight: 600;">/Roms/${escapeHtml(item.detected_system)} (${escapeHtml(item.detected_name)})</span>
                   </div>
-                  <div style="font-size: 11px; color: #94a3b8; margin-top: 2px;">💡 Lý do: ${escapeHtml(item.reason)}</div>
+                  <div style="font-size: 11px; color: #94a3b8; margin-top: 2px;">Lý do: ${escapeHtml(item.reason)}</div>
                 </div>
               </div>
             `).join('');
@@ -2543,7 +2694,7 @@ std::string WebServer::buildHtmlResponse() {
           summaryBox.style.background = 'rgba(239,68,68,0.15)';
           summaryBox.style.border = '1px solid #ef4444';
           summaryBox.style.color = '#f87171';
-          summaryBox.innerHTML = '❌ Lỗi khi kiểm tra thư mục ROM trên thẻ nhớ.';
+          summaryBox.innerHTML = 'Lỗi khi kiểm tra thư mục trên thẻ.';
         }
       }
     }
@@ -2552,9 +2703,9 @@ std::string WebServer::buildHtmlResponse() {
       const fixBtn = document.getElementById('btn-doctor-fix');
       if (fixBtn) {
         fixBtn.disabled = true;
-        fixBtn.innerHTML = '⏳ Đang tự động chuyển file & Boxart...';
+        fixBtn.innerHTML = 'Đang chuyển file và ảnh bìa...';
       }
-      showToast('⏳ Bác sĩ ROM đang điều chuyển các game về đúng Emulator...');
+      showToast('Đang chuyển game về đúng thư mục...');
 
       try {
         const res = await fetch('/api/fix_misplaced_roms', { method: 'POST' });
@@ -2567,7 +2718,7 @@ std::string WebServer::buildHtmlResponse() {
           summaryBox.style.background = 'rgba(16,185,129,0.2)';
           summaryBox.style.border = '1px solid #10b981';
           summaryBox.style.color = '#34d399';
-          summaryBox.innerHTML = `<b>🎉 THÀNH CÔNG!</b> Đã tự động dời ${successCount} ROM về đúng thư mục Emulator trên thẻ nhớ. Toàn bộ game và Boxart đã sẵn sàng để bạn chơi ngay trên TrimUI!`;
+          summaryBox.innerHTML = `<b>Xong!</b> Đã chuyển ${successCount} ROM về đúng thư mục. Chơi được ngay trên máy.`;
         }
 
         const itemsWrap = document.getElementById('doctor-items-wrap');
@@ -2578,17 +2729,17 @@ std::string WebServer::buildHtmlResponse() {
                 <b>${escapeHtml(item.filename)}</b>
                 <div style="font-size: 11px; color: #34d399;">${escapeHtml(item.status)}</div>
               </div>
-              <span style="font-size: 16px;">✅</span>
+              <span style="font-size: 14px; color: #34d399; font-weight: 700;">Xong</span>
             </div>
           `).join('');
         }
 
         if (fixBtn) fixBtn.style.display = 'none';
-        showToast(`🎉 Đã sửa xong ${successCount} ROM đặt nhầm!`);
+        showToast(`Đã sửa ${successCount} ROM đặt sai thư mục!`);
         loadGames();
         loadStorageInfo();
       } catch (e) {
-        showToast('❌ Lỗi khi thực hiện dời ROM.');
+        showToast('Lỗi khi chuyển ROM.');
         if (fixBtn) {
           fixBtn.disabled = false;
           fixBtn.innerHTML = 'Thử lại';
@@ -2602,7 +2753,7 @@ std::string WebServer::buildHtmlResponse() {
       if (statusDiv) {
         statusDiv.style.display = 'block';
         statusDiv.style.color = '#38bdf8';
-        statusDiv.innerHTML = `⏳ Đang tải lên và phân tích hệ máy cho <b>${escapeHtml(file.name)}</b> (${(file.size / 1024 / 1024).toFixed(2)} MB)...`;
+        statusDiv.innerHTML = `Đang tải lên và nhận diện hệ máy cho <b>${escapeHtml(file.name)}</b> (${(file.size / 1024 / 1024).toFixed(2)} MB)...`;
       }
 
       try {
@@ -2614,9 +2765,9 @@ std::string WebServer::buildHtmlResponse() {
         if (data.success) {
           if (statusDiv) {
             statusDiv.style.color = '#34d399';
-            statusDiv.innerHTML = `✅ ${escapeHtml(data.message || 'Đã phân loại thành công!')}`;
+            statusDiv.innerHTML = `${escapeHtml(data.message || 'Đã phân loại xong!')}`;
           }
-          showToast(`🎉 Nhận diện thành công: ${data.system_name || 'ROM'}! Đã đưa vào Emulator.`);
+          showToast(`Đã nhận diện: ${data.system_name || 'ROM'}. Đã đặt vào đúng thư mục.`);
           setTimeout(() => {
             runDoctorAudit();
             loadGames();
@@ -2625,19 +2776,19 @@ std::string WebServer::buildHtmlResponse() {
         } else {
           if (statusDiv) {
             statusDiv.style.color = '#f87171';
-            statusDiv.innerHTML = `❌ ${escapeHtml(data.error || 'Lỗi xử lý file')}`;
+            statusDiv.innerHTML = `${escapeHtml(data.error || 'Lỗi xử lý file')}`;
           }
         }
       } catch (e) {
         if (statusDiv) {
           statusDiv.style.color = '#f87171';
-          statusDiv.innerHTML = '❌ Lỗi đường truyền khi tải file lên máy TrimUI.';
+          statusDiv.innerHTML = 'Lỗi khi tải file lên máy.';
         }
       }
     }
 
     async function deleteRom(gameId, title) {
-      if (!confirm(`Bạn có chắc chắn muốn xóa ROM "${title}" khỏi thẻ nhớ TrimUI? (File sẽ được giải phóng khỏi thẻ, bạn vẫn có thể tải lại sau)`)) {
+      if (!confirm(`Xóa "${title}" khỏi thẻ? Sau này vẫn tải lại được.`)) {
         return;
       }
       try {
@@ -2647,7 +2798,7 @@ std::string WebServer::buildHtmlResponse() {
           body: `game_id=${gameId}`
         });
         const data = await res.json();
-        showToast(data.message || 'Đã xóa ROM khỏi thẻ nhớ.');
+        showToast(data.message || 'Đã xóa khỏi thẻ nhớ.');
         loadGames();
         loadStorageInfo();
         loadSystems();
@@ -2657,7 +2808,7 @@ std::string WebServer::buildHtmlResponse() {
     }
 
     async function scrapeBoxart(gameId) {
-      showToast('⏳ Đang tìm kiếm ảnh bìa và thông tin trên ScreenScraper & Libretro...');
+      showToast('Đang tìm bìa và thông tin...');
       try {
         const res = await fetch('/api/scrape_cover', {
           method: 'POST',
@@ -2666,38 +2817,38 @@ std::string WebServer::buildHtmlResponse() {
         });
         const data = await res.json();
         if (data.success) {
-          showToast(data.message || 'Cập nhật ảnh bìa & thông tin hoàn tất!');
+          showToast(data.message || 'Đã cập nhật bìa và thông tin!');
           loadGames();
         } else {
-          showToast('⚠️ ' + (data.message || 'Không tìm thấy dữ liệu.'));
+          showToast(data.message || 'Không tìm thấy dữ liệu.');
         }
       } catch (e) {
-        showToast('❌ Lỗi cào thông tin game.');
+        showToast('Lỗi khi lấy thông tin game.');
       }
     }
 
     let isBatchScraping = false;
     async function batchScrapeCurrentPage() {
       if (isBatchScraping) {
-        showToast('⚠️ Đang trong quá trình cào thông tin, vui lòng đợi...');
+        showToast('Đang lấy thông tin, chờ một lát...');
         return;
       }
       if (!lastLoadedGames || !lastLoadedGames.games || lastLoadedGames.games.length === 0) {
-        showToast('Không có game nào ở trang hiện tại để cào.');
+        showToast('Trang này không có game nào để lấy bìa.');
         return;
       }
       const gamesToScrape = lastLoadedGames.games;
-      if (!confirm(`Bạn có muốn tự động cào ảnh bìa và thông tin cho tất cả ${gamesToScrape.length} game trong trang này?`)) return;
+      if (!confirm(`Lấy ảnh bìa và thông tin cho tất cả ${gamesToScrape.length} game ở trang này?`)) return;
 
       isBatchScraping = true;
       const btn = document.getElementById('btn-batch-scrape');
-      const origText = btn ? btn.innerHTML : '🎨 Cào toàn bộ trang';
-      if (btn) { btn.disabled = true; btn.innerHTML = '⏳ Đang cào...'; }
+      const origText = btn ? btn.innerHTML : 'Lấy bìa trang này';
+      if (btn) { btn.disabled = true; btn.innerHTML = 'Đang lấy...'; }
 
       let successCount = 0;
       for (let i = 0; i < gamesToScrape.length; i++) {
         const g = gamesToScrape[i];
-        showToast(`⏳ Đang cào (${i + 1}/${gamesToScrape.length}): ${g.title.substring(0, 20)}...`);
+        showToast(`Đang lấy bìa (${i + 1}/${gamesToScrape.length}): ${g.title.substring(0, 20)}...`);
         try {
           const res = await fetch('/api/scrape_cover', {
             method: 'POST',
@@ -2709,7 +2860,7 @@ std::string WebServer::buildHtmlResponse() {
         } catch (e) {}
       }
 
-      showToast(`✅ Đã hoàn tất cào thông tin cho ${successCount}/${gamesToScrape.length} game!`);
+      showToast(`Đã lấy thông tin cho ${successCount}/${gamesToScrape.length} game!`);
       if (btn) { btn.disabled = false; btn.innerHTML = origText; }
       isBatchScraping = false;
       loadGames();
@@ -2717,7 +2868,7 @@ std::string WebServer::buildHtmlResponse() {
 
     // Auto-scrape all SD Card ROMs in background
     async function startAutoScrapeSd(force = false) {
-      if (!confirm('Tự động cào ảnh bìa và thông tin cốt truyện cho các ROM trên thẻ nhớ (chạy ngầm)?\n\nNguồn dữ liệu: ScreenScraper.fr & Libretro Thumbnails chính thức (Không dùng Wikipedia).')) {
+      if (!confirm('Tự lấy ảnh bìa và thông tin cho mọi game trên thẻ (chạy ngầm)?\n\nNguồn: ScreenScraper.fr và Libretro Thumbnails.')) {
         return;
       }
       try {
@@ -2727,10 +2878,10 @@ std::string WebServer::buildHtmlResponse() {
           body: `force=${force ? '1' : '0'}`
         });
         const data = await res.json();
-        showToast(data.message || 'Đã khởi chạy tiến trình cào tự động!');
+        showToast(data.message || 'Đã bắt đầu lấy bìa tự động!');
         startScrapePolling();
       } catch (e) {
-        showToast('❌ Lỗi khi khởi chạy cào tự động.');
+        showToast('Lỗi khi bắt đầu lấy bìa tự động.');
       }
     }
 
@@ -2761,19 +2912,19 @@ std::string WebServer::buildHtmlResponse() {
         const countEl = document.getElementById('scrape-float-count');
         const pctEl = document.getElementById('scrape-float-pct');
 
-        if (titleEl) titleEl.textContent = data.current_game || 'ROM Game';
+        if (titleEl) titleEl.textContent = data.current_game || 'Game';
         if (sysEl) sysEl.textContent = `Hệ máy: ${data.current_sys || 'SYS'} (${data.scraped}/${data.total} game)`;
         if (fillEl) fillEl.style.width = (data.progress_pct || 0) + '%';
-        if (countEl) countEl.textContent = `Đã cào: ${data.scraped} / ${data.total} (${data.success} thành công)`;
+        if (countEl) countEl.textContent = `Đã lấy: ${data.scraped} / ${data.total} (${data.success} xong)`;
         if (pctEl) pctEl.textContent = `${data.progress_pct || 0}%`;
       } catch (e) {}
     }
 
     async function cancelAutoScrape() {
-      if (!confirm('Bạn có chắc chắn muốn hủy quá trình cào tự động ROM trên thẻ?')) return;
+      if (!confirm('Hủy việc lấy bìa tự động trên thẻ?')) return;
       try {
         await fetch('/api/cancel_auto_scrape', { method: 'POST' });
-        showToast('Đã gửi yêu cầu hủy cào tự động.');
+        showToast('Đã yêu cầu hủy.');
         const card = document.getElementById('active-scrape-floating');
         if (card) card.style.display = 'none';
         if (scrapePollTimer) {
@@ -2816,14 +2967,14 @@ std::string WebServer::buildHtmlResponse() {
           body: params.toString()
         });
         const data = await res.json();
-        showToast(data.message || 'Đã lưu cấu hình ScreenScraper.fr');
+        showToast(data.message || 'Đã lưu tài khoản ScreenScraper');
         const st = document.getElementById('ss-test-status');
         if (st) {
           st.style.display = 'block';
-          st.innerHTML = '<span style="color:var(--green);">✅ Đã lưu cấu hình. Hãy bấm "Kiểm tra kết nối" để xác thực tài khoản.</span>';
+          st.innerHTML = '<span style="color:var(--green);">Đã lưu. Bấm "Kiểm tra kết nối" để thử tài khoản.</span>';
         }
       } catch (e) {
-        showToast('❌ Lỗi lưu cấu hình.');
+        showToast('Lỗi khi lưu.');
       }
     }
 
@@ -2836,7 +2987,7 @@ std::string WebServer::buildHtmlResponse() {
       const st = document.getElementById('ss-test-status');
       if (st) {
         st.style.display = 'block';
-        st.innerHTML = '<span style="color:var(--accent);">⏳ Đang kết nối đến API ScreenScraper.fr...</span>';
+        st.innerHTML = '<span style="color:var(--accent);">Đang kết nối ScreenScraper.fr...</span>';
       }
 
       const params = new URLSearchParams();
@@ -2854,21 +3005,21 @@ std::string WebServer::buildHtmlResponse() {
         const data = await res.json();
         if (st) {
           if (data.success) {
-            st.innerHTML = `<span style="color:var(--green);">🟢 ${escapeHtml(data.message)}</span>`;
+            st.innerHTML = `<span style="color:var(--green);">${escapeHtml(data.message)}</span>`;
           } else {
-            st.innerHTML = `<span style="color:var(--red);">🔴 ${escapeHtml(data.message)}</span>`;
+            st.innerHTML = `<span style="color:var(--red);">${escapeHtml(data.message)}</span>`;
           }
         }
       } catch (e) {
-        if (st) st.innerHTML = '<span style="color:var(--red);">🔴 Lỗi kết nối kiểm tra.</span>';
+        if (st) st.innerHTML = '<span style="color:var(--red);">Lỗi kết nối.</span>';
       }
     }
 
     async function cancelActiveDownload() {
-      if (!confirm('Bạn có chắc chắn muốn hủy lượt tải game hiện tại?')) return;
+      if (!confirm('Hủy lượt tải hiện tại?')) return;
       try {
         await fetch('/api/cancel_download', { method: 'POST' });
-        showToast('Đã gửi yêu cầu hủy tải.');
+        showToast('Đã yêu cầu hủy tải.');
         updateDownloadQueueUI();
         loadGames();
       } catch (e) {}
@@ -2889,10 +3040,10 @@ std::string WebServer::buildHtmlResponse() {
     }
 
     async function clearAllQueue() {
-      if (!confirm('Xóa sạch toàn bộ các game đang xếp hàng tải về?')) return;
+      if (!confirm('Xóa hết game đang chờ tải?')) return;
       try {
         await fetch('/api/clear_queue', { method: 'POST' });
-        showToast('Đã xóa sạch hàng đợi.');
+        showToast('Đã xóa hết hàng đợi.');
         updateDownloadQueueUI();
         loadGames();
       } catch (e) {}
@@ -2901,13 +3052,13 @@ std::string WebServer::buildHtmlResponse() {
     // Google Drive Personal Backup Actions
     async function uploadGameToDrive(gameId, title) {
       if (!canUploadGlobal) {
-        if (confirm('⚠️ Bạn chưa cấp Token Google Drive cá nhân để sao lưu!\n\nBạn có muốn chuyển sang Tab "Cài đặt Cloud" để nhập Refresh Token hoặc Access Token theo hướng dẫn không?')) {
+        if (confirm('Bạn chưa đăng nhập Google để sao lưu. Mở mục Đồng bộ để đăng nhập?')) {
           switchTab('tab-storage');
         }
         return;
       }
 
-      if (!confirm(`Sao lưu ROM "${title}" từ thẻ nhớ TrimUI lên thư mục /RomCloud_Backup trên Google Drive cá nhân của bạn?`)) {
+      if (!confirm(`Sao lưu "${title}" lên Drive của bạn (thư mục Roms)?`)) {
         return;
       }
 
@@ -2919,25 +3070,25 @@ std::string WebServer::buildHtmlResponse() {
         });
         const data = await res.json();
         if (data.success) {
-          showToast(data.message || 'Đã bắt đầu sao lưu ROM lên Google Drive!');
+          showToast(data.message || 'Đã bắt đầu sao lưu!');
           startUploadPolling();
         } else {
-          showToast('⚠️ ' + (data.message || 'Không thể bắt đầu sao lưu.'));
+          showToast(data.message || 'Không thể bắt đầu sao lưu.');
         }
       } catch (e) {
-        showToast('❌ Lỗi khi gửi yêu cầu sao lưu.');
+        showToast('Lỗi khi gửi yêu cầu sao lưu.');
       }
     }
 
     async function uploadAllGamesToDrive() {
       if (!canUploadGlobal) {
-        if (confirm('⚠️ Bạn chưa cài đặt Token Google Drive cá nhân để cấp quyền sao lưu!\n\nBạn có muốn chuyển sang Tab "Cài đặt Cloud" để nhập Refresh Token hoặc Access Token theo hướng dẫn không?')) {
+        if (confirm('Bạn chưa đăng nhập Google để sao lưu. Mở mục Đồng bộ để đăng nhập?')) {
           switchTab('tab-storage');
         }
         return;
       }
 
-      if (!confirm('Bạn có muốn sao lưu TOÀN BỘ game hiện có trên thẻ nhớ TrimUI lên thư mục /RomCloud_Backup trên Google Drive cá nhân của bạn?\n\nQuá trình sao lưu sẽ chạy ngầm lần lượt từng game.')) {
+      if (!confirm('Sao lưu toàn bộ game trên thẻ lên Drive của bạn (thư mục Roms)? Việc này chạy ngầm, lần lượt từng game.')) {
         return;
       }
 
@@ -2945,13 +3096,13 @@ std::string WebServer::buildHtmlResponse() {
         const res = await fetch('/api/upload_all', { method: 'POST' });
         const data = await res.json();
         if (data.success) {
-          showToast(data.message || 'Đã bắt đầu sao lưu toàn bộ thẻ nhớ lên Google Drive!');
+          showToast(data.message || 'Đã bắt đầu sao lưu cả thẻ!');
           startUploadPolling();
         } else {
-          showToast('⚠️ ' + (data.message || 'Không thể bắt đầu sao lưu.'));
+          showToast(data.message || 'Không thể bắt đầu sao lưu.');
         }
       } catch (e) {
-        showToast('❌ Lỗi khi gửi yêu cầu sao lưu toàn bộ.');
+        showToast('Lỗi khi gửi yêu cầu sao lưu.');
       }
     }
 
@@ -2966,11 +3117,24 @@ std::string WebServer::buildHtmlResponse() {
         const res = await fetch('/api/upload_status');
         const data = await res.json();
         const floatCard = document.getElementById('active-upload-floating');
-        if (!data.in_progress) {
+        if (!data.is_uploading) {
           if (floatCard) floatCard.style.display = 'none';
           if (uploadPollTimer) {
             clearInterval(uploadPollTimer);
             uploadPollTimer = null;
+            if (data.state === 'FAILED') {
+              showToast(data.error || 'Sao lưu thất bại.', 'error');
+            } else if (data.state === 'COMPLETED') {
+              if (data.games_failed > 0) {
+                showToast(`Sao lưu xong: ${data.games_uploaded} thành công, ${data.games_failed} thất bại.${data.error ? ' ' + data.error : ''}`, 'error');
+              } else if (data.total_games === 0) {
+                showToast(data.error || 'Không có game nào để sao lưu.', 'error');
+              } else {
+                showToast(`Sao lưu xong: ${data.games_uploaded} game đã lên Drive.`);
+              }
+            } else if (data.state === 'CANCELLED') {
+              showToast('Đã hủy sao lưu.');
+            }
           }
           return;
         }
@@ -2983,20 +3147,22 @@ std::string WebServer::buildHtmlResponse() {
         const pctEl = document.getElementById('upload-float-percent');
         const bytesEl = document.getElementById('upload-float-bytes');
 
-        if (titleEl) titleEl.textContent = data.current_game || 'Game ROM';
-        if (fileEl) fileEl.textContent = `${data.current_file || ''} (${data.uploaded_count}/${data.total_games} game)`;
-        if (fillEl) fillEl.style.width = (data.progress_pct || 0) + '%';
-        if (speedEl) speedEl.textContent = `${data.speed_kbps || 0} KB/s`;
-        if (pctEl) pctEl.textContent = `${data.progress_pct || 0}%`;
-        if (bytesEl) bytesEl.textContent = `${data.uploaded_mb || '0'} / ${data.total_mb || '0'} MB`;
+        const pct = Math.round(data.progress_pct || 0);
+        const fmtMB = (b) => ((b || 0) / 1048576).toFixed(1) + ' MB';
+        if (titleEl) titleEl.textContent = data.game_title || 'Game';
+        if (fileEl) fileEl.textContent = `${data.filename || ''} (${data.current_index}/${data.total_games} game)`;
+        if (fillEl) fillEl.style.width = pct + '%';
+        if (speedEl) speedEl.textContent = `${Math.round(data.speed_kbps || 0)} KB/s`;
+        if (pctEl) pctEl.textContent = `${pct}%`;
+        if (bytesEl) bytesEl.textContent = `${fmtMB(data.bytes_uploaded)} / ${fmtMB(data.total_bytes)}`;
       } catch (e) {}
     }
 
     async function cancelActiveUpload() {
-      if (!confirm('Bạn có chắc chắn muốn hủy quá trình sao lưu hiện tại?')) return;
+      if (!confirm('Hủy sao lưu đang chạy?')) return;
       try {
         await fetch('/api/cancel_upload', { method: 'POST' });
-        showToast('Đã gửi yêu cầu hủy sao lưu.');
+        showToast('Đã yêu cầu hủy sao lưu.');
         const floatCard = document.getElementById('active-upload-floating');
         if (floatCard) floatCard.style.display = 'none';
         if (uploadPollTimer) {
@@ -3009,17 +3175,17 @@ std::string WebServer::buildHtmlResponse() {
     async function triggerSync() {
       const btn = document.getElementById('btn-trigger-sync');
       btn.disabled = true;
-      btn.textContent = '⏳ Đang quét Google Drive...';
+      btn.textContent = 'Đang quét Drive...';
       const box = document.getElementById('sync-status-box');
       box.style.display = 'block';
 
       try {
         await fetch('/api/trigger_sync', { method: 'POST' });
-        showToast('Đã bắt đầu đồng bộ kho game Google Drive.');
+        showToast('Đã bắt đầu đồng bộ.');
         pollSyncProgress();
       } catch (e) {
         btn.disabled = false;
-        btn.textContent = '🔄 Quét & Đồng bộ lại ngay';
+        btn.textContent = 'Quét và đồng bộ ngay';
       }
     }
 
@@ -3030,12 +3196,12 @@ std::string WebServer::buildHtmlResponse() {
           const data = await res.json();
           const txt = document.getElementById('sync-status-txt');
           if (data.is_syncing) {
-            txt.textContent = `Trạng thái: ${data.status} | Đang quét: ${data.current_platform || '...'} | Đã tìm thấy: ${data.games_found || 0} game`;
+            txt.textContent = `${data.status} · Đang quét: ${data.current_platform || '...'} · Tìm thấy: ${data.games_found || 0} game`;
           } else {
             clearInterval(timer);
             document.getElementById('btn-trigger-sync').disabled = false;
-            document.getElementById('btn-trigger-sync').textContent = '🔄 Quét & Đồng bộ lại ngay';
-            txt.textContent = `Đồng bộ hoàn tất! Tổng game tìm thấy: ${data.games_found || 0}`;
+            document.getElementById('btn-trigger-sync').textContent = 'Quét và đồng bộ ngay';
+            txt.textContent = `Đồng bộ xong. Tìm thấy: ${data.games_found || 0} game.`;
             loadSystems();
             loadGames();
             loadStorageInfo();
@@ -3072,22 +3238,22 @@ std::string WebServer::buildHtmlResponse() {
         const sInput = document.getElementById('rom-search');
 
         if (data.is_linked) {
-          authPill.innerHTML = `Drive: <b style="color:var(--green);">🟢 Đã kết nối</b>`;
+          authPill.innerHTML = `Drive: <b style="color:var(--green);">Đã kết nối</b>`;
           btnHeadLogout.style.display = 'inline-flex';
           unlinkedBanner.style.display = 'none';
-          driveConnStatus.innerHTML = `Trạng thái: <b style="color:var(--green);">🟢 Đã liên kết</b> (${data.user_email || 'Google Drive'})`;
+          driveConnStatus.innerHTML = `Trạng thái: <b style="color:var(--green);">Đã liên kết</b> (${data.user_email || 'Google Drive'})`;
           btnTabLogout.style.display = 'inline-flex';
           btnTriggerSync.disabled = false;
           if (driveInput && data.drive_url) driveInput.value = data.drive_url;
           if (sInput) {
             sInput.disabled = false;
-            sInput.placeholder = '🔍 Nhập tên game hoặc tên file ROM để tìm kiếm ngay...';
+            sInput.placeholder = 'Tìm theo tên game hoặc tên file...';
           }
         } else {
-          authPill.innerHTML = `Drive: <b style="color:var(--text-dim);">⚪ Đã đăng xuất</b>`;
+          authPill.innerHTML = `Drive: <b style="color:var(--text-dim);">Chưa kết nối</b>`;
           btnHeadLogout.style.display = 'none';
           unlinkedBanner.style.display = 'block';
-          driveConnStatus.innerHTML = `Trạng thái: <b style="color:var(--yellow);">⚪ Chưa liên kết Google Drive (Đã đăng xuất)</b>`;
+          driveConnStatus.innerHTML = `Trạng thái: <b style="color:var(--yellow);">Chưa liên kết Google Drive</b>`;
           btnTabLogout.style.display = 'none';
           btnTriggerSync.disabled = true;
           document.getElementById('head-local-count').textContent = '0';
@@ -3096,19 +3262,22 @@ std::string WebServer::buildHtmlResponse() {
           if (sInput) {
             sInput.disabled = true;
             sInput.value = '';
-            sInput.placeholder = '🔒 Chưa kết nối Google Drive. Vui lòng kết nối để hiển thị ROM...';
+            sInput.placeholder = 'Chưa kết nối Google Drive...';
           }
         }
 
         const backupBadge = document.getElementById('backup-perm-badge');
         const btnClearToken = document.getElementById('btn-clear-personal-token');
+        const btnLoginStart = document.getElementById('btn-google-login-start');
         if (backupBadge) {
           if (data.can_upload) {
-            backupBadge.innerHTML = `<span style="color:var(--green);">🟢 Đã kích hoạt</span> (${escapeHtml(data.user_email || 'Google Drive cá nhân')} - Sao lưu vào thư mục /RomCloud_Backup)`;
+            backupBadge.innerHTML = `<span style="color:var(--green);">Đã bật</span> (${escapeHtml(data.user_email || 'Drive của bạn')} · thư mục Roms)`;
             if (btnClearToken) btnClearToken.style.display = 'inline-block';
+            if (btnLoginStart) btnLoginStart.innerHTML = 'Đổi tài khoản Google';
           } else {
-            backupBadge.innerHTML = `<span style="color:var(--yellow);">⚪ Chưa kích hoạt</span> (Chế độ hiện tại chỉ cho phép tải về)`;
+            backupBadge.innerHTML = `<span style="color:var(--yellow);">Chưa bật</span> (hiện chỉ tải về được)`;
             if (btnClearToken) btnClearToken.style.display = 'none';
+            if (btnLoginStart) btnLoginStart.innerHTML = 'Đăng nhập Google';
           }
         }
 
@@ -3117,18 +3286,18 @@ std::string WebServer::buildHtmlResponse() {
         // Update Architecture Banner cards in Tab 1
         const archPublicUrl = document.getElementById('arch-public-url');
         if (archPublicUrl) {
-          archPublicUrl.textContent = data.is_linked ? (data.drive_url || 'Đã liên kết kho ROM') : 'Chưa kết nối kho ROM';
+          archPublicUrl.textContent = data.is_linked ? (data.drive_url || 'Đã liên kết') : 'Chưa kết nối';
         }
         const archLocalStatus = document.getElementById('arch-local-status');
         if (archLocalStatus) {
-          archLocalStatus.innerHTML = `${data.total_local || 0} ROMs trên thẻ • <span style="color:var(--text-dim);">${data.avail_str || '--'} trống</span>`;
+          archLocalStatus.innerHTML = `${data.total_local || 0} game trên thẻ • <span style="color:var(--text-dim);">${data.avail_str || '--'} trống</span>`;
         }
         const archBackupBadge = document.getElementById('arch-backup-badge');
         if (archBackupBadge) {
           if (data.can_upload) {
-            archBackupBadge.innerHTML = `<span style="color:var(--green);">🟢 Sẵn sàng sao lưu</span> (${escapeHtml(data.user_email || 'Drive cá nhân')})`;
+            archBackupBadge.innerHTML = `<span style="color:var(--green);">Sẵn sàng sao lưu</span> (${escapeHtml(data.user_email || 'Drive của bạn')})`;
           } else {
-            archBackupBadge.innerHTML = `<span style="color:var(--yellow);">⚪ Chưa cấp Token sao lưu</span>`;
+            archBackupBadge.innerHTML = `<span style="color:var(--yellow);">Chưa đăng nhập</span>`;
           }
         }
 
@@ -3152,7 +3321,7 @@ std::string WebServer::buildHtmlResponse() {
       const input = document.getElementById('input-drive-url');
       const val = (input ? input.value : '').trim();
       if (!val) {
-        showToast('Vui lòng dán link thư mục Google Drive trước khi kết nối.');
+        showToast('Hãy dán link thư mục Drive trước.');
         return;
       }
       try {
@@ -3162,7 +3331,7 @@ std::string WebServer::buildHtmlResponse() {
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
           body: body
         });
-        showToast('Đã lưu kết nối Google Drive! Đang bắt đầu quét...');
+        showToast('Đã lưu. Đang quét...');
         await loadStorageInfo();
         triggerSync();
       } catch (err) {
@@ -3177,17 +3346,17 @@ std::string WebServer::buildHtmlResponse() {
       const val = (input ? input.value : '').trim();
 
       if (!val) {
-        showToast('⚠️ Vui lòng dán Access Token hoặc Refresh Token vào ô.');
+        showToast('Hãy dán Access Token hoặc Refresh Token.');
         if (input) input.focus();
         return;
       }
 
-      const origText = btn ? btn.innerHTML : '💾 Kích hoạt Sao lưu';
+      const origText = btn ? btn.innerHTML : 'Lưu token';
       if (btn) {
         btn.disabled = true;
-        btn.innerHTML = '⏳ Đang xác thực với Google...';
+        btn.innerHTML = 'Đang kiểm tra...';
       }
-      if (statusBox) statusBox.innerHTML = '<span style="color:var(--accent);">⏳ Đang kiểm tra token với Google Drive API...</span>';
+      if (statusBox) statusBox.innerHTML = '<span style="color:var(--accent);">Đang kiểm tra token...</span>';
 
       try {
         const body = 'token=' + encodeURIComponent(val);
@@ -3198,17 +3367,17 @@ std::string WebServer::buildHtmlResponse() {
         });
         const data = await res.json();
         if (data.success) {
-          showToast(data.message || 'Kích hoạt sao lưu thành công!');
-          if (statusBox) statusBox.innerHTML = `<span style="color:var(--green);">✅ ${escapeHtml(data.message || 'Đã kích hoạt sao lưu thành công!')}</span>`;
+          showToast(data.message || 'Đã bật sao lưu!');
+          if (statusBox) statusBox.innerHTML = `<span style="color:var(--green);">${escapeHtml(data.message || 'Đã bật sao lưu!')}</span>`;
           if (input) input.value = '';
           await loadStorageInfo();
         } else {
-          showToast('❌ ' + (data.error || 'Xác thực token thất bại.'));
-          if (statusBox) statusBox.innerHTML = `<span style="color:var(--red);">❌ ${escapeHtml(data.error || 'Xác thực token thất bại.')}</span>`;
+          showToast(data.error || 'Token không đúng.');
+          if (statusBox) statusBox.innerHTML = `<span style="color:var(--red);">${escapeHtml(data.error || 'Token không đúng.')}</span>`;
         }
       } catch (e) {
-        showToast('❌ Lỗi kết nối đến máy chủ RomCloud.');
-        if (statusBox) statusBox.innerHTML = '<span style="color:var(--red);">❌ Lỗi kết nối máy chủ RomCloud.</span>';
+        showToast('Lỗi kết nối máy chủ.');
+        if (statusBox) statusBox.innerHTML = '<span style="color:var(--red);">Lỗi kết nối máy chủ.</span>';
       } finally {
         if (btn) {
           btn.disabled = false;
@@ -3217,8 +3386,81 @@ std::string WebServer::buildHtmlResponse() {
       }
     }
 
+    let googlePollInterval = null;
+
+    async function startGoogleDeviceLogin() {
+      const btn = document.getElementById('btn-google-login-start');
+      const promptBox = document.getElementById('google-device-prompt');
+      const origText = btn ? btn.innerHTML : '';
+      if (btn) { btn.disabled = true; btn.innerHTML = 'Đang lấy mã...'; }
+
+      try {
+        const res = await fetch('/api/device_flow_start', { method: 'POST' });
+        const data = await res.json();
+        if (data.success && data.user_code) {
+          if (promptBox) promptBox.style.display = 'block';
+          const codeDisp = document.getElementById('google-user-code-display');
+          if (codeDisp) codeDisp.textContent = data.user_code;
+          const linkEl = document.getElementById('google-verify-link');
+          if (linkEl && data.verification_url) linkEl.href = data.verification_url;
+
+          showToast('Đã có mã. Mở trang Google và nhập mã nhé.');
+
+          // Bắt đầu polling kiểm tra trạng thái
+          if (googlePollInterval) clearInterval(googlePollInterval);
+          googlePollInterval = setInterval(pollGoogleDeviceStatus, (data.interval || 5) * 1000);
+        } else {
+          showToast('Không lấy được mã đăng nhập: ' + (data.error || 'lỗi không rõ'));
+        }
+      } catch (err) {
+        showToast('Lỗi kết nối máy chủ.');
+      } finally {
+        if (btn) { btn.disabled = false; btn.innerHTML = origText; }
+      }
+    }
+
+    async function pollGoogleDeviceStatus() {
+      try {
+        const res = await fetch('/api/device_flow_status');
+        const data = await res.json();
+        if (data.is_linked && data.can_upload) {
+          if (googlePollInterval) { clearInterval(googlePollInterval); googlePollInterval = null; }
+          const promptBox = document.getElementById('google-device-prompt');
+          if (promptBox) promptBox.style.display = 'none';
+          showToast('Đã đăng nhập Google ' + (data.email || '') + '. Sao lưu đã bật.');
+          await loadStorageInfo();
+        } else if (data.status === 'ERROR') {
+          if (googlePollInterval) { clearInterval(googlePollInterval); googlePollInterval = null; }
+          showToast(data.error || 'Lỗi xác thực Google.');
+        }
+      } catch (err) {
+        // bỏ qua lỗi mạng tạm thời trong lúc poll
+      }
+    }
+
+    async function cancelGoogleDeviceLogin() {
+      if (googlePollInterval) { clearInterval(googlePollInterval); googlePollInterval = null; }
+      const promptBox = document.getElementById('google-device-prompt');
+      if (promptBox) promptBox.style.display = 'none';
+      try {
+        await fetch('/api/device_flow_cancel', { method: 'POST' });
+      } catch(e) {}
+      showToast('Đã hủy phiên đăng nhập Google.');
+    }
+
+    function copyUserCode() {
+      const codeDisp = document.getElementById('google-user-code-display');
+      if (codeDisp && codeDisp.textContent) {
+        navigator.clipboard.writeText(codeDisp.textContent.trim()).then(() => {
+          showToast('Đã chép mã: ' + codeDisp.textContent.trim());
+        }).catch(() => {
+          showToast('Mã xác nhận: ' + codeDisp.textContent.trim());
+        });
+      }
+    }
+
     async function clearPersonalToken() {
-      if (!confirm('Bạn có chắc muốn hủy quyền sao lưu cá nhân? (Hệ thống sẽ trở về chế độ chỉ tải game về từ kho công khai)')) return;
+      if (!confirm('Hủy quyền sao lưu? Sau đó chỉ tải game về được.')) return;
       try {
         const res = await fetch('/api/set_personal_auth', {
           method: 'POST',
@@ -3226,7 +3468,7 @@ std::string WebServer::buildHtmlResponse() {
           body: 'action=clear'
         });
         const data = await res.json();
-        showToast(data.message || 'Đã hủy quyền sao lưu cá nhân.');
+        showToast(data.message || 'Đã hủy quyền sao lưu.');
         const statusBox = document.getElementById('personal-token-status');
         if (statusBox) statusBox.innerHTML = '';
         await loadStorageInfo();
@@ -3236,13 +3478,13 @@ std::string WebServer::buildHtmlResponse() {
     }
 
     async function logoutGoogleDrive() {
-      if (!confirm("Bạn có chắc chắn muốn ĐĂNG XUẤT khỏi Google Drive?\\n\\n- Các game đã tải về thẻ nhớ vẫn được giữ nguyên 100%.\\n- Danh mục các game cloud chưa tải sẽ được dọn sạch khỏi danh sách.")) {
+      if (!confirm("Đăng xuất Google Drive?\\n\\n- Game đã tải về thẻ vẫn còn nguyên.\\n- Danh sách game trên Drive sẽ ẩn đi.")) {
         return;
       }
       try {
         const res = await fetch('/api/logout', { method: 'POST' });
         const data = await res.json();
-        showToast(data.message || 'Đã đăng xuất khỏi Google Drive.');
+        showToast(data.message || 'Đã đăng xuất.');
         const driveInput = document.getElementById('input-drive-url');
         if (driveInput) driveInput.value = '';
         await loadStorageInfo();
@@ -3285,7 +3527,7 @@ std::string WebServer::buildHtmlResponse() {
         // Queue List
         const qContainer = document.getElementById('queue-list-container');
         if (!data.queue || data.queue.length === 0) {
-          qContainer.innerHTML = `<p style="color: var(--text-dim); text-align: center; padding: 20px;">Hàng đợi tải về hiện đang trống.</p>`;
+          qContainer.innerHTML = `<p style="color: var(--text-dim); text-align: center; padding: 20px;">Chưa có game nào đang chờ tải.</p>`;
         } else {
           let qHtml = '<table class="game-table"><thead><tr><th>#</th><th>Hệ máy</th><th>Tên game</th><th>Dung lượng</th><th style="text-align:right;">Thao tác</th></tr></thead><tbody>';
           data.queue.forEach((item, idx) => {
@@ -3295,7 +3537,7 @@ std::string WebServer::buildHtmlResponse() {
                 <td><span class="sys-tag sys-${item.system}">${item.system}</span></td>
                 <td><b>${escapeHtml(item.title)}</b></td>
                 <td>${item.size_str}</td>
-                <td style="text-align:right;"><button class="btn btn-secondary" onclick="removeFromQueue(${item.game_id})">✕ Bỏ</button></td>
+                <td style="text-align:right;"><button class="btn btn-secondary" onclick="removeFromQueue(${item.game_id})">Bỏ</button></td>
               </tr>
             `;
           });
@@ -3387,20 +3629,20 @@ std::string WebServer::buildHtmlResponse() {
           }
 
           if (box) {
-            document.getElementById('ota-version-title').innerHTML = `🎉 Có bản cập nhật mới: v${remoteVer}`;
+            document.getElementById('ota-version-title').innerHTML = `Có bản cập nhật mới: v${remoteVer}`;
             document.getElementById('ota-release-date').textContent = `Ngày phát hành: ${data.release_date || 'Mới nhất'}`;
             document.getElementById('ota-changelog').textContent = changelog;
             document.getElementById('btn-ota-install').style.display = 'inline-flex';
           }
 
           if (silent) {
-            showToast(`🎉 Phát hiện bản cập nhật mới v${remoteVer}!`);
+            showToast(`Có bản cập nhật mới v${remoteVer}!`);
           }
         } else {
           if (box) {
-            document.getElementById('ota-version-title').innerHTML = `✅ Bạn đang sử dụng bản mới nhất (v${data.current_version})`;
+            document.getElementById('ota-version-title').innerHTML = `Bạn đang dùng bản mới nhất (v${data.current_version})`;
             document.getElementById('ota-release-date').textContent = '';
-            document.getElementById('ota-changelog').textContent = 'Không có bản cập nhật nào mới hơn.';
+            document.getElementById('ota-changelog').textContent = 'Chưa có bản nào mới hơn.';
             document.getElementById('btn-ota-install').style.display = 'none';
           }
         }
@@ -3427,12 +3669,12 @@ std::string WebServer::buildHtmlResponse() {
 
           if (data.state === 'COMPLETED') {
             clearInterval(otaPollTimer);
-            document.getElementById('ota-status-txt').innerHTML = `<span style="color:var(--green);font-weight:700;">🎉 ĐÃ CẬP NHẬT THÀNH CÔNG! Đang khởi động lại ứng dụng...</span>`;
+            document.getElementById('ota-status-txt').innerHTML = `<span style="color:var(--green);font-weight:700;">Đã cập nhật xong. Đang khởi động lại...</span>`;
             await fetch('/ota_restart', { method: 'POST' });
             setTimeout(() => location.reload(), 5000);
           } else if (data.state === 'FAILED') {
             clearInterval(otaPollTimer);
-            document.getElementById('ota-status-txt').innerHTML = `<span style="color:var(--red);">❌ Thất bại: ${data.error}</span>`;
+            document.getElementById('ota-status-txt').innerHTML = `<span style="color:var(--red);">Thất bại: ${data.error}</span>`;
             document.getElementById('btn-ota-install').disabled = false;
           }
         }, 1000);
@@ -3464,7 +3706,7 @@ std::string WebServer::buildHtmlResponse() {
         } else {
           box.innerHTML = data.sources.map(s =>
             `<div style="display: flex; gap: 8px; align-items: center; background: var(--card-alt); border-radius: 6px; padding: 6px 10px;">
-               <span style="flex: 1;">📅 <b>${escHtml(s.name)}</b></span>
+               <span style="flex: 1;"><b>${escHtml(s.name)}</b></span>
                <button class="btn btn-secondary" style="padding: 3px 10px; font-size: 11px;" onclick="calDelSource(${s.id})">Xóa</button>
              </div>`).join('');
         }
@@ -3483,7 +3725,7 @@ std::string WebServer::buildHtmlResponse() {
             `<div style="display: flex; gap: 8px; align-items: center; background: var(--card-alt); border-radius: 6px; padding: 6px 10px;">
                <span style="color: var(--accent); font-size: 11px; white-space: nowrap;">${fmtTs(e.start)}</span>
                <span style="flex: 1;">${escHtml(e.title)} <span style="color: var(--text-dim); font-size: 10px;">(${escHtml(e.source)})</span></span>
-               <button class="btn btn-secondary" style="padding: 3px 10px; font-size: 11px;" onclick="calToggleRemind(${e.id}, ${e.remind ? 0 : 1})">${e.remind ? '🔕 Tắt báo' : '🔔 Báo'}</button>
+               <button class="btn btn-secondary" style="padding: 3px 10px; font-size: 11px;" onclick="calToggleRemind(${e.id}, ${e.remind ? 0 : 1})">${e.remind ? 'Tắt nhắc' : 'Nhắc'}</button>
                <button class="btn btn-secondary" style="padding: 3px 10px; font-size: 11px;" onclick="calDelEvent(${e.id})">Xóa</button>
              </div>`).join('');
         }
@@ -3494,7 +3736,7 @@ std::string WebServer::buildHtmlResponse() {
       const url = document.getElementById('cal-url').value.trim();
       if (!url) { showToast('Chưa nhập link ICS'); return; }
       const d = await postForm('/api/cal/add_url', { name, url });
-      showToast(d.success ? 'Đã thêm + tải lịch!' : ('Lỗi: ' + (d.error || 'không rõ')));
+      showToast(d.success ? 'Đã thêm và tải lịch!' : ('Lỗi: ' + (d.error || 'không rõ')));
       loadCalSources(); loadCalEvents();
     }
     async function calImport() {
@@ -3529,7 +3771,7 @@ std::string WebServer::buildHtmlResponse() {
     }
     async function calRefresh() {
       const d = await postForm('/api/cal/refresh', {});
-      showToast(`Đã refresh ${d.refreshed || 0} nguồn!`);
+      showToast(`Đã làm mới ${d.refreshed || 0} nguồn!`);
       loadCalEvents();
     }
 
@@ -3546,7 +3788,7 @@ std::string WebServer::buildHtmlResponse() {
           <div style="display:flex;align-items:center;gap:10px;background:var(--card-alt);border:1px solid var(--border);border-radius:8px;padding:8px 12px;">
             <b style="font-size:16px;min-width:56px;${a.enabled ? '' : 'color:var(--text-dim);text-decoration:line-through;'}">${a.time}</b>
             <span class="status-badge ${a.enabled ? 'status-local' : 'status-cloud'}">${a.enabled ? 'BẬT' : 'TẮT'}</span>
-            <button class="btn btn-secondary" style="padding:4px 10px;font-size:11px" onclick="alarmMode(${a.idx})" title="Đổi chế độ">🔔 ${ALARM_MODES[a.mode] || ''}</button>
+            <button class="btn btn-secondary" style="padding:4px 10px;font-size:11px" onclick="alarmMode(${a.idx})" title="Đổi kiểu báo">${ALARM_MODES[a.mode] || ''}</button>
             <span style="flex:1"></span>
             <button class="btn btn-secondary" style="padding:4px 10px;font-size:11px" onclick="alarmToggle(${a.idx})">${a.enabled ? 'Tắt' : 'Bật'}</button>
             <button class="btn btn-danger" style="padding:4px 10px;font-size:11px" onclick="alarmDel(${a.idx})">Xóa</button>
@@ -3574,13 +3816,13 @@ std::string WebServer::buildHtmlResponse() {
         document.getElementById('watch-symbols').value = (d.symbols || []).join(',');
         document.getElementById('watch-list').innerHTML = (d.symbols || []).map(s =>
           `<span class="status-badge status-local">${s}</span>`).join('') ||
-          '<div style="color:var(--text-dim);font-size:12px">Trống — Brick sẽ dùng mặc định BTC,ETH,VCB,HPG.</div>';
+          '<div style="color:var(--text-dim);font-size:12px">Trống. Máy sẽ dùng mặc định BTC,ETH,VCB,HPG.</div>';
       } catch (e) { showToast('Không tải được danh sách mã'); }
     }
     async function watchSave() {
       const v = document.getElementById('watch-symbols').value;
       const d = await postForm('/api/watch_symbols', { symbols: v });
-      showToast(d.success ? 'Đã lưu! Mở tab Thị trường trên Brick để xem.' : 'Lỗi lưu');
+      showToast(d.success ? 'Đã lưu! Mở mục Thị trường trên máy để xem.' : 'Lỗi lưu');
       loadWatch();
     }
   </script>
@@ -3589,6 +3831,57 @@ std::string WebServer::buildHtmlResponse() {
   return html;
 }
 
+std::string WebServer::buildSaverHtml() {
+  return R"HTML(<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hình nền - RomCloud</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:sans-serif;background:#111;color:#eee;padding:16px}
+h1{font-size:20px;margin-bottom:16px}
+.upload{margin-bottom:20px;padding:16px;background:#222;border-radius:8px}
+.upload button{background:#4CAF50;color:#fff;border:none;padding:10px 20px;border-radius:4px;cursor:pointer}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}
+.card{background:#222;border-radius:8px;overflow:hidden}
+.card img{width:100%;height:120px;object-fit:cover;display:block}
+.card .info{padding:8px}
+.card .name{font-size:12px;margin-bottom:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.card .btns{display:flex;gap:6px}
+.card button{flex:1;padding:6px;border:none;border-radius:4px;cursor:pointer;font-size:12px}
+.btn-toggle{background:#2196F3;color:#fff}
+.btn-del{background:#f44336;color:#fff}
+</style>
+</head>
+<body>
+<h1>Ảnh hình nền</h1>
+<div class="upload">
+<input type="file" id="fileInput" accept="image/jpeg,image/png" multiple>
+<button onclick="uploadFiles()">Tải ảnh lên</button>
+<div id="progress"></div>
+</div>
+<div id="grid" class="grid"></div>
+<script>
+async function loadPhotos(){
+const r=await fetch('/api/saver/photos');
+const photos=await r.json();
+const g=document.getElementById('grid');
+g.innerHTML=photos.map(p=>`<div class="card"><img src="/saver/photo/${p.name}" loading="lazy"><div class="info"><div class="name">${p.name}</div><div class="btns"><button class="btn-toggle" onclick="toggle('${p.name}')">${p.hidden?'Hiện':'Ẩn'}</button><button class="btn-del" onclick="del('${p.name}')">Xóa</button></div></div></div>`).join('');
+}
+async function toggle(n){await fetch('/api/saver/toggle',{method:'POST',body:'name='+n});loadPhotos();}
+async function del(n){if(confirm('Xóa ảnh này?')){await fetch('/api/saver/delete',{method:'POST',body:'name='+n});loadPhotos();}}
+async function uploadFiles(){
+const inp=document.getElementById('fileInput');
+for(const f of inp.files){const fd=new FormData();fd.append('file',f);await fetch('/api/saver/upload',{method:'POST',body:fd});}
+loadPhotos();
+}
+loadPhotos();
+</script>
+</body>
+</html>)HTML";
+}
 std::string WebServer::buildSuccessResponse(const std::string &message) {
   std::string html =
       R"(<!DOCTYPE html>
@@ -3609,11 +3902,11 @@ std::string WebServer::buildSuccessResponse(const std::string &message) {
 <body>
   <div class="card">
     <div class="icon">&#10004;</div>
-    <h1>ĐÃ LƯU THÀNH CÔNG!</h1>
+    <h1>Đã lưu xong</h1>
     <p>)" +
       message +
-      R"(<br><br>Quá trình đồng bộ kho game đang diễn ra tự động!</p>
-    <a href="/">&larr; Quay lại trang quản lý ROM</a>
+      R"(<br><br>Kho game đang được đồng bộ tự động.</p>
+    <a href="/">&larr; Quay lại trang quản lý</a>
   </div>
 </body>
 </html>)";
@@ -3627,7 +3920,9 @@ void WebServer::handleClient(int clientFd) {
     return;
   buffer[bytesRead] = '\0';
 
-  std::string req(buffer);
+  // Binary-safe: body upload (ảnh/jpg) chứa byte NUL — dựng string theo độ
+  // dài thực, không dừng ở NUL đầu tiên (bản cũ mất phần còn lại của body).
+  std::string req(buffer, bytesRead);
   std::string method, fullPath;
   std::istringstream iss(req);
   iss >> method >> fullPath;
@@ -4089,7 +4384,7 @@ void WebServer::handleClient(int clientFd) {
   } else if (method == "POST" && path == "/api/cancel_download") {
     DownloadManager::instance().cancelDownload();
     std::string json =
-        "{\"success\":true,\"message\":\"Đã hủy tải lượt hiện tại.\"}";
+        "{\"success\":true,\"message\":\"Đã hủy tải.\"}";
     std::string res = "HTTP/1.1 200 OK\r\n"
                       "Content-Type: application/json; charset=UTF-8\r\n"
                       "Access-Control-Allow-Origin: *\r\n"
@@ -4124,7 +4419,7 @@ void WebServer::handleClient(int clientFd) {
   } else if (method == "POST" && path == "/api/clear_queue") {
     DownloadManager::instance().clearQueue();
     std::string json =
-        "{\"success\":true,\"message\":\"Đã xóa toàn bộ hàng đợi.\"}";
+        "{\"success\":true,\"message\":\"Đã xóa hết hàng đợi.\"}";
     std::string res = "HTTP/1.1 200 OK\r\n"
                       "Content-Type: application/json; charset=UTF-8\r\n"
                       "Access-Control-Allow-Origin: *\r\n"
@@ -4149,7 +4444,7 @@ void WebServer::handleClient(int clientFd) {
       if (DatabaseManager::instance().getGameById(gameId, g)) {
         ok = DatabaseManager::instance().markGameDeletedLocally(gameId);
         if (ok) {
-          msg = "Đã xóa ROM \"" + g.title + "\" khỏi thẻ nhớ.";
+          msg = "Đã xóa \"" + g.title + "\" khỏi thẻ.";
         }
       }
     }
@@ -4180,7 +4475,7 @@ void WebServer::handleClient(int clientFd) {
     std::string developer;
     std::string desc;
     std::string title;
-    std::string msg = "Không thể cào thông tin game";
+    std::string msg = "Không lấy được thông tin game";
 
     if (gameId > 0) {
       GameRecord g;
@@ -4196,7 +4491,7 @@ void WebServer::handleClient(int clientFd) {
           desc = scrapeRes.description;
           title = scrapeRes.title;
           if (ok) {
-            msg = "Đã cập nhật ảnh bìa & thông tin cho \"" +
+            msg = "Đã lấy bìa và thông tin cho \"" +
                   (title.empty() ? g.title : title) + "\"!";
           } else {
             msg = "Không tìm thấy dữ liệu trên ScreenScraper.fr / Libretro.";
@@ -4228,8 +4523,8 @@ void WebServer::handleClient(int clientFd) {
     bool started = BoxartScraper::instance().startAutoScrapeSdCard(force);
     std::string msg =
         started
-            ? "Đã bắt đầu tự động cào ảnh bìa và thông tin cho ROM trên thẻ SD."
-            : "Không có ROM nào trên thẻ cần cào hoặc tiến trình đang chạy.";
+            ? "Đã bắt đầu tự lấy ảnh bìa và thông tin trên thẻ."
+            : "Không có game nào cần lấy bìa, hoặc đang chạy rồi.";
     std::string json =
         "{\"success\":" + std::string(started ? "true" : "false") +
         ",\"message\":\"" + escapeJson(msg) + "\"}";
@@ -4267,7 +4562,7 @@ void WebServer::handleClient(int clientFd) {
   } else if (method == "POST" && path == "/api/cancel_auto_scrape") {
     BoxartScraper::instance().cancelAutoScrape();
     std::string json =
-        "{\"success\":true,\"message\":\"Đã gửi yêu cầu hủy cào tự động.\"}";
+        "{\"success\":true,\"message\":\"Đã yêu cầu hủy.\"}";
     std::string res = "HTTP/1.1 200 OK\r\n"
                       "Content-Type: application/json; charset=UTF-8\r\n"
                       "Access-Control-Allow-Origin: *\r\n"
@@ -4316,8 +4611,7 @@ void WebServer::handleClient(int clientFd) {
       DatabaseManager::instance().setSetting("screenscraper_devpass", devPass);
     }
 
-    std::string json = "{\"success\":true,\"message\":\"Đã lưu cấu hình "
-                       "ScreenScraper.fr thành công!\"}";
+    std::string json = "{\"success\":true,\"message\":\"Đã lưu tài khoản ScreenScraper!\"}";
     std::string res = "HTTP/1.1 200 OK\r\n"
                       "Content-Type: application/json; charset=UTF-8\r\n"
                       "Access-Control-Allow-Origin: *\r\n"
@@ -4340,7 +4634,7 @@ void WebServer::handleClient(int clientFd) {
     std::string errMsg;
     bool ok = BoxartScraper::instance().testScreenScraperAuth(user, pass, devId,
                                                               devPass, errMsg);
-    std::string msg = ok ? "Kết nối ScreenScraper.fr thành công!" : errMsg;
+    std::string msg = ok ? "Kết nối được!" : errMsg;
 
     std::string json = "{\"success\":" + std::string(ok ? "true" : "false") +
                        ",\"message\":\"" + escapeJson(msg) + "\"}";
@@ -4406,8 +4700,8 @@ void WebServer::handleClient(int clientFd) {
 
     std::string json = "{\"success\":" + std::string(ok ? "true" : "false") +
                        ",\"message\":\"" +
-                       (ok ? "Đã áp dụng ảnh bìa và thông tin game thành công!"
-                           : "Lỗi khi áp dụng thông tin game.") +
+                       (ok ? "Đã áp dụng bìa và thông tin!"
+                           : "Lỗi khi áp dụng.") +
                        "\"}";
     std::string res = "HTTP/1.1 200 OK\r\n"
                       "Content-Type: application/json; charset=UTF-8\r\n"
@@ -4563,9 +4857,9 @@ void WebServer::handleClient(int clientFd) {
         DatabaseManager::instance().upsertGame(g);
 
         message = "Đã nhận diện: " + sysName + " (" + sysCode +
-                  ")! Game đã được lưu vào /Roms/" + targetSys.romDir + "/";
+                  "). Đã lưu vào /Roms/" + targetSys.romDir + "/";
       } else {
-        message = "Đã lưu ROM vào Hộp tiếp nhận _INBOX.";
+        message = "Chưa rõ hệ máy, đã lưu vào thư mục _INBOX.";
       }
 
       std::string json = "{\"success\":true,\"filename\":\"" +
@@ -4713,8 +5007,7 @@ void WebServer::handleClient(int clientFd) {
   } else if (method == "POST" && (path == "/api/logout" || path == "/unlink")) {
     AuthManager::instance().logout();
     if (path == "/api/logout") {
-      std::string json = "{\"success\":true,\"message\":\"Đã đăng xuất khỏi "
-                         "Google Drive thành công!\"}";
+      std::string json = "{\"success\":true,\"message\":\"Đã đăng xuất Google Drive.\"}";
       std::string res = "HTTP/1.1 200 OK\r\n"
                         "Content-Type: application/json; charset=UTF-8\r\n"
                         "Access-Control-Allow-Origin: *\r\n"
@@ -4726,7 +5019,7 @@ void WebServer::handleClient(int clientFd) {
       send(clientFd, res.c_str(), res.length(), 0);
     } else {
       std::string body =
-          buildSuccessResponse("Đã hủy liên kết Google Drive thành công!");
+          buildSuccessResponse("Đã hủy liên kết Drive.");
       std::string res = "HTTP/1.1 200 OK\r\n"
                         "Content-Type: text/html; charset=UTF-8\r\n"
                         "Content-Length: " +
@@ -4756,7 +5049,7 @@ void WebServer::handleClient(int clientFd) {
     DriveSyncEngine::instance().startSync();
 
     std::string body =
-        buildSuccessResponse("Đã lưu liên kết Google Drive vào máy TrimUI!");
+        buildSuccessResponse("Đã lưu. Đang quét Drive...");
     std::string res = "HTTP/1.1 200 OK\r\n"
                       "Content-Type: text/html; charset=UTF-8\r\n"
                       "Content-Length: " +
@@ -4769,8 +5062,7 @@ void WebServer::handleClient(int clientFd) {
     std::string action = extractPostParam(postBody, "action");
     if (action == "clear") {
       AuthManager::instance().clearPersonalTokens();
-      std::string json = "{\"success\":true,\"message\":\"Đã hủy kích hoạt sao "
-                         "lưu Drive cá nhân thành công.\"}";
+      std::string json = "{\"success\":true,\"message\":\"Đã hủy quyền sao lưu.\"}";
       std::string res = "HTTP/1.1 200 OK\r\n"
                         "Content-Type: application/json; charset=UTF-8\r\n"
                         "Access-Control-Allow-Origin: *\r\n"
@@ -4787,8 +5079,8 @@ void WebServer::handleClient(int clientFd) {
     std::string refreshToken = extractPostParam(postBody, "refresh_token");
     std::string email = extractPostParam(postBody, "email");
     if (token.empty() && refreshToken.empty()) {
-      std::string json = "{\"success\":false,\"error\":\"Vui lòng dán Access "
-                         "Token hoặc Refresh Token vào ô.\"}";
+      std::string json = "{\"success\":false,\"error\":\"Hãy dán Access "
+                         "Token hoặc Refresh Token.\"}";
       std::string res = "HTTP/1.1 400 Bad Request\r\n"
                         "Content-Type: application/json; charset=UTF-8\r\n"
                         "Access-Control-Allow-Origin: *\r\n"
@@ -4828,11 +5120,52 @@ void WebServer::handleClient(int clientFd) {
                         json;
       send(clientFd, res.c_str(), res.length(), 0);
     }
+  } else if (method == "POST" && path == "/api/device_flow_start") {
+    bool ok = AuthManager::instance().startDeviceFlow();
+    if (ok) {
+      DeviceCodeResponse info = AuthManager::instance().getDeviceCodeInfo();
+      std::string json = "{\"success\":true,\"user_code\":\"" + escapeJson(info.userCode) +
+                         "\",\"verification_url\":\"" + escapeJson(info.verificationUrl) +
+                         "\",\"expires_in\":" + std::to_string(info.expiresIn) +
+                         ",\"interval\":" + std::to_string(info.interval) + "}";
+      std::string res = "HTTP/1.1 200 OK\r\nContent-Type: application/json; charset=UTF-8\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: " +
+                        std::to_string(json.length()) + "\r\nConnection: close\r\n\r\n" + json;
+      send(clientFd, res.c_str(), res.length(), 0);
+    } else {
+      std::string err = AuthManager::instance().getErrorMessage();
+      std::string json = "{\"success\":false,\"error\":\"" + escapeJson(err) + "\"}";
+      std::string res = "HTTP/1.1 500 Internal Server Error\r\nContent-Type: application/json; charset=UTF-8\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: " +
+                        std::to_string(json.length()) + "\r\nConnection: close\r\n\r\n" + json;
+      send(clientFd, res.c_str(), res.length(), 0);
+    }
+    return;
+  } else if (method == "GET" && path == "/api/device_flow_status") {
+    AuthState st = AuthManager::instance().getState();
+    std::string stStr = "UNLINKED";
+    if (st == AuthState::LINKED) stStr = "LINKED";
+    else if (st == AuthState::AWAITING_USER) stStr = "AWAITING_USER";
+    else if (st == AuthState::REQUESTING_CODE) stStr = "REQUESTING_CODE";
+    else if (st == AuthState::ERROR_OCCURRED) stStr = "ERROR";
+
+    std::string json = "{\"status\":\"" + stStr + "\",\"is_linked\":" + (AuthManager::instance().isLinked() ? "true" : "false") +
+                       ",\"can_upload\":" + (AuthManager::instance().canUpload() ? "true" : "false") +
+                       ",\"email\":\"" + escapeJson(AuthManager::instance().getUserEmail()) +
+                       "\",\"error\":\"" + escapeJson(AuthManager::instance().getErrorMessage()) + "\"}";
+    std::string res = "HTTP/1.1 200 OK\r\nContent-Type: application/json; charset=UTF-8\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: " +
+                      std::to_string(json.length()) + "\r\nConnection: close\r\n\r\n" + json;
+    send(clientFd, res.c_str(), res.length(), 0);
+    return;
+  } else if (method == "POST" && path == "/api/device_flow_cancel") {
+    AuthManager::instance().cancelDeviceFlow();
+    std::string json = "{\"success\":true}";
+    std::string res = "HTTP/1.1 200 OK\r\nContent-Type: application/json; charset=UTF-8\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: " +
+                      std::to_string(json.length()) + "\r\nConnection: close\r\n\r\n" + json;
+    send(clientFd, res.c_str(), res.length(), 0);
+    return;
   } else if (method == "POST" && path == "/api/upload_game") {
     if (!AuthManager::instance().canUpload()) {
-      std::string json = "{\"success\":false,\"error\":\"Chưa kích hoạt quyền "
-                         "sao lưu! Vui lòng vào tab 'Đồng bộ & Thẻ nhớ' để nạp "
-                         "Google Token cá nhân trước.\"}";
+      std::string json = "{\"success\":false,\"error\":\"Chưa bật sao lưu. "
+                         "Vào mục Đồng bộ & Thẻ nhớ để đăng nhập Google trước.\"}";
       std::string res =
           "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json; "
           "charset=UTF-8\r\nAccess-Control-Allow-Origin: "
@@ -4849,8 +5182,7 @@ void WebServer::handleClient(int clientFd) {
       }
       if (gameId > 0) {
         UploadManager::instance().startUploadGames({gameId});
-        std::string json = "{\"success\":true,\"message\":\"Đang bắt đầu sao "
-                           "lưu game lên Google Drive cá nhân...\"}";
+        std::string json = "{\"success\":true,\"message\":\"Đang sao lưu lên Drive...\"}";
         std::string res = "HTTP/1.1 200 OK\r\nContent-Type: application/json; "
                           "charset=UTF-8\r\nAccess-Control-Allow-Origin: "
                           "*\r\nContent-Length: " +
@@ -4871,9 +5203,8 @@ void WebServer::handleClient(int clientFd) {
     }
   } else if (method == "POST" && path == "/api/upload_all") {
     if (!AuthManager::instance().canUpload()) {
-      std::string json = "{\"success\":false,\"error\":\"Chưa kích hoạt quyền "
-                         "sao lưu! Vui lòng vào tab 'Đồng bộ & Thẻ nhớ' để nạp "
-                         "Google Token cá nhân trước.\"}";
+      std::string json = "{\"success\":false,\"error\":\"Chưa bật sao lưu. "
+                         "Vào mục Đồng bộ & Thẻ nhớ để đăng nhập Google trước.\"}";
       std::string res =
           "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json; "
           "charset=UTF-8\r\nAccess-Control-Allow-Origin: "
@@ -4884,8 +5215,7 @@ void WebServer::handleClient(int clientFd) {
     } else {
       UploadManager::instance().startReverseSync();
       std::string json =
-          "{\"success\":true,\"message\":\"Đang bắt đầu sao lưu toàn bộ game "
-          "trên thẻ nhớ lên Google Drive cá nhân...\"}";
+          "{\"success\":true,\"message\":\"Đang sao lưu cả thẻ lên Drive...\"}";
       std::string res = "HTTP/1.1 200 OK\r\nContent-Type: application/json; "
                         "charset=UTF-8\r\nAccess-Control-Allow-Origin: "
                         "*\r\nContent-Length: " +
@@ -5262,7 +5592,7 @@ void WebServer::handleClient(int clientFd) {
       }
     } else {
       std::string json =
-          "{\"success\":false,\"error\":\"Chưa cung cấp đường dẫn URL\"}";
+          "{\"success\":false,\"error\":\"Chưa có link\"}";
       std::string res = "HTTP/1.1 400 OK\r\nContent-Type: application/json; "
                         "charset=UTF-8\r\nAccess-Control-Allow-Origin: "
                         "*\r\nContent-Length: " +
@@ -5307,7 +5637,7 @@ void WebServer::handleClient(int clientFd) {
     } else {
       std::string json =
           "{\"success\":false,\"error\":\"" +
-          escapeJson(error.empty() ? "Không thể xóa nguồn" : error) + "\"}";
+          escapeJson(error.empty() ? "Không xóa được nguồn" : error) + "\"}";
       std::string res = "HTTP/1.1 400 OK\r\nContent-Type: application/json; "
                         "charset=UTF-8\r\nAccess-Control-Allow-Origin: "
                         "*\r\nContent-Length: " +
@@ -5315,6 +5645,208 @@ void WebServer::handleClient(int clientFd) {
                         "\r\nConnection: close\r\n\r\n" + json;
       send(clientFd, res.c_str(), res.length(), 0);
     }
+  // ---------------- Ảnh screensaver (Picture frame) ----------------
+  } else if (method == "GET" && path == "/api/saver/photos") {
+    std::string photoDir = AppConfig::instance().getAppRoot() + "/screensaver/photos";
+    FileSystemManager::instance().createDirectoryRecursive(photoDir);
+    std::string json = "{\"success\":true,\"photos\":[";
+    bool first = true;
+    size_t total = 0;
+    DIR* dir = opendir(photoDir.c_str());
+    if (dir) {
+      struct dirent* e;
+      while ((e = readdir(dir)) != nullptr) {
+        std::string name = e->d_name;
+        if (name == "." || name == "..") continue;
+        std::string low = name;
+        for (char& c : low) c = (char)::tolower((unsigned char)c);
+        bool isImg = (low.size() >= 4 &&
+                      (low.compare(low.size() - 4, 4, ".jpg") == 0 ||
+                       low.compare(low.size() - 4, 4, ".png") == 0)) ||
+                     (low.size() >= 5 &&
+                      low.compare(low.size() - 5, 5, ".jpeg") == 0);
+        if (!isImg) continue;
+        struct stat st;
+        if (::stat((photoDir + "/" + name).c_str(), &st) != 0) continue;
+        if (!S_ISREG(st.st_mode)) continue;
+        if (!first) json += ",";
+        first = false;
+        json += "{\"file\":\"" + escapeJson(name) + "\",\"size\":" +
+                std::to_string((long long)st.st_size) + "}";
+        total++;
+      }
+      closedir(dir);
+    }
+    json += "],\"total\":" + std::to_string(total) + "}";
+    std::string res = "HTTP/1.1 200 OK\r\nContent-Type: application/json; "
+                      "charset=UTF-8\r\nAccess-Control-Allow-Origin: "
+                      "*\r\nContent-Length: " +
+                      std::to_string(json.length()) +
+                      "\r\nConnection: close\r\n\r\n" + json;
+    send(clientFd, res.c_str(), res.length(), 0);
+  } else if (method == "POST" && path == "/api/saver/upload") {
+    // Đọc full POST body theo Content-Length (1 ảnh/lần; portal gửi tuần tự)
+    size_t clPos = req.find("Content-Length: ");
+    if (clPos == std::string::npos)
+      clPos = req.find("content-length: ");
+    long totalCl = 0;
+    if (clPos != std::string::npos) {
+      size_t clEnd = req.find("\r\n", clPos);
+      try {
+        totalCl = std::stol(req.substr(clPos + 16, clEnd - (clPos + 16)));
+      } catch (...) {
+      }
+    }
+    const long kMaxPhoto = 25L * 1024 * 1024;
+    std::string json;
+    int httpCode = 200;
+    if (totalCl > kMaxPhoto) {
+      httpCode = 413;
+      json = "{\"success\":false,\"error\":\"File quá lớn (tối đa 25MB)\"}";
+    } else {
+      std::string fullBody = postBody;
+      if (totalCl > 0 && static_cast<long>(fullBody.size()) < totalCl) {
+        char chunk[16384];
+        while (static_cast<long>(fullBody.size()) < totalCl) {
+          long toRead = std::min<long>(
+              sizeof(chunk), totalCl - static_cast<long>(fullBody.size()));
+          int n = recv(clientFd, chunk, toRead, 0);
+          if (n <= 0) break;
+          fullBody.append(chunk, n);
+        }
+      }
+      std::string filename = "photo.jpg";
+      size_t fnPos = fullBody.find("filename=\"");
+      if (fnPos != std::string::npos) {
+        fnPos += 10;
+        size_t fnEnd = fullBody.find("\"", fnPos);
+        if (fnEnd != std::string::npos && fnEnd > fnPos) {
+          filename = fullBody.substr(fnPos, fnEnd - fnPos);
+          size_t slash = filename.find_last_of("/\\");
+          if (slash != std::string::npos)
+            filename = filename.substr(slash + 1);
+        }
+      }
+      // Làm sạch tên: bỏ ký tự nguy hiểm, chặn traversal
+      std::string safe;
+      for (char c : filename) {
+        unsigned char u = (unsigned char)c;
+        if (u == '/' || u == '\\' || u < 32 || u == 127) continue;
+        safe += c;
+      }
+      filename = safe;
+      if (filename.empty() || filename == "." || filename == "..") {
+        filename = "photo_" + std::to_string(std::time(nullptr)) + ".jpg";
+      }
+      std::string low = filename;
+      for (char& c : low) c = (char)::tolower((unsigned char)c);
+      bool okExt = (low.size() >= 4 &&
+                    (low.compare(low.size() - 4, 4, ".jpg") == 0 ||
+                     low.compare(low.size() - 4, 4, ".png") == 0)) ||
+                   (low.size() >= 5 &&
+                    low.compare(low.size() - 5, 5, ".jpeg") == 0);
+      if (!okExt) {
+        httpCode = 400;
+        json = "{\"success\":false,\"error\":\"Chỉ nhận file .jpg / .jpeg / .png\"}";
+      } else {
+        std::string fileContent;
+        size_t dataStart = fullBody.find("\r\n\r\n");
+        if (dataStart != std::string::npos &&
+            fullBody.find("Content-Disposition") != std::string::npos) {
+          dataStart += 4;
+          size_t dataEnd = fullBody.find("\r\n--", dataStart);
+          fileContent = (dataEnd != std::string::npos)
+                            ? fullBody.substr(dataStart, dataEnd - dataStart)
+                            : fullBody.substr(dataStart);
+        } else {
+          fileContent = fullBody;
+        }
+        if (fileContent.empty() || (long)fileContent.size() > kMaxPhoto) {
+          httpCode = 400;
+          json = "{\"success\":false,\"error\":\"File rỗng hoặc quá lớn\"}";
+        } else {
+          std::string photoDir =
+              AppConfig::instance().getAppRoot() + "/screensaver/photos";
+          FileSystemManager::instance().createDirectoryRecursive(photoDir);
+          // Trùng tên -> thêm hậu tố _1, _2...
+          std::string outPath = photoDir + "/" + filename;
+          if (access(outPath.c_str(), F_OK) == 0) {
+            size_t dot = filename.find_last_of('.');
+            std::string stem = (dot == std::string::npos) ? filename
+                                                          : filename.substr(0, dot);
+            std::string ext = (dot == std::string::npos) ? ""
+                                                         : filename.substr(dot);
+            for (int i = 1; i < 1000; i++) {
+              std::string cand = photoDir + "/" + stem + "_" +
+                                 std::to_string(i) + ext;
+              if (access(cand.c_str(), F_OK) != 0) {
+                outPath = cand;
+                filename = stem + "_" + std::to_string(i) + ext;
+                break;
+              }
+            }
+          }
+          std::ofstream out(outPath, std::ios::binary);
+          if (out.is_open()) {
+            out.write(fileContent.data(), fileContent.size());
+            out.close();
+            sync();
+            Logger::info("Saver: photo uploaded to " + outPath + " (" +
+                         std::to_string(fileContent.size()) + " bytes)");
+            json = "{\"success\":true,\"file\":\"" + escapeJson(filename) +
+                   "\",\"size\":" + std::to_string(fileContent.size()) + "}";
+          } else {
+            httpCode = 500;
+            json = "{\"success\":false,\"error\":\"Không ghi được file\"}";
+          }
+        }
+      }
+    }
+    std::string res = "HTTP/1.1 " + std::to_string(httpCode) +
+                      " OK\r\nContent-Type: application/json; "
+                      "charset=UTF-8\r\nAccess-Control-Allow-Origin: "
+                      "*\r\nContent-Length: " +
+                      std::to_string(json.length()) +
+                      "\r\nConnection: close\r\n\r\n" + json;
+    send(clientFd, res.c_str(), res.length(), 0);
+  } else if ((method == "GET" && (path == "/api/saver/delete" ||
+                                  fullPath.find("/api/saver/delete") == 0)) ||
+             (method == "POST" && path == "/api/saver/delete")) {
+    std::string file;
+    if (method == "GET") {
+      file = extractQueryParam(queryString, "file");
+      if (file.empty()) file = extractQueryParam(fullPath, "file");
+    } else {
+      file = extractPostParam(postBody, "file");
+      if (file.empty()) file = extractPostParam(postBody, "filename");
+    }
+    size_t slash = file.find_last_of("/\\");
+    if (slash != std::string::npos) file = file.substr(slash + 1);
+    std::string json;
+    int httpCode = 200;
+    if (file.empty() || file == "." || file == "..") {
+      httpCode = 400;
+      json = "{\"success\":false,\"error\":\"Tên file không hợp lệ\"}";
+    } else {
+      std::string photoDir =
+          AppConfig::instance().getAppRoot() + "/screensaver/photos";
+      std::string target = photoDir + "/" + file;
+      if (unlink(target.c_str()) == 0) {
+        sync();
+        Logger::info("Saver: photo deleted: " + target);
+        json = "{\"success\":true,\"deleted\":\"" + escapeJson(file) + "\"}";
+      } else {
+        httpCode = 400;
+        json = "{\"success\":false,\"error\":\"Không xóa được file\"}";
+      }
+    }
+    std::string res = "HTTP/1.1 " + std::to_string(httpCode) +
+                      " OK\r\nContent-Type: application/json; "
+                      "charset=UTF-8\r\nAccess-Control-Allow-Origin: "
+                      "*\r\nContent-Length: " +
+                      std::to_string(json.length()) +
+                      "\r\nConnection: close\r\n\r\n" + json;
+    send(clientFd, res.c_str(), res.length(), 0);
   // ---------------- Lịch phone (CalManager) ----------------
   } else if (method == "GET" && path == "/api/cal/sources") {
     CalManager::instance().ensureTables();
@@ -5541,6 +6073,87 @@ void WebServer::handleClient(int clientFd) {
                       std::to_string(json.length()) +
                       "\r\nConnection: close\r\n\r\n" + json;
     send(clientFd, res.c_str(), res.length(), 0);
+  } else if (method == "GET" && path == "/saver.html") {
+    std::string body = buildSaverHtml();
+    std::string res="HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=UTF-8\r\nContent-Length: "+std::to_string(body.length())+"\r\nConnection: close\r\n\r\n"+body;
+    send(clientFd,res.c_str(),res.length(),0);
+  } else if (method == "GET" && path == "/api/saver/photos") {
+    std::string dir = "/mnt/SDCARD/Apps/RomCloud/screensaver/photos";
+    std::string hf_path = "/mnt/SDCARD/Apps/RomCloud/screensaver/hidden.txt";
+    std::set<std::string> hidden;
+    { std::ifstream hf(hf_path); std::string l; while (std::getline(hf,l)) if(!l.empty()) hidden.insert(l); }
+    std::string json = "[";
+    DIR* d = opendir(dir.c_str());
+    bool first = true;
+    if (d) {
+      struct dirent* e;
+      while ((e = readdir(d)) != nullptr) {
+        std::string n = e->d_name;
+        if (n=="."||n=="..") continue;
+        if(!first) json+=","; first=false;
+        json+="{\"name\":\""+escapeJson(n)+"\",\"hidden\":"+(hidden.count(n)?"true":"false")+"}";
+      }
+      closedir(d);
+    }
+    json += "]";
+    std::string res2="HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: "+std::to_string(json.length())+"\r\nConnection: close\r\n\r\n"+json;
+    send(clientFd,res2.c_str(),res2.length(),0);
+  } else if (method == "GET" && path.rfind("/saver/photo/",0)==0) {
+    std::string fn=path.substr(13);
+    if(fn.find("..")!=std::string::npos||fn.find("/")!=std::string::npos){
+      std::string r400="HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n";
+      send(clientFd,r400.c_str(),r400.length(),0);
+    } else {
+      std::string fp="/mnt/SDCARD/Apps/RomCloud/screensaver/photos/"+fn;
+      std::ifstream f(fp,std::ios::binary);
+      if(!f){
+        std::string r404="HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n";
+        send(clientFd,r404.c_str(),r404.length(),0);
+      } else {
+        std::string data((std::istreambuf_iterator<char>(f)),std::istreambuf_iterator<char>());
+        std::string r200="HTTP/1.1 200 OK\r\nContent-Type: image/jpeg\r\nContent-Length: "+std::to_string(data.size())+"\r\nConnection: close\r\n\r\n";
+        send(clientFd,r200.c_str(),r200.length(),0);
+        send(clientFd,data.c_str(),data.size(),0);
+      }
+    }
+  } else if (method == "POST" && path == "/api/saver/upload") {
+    size_t clP=req.find("Content-Length: ");
+    long tCl=0;
+    if(clP!=std::string::npos){ size_t e=req.find("\r\n",clP); try{tCl=std::stol(req.substr(clP+16,e-clP-16));}catch(...){} }
+    std::string body=postBody;
+    if(tCl>0&&(long)body.size()<tCl){ char ch[16384]; while((long)body.size()<tCl){ long tr=std::min<long>(sizeof(ch),tCl-body.size()); int n=recv(clientFd,ch,tr,0); if(n<=0)break; body.append(ch,n);} }
+    std::string fn="photo.jpg";
+    size_t fp=body.find("filename=\"");
+    if(fp!=std::string::npos){ fp+=10; size_t fe=body.find("\"",fp); if(fe!=std::string::npos) fn=body.substr(fp,fe-fp); }
+    std::string json;
+    size_t ds=body.find("\r\n\r\n");
+    if(ds!=std::string::npos){
+      ds+=4; size_t de=body.find("\r\n--",ds);
+      std::string fc=(de!=std::string::npos)?body.substr(ds,de-ds):body.substr(ds);
+      std::string dir="/mnt/SDCARD/Apps/RomCloud/screensaver/photos";
+      mkdir(dir.c_str(),0755);
+      std::string fp2=dir+"/"+fn;
+      std::ofstream out(fp2,std::ios::binary); out.write(fc.c_str(),fc.size()); out.close();
+      json="{\"ok\":true}";
+    } else json="{\"ok\":false}";
+    std::string r="HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: "+std::to_string(json.length())+"\r\nConnection: close\r\n\r\n"+json;
+    send(clientFd,r.c_str(),r.length(),0);
+  } else if (method == "POST" && path == "/api/saver/toggle") {
+    std::string name; size_t p=postBody.find("name="); if(p!=std::string::npos){ name=postBody.substr(p+5); size_t a=name.find("&"); if(a!=std::string::npos) name=name.substr(0,a); }
+    std::string hfp="/mnt/SDCARD/Apps/RomCloud/screensaver/hidden.txt";
+    std::set<std::string> hs; { std::ifstream hf(hfp); std::string l; while(std::getline(hf,l)) if(!l.empty()) hs.insert(l); }
+    if(hs.count(name)) hs.erase(name); else hs.insert(name);
+    { std::ofstream hf(hfp,std::ios::trunc); for(auto&h:hs) hf<<h<<"\n"; }
+    std::string j="{\"ok\":true}";
+    std::string rr="HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: "+std::to_string(j.length())+"\r\nConnection: close\r\n\r\n"+j;
+    send(clientFd,rr.c_str(),rr.length(),0);
+  } else if (method == "POST" && path == "/api/saver/delete") {
+    std::string name; size_t p=postBody.find("name="); if(p!=std::string::npos){ name=postBody.substr(p+5); size_t a=name.find("&"); if(a!=std::string::npos) name=name.substr(0,a); }
+    std::string j;
+    if(name.find("..")!=std::string::npos||name.find("/")!=std::string::npos) j="{\"ok\":false}";
+    else { unlink(("/mnt/SDCARD/Apps/RomCloud/screensaver/photos/"+name).c_str()); j="{\"ok\":true}"; }
+    std::string rr="HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: "+std::to_string(j.length())+"\r\nConnection: close\r\n\r\n"+j;
+    send(clientFd,rr.c_str(),rr.length(),0);
   } else {
     std::string notFound = "HTTP/1.1 404 Not Found\r\nContent-Length: "
                            "0\r\nConnection: close\r\n\r\n";

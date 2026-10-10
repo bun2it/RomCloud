@@ -41,25 +41,27 @@ sleep 1
 
 echo "[deploy] Pushing binary ($BIN_LOCAL, $(wc -c < $BIN_LOCAL) bytes)..."
 adb push "$BIN_LOCAL" "$APP_ROOT/bin/RomCloud"
+if [ -f "bin/netsurf" ]; then
+    echo "[deploy] Pushing NetSurf native binary (bin/netsurf)..."
+    adb push "bin/netsurf" "$APP_ROOT/bin/netsurf"
+    adb shell "chmod +x $APP_ROOT/bin/netsurf"
+fi
 adb shell "chmod +x $APP_ROOT/bin/RomCloud && sync"
 
+echo "[deploy] Pushing NetSurf assets (default.css, welcome.html, icons)..."
+adb push "assets/netsurf" "$APP_ROOT/assets/"
+
 echo "[deploy] Pushing shared libs we own (libcurl, libsqlite3, libjpeg, libsdl2_*)..."
-# Only push libs that DON'T exist on the system to avoid clobbering working
-# versions. The Brick's /mnt/SDCARD/Apps/RomCloud/lib/ already has libssl,
-# libcrypto, libav*, libSDL2 — we only ship the ones that are missing.
-for lib in libcurl libsqlite3 libjpeg libSDL2_image libSDL2_ttf libpng; do
-    for f in sysroot/lib/${lib}.so*; do
-        if [ -f "$f" ]; then
-            echo "  + $f"
-            adb push "$f" "$APP_ROOT/lib/" 2>&1 | tail -1
-        fi
-    done
+for f in sysroot/lib/*.so* lib/*.so*; do
+    if [ -f "$f" ] || [ -L "$f" ]; then
+        adb push -a "$f" "$APP_ROOT/lib/" 2>/dev/null || adb push "$f" "$APP_ROOT/lib/" 2>&1 | tail -1
+    fi
 done
 
 adb shell "sync"
 
 echo "[deploy] Verifying libs on device..."
-for lib in libcurl.so.4 libsqlite3.so.0 libSDL2_image-1.2.so.0 libSDL2_ttf-2.0.so.0; do
+for lib in libcurl.so.4 libjpeg.so.9 libfreetype.so.6 libsqlite3.so.0 libSDL2_image-1.2.so.0 libSDL2_ttf-2.0.so.0; do
     echo -n "  $lib: "
     adb shell "ls $APP_ROOT/lib/$lib 2>/dev/null || echo MISSING"
 done

@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<title>Bàn phím</title>
+<style>
+  html, body { margin: 0; padding: 8px; background: #111418; height: 100%;
+    box-sizing: border-box; font-family: sans-serif; }
+  .row { display: flex; gap: 6px; margin-bottom: 6px; }
+  button { flex: 1; height: 52px; font-size: 20px; border: 0;
+    border-radius: 8px; background: #232830; color: #e8ecf3; }
+  button:active { background: #3b82f6; }
+  button.wide { flex: 4; }
+  button.fn { background: #2e3542; font-size: 17px; }
+</style>
+</head>
+<body>
+<div id="pad"></div>
+<script>
+  // Bàn phím ảo tối giản của RC-Web: bấm bằng con trỏ chuột (tay cầm).
+  // Chỉ gồm ký tự Latin/số/ký hiệu hay gặp khi gõ địa chỉ + đăng nhập.
+  var rows = [
+    ['1','2','3','4','5','6','7','8','9','0'],
+    ['q','w','e','r','t','y','u','i','o','p'],
+    ['a','s','d','f','g','h','j','k','l'],
+    ['z','x','c','v','b','n','m','.','@','-'],
+    ['.com', '/', ':', '_', '~', '?', '=', '&', '%', '+']
+  ];
+  var pad = document.getElementById('pad');
+  rows.forEach(function (chars) {
+    var row = document.createElement('div');
+    row.className = 'row';
+    chars.forEach(function (c) {
+      var b = document.createElement('button');
+      b.textContent = c;
+      b.addEventListener('click', function () { window.kb.text(c); });
+      row.appendChild(b);
+    });
+    pad.appendChild(row);
+  });
+  var last = document.createElement('div');
+  last.className = 'row';
+  function fn(label, cls, handler) {
+    var b = document.createElement('button');
+    b.textContent = label;
+    b.className = cls || '';
+    b.addEventListener('click', handler);
+    last.appendChild(b);
+  }
+  fn('Xoá', 'fn', function () { window.kb.backspace(); });
+  fn('Khoảng trắng', 'fn wide', function () { window.kb.text(' '); });
+  fn('Nhập', 'fn', function () { window.kb.enter(); });
+  fn('Đóng', 'fn', function () { window.kb.close(); });
+  pad.appendChild(last);
+</script>
+</body>
+</html>

@@ -20,12 +20,22 @@ struct NetSurfDomNode {
 
 // Computed style properties resolved by libcss Selection Cascade
 struct NetSurfComputedStyle {
-    uint8_t display = 1;          // 0x01 = inline, 0x02 = block, 0x10 = none, 0x11 = flex
+    uint8_t display = 1;          // 0x01 = inline, 0x02 = block, 0x10 = none,
+                                  // 0x11 = flex, 0x12 = grid
     uint8_t flexDirection = 1;    // 0x01 = row, 0x03 = column
+    uint8_t floatSide = 0;        // P25: 0 = none, 1 = left, 2 = right
     uint8_t alignItems = 0;
     uint8_t justifyContent = 0;
     float flexGrow = 0.0f;
     float flexShrink = 1.0f;
+    int gapPx = 0;                // gap (flex) / grid-gap (grid), px
+
+    // Grid template columns — libcss này không có grid nên parse thủ công.
+    struct GridTrack {
+        uint8_t kind = 2;         // 0 = px, 1 = percent, 2 = fr
+        float value = 1.0f;
+    };
+    std::vector<GridTrack> gridCols;  // rỗng = tự chia đều theo số item
 
     int widthPx = -1;             // -1 = auto
     int heightPx = -1;            // -1 = auto
@@ -45,6 +55,28 @@ struct NetSurfComputedStyle {
     int fontSizePx = 24;
     int fontWeight = 400;
     uint8_t textAlign = 0;        // 0 = left, 1 = right, 2 = center
+
+    // P21: extended CSS properties (libcss cascade + inline-style override).
+    int minHeightPx = -1;          // -1 = auto
+    int textIndentPx = 0;          // px
+    int letterSpacingPx = 0;       // px
+    int wordSpacingPx = 0;         // px
+    int borderTopWidthPx = 0;
+    int borderRightWidthPx = 0;
+    int borderBottomWidthPx = 0;
+    int borderLeftWidthPx = 0;
+    uint8_t borderTopStyle = 0;
+    uint8_t borderRightStyle = 0;
+    uint8_t borderBottomStyle = 0;
+    uint8_t borderLeftStyle = 0;
+    uint32_t borderTopColor = 0x00000000;
+    uint32_t borderRightColor = 0x00000000;
+    uint32_t borderBottomColor = 0x00000000;
+    uint32_t borderLeftColor = 0x00000000;
+    int outlineWidthPx = 0;
+    uint32_t outlineColor = 0x00000000;
+    uint8_t outlineStyle = 0;      // 0=none, 1=solid, 2=dashed, 3=dotted, 4=double
+    uint8_t listStylePosition = 0; // 0=outside, 1=inside
 };
 
 struct NetSurfStyledNode {
@@ -66,6 +98,9 @@ struct NetSurfStyledNode {
     std::string formMethod;  // <form> method, uppercased ("GET" default)
 
     NetSurfComputedStyle style;
+
+    // P26: raw style="" attr (libcss parse ở computeStylesRecursive, thay parser tay).
+    std::string styleAttr;
 
     NetSurfStyledNode* parent = nullptr;
     NetSurfStyledNode* prevSibling = nullptr;
@@ -91,13 +126,15 @@ public:
     // extraCss: Additional stylesheet text (e.g. from <style> tags or external css)
     bool parseAndStyle(const std::string& html,
                        const std::string& extraCss,
-                       std::unique_ptr<NetSurfStyledNode>& outRoot);
+                       std::unique_ptr<NetSurfStyledNode>& outRoot,
+                       const std::string& baseUrl = "");
 
     // Phase 3: Parse HTML, cascade CSS, and compute full 2D RenderBox layout tree
     bool layout(const std::string& html,
                 const std::string& extraCss,
                 int viewportWidth,
-                std::unique_ptr<struct RenderBox>& outRenderTree);
+                std::unique_ptr<struct RenderBox>& outRenderTree,
+                const std::string& baseUrl = "");
 
     bool isInitialized() const { return m_initialized; }
 

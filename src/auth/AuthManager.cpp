@@ -252,6 +252,7 @@ AuthManager::PersonalTokenResult AuthManager::setPersonalTokens(const std::strin
     std::string email = !userEmail.empty() ? userEmail : detectedEmail;
     db.setSetting("auth_user_email", email);
     db.setSetting("auth_is_linked", "1");
+    db.setSetting("drive_roms_folder_id", ""); // new account: drop cached backup folder
     m_userEmail = email;
     m_state = AuthState::LINKED;
 
@@ -268,6 +269,7 @@ void AuthManager::clearPersonalTokens() {
     db.setSetting("auth_access_token", "");
     db.setSetting("auth_refresh_token", "");
     db.setSetting("auth_user_email", "");
+    db.setSetting("drive_roms_folder_id", "");
     m_userEmail = "";
 
     std::string folderId = db.getSetting("drive_folder_id", "");
@@ -398,6 +400,7 @@ void AuthManager::logout() {
     db.setSetting("auth_user_email", "");
     db.setSetting("drive_folder_id", "");
     db.setSetting("drive_folder_url", "");
+    db.setSetting("drive_roms_folder_id", "");
     db.setSetting("last_cloud_sync_time", "Chưa đồng bộ");
     db.clearCloudGames();
 
@@ -440,6 +443,7 @@ void AuthManager::pollTokenWorker() {
                 auto& db = DatabaseManager::instance();
                 db.setSetting("auth_is_linked", "1");
                 db.setSetting("auth_access_token", accessToken);
+                db.setSetting("drive_roms_folder_id", "");
                 if (!refreshToken.empty()) {
                     db.setSetting("auth_refresh_token", refreshToken);
                 }
@@ -540,8 +544,20 @@ std::string AuthManager::getValidAccessToken() {
         if (refreshAccessToken()) {
             return db.getSetting("auth_access_token", "");
         }
+        if (nowSec >= expiresAt) {
+            // Token is dead and cannot be refreshed (e.g. a pasted access
+            // token with no refresh token). Never hand out the stale token:
+            // uploads would die at Google with an opaque 401.
+            Logger::error("AuthManager: access token expired and refresh failed");
+            return "";
+        }
     }
     return accessToken;
+}
+
+bool AuthManager::refreshAccessTokenNow() {
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
+    return refreshAccessToken();
 }
 
 bool AuthManager::exchangeAuthCode(const std::string& code, const std::string& redirectUri) {
@@ -597,6 +613,7 @@ bool AuthManager::exchangeAuthCode(const std::string& code, const std::string& r
 
         auto& db = DatabaseManager::instance();
         db.setSetting("auth_access_token", accessToken);
+        db.setSetting("drive_roms_folder_id", "");
         if (!refreshToken.empty()) db.setSetting("auth_refresh_token", refreshToken);
         uint64_t nowSec = static_cast<uint64_t>(std::time(nullptr));
         db.setSetting("auth_expires_at", std::to_string(nowSec + expiresIn));

@@ -79,12 +79,12 @@ LIBS = {
                     "cflags": ["-D_BSD_SOURCE", "-D_DEFAULT_SOURCE", '-D_ALIGNED=__attribute__((aligned))', "-DSTMTEXPR=1"], "inc_dir": "lib"},
     "dom":         {"deps": ["wapcaplet", "parserutils", "hubbub"],
                     "cflags": ["-D_BSD_SOURCE", "-D_DEFAULT_SOURCE", '-D_ALIGNED=__attribute__((aligned))', "-DSTMTEXPR=1"], "inc_dir": "nolib"},
+    "nsbmp":       {"deps": [],                  "cflags": ["-D_BSD_SOURCE", "-D_DEFAULT_SOURCE"], "inc_dir": "flat"},
+    "nsgif":       {"deps": [],                  "cflags": ["-D_BSD_SOURCE", "-D_DEFAULT_SOURCE"], "inc_dir": "flat"},
+    "utf8proc":    {"deps": [],                  "cflags": ["-D_BSD_SOURCE", "-D_DEFAULT_SOURCE", "-Ilibnetsurf-src/libutf8proc/include/libutf8proc"], "inc_dir": "lib"},
+    "nspsl":       {"deps": [],                  "cflags": ["-D_BSD_SOURCE", "-D_DEFAULT_SOURCE"], "inc_dir": "flat"},
     "nsfb":        {"deps": ["nslog", "nsutils"],
-                    "cflags": ["-D_BSD_SOURCE", "-D_DEFAULT_SOURCE"], "inc_dir": "flat",
-                    "skip": True},  # broken in netsurf-all-3.11: stale includes
-                                     # like utils/log.h, desktop/plotters.h. We use
-                                     # SDL2 directly instead of NetSurf's framebuffer
-                                     # abstraction layer.
+                    "cflags": ["-D_BSD_SOURCE", "-D_DEFAULT_SOURCE"], "inc_dir": "flat"},
 }
 
 
@@ -98,6 +98,12 @@ def run(cmd, **kw):
 
 
 def find_sources(lib_dir):
+    if "libnsfb" in str(lib_dir):
+        return sorted(p for p in lib_dir.rglob("*.c")
+                      if not any(seg in str(p) for seg in (
+                          "/test/", "/usage/", "1bpp.c", "24bpp.c",
+                          "common.c", "32bpp-common.c", "vnc.c", "wld.c", "x.c", "sdl.c",
+                      )))
     # Exclude directories that need optional system libs we don't ship:
     # test/    - depends on libcheck
     # examples/ - demo programs
@@ -107,7 +113,7 @@ def find_sources(lib_dir):
     return sorted(p for p in lib_dir.rglob("*.c")
                   if not any(seg in str(p) for seg in (
                       "/test/", "/examples/", "/bench/", "/perf/",
-                      "/bindings/xml/", "_gen.c",
+                      "/bindings/xml/", "_gen.c", "utf8proc_data.c",
                   )))
 
 

@@ -550,18 +550,175 @@ std::string HtmlRenderer::extractTag(const std::string& html, size_t& pos, std::
 }
 
 std::string HtmlRenderer::getAttribute(const std::string& attrs, const std::string& name) {
-    std::string search = name + "=\"";
-    size_t pos = attrs.find(search);
-    if (pos == std::string::npos) {
-        search = name + "='";
-        pos = attrs.find(search);
+    if (attrs.empty() || name.empty()) return "";
+    size_t i = 0;
+    size_t n = attrs.size();
+    size_t nlen = name.size();
+
+    while (i < n) {
+        while (i < n && std::isspace(static_cast<unsigned char>(attrs[i]))) i++;
+        if (i >= n) break;
+
+        size_t startName = i;
+        while (i < n && !std::isspace(static_cast<unsigned char>(attrs[i])) &&
+               attrs[i] != '=' && attrs[i] != '/' && attrs[i] != '>') {
+            i++;
+        }
+        size_t nameLen = i - startName;
+        bool match = (nameLen == nlen);
+        if (match) {
+            for (size_t k = 0; k < nlen; ++k) {
+                if (std::tolower(static_cast<unsigned char>(attrs[startName + k])) !=
+                    std::tolower(static_cast<unsigned char>(name[k]))) {
+                    match = false;
+                    break;
+                }
+            }
+        }
+
+        while (i < n && std::isspace(static_cast<unsigned char>(attrs[i]))) i++;
+
+        if (i < n && attrs[i] == '=') {
+            i++; // skip '='
+            while (i < n && std::isspace(static_cast<unsigned char>(attrs[i]))) i++;
+            if (i >= n) break;
+
+            std::string val;
+            if (attrs[i] == '"' || attrs[i] == '\'') {
+                char quote = attrs[i++];
+                size_t valStart = i;
+                while (i < n && attrs[i] != quote) i++;
+                val = attrs.substr(valStart, i - valStart);
+                if (i < n && attrs[i] == quote) i++;
+            } else {
+                size_t valStart = i;
+                while (i < n && !std::isspace(static_cast<unsigned char>(attrs[i])) &&
+                       attrs[i] != '>') {
+                    i++;
+                }
+                val = attrs.substr(valStart, i - valStart);
+            }
+
+            if (match) return val;
+        } else {
+            if (match) return "true";
+        }
     }
-    if (pos == std::string::npos) return "";
-    pos += search.size();
-    size_t end = pos;
-    while (end < attrs.size() && attrs[end] != '"' && attrs[end] != '\'') end++;
-    return attrs.substr(pos, end - pos);
+    return "";
 }
+
+static bool isPlaceholderUrl(const std::string& u) {
+    if (u.empty()) return true;
+    if (u.compare(0, 5, "data:") == 0) return true;
+    if (u.compare(0, 5, "blob:") == 0) return true;
+    if (u.compare(0, 6, "about:") == 0) return true;
+    if (u == "#" || u.compare(0, 11, "javascript:") == 0) return true;
+    std::string low = u;
+    std::transform(low.begin(), low.end(), low.begin(), ::tolower);
+    if (low.find("blank.gif") != std::string::npos ||
+        low.find("spacer.gif") != std::string::npos ||
+        low.find("pixel.gif") != std::string::npos ||
+        low.find("transparent.gif") != std::string::npos ||
+        low.find("placeholder.") != std::string::npos) {
+        return true;
+    }
+    return false;
+}
+
+static std::string extractBestFromSrcset(const std::string& srcset) {
+    if (srcset.empty()) return "";
+    std::string bestUrl;
+    int bestScore = -1;
+
+    size_t pos = 0;
+    while (pos < srcset.size()) {
+        while (pos < srcset.size() && (std::isspace((unsigned char)srcset[pos]) || srcset[pos] == ',')) pos++;
+        if (pos >= srcset.size()) break;
+
+        size_t end = srcset.find(',', pos);
+        std::string entry = (end == std::string::npos) ? srcset.substr(pos) : srcset.substr(pos, end - pos);
+        pos = (end == std::string::npos) ? srcset.size() : end + 1;
+
+        size_t b = 0;
+        while (b < entry.size() && std::isspace((unsigned char)entry[b])) b++;
+        size_t e = entry.size();
+        while (e > b && std::isspace((unsigned char)entry[e - 1])) e--;
+        if (b >= e) continue;
+        entry = entry.substr(b, e - b);
+
+        size_t sp = entry.find(' ');
+        std::string candUrl = (sp == std::string::npos) ? entry : entry.substr(0, sp);
+        if (candUrl.empty() || candUrl.compare(0, 5, "data:") == 0) continue;
+
+        int score = 100;
+        if (sp != std::string::npos) {
+            std::string desc = entry.substr(sp + 1);
+            if (desc.find('w') != std::string::npos) {
+                int w = std::atoi(desc.c_str());
+                if (w >= 400 && w <= 1024) score = 300 + w;
+                else if (w > 1024) score = 200 - (w / 100);
+                else score = 100 + w;
+            } else if (desc.find('x') != std::string::npos) {
+                int x = std::atoi(desc.c_str());
+                if (x == 1 || x == 2) score = 350 + x * 50;
+            }
+        }
+
+        if (score > bestScore || bestUrl.empty()) {
+            bestScore = score;
+            bestUrl = candUrl;
+        }
+    }
+    return bestUrl;
+}
+
+static std::string extractImageCandidate(const std::string& attrs, const std::string& fallbackPictureSrc) {
+    static const char* kLazyAttrs[] = {
+        "data-src", "data-original", "data-lazy-src", "data-actualsrc",
+        "data-url", "data-hi-res-src", "data-full-src", "data-src-retina"
+    };
+    std::string cand;
+    for (const char* a : kLazyAttrs) {
+        std::string v = HtmlRenderer::getAttribute(attrs, a);
+        if (!isPlaceholderUrl(v)) {
+            cand = v;
+            break;
+        }
+    }
+
+    if (cand.empty()) {
+        std::string dss = HtmlRenderer::getAttribute(attrs, "data-srcset");
+        std::string v = extractBestFromSrcset(dss);
+        if (!isPlaceholderUrl(v)) cand = v;
+    }
+    if (cand.empty()) {
+        std::string ss = HtmlRenderer::getAttribute(attrs, "srcset");
+        std::string v = extractBestFromSrcset(ss);
+        if (!isPlaceholderUrl(v)) cand = v;
+    }
+
+    if (cand.empty()) {
+        std::string rawSrc = HtmlRenderer::getAttribute(attrs, "src");
+        if (!isPlaceholderUrl(rawSrc)) {
+            cand = rawSrc;
+        }
+    }
+
+    if (cand.empty() && !fallbackPictureSrc.empty()) {
+        cand = fallbackPictureSrc;
+    }
+
+    if (!cand.empty()) {
+        cand = HtmlRenderer::decodeHtmlEntities(cand);
+        size_t b = 0;
+        while (b < cand.size() && (std::isspace((unsigned char)cand[b]) || cand[b] == '"' || cand[b] == '\'')) b++;
+        size_t e = cand.size();
+        while (e > b && (std::isspace((unsigned char)cand[e - 1]) || cand[e - 1] == '"' || cand[e - 1] == '\'')) e--;
+        cand = (b < e) ? cand.substr(b, e - b) : "";
+    }
+    return cand;
+}
+
 
 std::string HtmlRenderer::decodeHtmlEntities(const std::string& str) {
     std::string result = str;
@@ -1141,15 +1298,16 @@ void HtmlRenderer::parseHtml(const std::string& html) {
     struct TextStyle { int lineH = LINE_HEIGHT; bool bold = false; };
     std::vector<TextStyle> styleStack;
     int listDepth = 0;
+    std::string pendingPictureSrc;
     auto curStyle = [&]() -> TextStyle {
         return styleStack.empty() ? TextStyle{} : styleStack.back();
     };
     auto styleFor = [&](const std::string& tag) -> TextStyle {
         TextStyle s = curStyle();
-        if (tag == "h1") { s.lineH = 58; s.bold = true; }
-        else if (tag == "h2") { s.lineH = 52; s.bold = true; }
-        else if (tag == "h3") { s.lineH = 46; s.bold = true; }
-        else if (tag == "h4" || tag == "h5" || tag == "h6") { s.lineH = 40; s.bold = true; }
+        if (tag == "h1") { s.lineH = 96; s.bold = true; }
+        else if (tag == "h2") { s.lineH = 84; s.bold = true; }
+        else if (tag == "h3") { s.lineH = 72; s.bold = true; }
+        else if (tag == "h4" || tag == "h5" || tag == "h6") { s.lineH = 64; s.bold = true; }
         else if (tag == "b" || tag == "strong") { s.bold = true; }
         return s;
     };
@@ -1239,6 +1397,7 @@ void HtmlRenderer::parseHtml(const std::string& html) {
             // like vnexpress where void tags/typos unbalance the tree).
             if (!tagName.empty() && tagName[0] == '/') {
                 std::string target = tagName.substr(1);
+                if (target == "picture") pendingPictureSrc.clear();
                 while (!stack.empty()) {
                     bool match = (stack.back()->tag == target);
                     popOne();  // also syncs formStack/style/listDepth
@@ -1282,30 +1441,9 @@ void HtmlRenderer::parseHtml(const std::string& html) {
                     el.cls = getAttribute(attrs, "class");
                     el.elemId = getAttribute(attrs, "id");
                     el.inlineCss = getAttribute(attrs, "style");
-                    el.src = getAttribute(attrs, "src");
-                    // P5: lazy-load pattern (vnexpress): src is a 1px
-                    // data: GIF placeholder, real URL lives in data-src.
-                    if (el.src.empty() || el.src.compare(0, 5, "data:") == 0) {
-                        el.src = getAttribute(attrs, "data-src");
-                    }
-                    // P12: more lazy variants — data-original, then the
-                    // first URL of srcset ("u1 220w, u2 480w").
-                    if (el.src.empty() || el.src.compare(0, 5, "data:") == 0) {
-                        el.src = getAttribute(attrs, "data-original");
-                    }
-                    if (el.src.empty() || el.src.compare(0, 5, "data:") == 0) {
-                        std::string ss = getAttribute(attrs, "srcset");
-                        if (!ss.empty()) {
-                            size_t comma = ss.find(',');
-                            std::string first = (comma == std::string::npos)
-                                                    ? ss
-                                                    : ss.substr(0, comma);
-                            first = cssTrim(first);
-                            size_t sp = first.find(' ');
-                            if (sp != std::string::npos) first.resize(sp);
-                            el.src = first;
-                        }
-                    }
+                    // Trích xuất ảnh toàn diện: lazy-load, srcset, src, fallback picture
+                    el.src = extractImageCandidate(attrs, pendingPictureSrc);
+                    if (el.src == pendingPictureSrc) pendingPictureSrc.clear();
                     el.text = getAttribute(attrs, "alt");
                     // P5b: reserve space from width/height or intrinsicsize
                     // ("220x132") so loaded images don't shift the layout.
@@ -1356,6 +1494,9 @@ void HtmlRenderer::parseHtml(const std::string& html) {
                         current->href.empty()) {
                         current->href = getAttribute(attrs, "src");
                     }
+                    // Bắt ảnh chất lượng cao cho thẻ <picture> bao bọc <img>
+                    std::string sSrc = extractImageCandidate(attrs, "");
+                    if (!sSrc.empty()) pendingPictureSrc = sSrc;
                 } else if (tagName == "input") {
                     std::string type = getAttribute(attrs, "type");
                     if (type.empty()) type = "text";
@@ -1692,16 +1833,16 @@ int HtmlRenderer::textWidth(const std::string& text, int px) {
 int HtmlRenderer::cssPx(int v) const {
     int pct = BrowserManager::instance().settings().fontScalePct;
     if (pct != 100 && pct != 120 && pct != 150) pct = 120;
-    int s = v * pct / 100;
-    if (s < 15) s = 15;
-    if (s > 44) s = 44;
+    int s = (v * 2) * pct / 100;
+    if (s < 24) s = 24;
+    if (s > 96) s = 96;
     return s;
 }
 
 TTF_Font* HtmlRenderer::fontFor(int px) {    // P9: sized font from the same file, cached. Falls back to base font.
     if (px <= 0 || m_fontPath.empty()) return m_font;
-    if (px < 12) px = 12;
-    if (px > 48) px = 48;
+    if (px < 16) px = 16;
+    if (px > 110) px = 110;
     auto it = m_fonts.find(px);
     if (it != m_fonts.end()) return it->second ? it->second : m_font;
     TTF_Font* f = TTF_OpenFont(m_fontPath.c_str(), px);
@@ -2321,58 +2462,34 @@ void HtmlRenderer::handleInput(int button) {
         return;
     }
     switch (button) {
+        // UP/DOWN: read-scroll — the page moves line by line and the
+        // highlight follows to the nearest actionable event (never yanks
+        // the viewport). L1/R1 stay as the big page jumps (pageUp/pageDown).
         case BTN_UP:
-            if (!m_focusable.empty()) {
-                if (m_inputIndex > 0) {
-                    m_inputIndex--;
-                } else {
-                    m_scrollY -= 48;
-                    if (m_scrollY < 0) m_scrollY = 0;
-                }
-                updateFocus();
-                ensureFocusVisible();
-                markDirty();
-            } else {
-                m_scrollY -= 48;
-                if (m_scrollY < 0) m_scrollY = 0;
-                markDirty();
-            }
+            scrollRead(-48);
             break;
         case BTN_DOWN:
-            if (!m_focusable.empty()) {
-                if (m_inputIndex + 1 < (int)m_focusable.size()) {
-                    m_inputIndex++;
-                } else {
-                    m_scrollY += 48;
-                    if (m_scrollY > m_maxScroll) m_scrollY = m_maxScroll;
-                }
-                updateFocus();
-                ensureFocusVisible();
-                markDirty();
-            } else {
-                m_scrollY += 48;
-                if (m_scrollY > m_maxScroll) m_scrollY = m_maxScroll;
-                markDirty();
-            }
+            scrollRead(+48);
             break;
-        case 2:  // LEFT: nhảy nhanh lùi 4 mục hoặc cuộn trang
-            if (!m_focusable.empty() && m_inputIndex > 0) {
-                m_inputIndex = std::max(0, m_inputIndex - 4);
-                updateFocus();
-                ensureFocusVisible();
-                markDirty();
-            } else {
+        // LEFT/RIGHT: step through the events INSIDE the current block,
+        // wrapping at the ends (viewport = card of blocks). Falls back to a
+        // big page jump when the page has no actionable events at all.
+        case 2:  // LEFT: mục trước trong block (wrap)
+            if (m_focusable.empty()) {
                 pageUp(250);
-            }
-            break;
-        case 3:  // RIGHT: nhảy nhanh tới 4 mục hoặc cuộn trang
-            if (!m_focusable.empty() && m_inputIndex + 1 < (int)m_focusable.size()) {
-                m_inputIndex = std::min((int)m_focusable.size() - 1, m_inputIndex + 4);
-                updateFocus();
+            } else {
+                focusInBlockStep(-1);
                 ensureFocusVisible();
                 markDirty();
-            } else {
+            }
+            break;
+        case 3:  // RIGHT: mục sau trong block (wrap)
+            if (m_focusable.empty()) {
                 pageDown(250);
+            } else {
+                focusInBlockStep(+1);
+                ensureFocusVisible();
+                markDirty();
             }
             break;
         case BTN_A:
@@ -3142,16 +3259,16 @@ void HtmlRenderer::applyStyles() {
                     el.centered = (el.textAlign == TextAlign::CENTER);
                 }
                 if (el.fontSize > 0) {
-                    el.lineH = std::max(20, cssPx(el.fontSize) * 14 / 10);
+                    el.lineH = std::max(36, cssPx(el.fontSize) * 14 / 10);
                 }
                 // P14.2: explicit line-height wins over the derived one.
                 if (el.lineHPx > 0) {
                     int lh = cssPx(el.lineHPx);
-                    if (lh < 16) lh = 16;
-                    if (lh > 90) lh = 90;
+                    if (lh < 28) lh = 28;
+                    if (lh > 160) lh = 160;
                     el.lineH = lh;
                 } else if (el.lineHNum > 0 && el.fontSize > 0) {
-                    el.lineH = std::max(16, (int)(cssPx(el.fontSize) * el.lineHNum));
+                    el.lineH = std::max(28, (int)(cssPx(el.fontSize) * el.lineHNum));
                 }
                 Inh child{el.hasColor, el.color, el.fontSize, el.bold,
                             el.centered, el.textAlign, el.lineHPx, el.lineHNum};

@@ -141,6 +141,43 @@ http://stream.test/vtv3_1080p
         self.assertIn("version", manifest)
         self.assertGreater(manifest["channel_count"], 0)
 
+    def test_06_api_export_with_selected_groups(self):
+        # 1. Xuất chỉ riêng nhóm Thể Thao (nhóm có sẵn từ sample_m3u)
+        code, resp = self.request_post_json("/api/export", {
+            "include_backup": True,
+            "publish_filters": {
+                "selected_groups": ["Thể Thao"]
+            }
+        })
+        self.assertEqual(code, 200)
+        self.assertTrue(resp["success"])
+
+        code, ctype, body = self.request_get("/download/live.m3u")
+        self.assertEqual(code, 200)
+        content = body.decode("utf-8")
+        self.assertIn("group-title=\"Thể Thao\"", content)
+        self.assertIn("VTV3", content)
+
+        # 2. Xuất nhóm khác không được chọn (ví dụ: Tin Tức) -> 0 kênh
+        code, resp = self.request_post_json("/api/export", {
+            "include_backup": True,
+            "publish_filters": {
+                "selected_groups": ["Tin Tức"]
+            }
+        })
+        self.assertEqual(code, 200)
+        self.assertEqual(resp["result"]["exported_entries"], 0)
+
+        # 3. Xuất danh sách nhóm rỗng [] -> 0 kênh
+        code, resp = self.request_post_json("/api/export", {
+            "include_backup": True,
+            "publish_filters": {
+                "selected_groups": []
+            }
+        })
+        self.assertEqual(code, 200)
+        self.assertEqual(resp["result"]["exported_entries"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -194,6 +194,14 @@ class CuratorEngine:
 
             # Kiểm tra bộ lọc xuất bản (Publish Filters) do Admin thiết lập
             if publish_filters:
+                # 1. Lọc theo nhóm kênh (Selected Groups) nếu có chỉ định
+                selected_groups = publish_filters.get("selected_groups")
+                if selected_groups is not None:
+                    ch_grp = best.get("group") or "Khác"
+                    if ch_grp not in selected_groups:
+                        continue
+
+                # 2. Lọc theo tiêu chí chất lượng đường truyền (Ping & Trạng thái)
                 good_ms = int(publish_filters.get("good_threshold_ms", self.normalizer.ping_thresholds.get("good_ms", 500)))
                 fair_ms = int(publish_filters.get("fair_threshold_ms", self.normalizer.ping_thresholds.get("fair_ms", 1500)))
                 allow_good = bool(publish_filters.get("allow_good", True))
@@ -264,6 +272,14 @@ class CuratorEngine:
 
         m3u_path = os.path.join(output_dir, "live.m3u")
         manifest_path = os.path.join(output_dir, "iptv_manifest.json")
+
+        # Xóa sạch file cũ trước khi xuất mới để đảm bảo không bị dính rác hay dữ liệu cũ
+        for old_file in [m3u_path, manifest_path]:
+            if os.path.exists(old_file):
+                try:
+                    os.remove(old_file)
+                except Exception as e:
+                    print(f"Không thể xóa file cũ {old_file}: {e}")
 
         entries = self.generate_live_entries(include_backup=include_backup, probe_results=probe_results, publish_filters=publish_filters)
         manifest = PlaylistExporter.export_files(entries, m3u_path, manifest_path)

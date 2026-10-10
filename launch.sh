@@ -101,7 +101,8 @@ install_pending_ota
 # Ensure binary is executable
 chmod +x ./bin/RomCloud 2>/dev/null
 
-# Execution loop supporting in-app restart after OTA update (exit code 42)
+# Execution loop supporting in-app restart after OTA update (exit code 42).
+# (Chrome chạy nhúng trong app — fork/wait trong ChromeBridge, không exit.)
 while true; do
     ./bin/RomCloud "$PWD"
     EXIT_CODE=$?

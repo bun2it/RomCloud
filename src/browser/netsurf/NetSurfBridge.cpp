@@ -27,6 +27,7 @@
 #include <cstring>
 #include <iostream>
 #include <sstream>
+#include <unordered_map>  // P23: applyGridFromAuthorCss
 
 namespace RomCloud {
 
@@ -45,6 +46,40 @@ bool NetSurfBridge::init() {
 }
 
 void NetSurfBridge::shutdown() { m_initialized = false; }
+
+static std::string resolveUrl(const std::string& base, const std::string& ref) {
+  if (ref.empty()) return "";
+  if (ref.rfind("http://", 0) == 0 || ref.rfind("https://", 0) == 0) return ref;
+  if (ref.rfind("//", 0) == 0) return "https:" + ref;
+  if (base.empty()) return ref;
+
+  size_t schemeEnd = base.find("://");
+  if (schemeEnd == std::string::npos) return ref;
+  size_t hostEnd = base.find('/', schemeEnd + 3);
+  std::string origin = (hostEnd == std::string::npos) ? base : base.substr(0, hostEnd);
+
+  if (ref.front() == '/') {
+    return origin + ref;
+  }
+  size_t lastSlash = base.rfind('/');
+  if (lastSlash != std::string::npos && lastSlash > schemeEnd + 2) {
+    return base.substr(0, lastSlash + 1) + ref;
+  }
+  return origin + "/" + ref;
+}
+
+static void resolveTreeUrls(NetSurfStyledNode* node, const std::string& baseUrl) {
+  if (!node || baseUrl.empty()) return;
+  if (!node->src.empty()) {
+    node->src = resolveUrl(baseUrl, node->src);
+  }
+  if (!node->href.empty()) {
+    node->href = resolveUrl(baseUrl, node->href);
+  }
+  for (auto& ch : node->children) {
+    resolveTreeUrls(ch.get(), baseUrl);
+  }
+}
 
 #if HAVE_NETSURF_LIBS
 // Helper to convert dom_string to std::string and unref
@@ -166,6 +201,149 @@ static uint32_t parseCssColor(const std::string& str) {
   return 0;
 }
 
+// P23: grid — libcss bản này không parse grid nên làm thủ công.
+// Parse "1fr 1fr", "repeat(3, 1fr)", "100px 25% 1fr" thành track list.
+static void parseGridTracks(const std::string& value,
+                            std::vector<NetSurfComputedStyle::GridTrack>& out) {
+  out.clear();
+  auto pushToken = [&](std::string tok) {
+    while (!tok.empty() && std::isspace((unsigned char)tok.front())) tok.erase(tok.begin());
+    while (!tok.empty() && std::isspace((unsigned char)tok.back())) tok.pop_back();
+    if (tok.empty()) return;
+    NetSurfComputedStyle::GridTrack t;
+    try {
+      if (tok.size() > 2 && tok.compare(tok.size() - 2, 2, "fr") == 0) {
+        t.kind = 2;
+        t.value = std::stof(tok.substr(0, tok.size() - 2));
+      } else if (!tok.empty() && tok.back() == '%') {
+        t.kind = 1;
+        t.value = std::stof(tok.substr(0, tok.size() - 1));
+      } else {
+        t.kind = 0;
+        std::string num = tok;
+        if (num.size() > 2 && num.compare(num.size() - 2, 2, "px") == 0)
+          num = num.substr(0, num.size() - 2);
+        t.value = std::stof(num);
+      }
+    } catch (...) { return; }
+    if (t.value < 0) t.value = 0;
+    out.push_back(t);
+  };
+  // Tách token, giữ nguyên repeat(...) nguyên cụm
+  size_t i = 0;
+  while (i < value.size()) {
+    while (i < value.size() && std::isspace((unsigned char)value[i])) i++;
+    if (i >= value.size()) break;
+    if (value.compare(i, 7, "repeat(") == 0) {
+      size_t close = value.find(')', i);
+      if (close == std::string::npos) break;
+      std::string inside = value.substr(i + 7, close - i - 7);
+      size_t comma = inside.find(',');
+      int n = 1;
+      std::string track = inside;
+      if (comma != std::string::npos) {
+        try { n = std::stoi(inside.substr(0, comma)); } catch (...) { n = 1; }
+        track = inside.substr(comma + 1);
+      }
+      if (n < 1) n = 1;
+      if (n > 12) n = 12;  // chống repeat(999,...) nổ layout
+      for (int r = 0; r < n; r++) pushToken(track);
+      i = close + 1;
+    } else {
+      size_t j = i;
+      while (j < value.size() && !std::isspace((unsigned char)value[j])) j++;
+      pushToken(value.substr(i, j - i));
+      i = j;
+    }
+  }
+}
+
+// P23: libcss không biết display:grid — quét author CSS thủ công, match
+// selector đơn giản (tag, .class, #id, tag.class) rồi gán grid cho node.
+// Selector phức tạp (:hover, >, +, ~, [...]) thì bỏ qua cho an toàn.
+static void applyGridFromAuthorCss(NetSurfStyledNode* root, const std::string& css) {
+  if (!root || css.empty()) return;
+  auto trimLower = [](std::string s) {
+    while (!s.empty() && std::isspace((unsigned char)s.front())) s.erase(s.begin());
+    while (!s.empty() && std::isspace((unsigned char)s.back())) s.pop_back();
+    std::transform(s.begin(), s.end(), s.begin(), ::tolower);
+    return s;
+  };
+  size_t pos = 0;
+  while (pos < css.size()) {
+    size_t openBrace = css.find('{', pos);
+    if (openBrace == std::string::npos) break;
+    size_t closeBrace = css.find('}', openBrace);
+    if (closeBrace == std::string::npos) break;
+    std::string selPart = css.substr(pos, openBrace - pos);
+    std::string body = css.substr(openBrace + 1, closeBrace - openBrace - 1);
+    pos = closeBrace + 1;
+    std::string lowBody = body;
+    std::transform(lowBody.begin(), lowBody.end(), lowBody.begin(), ::tolower);
+    if (lowBody.find("display") == std::string::npos ||
+        lowBody.find("grid") == std::string::npos)
+      continue;
+    std::unordered_map<std::string, std::string> decls;
+    std::istringstream iss(body);
+    std::string decl;
+    while (std::getline(iss, decl, ';')) {
+      size_t colon = decl.find(':');
+      if (colon == std::string::npos) continue;
+      decls[trimLower(decl.substr(0, colon))] = trimLower(decl.substr(colon + 1));
+    }
+    auto itD = decls.find("display");
+    if (itD == decls.end() || (itD->second != "grid" && itD->second != "inline-grid"))
+      continue;
+    int gapPx = 0;
+    auto itG = decls.find("gap");
+    if (itG == decls.end()) itG = decls.find("grid-gap");
+    if (itG == decls.end()) itG = decls.find("column-gap");
+    if (itG != decls.end()) { try { gapPx = std::stoi(itG->second); } catch (...) {} }
+    std::vector<NetSurfComputedStyle::GridTrack> cols;
+    auto itC = decls.find("grid-template-columns");
+    if (itC != decls.end()) parseGridTracks(itC->second, cols);
+    std::istringstream sss(selPart);
+    std::string sel;
+    while (std::getline(sss, sel, ',')) {
+      sel = trimLower(sel);
+      if (sel.empty() || sel.find_first_of(":>+~[*") != std::string::npos) continue;
+      std::function<void(NetSurfStyledNode*)> apply = [&](NetSurfStyledNode* n) {
+        if (!n) return;
+        bool match = false;
+        if (sel[0] == '.') {
+          std::string cls = sel.substr(1);
+          std::istringstream cn(n->className);
+          std::string c;
+          while (cn >> c) { if (c == cls) { match = true; break; } }
+        } else if (sel[0] == '#') {
+          match = (n->id == sel.substr(1));
+        } else {
+          size_t dot = sel.find('.');
+          std::string tag = (dot == std::string::npos) ? sel : sel.substr(0, dot);
+          std::string cls = (dot == std::string::npos) ? "" : sel.substr(dot + 1);
+          std::string ntag = n->tagName;
+          std::transform(ntag.begin(), ntag.end(), ntag.begin(), ::tolower);
+          if (ntag == tag) {
+            if (cls.empty()) match = true;
+            else {
+              std::istringstream cn(n->className);
+              std::string c;
+              while (cn >> c) { if (c == cls) { match = true; break; } }
+            }
+          }
+        }
+        if (match) {
+          n->style.display = 0x12;
+          n->style.gapPx = gapPx;
+          if (!cols.empty()) n->style.gridCols = cols;
+        }
+        for (auto& ch : n->children) apply(ch.get());
+      };
+      apply(root);
+    }
+  }
+}
+
 // Recursive walker to populate NetSurfStyledNode tree
 static std::unique_ptr<NetSurfStyledNode>
 buildStyledTree(dom_node *node, NetSurfStyledNode *parent,
@@ -251,47 +429,24 @@ buildStyledTree(dom_node *node, NetSurfStyledNode *parent,
         styledNode->formMethod = "GET";
     }
 
+    // P26: lưu raw style="" để libcss parse ở computeStylesRecursive
+    // (thay parser tay — libcss hiểu đúng % vs px, float, mọi thuộc tính).
+    // Chỉ giữ parse thủ công cho grid-template-columns (libcss không có grid).
     std::string styleAttr = getElementAttr(elem, "style");
     if (!styleAttr.empty()) {
-      std::istringstream iss(styleAttr);
-      std::string decl;
-      while (std::getline(iss, decl, ';')) {
-        size_t colon = decl.find(':');
-        if (colon == std::string::npos) continue;
-        std::string k = decl.substr(0, colon);
-        std::string v = decl.substr(colon + 1);
-        while (!k.empty() && std::isspace((unsigned char)k.front())) k.erase(k.begin());
-        while (!k.empty() && std::isspace((unsigned char)k.back())) k.pop_back();
-        while (!v.empty() && std::isspace((unsigned char)v.front())) v.erase(v.begin());
-        while (!v.empty() && std::isspace((unsigned char)v.back())) v.pop_back();
-        std::transform(k.begin(), k.end(), k.begin(), ::tolower);
-        std::transform(v.begin(), v.end(), v.begin(), ::tolower);
-
-        if (k == "display") {
-          if (v == "flex") styledNode->style.display = 0x11;
-          else if (v == "none") styledNode->style.display = 0x10;
-          else if (v == "inline-block") styledNode->style.display = 0x05;
-          else if (v == "inline") styledNode->style.display = 0x01;
-          else if (v == "block") styledNode->style.display = 0x02;
-        } else if (k == "flex-direction") {
-          if (v == "row") styledNode->style.flexDirection = 0x01;
-          else if (v == "column") styledNode->style.flexDirection = 0x02;
-        } else if (k == "color") {
-          uint32_t c = parseCssColor(v);
-          if (c != 0) styledNode->style.color = c;
-        } else if (k == "background" || k == "background-color") {
-          uint32_t c = parseCssColor(v);
-          if (c != 0) styledNode->style.backgroundColor = c;
-        } else if (k == "font-size") {
-          try { styledNode->style.fontSizePx = std::stoi(v); } catch (...) {}
-        } else if (k == "width") {
-          try { styledNode->style.widthPx = std::stoi(v); } catch (...) {}
-        } else if (k == "height") {
-          try { styledNode->style.heightPx = std::stoi(v); } catch (...) {}
-        } else if (k == "text-align") {
-          if (v == "center") styledNode->style.textAlign = 2;
-          else if (v == "right") styledNode->style.textAlign = 1;
-          else if (v == "left") styledNode->style.textAlign = 0;
+      styledNode->styleAttr = styleAttr;
+      // Grid: libcss không hỗ trợ — parse thủ công từ style attr.
+      // (gap cũng parse ở applyInlineStyleOverride, sau libcss)
+      std::string low = styleAttr;
+      std::transform(low.begin(), low.end(), low.begin(), ::tolower);
+      size_t gp = low.find("grid-template-columns");
+      if (gp != std::string::npos) {
+        size_t colon = low.find(':', gp);
+        size_t semi = low.find(';', colon);
+        if (colon != std::string::npos) {
+          std::string gv = styleAttr.substr(colon + 1,
+              (semi == std::string::npos ? std::string::npos : semi - colon - 1));
+          parseGridTracks(gv, styledNode->style.gridCols);
         }
       }
     }
@@ -495,11 +650,22 @@ static css_error cb_node_is_root(void *pw, void *n, bool *match) {
   return CSS_OK;
 }
 
+static inline uint32_t cssColorToRgba(css_color c) {
+  // libcss css_color is 0xAARRGGBB -> convert to RomCloud 0xRRGGBBAA
+  uint32_t a = (c >> 24) & 0xFF;
+  uint32_t r = (c >> 16) & 0xFF;
+  uint32_t g = (c >> 8) & 0xFF;
+  uint32_t b = c & 0xFF;
+  return (r << 24) | (g << 16) | (b << 8) | a;
+}
+
 static css_error cb_ua_default_for_property(void *pw, uint32_t property,
                                             css_hint *hint) {
   (void)pw;
   if (property == CSS_PROP_COLOR) {
-    hint->data.color = 0xFFFFFFFF; // White default
+    // Charcoal text default (AARRGGBB in libcss: Alpha=0xFF, R=0x22, G=0x22, B=0x22)
+    // NEVER 0xFFFFFFFF white, because canvas background is white!
+    hint->data.color = 0xFF222222;
     hint->status = CSS_COLOR_COLOR;
   } else if (property == CSS_PROP_FONT_FAMILY) {
     hint->data.strings = nullptr;
@@ -732,6 +898,236 @@ static css_select_handler g_selectHandler = {
     stub_get_node_data,
 };
 
+// P26: apply style="" bằng parser tay, chạy SAU computeStylesRecursive
+// (inline style override libcss — đúng thứ tự cascade).
+// Chỉ parse những gì layout cần; % thì bỏ qua (để auto).
+static void applyInlineStyleOverride(NetSurfStyledNode* node) {
+    if (!node) return;
+    // P26-fix: đệ quy con cháu LUÔN, kể cả khi node hiện tại không có styleAttr.
+    if (!node->styleAttr.empty()) {
+    const std::string& styleAttr = node->styleAttr;
+    std::string low = styleAttr;
+    std::transform(low.begin(), low.end(), low.begin(), ::tolower);
+
+    auto getDecl = [&](const char* name) -> std::string {
+        size_t p = low.find(name);
+        if (p == std::string::npos) return "";
+        size_t colon = low.find(':', p);
+        if (colon == std::string::npos) return "";
+        size_t semi = low.find(';', colon);
+        std::string v = styleAttr.substr(colon + 1,
+            (semi == std::string::npos ? std::string::npos : semi - colon - 1));
+        while (!v.empty() && std::isspace((unsigned char)v.front())) v.erase(v.begin());
+        while (!v.empty() && std::isspace((unsigned char)v.back())) v.pop_back();
+        std::transform(v.begin(), v.end(), v.begin(), ::tolower);
+        return v;
+    };
+
+    std::string v;
+    v = getDecl("display");
+    if (v == "flex") node->style.display = 0x11;
+    else if (v == "grid") node->style.display = 0x12;
+    else if (v == "none") node->style.display = 0x10;
+    else if (v == "block") node->style.display = 0x02;
+    else if (v == "inline") node->style.display = 0x01;
+
+    v = getDecl("float");
+    if (v == "left") node->style.floatSide = 1;
+    else if (v == "right") node->style.floatSide = 2;
+
+    v = getDecl("width");
+    if (!v.empty() && v.find('%') == std::string::npos) {
+        try { node->style.widthPx = std::stoi(v); } catch (...) {}
+    }
+    v = getDecl("height");
+    if (!v.empty() && v.find('%') == std::string::npos) {
+        try { node->style.heightPx = std::stoi(v); } catch (...) {}
+    }
+    v = getDecl("gap");
+    if (!v.empty()) {
+        try { node->style.gapPx = std::stoi(v); } catch (...) {}
+    }
+    // grid-template-columns đã parse ở buildStyledTree.
+
+    // ============ P21: extended CSS properties (helpers) ============
+    // getDeclStrict — tránh "border" khớp nhầm "border-top" / "padding-top" / v.v.
+    auto getDeclStrict = [&](const char* name) -> std::string {
+        std::string key = std::string(name) + ":";
+        size_t p = 0;
+        while (true) {
+            size_t found = low.find(key, p);
+            if (found == std::string::npos) return "";
+            if (found == 0 || low[found - 1] == ';') {
+                size_t colon = found + std::strlen(name);
+                size_t semi = low.find(';', colon);
+                std::string dv = styleAttr.substr(colon + 1,
+                    (semi == std::string::npos ? std::string::npos : semi - colon - 1));
+                while (!dv.empty() && std::isspace((unsigned char)dv.front())) dv.erase(dv.begin());
+                while (!dv.empty() && std::isspace((unsigned char)dv.back())) dv.pop_back();
+                std::transform(dv.begin(), dv.end(), dv.begin(), ::tolower);
+                return dv;
+            }
+            p = found + 1;
+        }
+    };
+    auto getDeclListStrict = [&](const char* name) -> std::vector<std::string> {
+        std::string s = getDeclStrict(name);
+        std::vector<std::string> out;
+        if (s.empty()) return out;
+        size_t i = 0;
+        while (i < s.size()) {
+            while (i < s.size() && std::isspace((unsigned char)s[i])) i++;
+            size_t j = i;
+            while (j < s.size() && !std::isspace((unsigned char)s[j])) j++;
+            if (j > i) out.push_back(s.substr(i, j - i));
+            i = j;
+        }
+        return out;
+    };
+    auto parsePxVal = [](const std::string& t) -> int {
+        if (t.empty()) return -1;
+        try {
+            std::string num;
+            for (char c : t) {
+                if (c == '-' || c == '+' || std::isdigit((unsigned char)c)) num += c;
+                else break;
+            }
+            if (num.empty() || num == "-" || num == "+") return -1;
+            return std::stoi(num);
+        } catch (...) { return -1; }
+    };
+    auto parseColorInline = [](const std::string& t) -> uint32_t {
+        if (t.empty()) return 0;
+        if (t == "transparent") return 0x00000000;
+        if (t[0] == '#') {
+            std::string hex = t.substr(1);
+            if (hex.size() == 3) { char r=hex[0],g=hex[1],b=hex[2]; hex = {r,r,g,g,b,b}; }
+            if (hex.size() == 6) {
+                try { return ((uint32_t)std::stoul(hex, nullptr, 16) << 8) | 0xFF; } catch (...) {}
+            }
+        }
+        return 0;
+    };
+    auto parseBorderStyleInline = [](const std::string& t) -> uint8_t {
+        if (t == "solid") return 1;
+        if (t == "dashed") return 2;
+        if (t == "dotted") return 3;
+        if (t == "double") return 4;
+        if (t == "groove" || t == "ridge" || t == "inset" || t == "outset") return 5;
+        return 0;
+    };
+
+    // P21: min-height, text-indent, letter-spacing, word-spacing
+    {
+        std::string v = getDeclStrict("min-height");
+        if (!v.empty()) { int px = parsePxVal(v); if (px >= 0) node->style.minHeightPx = px; }
+    }
+    {
+        std::string v = getDeclStrict("text-indent");
+        if (!v.empty()) { int px = parsePxVal(v); if (px >= 0) node->style.textIndentPx = px; }
+    }
+    {
+        std::string v = getDeclStrict("letter-spacing");
+        if (!v.empty()) {
+            if (v == "normal") node->style.letterSpacingPx = 0;
+            else { int px = parsePxVal(v); if (px >= 0) node->style.letterSpacingPx = px; }
+        }
+    }
+    {
+        std::string v = getDeclStrict("word-spacing");
+        if (!v.empty()) {
+            if (v == "normal") node->style.wordSpacingPx = 0;
+            else { int px = parsePxVal(v); if (px >= 0) node->style.wordSpacingPx = px; }
+        }
+    }
+
+    // P21: padding shorthand (1-4 values; longhand padding-top/... đã có sẵn
+    // nếu có cascade trước — inline-style này override toàn bộ 4 cạnh).
+    {
+        auto tok = getDeclListStrict("padding");
+        if (!tok.empty()) {
+            int vals[4] = {0, 0, 0, 0};
+            int got = 0;
+            for (int i = 0; i < 4 && i < (int)tok.size(); i++) {
+                int px = parsePxVal(tok[i]);
+                if (px >= 0) { vals[i] = px; got++; }
+            }
+            if (got > 0) {
+                switch (tok.size()) {
+                    case 1: vals[1] = vals[2] = vals[3] = vals[0]; break;
+                    case 2: vals[2] = vals[0]; vals[3] = vals[1]; break;
+                    case 3: vals[3] = vals[1]; break;
+                    default: break;
+                }
+                node->style.paddingTopPx = vals[0];
+                node->style.paddingRightPx = vals[1];
+                node->style.paddingBottomPx = vals[2];
+                node->style.paddingLeftPx = vals[3];
+            }
+        }
+    }
+
+    // P21: border shorthand + per-side longhand
+    {
+        auto applySide = [&](const char* name, int& wPx, uint32_t& col, uint8_t& sty) {
+            auto tok = getDeclListStrict(name);
+            if (tok.empty()) return;
+            for (const auto& t : tok) {
+                int px = parsePxVal(t);
+                if (px >= 0) {
+                    wPx = px;
+                } else {
+                    uint8_t s = parseBorderStyleInline(t);
+                    if (s) sty = s;
+                    else {
+                        uint32_t c = parseColorInline(t);
+                        if (c) col = c;
+                    }
+                }
+            }
+        };
+        // shorthand "border" áp cho 4 cạnh; longhand sau đó đè từng cạnh.
+        applySide("border", node->style.borderTopWidthPx, node->style.borderTopColor, node->style.borderTopStyle);
+        applySide("border", node->style.borderRightWidthPx, node->style.borderRightColor, node->style.borderRightStyle);
+        applySide("border", node->style.borderBottomWidthPx, node->style.borderBottomColor, node->style.borderBottomStyle);
+        applySide("border", node->style.borderLeftWidthPx, node->style.borderLeftColor, node->style.borderLeftStyle);
+        applySide("border-top", node->style.borderTopWidthPx, node->style.borderTopColor, node->style.borderTopStyle);
+        applySide("border-right", node->style.borderRightWidthPx, node->style.borderRightColor, node->style.borderRightStyle);
+        applySide("border-bottom", node->style.borderBottomWidthPx, node->style.borderBottomColor, node->style.borderBottomStyle);
+        applySide("border-left", node->style.borderLeftWidthPx, node->style.borderLeftColor, node->style.borderLeftStyle);
+    }
+
+    // P21: outline shorthand (width + style + color, không có per-side).
+    {
+        auto tok = getDeclListStrict("outline");
+        if (!tok.empty()) {
+            for (const auto& t : tok) {
+                int px = parsePxVal(t);
+                if (px >= 0) {
+                    node->style.outlineWidthPx = px;
+                } else {
+                    uint8_t s = parseBorderStyleInline(t);
+                    if (s) node->style.outlineStyle = s;
+                    else {
+                        uint32_t c = parseColorInline(t);
+                        if (c) node->style.outlineColor = c;
+                    }
+                }
+            }
+        }
+    }
+
+    // P21: list-style-position
+    {
+        std::string v = getDeclStrict("list-style-position");
+        if (v == "inside") node->style.listStylePosition = 1;
+        else if (v == "outside") node->style.listStylePosition = 0;
+    }
+    }
+
+    for (auto& ch : node->children) applyInlineStyleOverride(ch.get());
+}
+
 static void computeStylesRecursive(NetSurfStyledNode *node,
                                    css_select_ctx *selectCtx,
                                    css_unit_ctx *unitCtx, css_media *media,
@@ -817,11 +1213,11 @@ static void computeStylesRecursive(NetSurfStyledNode *node,
       // 6. Colors
       css_color colorVal;
       if (css_computed_color(s, &colorVal) == CSS_COLOR_COLOR) {
-        node->style.color = colorVal;
+        node->style.color = cssColorToRgba(colorVal);
       }
       if (css_computed_background_color(s, &colorVal) ==
           CSS_BACKGROUND_COLOR_COLOR) {
-        node->style.backgroundColor = colorVal;
+        node->style.backgroundColor = cssColorToRgba(colorVal);
       }
 
       // 7. Font size & Weight
@@ -833,6 +1229,73 @@ static void computeStylesRecursive(NetSurfStyledNode *node,
 
       // 8. Text align
       node->style.textAlign = css_computed_text_align(s);
+
+      // 9. P21: min-height (chỉ px; auto = -1)
+      if (css_computed_min_height(s, &fval, &u) == CSS_MIN_HEIGHT_SET &&
+          u == CSS_UNIT_PX) {
+        node->style.minHeightPx = (fval >> CSS_RADIX_POINT);
+      }
+      // 10. P21: text-indent
+      if (css_computed_text_indent(s, &fval, &u) == CSS_TEXT_INDENT_SET &&
+          u == CSS_UNIT_PX) {
+        node->style.textIndentPx = (fval >> CSS_RADIX_POINT);
+      }
+      // 11. P21: letter-spacing
+      if (css_computed_letter_spacing(s, &fval, &u) == CSS_LETTER_SPACING_SET &&
+          u == CSS_UNIT_PX) {
+        node->style.letterSpacingPx = (fval >> CSS_RADIX_POINT);
+      }
+      // 12. P21: word-spacing
+      if (css_computed_word_spacing(s, &fval, &u) == CSS_WORD_SPACING_SET &&
+          u == CSS_UNIT_PX) {
+        node->style.wordSpacingPx = (fval >> CSS_RADIX_POINT);
+      }
+      // 13. P21: border per-side widths (CSS_BORDER_WIDTH_WIDTH = 0x4 = đã set px)
+      if (css_computed_border_top_width(s, &fval, &u) == CSS_BORDER_WIDTH_WIDTH &&
+          u == CSS_UNIT_PX) {
+        node->style.borderTopWidthPx = (fval >> CSS_RADIX_POINT);
+      }
+      if (css_computed_border_right_width(s, &fval, &u) == CSS_BORDER_WIDTH_WIDTH &&
+          u == CSS_UNIT_PX) {
+        node->style.borderRightWidthPx = (fval >> CSS_RADIX_POINT);
+      }
+      if (css_computed_border_bottom_width(s, &fval, &u) == CSS_BORDER_WIDTH_WIDTH &&
+          u == CSS_UNIT_PX) {
+        node->style.borderBottomWidthPx = (fval >> CSS_RADIX_POINT);
+      }
+      if (css_computed_border_left_width(s, &fval, &u) == CSS_BORDER_WIDTH_WIDTH &&
+          u == CSS_UNIT_PX) {
+        node->style.borderLeftWidthPx = (fval >> CSS_RADIX_POINT);
+      }
+      // 14. P21: border per-side colors
+      if (css_computed_border_top_color(s, &colorVal) == CSS_BORDER_COLOR_COLOR) {
+        node->style.borderTopColor = cssColorToRgba(colorVal);
+      }
+      if (css_computed_border_right_color(s, &colorVal) == CSS_BORDER_COLOR_COLOR) {
+        node->style.borderRightColor = cssColorToRgba(colorVal);
+      }
+      if (css_computed_border_bottom_color(s, &colorVal) == CSS_BORDER_COLOR_COLOR) {
+        node->style.borderBottomColor = cssColorToRgba(colorVal);
+      }
+      if (css_computed_border_left_color(s, &colorVal) == CSS_BORDER_COLOR_COLOR) {
+        node->style.borderLeftColor = cssColorToRgba(colorVal);
+      }
+      // 14b. P21: border per-side styles (solid/dashed/...)
+      node->style.borderTopStyle = css_computed_border_top_style(s);
+      node->style.borderRightStyle = css_computed_border_right_style(s);
+      node->style.borderBottomStyle = css_computed_border_bottom_style(s);
+      node->style.borderLeftStyle = css_computed_border_left_style(s);
+      // 15. P21: outline width/color/style (CSS_OUTLINE_WIDTH_WIDTH = 0x4 = đã set px)
+      if (css_computed_outline_width(s, &fval, &u) == CSS_OUTLINE_WIDTH_WIDTH &&
+          u == CSS_UNIT_PX) {
+        node->style.outlineWidthPx = (fval >> CSS_RADIX_POINT);
+      }
+      if (css_computed_outline_color(s, &colorVal) == CSS_OUTLINE_COLOR_COLOR) {
+        node->style.outlineColor = cssColorToRgba(colorVal);
+      }
+      node->style.outlineStyle = css_computed_outline_style(s);
+      // 16. P21: list-style-position
+      node->style.listStylePosition = css_computed_list_style_position(s);
     }
 
     if (results)
@@ -953,7 +1416,8 @@ bool NetSurfBridge::parseHtml(const std::string &html,
 
 bool NetSurfBridge::parseAndStyle(const std::string &html,
                                   const std::string &extraCss,
-                                  std::unique_ptr<NetSurfStyledNode> &outRoot) {
+                                  std::unique_ptr<NetSurfStyledNode> &outRoot,
+                                  const std::string &baseUrl) {
   init();
   outRoot = nullptr;
   if (html.empty())
@@ -997,9 +1461,12 @@ bool NetSurfBridge::parseAndStyle(const std::string &html,
   const std::string defaultUaCss =
       "* { box-sizing: border-box; }\n"
       "html, body { display: block; margin: 0; padding: 0; width: 100%; }\n"
-      "div, section, footer, main, aside, p, h1, h2, h3, h4, h5, h6 { display: "
+      "div, section, footer, main, aside, article, p, h1, h2, h3, h4, h5, h6 { display: "
       "block; }\n"
-      "article, .item-news, .item_news, .news-item { display: flex; "
+      // P24: chỉ list-item (class cụ thể) mới flex row; <article> trần
+      // là block (hero: ảnh trên, tiêu đề dưới — như mobile thật).
+      // P25: thêm .art_item (vnexpress).
+      ".item-news, .item_news, .news-item, .art_item { display: flex; "
       "flex-direction: row; }\n"
       "nav, .main-nav, .parent, header ul, nav ul { display: flex; "
       "flex-direction: row; flex-wrap: wrap; list-style: none; margin: 0; "
@@ -1045,11 +1512,12 @@ bool NetSurfBridge::parseAndStyle(const std::string &html,
     css_select_ctx_append_sheet(selectCtx, uaSheet, CSS_ORIGIN_UA, nullptr);
   }
 
-  // Extract all <style> blocks from the HTML document
+  // Extract all <style> blocks from the HTML document.
+  // P23: không giới hạn kích thước — CSS chỉ là tập con của HTML (đã nằm
+  // trong RAM), cắt bớt làm mất style của trang (vnexpress có block 88KB).
   std::string authorCss = extraCss;
   size_t searchPos = 0;
-  const size_t kMaxAuthorCss = 65536; // 64KB safety budget prevents hangs on huge SPAs like YouTube
-  while ((searchPos = html.find("<style", searchPos)) != std::string::npos && authorCss.size() < kMaxAuthorCss) {
+  while ((searchPos = html.find("<style", searchPos)) != std::string::npos) {
     size_t closeAngle = html.find('>', searchPos);
     if (closeAngle == std::string::npos)
       break;
@@ -1057,9 +1525,6 @@ bool NetSurfBridge::parseAndStyle(const std::string &html,
     if (closeTag == std::string::npos)
       break;
     std::string snippet = html.substr(closeAngle + 1, closeTag - closeAngle - 1);
-    if (authorCss.size() + snippet.size() > kMaxAuthorCss) {
-      snippet.resize(kMaxAuthorCss - authorCss.size());
-    }
     if (!authorCss.empty())
       authorCss.push_back('\n');
     authorCss.append(snippet);
@@ -1102,6 +1567,13 @@ bool NetSurfBridge::parseAndStyle(const std::string &html,
   int nodeCount = 0;
   computeStylesRecursive(outRoot.get(), selectCtx, &unitCtx, &media, nodeCount);
 
+  // P26: apply style="" SAU libcss (inline override — đúng cascade).
+  applyInlineStyleOverride(outRoot.get());
+
+  // P23: libcss không parse display:grid — quét author CSS thủ công.
+  // authorCss ở đây = extraCss (file ngoài, fetch từ worker) + <style> inline.
+  applyGridFromAuthorCss(outRoot.get(), authorCss);
+
   // Clean up CSS selection resources
   css_select_ctx_destroy(selectCtx);
   if (uaSheet)
@@ -1109,6 +1581,7 @@ bool NetSurfBridge::parseAndStyle(const std::string &html,
   if (authorSheet)
     css_stylesheet_destroy(authorSheet);
 
+  resolveTreeUrls(outRoot.get(), baseUrl);
   return true;
 #else
     static auto parseCssRules =
@@ -1315,6 +1788,7 @@ bool NetSurfBridge::parseAndStyle(const std::string &html,
     }
 
     applyStylesRecursive(root.get());
+    resolveTreeUrls(root.get(), baseUrl);
     outRoot = std::move(root);
     return true;
 #endif
@@ -1322,11 +1796,15 @@ bool NetSurfBridge::parseAndStyle(const std::string &html,
 
 bool NetSurfBridge::layout(const std::string &html, const std::string &extraCss,
                            int viewportWidth,
-                           std::unique_ptr<RenderBox> &outRenderTree) {
+                           std::unique_ptr<RenderBox> &outRenderTree,
+                           const std::string &baseUrl) {
   std::unique_ptr<NetSurfStyledNode> styledRoot;
-  if (!parseAndStyle(html, extraCss, styledRoot) || !styledRoot) {
+  if (!parseAndStyle(html, extraCss, styledRoot, baseUrl) || !styledRoot) {
     return false;
   }
+  // P28: Resolve all relative and protocol-relative URLs on the styled tree
+  resolveTreeUrls(styledRoot.get(), baseUrl);
+
   outRenderTree = NetSurfLayoutEngine::instance().buildAndLayout(
       styledRoot.get(), viewportWidth, 20, 112);
   return outRenderTree != nullptr;

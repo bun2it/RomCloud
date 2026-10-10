@@ -1,4 +1,5 @@
 #include "NetSurfRenderer.h"
+#include "../SvgRaster.h"
 #include "../../logging/Logger.h"
 #include "../../network/HttpClient.h"
 #include <algorithm>
@@ -25,7 +26,7 @@ void NetSurfRenderer::init(SDL_Renderer* renderer, TTF_Font* font,
     m_renderer = renderer;
     m_font = font;
     m_fontPath = fontPath;
-    m_baseFontSize = baseFontSize > 0 ? baseFontSize : 24;
+    m_baseFontSize = baseFontSize > 0 ? baseFontSize : 36;
     clearTextCache();
     clearImageCache();
 }
@@ -76,8 +77,8 @@ void NetSurfRenderer::clearImageCache() {
 
 TTF_Font* NetSurfRenderer::fontFor(int px) {
     if (px <= 0 || m_fontPath.empty()) return m_font;
-    if (px < 12) px = 12;
-    if (px > 48) px = 48;
+    if (px < 16) px = 16;
+    if (px > 110) px = 110;
     auto it = m_fonts.find(px);
     if (it != m_fonts.end()) return it->second ? it->second : m_font;
     TTF_Font* f = TTF_OpenFont(m_fontPath.c_str(), px);
@@ -124,7 +125,7 @@ void NetSurfRenderer::rebuildFocusables() {
 
         // Requirement 3: Only hyperlinks (with href) and input fields are focusable.
         // Plain text and non-hyperlink images must NEVER be focusable or highlighted.
-        bool isHyperlink = !b->href.empty() && (b->type == RenderBoxType::LINK || b->type == RenderBoxType::IMAGE);
+        bool isHyperlink = !b->href.empty();
         bool isInputField = (b->type == RenderBoxType::INPUT || b->type == RenderBoxType::BUTTON);
 
         if ((isHyperlink || isInputField) && b->width > 0 && b->height > 0) {
@@ -328,6 +329,22 @@ void NetSurfRenderer::queueImage(const std::string& url) {
             SDL_RWops* rw = SDL_RWFromConstMem(resp.body.data(), (int)resp.body.size());
             if (rw) {
                 SDL_Surface* surf = IMG_Load_RW(rw, 1);
+                if (!surf) {
+                    // Fallback to SvgRaster if IMG_Load_RW fails (SVG vector format)
+                    std::vector<uint8_t> rgba;
+                    int svgW = 0, svgH = 0;
+                    if (svgRasterize((const uint8_t*)resp.body.data(), resp.body.size(),
+                                     1024, rgba, svgW, svgH) && svgW > 0 && svgH > 0) {
+                        surf = SDL_CreateRGBSurfaceWithFormatFrom(
+                            rgba.data(), svgW, svgH, 32, svgW * 4, SDL_PIXELFORMAT_RGBA32);
+                        if (surf) {
+                            // Duplicate surface so memory stays valid after rgba vector frees
+                            SDL_Surface* copy = SDL_DuplicateSurface(surf);
+                            SDL_FreeSurface(surf);
+                            surf = copy;
+                        }
+                    }
+                }
                 if (surf) {
                     std::lock_guard<std::mutex> lock(m_imageMutex);
                     m_readySurfaces.push_back(DecodedSurface{url, surf, surf->w, surf->h});
@@ -398,7 +415,17 @@ bool NetSurfRenderer::isImageLoaded(const std::string& url) const {
 void NetSurfRenderer::drawText(const std::string& text, int x, int y, SDL_Color color, int fontSizePx) {
     if (!m_renderer || text.empty()) return;
     TTF_Font* f = fontFor(fontSizePx);
-    if (!f) return;
+    if (!f) {
+        // P22: diagnostic — font null ở đây = trang trắng toàn tập.
+        // Log 1 lần để không spam debug.log (drawText chạy mỗi fragment).
+        static bool s_noFontWarned = false;
+        if (!s_noFontWarned) {
+            s_noFontWarned = true;
+            Logger::warn("NetSurfRenderer: no font available, skipping text "
+                         "(page will be blank)");
+        }
+        return;
+    }
 
     std::string key = text;
     key.push_back('\x01');
@@ -600,9 +627,12 @@ void NetSurfRenderer::renderBox(const RenderBox* box, int scrollY) {
             Uint8 g = (box->backgroundColor >> 16) & 0xFF;
             Uint8 b = (box->backgroundColor >> 8) & 0xFF;
             Uint8 a = box->backgroundColor & 0xFF;
-            SDL_Rect rBg = {box->x, sy, box->width, box->height};
-            SDL_SetRenderDrawColor(m_renderer, r, g, b, a);
-            SDL_RenderFillRect(m_renderer, &rBg);
+            // Prevent white overlay: if background is almost white, skip to keep canvas clean
+            if (!(r > 245 && g > 245 && b > 245)) {
+                SDL_Rect rBg = {box->x, sy, box->width, box->height};
+                SDL_SetRenderDrawColor(m_renderer, r, g, b, a);
+                SDL_RenderFillRect(m_renderer, &rBg);
+            }
         }
 
         // 2. Explicit Border
@@ -665,12 +695,17 @@ void NetSurfRenderer::renderBox(const RenderBox* box, int scrollY) {
             } else if (isHyperlink || box->type == RenderBoxType::LINK) {
                 textColor = SDL_Color{30, 64, 175, 255}; // Dark blue for links (#1E40AF)
             } else if ((box->color & 0xFF) > 0 && box->color != 0xFFFFFFFF) {
-                textColor = SDL_Color{
-                    (Uint8)((box->color >> 24) & 0xFF),
-                    (Uint8)((box->color >> 16) & 0xFF),
-                    (Uint8)((box->color >> 8) & 0xFF),
-                    (Uint8)(box->color & 0xFF)
-                };
+                Uint8 r = (Uint8)((box->color >> 24) & 0xFF);
+                Uint8 g = (Uint8)((box->color >> 16) & 0xFF);
+                Uint8 b = (Uint8)((box->color >> 8) & 0xFF);
+                Uint8 a = (Uint8)(box->color & 0xFF);
+                // SAFEGUARD: Never render white/invisible text on white canvas!
+                // If text luminance is too bright or alpha is nearly transparent, use dark charcoal
+                if ((r > 220 && g > 220 && b > 220) || a < 80) {
+                    textColor = SDL_Color{34, 34, 34, 255};
+                } else {
+                    textColor = SDL_Color{r, g, b, a};
+                }
             } else {
                 textColor = SDL_Color{34, 34, 34, 255}; // Dark gray default text (#222222)
             }

@@ -22,12 +22,14 @@ fi
 echo "=== Compiling RomCloud for TrimUI Brick Pro (aarch64-linux-gnu.2.33) ==="
 mkdir -p bin
 
-# Optional: build the NetSurf library stack (HTML5 parser, DOM, CSS engine).
-# Skipped by default; set BUILD_LIBNETSURF=1 to enable. The libs end up in
-# sysroot/lib/ (libcss.a, libhubbub.a, libdom.a, libparserutils.a,
-# libwapcaplet.a, libnslog.a, libnsutils.a) and headers in sysroot/include/.
-# See scripts/build-libnetsurf.py for the cross-compile recipe.
-if [ "${BUILD_LIBNETSURF:-0}" = "1" ]; then
+# P20: NetSurf library stack (HTML5 parser, DOM, CSS engine) is now the
+# default — we link it unconditionally for in-process FULL browsing. Set
+# BUILD_LIBNETSURF=0 to opt out (e.g. when libnetsurf-src isn't unpacked
+# and you want a faster dev build). The libs end up in sysroot/lib/
+# (libcss.a, libhubbub.a, libdom.a, libparserutils.a, libwapcaplet.a,
+# libnslog.a, libnsutils.a) and headers in sysroot/include/. See
+# scripts/build-libnetsurf.py for the cross-compile recipe.
+if [ "${BUILD_LIBNETSURF:-1}" = "1" ]; then
     if [ ! -e "libnetsurf-src" ]; then
         if [ -d "$HOME/Downloads/netsurf-all-3.11" ]; then
             ln -s "$HOME/Downloads/netsurf-all-3.11" libnetsurf-src
@@ -86,6 +88,7 @@ $ZIG c++ \
     src/ui/WeatherUI.cpp \
     src/clock/ClockStore.cpp \
     src/ui/ClockUI.cpp \
+    src/screensaver/SaverEngine.cpp \
     src/market/WatchManager.cpp \
     src/ui/WatchUI.cpp \
     src/market/MarketManager.cpp \
@@ -131,12 +134,15 @@ $ZIG c++ \
     src/localsend/LocalSendManager.cpp \
     src/browser/HtmlRenderer.cpp \
     src/browser/BrowserManager.cpp \
+    src/browser/chrome/ChromeBridge.cpp \
     src/browser/JsEngine.cpp \
     src/browser/SvgRaster.cpp \
     src/browser/netsurf/NetSurfBridge.cpp \
     src/browser/netsurf/NetSurfLayout.cpp \
     src/browser/netsurf/NetSurfRenderer.cpp \
     src/browser/netsurf/NetSurfEngine.cpp \
+    src/browser/netsurf/NetSurfJsBridge.cpp \
+    src/browser/netsurf/NetSurfWorkerBridge.cpp \
     build/nsgif_gif.o \
     build/nsgif_lzw.o \
     build/duktape.o \
@@ -155,6 +161,7 @@ $ZIG c++ \
     -lssl \
     -lcrypto \
     -lpthread \
+    -lrt \
     -ldl \
     -lm \
     -o bin/RomCloud
@@ -171,6 +178,28 @@ if [ "$RELEASE" = "1" ]; then
     ls -lh bin/RomCloud bin/RomCloud.debug
     file bin/RomCloud
 fi
+
+echo "=== Compiling NetSurf mobile-UA shim (ua_shim) ==="
+mkdir -p lib
+$ZIG cc \
+    -target aarch64-linux-gnu.2.33 \
+    -O2 \
+    -shared -fPIC \
+    src/browser/netsurf/ua_shim.c \
+    -o lib/netsurf_ua_shim.so
+ls -lh lib/netsurf_ua_shim.so
+file lib/netsurf_ua_shim.so
+
+echo "=== Compiling Chromium compat shim (LD_PRELOAD) ==="
+mkdir -p build
+$ZIG cc \
+    -target aarch64-linux-gnu.2.33 \
+    -O2 \
+    -shared -fPIC \
+    src/browser/chrome/compat_shim.c \
+    -o build/rc-compat_shim.so
+ls -lh build/rc-compat_shim.so
+file build/rc-compat_shim.so
 
 echo "=== Compiling GameCast Daemon (gamecast_d) ==="
 $ZIG c++ \

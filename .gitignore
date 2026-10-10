@@ -19,3 +19,7 @@ data/
 bin/test_browser
 tools/iptv_curator/*.db
 tools/iptv_curator/output/
+# RC-Web: binary ráp ngoài (Electron/Weston, ~300MB), không commit.
+rc-web-dist/
+rc-web/
+kv-chrome/

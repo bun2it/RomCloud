@@ -52,6 +52,10 @@ if [ -f bin/gamecast_d ]; then
     cp bin/gamecast_d "$STAGING_DIR/Apps/RomCloud/bin/"
     chmod +x "$STAGING_DIR/Apps/RomCloud/bin/gamecast_d"
 fi
+if [ -f bin/netsurf ]; then
+    cp bin/netsurf "$STAGING_DIR/Apps/RomCloud/bin/"
+    chmod +x "$STAGING_DIR/Apps/RomCloud/bin/netsurf"
+fi
 
 # Copy YouTube support (python3 + yt-dlp)
 # yt-dlp-glibc (38MB) chi dong trong goi Full; goi Lite se tu tai qua
@@ -87,6 +91,10 @@ cp assets/icons/*.png "$STAGING_DIR/Apps/RomCloud/assets/icons/"
 cp assets/apps_icons/*.png "$STAGING_DIR/Apps/RomCloud/assets/apps_icons/" 2>/dev/null || true
 cp -r assets/player_icons/* "$STAGING_DIR/Apps/RomCloud/assets/player_icons/" 2>/dev/null || true
 cp assets/button_icons/*.png "$STAGING_DIR/Apps/RomCloud/assets/button_icons/" 2>/dev/null || true
+if [ -d assets/netsurf ]; then
+    mkdir -p "$STAGING_DIR/Apps/RomCloud/assets/netsurf"
+    cp -r assets/netsurf/* "$STAGING_DIR/Apps/RomCloud/assets/netsurf/"
+fi
 cp config/settings.json "$STAGING_DIR/Apps/RomCloud/config/"
 if [ -d config ]; then
     cp -f config/*.conf "$STAGING_DIR/Apps/RomCloud/config/" 2>/dev/null || true

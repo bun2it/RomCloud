@@ -270,6 +270,11 @@ bool Application::init(int argc, char *argv[]) {
 
   // Initialize Network, OAuth, Sync & Download
   HttpClient::instance().init();
+  // P23: route the cookie jar to a persistent path under <dataDir> so
+  // login sessions survive app restarts and reboots. mkdir -p handled by
+  // HttpClient::setCookieJarPath itself.
+  HttpClient::instance().setCookieJarPath(
+      AppConfig::instance().getDataDir() + "/cookies.txt");
 
   // Initialize Database
   if (!DatabaseManager::instance().init(
@@ -324,15 +329,10 @@ bool Application::init(int argc, char *argv[]) {
     return false;
   }
 
-  // Auto-start LocalSendManager ở background (TCP listener + multicast
-  // announce). QUAN TRỌNG: phải chạy NGAY khi app launch, không chờ user vào
-  // LocalSend screen. Nếu service không listen, các peer (laptop / TrimUI khác)
-  // sẽ thấy TrimUI qua multicast discovery nhưng POST prepare-upload trả về
-  // "Connection refused".
-  if (!LocalSendManager::instance().start()) {
-    Logger::warn(
-        "LocalSendManager failed to start (continuing without LocalSend)");
-  }
+  // LocalSend: lazy-start theo rule "app nào chạy mới mở service".
+  // UIManager start khi vào LOCALSEND_HOME (UIManager.cpp:933) và stop khi
+  // bấm B thoát (UIManager.cpp:3035). Không auto-start ở boot để tránh
+  // multicast announce mỗi 5s tranh chấp WiFi với IPTV/mpv HLS segment.
 
   m_running = true;
   Logger::info("RomCloud initialization complete. Entering main loop.");
@@ -452,6 +452,7 @@ void Application::run() {
 void Application::shutdown() {
   Logger::info("Beginning clean shutdown sequence...");
   WebServer::instance().stop();
+  LocalSendManager::instance().stop();
   DownloadManager::instance().shutdown();
   DriveSyncEngine::instance().shutdown();
   AuthManager::instance().shutdown();

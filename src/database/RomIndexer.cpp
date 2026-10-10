@@ -73,9 +73,33 @@ ScanProgress RomIndexer::scanSystem(const SystemRecord& system, const std::strin
         std::string fullPath = systemDir + "/" + fname;
 
         struct stat st;
-        if (stat(fullPath.c_str(), &st) != 0 || !S_ISREG(st.st_mode)) continue;
+        if (stat(fullPath.c_str(), &st) != 0) continue;
 
-        if (!isExtensionSupported(fname, system.extList)) continue;
+        bool isFolderGame = false;
+        uint64_t entrySize = 0;
+        if (S_ISDIR(st.st_mode)) {
+            // Folder game (e.g. a PS1 game kept as bin/cue in its own
+            // folder): count the folder as one game when it directly
+            // holds at least one ROM file.
+            DIR* sub = opendir(fullPath.c_str());
+            if (!sub) continue;
+            struct dirent* subEntry = nullptr;
+            while ((subEntry = readdir(sub)) != nullptr) {
+                if (subEntry->d_name[0] == '.') continue;
+                std::string subPath = fullPath + "/" + subEntry->d_name;
+                struct stat subSt;
+                if (stat(subPath.c_str(), &subSt) != 0 || !S_ISREG(subSt.st_mode)) continue;
+                entrySize += static_cast<uint64_t>(subSt.st_size);
+                if (isExtensionSupported(subEntry->d_name, system.extList)) isFolderGame = true;
+            }
+            closedir(sub);
+            if (!isFolderGame) continue;
+        } else if (S_ISREG(st.st_mode)) {
+            if (!isExtensionSupported(fname, system.extList)) continue;
+            entrySize = static_cast<uint64_t>(st.st_size);
+        } else {
+            continue;
+        }
 
         foundFiles.insert(fname);
         progress.filesFound++;
@@ -83,7 +107,7 @@ ScanProgress RomIndexer::scanSystem(const SystemRecord& system, const std::strin
 
         GameRecord existing;
         if (db.getGameByFilename(system.id, fname, existing)) {
-            if (existing.localState != GameState::LOCAL || existing.localPath != fullPath || existing.sizeBytes != static_cast<uint64_t>(st.st_size)) {
+            if (existing.localState != GameState::LOCAL || existing.localPath != fullPath || existing.sizeBytes != entrySize) {
                 db.updateGameLocalState(existing.id, GameState::LOCAL, fullPath);
                 progress.filesUpdated++;
             }
@@ -91,8 +115,8 @@ ScanProgress RomIndexer::scanSystem(const SystemRecord& system, const std::strin
             GameRecord newGame;
             newGame.systemId = system.id;
             newGame.filename = fname;
-            newGame.title = cleanTitleFromFilename(fname);
-            newGame.sizeBytes = static_cast<uint64_t>(st.st_size);
+            newGame.title = isFolderGame ? fname : cleanTitleFromFilename(fname);
+            newGame.sizeBytes = entrySize;
             newGame.localPath = fullPath;
             newGame.localState = GameState::LOCAL;
 

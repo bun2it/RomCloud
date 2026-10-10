@@ -63,6 +63,15 @@ http://stream.example.com/kplus1.ts
         self.assertEqual(normalizer.canonicalize_group("⚽| THỂ THAO QUỐC TẾ"), "Thể Thao")
         self.assertEqual(normalizer.canonicalize_group("KÊNH VTV"), "VTV / Quốc Gia")
         self.assertEqual(normalizer.canonicalize_group("", "VTV3"), "VTV / Quốc Gia")
+        # Test series ON -> VTV / Quốc Gia
+        self.assertEqual(normalizer.canonicalize_group("", "ON Sports"), "VTV / Quốc Gia")
+        self.assertEqual(normalizer.canonicalize_group("", "ON Cine"), "VTV / Quốc Gia")
+        self.assertEqual(normalizer.canonicalize_group("VTVcab", "ON Football"), "VTV / Quốc Gia")
+        # Test series SCTV, THVL
+        self.assertEqual(normalizer.canonicalize_group("", "SCTV1"), "SCTV")
+        self.assertEqual(normalizer.canonicalize_group("", "THVL1"), "Địa phương")
+        # Test kênh không phân loại được -> Kênh Chung
+        self.assertEqual(normalizer.canonicalize_group("", "Kênh Lạ 999"), "Kênh Chung")
 
     def test_03_db_history_scoring(self):
         db_path = os.path.join(self.test_dir, "test_history.db")

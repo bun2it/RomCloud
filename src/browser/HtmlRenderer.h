@@ -321,9 +321,6 @@ private:
     // HTML Parsing
     void parseHtml(const std::string& html);
     std::string extractTag(const std::string& html, size_t& pos, std::string& tagName, std::string& attributes);
-    std::string getAttribute(const std::string& attrs, const std::string& name);
-    std::string decodeHtmlEntities(const std::string& str);
-    void appendUtf8(std::string& out, unsigned code);
     // P2: pixel word-wrap using the loaded font. Returns visual lines.
     std::vector<std::string> wrapText(const std::string& text, int maxWidth, int px = 0);
 
@@ -412,7 +409,7 @@ private:
     TTF_Font* m_font = nullptr;
     // P9: sized fonts for CSS font-size (same file, cached per px).
     std::string m_fontPath;
-    int m_baseFontSize = 30;
+    int m_baseFontSize = 36;
     std::unordered_map<int, TTF_Font*> m_fonts;
     // list (not vector): pointers into m_elements stay valid across
     // push_back — fixes the dangling-pointer bug in m_focusable (audit C2).
@@ -507,9 +504,9 @@ private:
     // retried (device log showed img_blank.gif refetched in a loop,
     // hogging all 4 worker slots and hiding real images).
     std::unordered_map<std::string, bool> m_imgFailed;
-    static constexpr int kMaxImgInFlight = 4;
-    static constexpr size_t kMaxImgCached = 24;
-    static constexpr size_t kMaxImgFailed = 128;
+    static constexpr int kMaxImgInFlight = 8;
+    static constexpr size_t kMaxImgCached = 256;
+    static constexpr size_t kMaxImgFailed = 256;
     static constexpr int kImgMaxH = 400;
     // P9c: vector formats need libraries the Brick build may lack (SVG
     // always, WebP sometimes) — don't waste workers/bandwidth on them.
@@ -610,8 +607,14 @@ private:
     static void downscaleSurface(SDL_Surface*& surf, int maxW, int maxH);
 
 public:
+    // Stateless text helpers — public static để hàm tự do (extractImageCandidate)
+    // và module khác dùng chung mà không cần instance.
+    static std::string getAttribute(const std::string& attrs, const std::string& name);
+    static std::string decodeHtmlEntities(const std::string& str);
+    static void appendUtf8(std::string& out, unsigned code);
+
     // Scroll / layout constants
-    static constexpr int LINE_HEIGHT = 36;
+    static constexpr int LINE_HEIGHT = 60;
     static constexpr int PADDING = 16;
     static constexpr int SCREEN_W = 1024;
     static constexpr int SCREEN_H = 768;

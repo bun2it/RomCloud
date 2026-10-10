@@ -2,12 +2,16 @@
 #include "../logging/Logger.h"
 #include <curl/curl.h>
 #include <sstream>
+#include <sys/stat.h>
+#include <sys/types.h>
 #include <unistd.h>
 
 namespace RomCloud {
 
-// P4: cookie jar path (tmpfs on Brick — session cookies, gone on reboot).
-static const char* kCookieJarPath = "/tmp/romcloud_cookies.txt";
+// P4: cookie jar path. P23: defaults to /tmp/romcloud_cookies.txt for
+// backwards-compat; Application::init() overrides it to a persistent
+// path under <dataDir>/cookies.txt so login sessions survive reboots.
+static const char* kDefaultCookieJarPath = "/tmp/romcloud_cookies.txt";
 
 static size_t writeCallback(void* contents, size_t size, size_t nmemb, void* userp) {
     size_t totalSize = size * nmemb;
@@ -52,7 +56,7 @@ bool HttpClient::init() {
         return false;
     }
     m_initialized = true;
-    Logger::info("HttpClient initialized with libcurl.");
+    Logger::info("HttpClient initialized with libcurl. cookieJar=" + m_cookieJarPath);
     return true;
 }
 
@@ -64,7 +68,33 @@ void HttpClient::shutdown() {
 }
 
 void HttpClient::clearCookies() {
-    unlink(kCookieJarPath);
+    unlink(m_cookieJarPath.c_str());
+}
+
+void HttpClient::setCookieJarPath(const std::string& path) {
+    if (path == m_cookieJarPath) return;
+    Logger::info("HttpClient: cookie jar path " + m_cookieJarPath +
+                 " -> " + path);
+    // If the old jar existed, move it to the new location so login sessions
+    // survive a path change (e.g. first boot with the persistent path).
+    if (!m_cookieJarPath.empty() && !path.empty() &&
+        m_cookieJarPath != path) {
+        // Best-effort: rename if source exists and dest doesn't.
+        struct stat stSrc, stDst;
+        if (stat(m_cookieJarPath.c_str(), &stSrc) == 0 &&
+            stat(path.c_str(), &stDst) != 0) {
+            // Ensure parent dir exists.
+            size_t slash = path.find_last_of('/');
+            if (slash != std::string::npos && slash > 0) {
+                std::string parent = path.substr(0, slash);
+                mkdir(parent.c_str(), 0700);
+            }
+            if (rename(m_cookieJarPath.c_str(), path.c_str()) == 0) {
+                Logger::info("HttpClient: migrated cookie jar to " + path);
+            }
+        }
+    }
+    m_cookieJarPath = path;
 }
 
 // Apply the options shared by GET and POST handles.
@@ -77,8 +107,10 @@ static void applyCommonOptions(CURL* curl, struct curl_slist* chunk, int timeout
     curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 10L);
     // P4: cookie engine backed by jar file — every handle in the app shares
     // the portal session (each request builds a fresh easy handle).
-    curl_easy_setopt(curl, CURLOPT_COOKIEFILE, kCookieJarPath);
-    curl_easy_setopt(curl, CURLOPT_COOKIEJAR, kCookieJarPath);
+    // P23: jar path is configurable so cookies survive reboots.
+    const std::string& jar = HttpClient::instance().cookieJarPath();
+    curl_easy_setopt(curl, CURLOPT_COOKIEFILE, jar.c_str());
+    curl_easy_setopt(curl, CURLOPT_COOKIEJAR, jar.c_str());
     // P4: ask for gzip/deflate/br — vnexpress serves gzip, ~5x smaller.
     curl_easy_setopt(curl, CURLOPT_ACCEPT_ENCODING, "");
     curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);

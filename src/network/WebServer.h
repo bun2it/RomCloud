@@ -29,6 +29,7 @@ private:
     void serverLoop();
     void handleClient(int clientFd);
     std::string buildHtmlResponse();
+    std::string buildSaverHtml();
     std::string buildSuccessResponse(const std::string& message);
 };
 

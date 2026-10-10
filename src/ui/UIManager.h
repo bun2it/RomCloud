@@ -14,6 +14,7 @@
 #include "UiRenderer.h"
 #include "UiTheme.h"
 #include "VirtualKeyboard.h"
+#include "../screensaver/SaverEngine.h"
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_ttf.h>
 #include <array>
@@ -70,6 +71,8 @@ enum class UIState {
   GAME_CAST,     // GameCast TV & Laptop streaming
   BROWSER,       // Browser main state (URL bar + content)
   BROWSER_INPUT, // Browser URL input (virtual keyboard)
+  CHROME,        // Chromium nhúng (viewport stream + map nút)
+  SCREENSAVER,   // P0: Screensaver (starfield/fire/clock/picture)
   EXIT_REQUESTED
 };
 
@@ -90,6 +93,11 @@ public:
   // B = lùi về trang trước: stack lưu lịch sử setState (trừ EXIT).
   // goBack() false = hết lịch sử (caller tự quyết, VD home thì thoát app).
   bool goBack();
+
+  // P0 Screensaver: public API cho SaverEngine
+  void saverSetClockStyle(int style);  // 0=flip, 2=qlocktwo
+  void saverRenderClock();             // gọi renderClockFullscreen()
+  void drawAppFooter(const std::vector<UiTheme::FooterHint> &hints);
 
 private:
   UIManager() = default;
@@ -449,6 +457,9 @@ private:
   void handleBrowserInputKeyboard();
   // P8: seed + open the URL editor (telex OFF — URLs are ASCII).
   void openBrowserUrlEditor();
+  // Chrome nhúng: commit/cancel editor điều hướng về CHROME hay BROWSER.
+  void commitBrowserInput(const std::string& url, bool addHist);
+  void cancelBrowserInput();
   // Cancel a page <input> edit: restore the original value, end the
   // session (B key while the field-edit VK overlay is up).
   void cancelBrowserFieldEdit();
@@ -496,6 +507,14 @@ private:
   // m_browserVk.query (VirtualKeyboard Telex transform) và
   // HtmlRenderer::setFocusedInputValue().
   bool m_browserFieldEditing = false;
+  // Chrome nhúng: true khi editor mở từ state CHROME (Y = gõ vào trang,
+  // START = sửa địa chỉ) — commit/cancel quay về CHROME thay vì BROWSER.
+  bool m_urlEditorFromChrome = false;
+  // Chrome nhúng: task nền (portal WiFi) yêu cầu vào state CHROME —
+  // update() tiêu thụ trên UI thread (không setState từ worker).
+  bool m_chromeEnterRequested = false;
+  void handleChromeInput();
+  void renderChromeState();
   // Value gốc của field khi mới vào edit mode — dùng để restore khi user
   // bấm "Hủy" (Cancel). Khi "Xong" (Commit) thì giữ value hiện tại.
   std::string m_browserFieldOriginal;
@@ -732,6 +751,9 @@ private:
   // Notification toast (DialogManager/ToastState la nguon duy nhat)
   DialogManager m_dialogs;
 
+  // P0 Screensaver
+  SaverEngine m_saver;
+
   void showToast(const std::string &message,
                  SDL_Color color = {0, 180, 216, 255},
                  uint32_t durationMs = 2500);
@@ -887,7 +909,6 @@ private:
   void drawAppHeader(const std::string &title, const std::string &sub = "");
   void drawHeaderStatus();
   void drawPadIcon(UiTheme::PadBtn btn, int x, int y, int size);
-  void drawAppFooter(const std::vector<UiTheme::FooterHint> &hints);
   void beginModalDim();
 
   // Performance caches (60 FPS Smooth UI) — P2-2: dung ImageCache LRU chung.

@@ -1,0 +1,387 @@
+#define _GNU_SOURCE  // POSIX_SPAWN_SETSID cho posix_spawn
+#include "ChromeBridge.h"
+#include "../../config/AppConfig.h"
+#include "../../logging/Logger.h"
+#include <sys/socket.h>
+#include <sys/stat.h>
+#include <sys/wait.h>
+#include <arpa/inet.h>
+#include <cerrno>
+#include <cstdio>
+#include <cstring>
+#include <fcntl.h>
+#include <signal.h>
+#include <spawn.h>
+#include <thread>
+#include <chrono>
+#include <unistd.h>
+#include <vector>
+
+extern char** environ;
+
+namespace RomCloud {
+
+namespace {
+// ── WEBTRACE: vết từng bước của phiên RC-Web (nằm trong debug.log) ──
+// Mã bước: B = bridge (file này), L = launch.sh trên máy (rc-web.log),
+// J = electron main (rc-web.log). Mốc +ms tính từ lúc start() bắt đầu,
+// để đối chiếu 2 file log theo thời gian tuyệt đối của Logger.
+std::chrono::steady_clock::time_point g_t0 =
+    std::chrono::steady_clock::now();
+
+long long traceMs() {
+    return (long long)std::chrono::duration_cast<std::chrono::milliseconds>(
+               std::chrono::steady_clock::now() - g_t0)
+        .count();
+}
+
+void trace(const char* step, const std::string& msg) {
+    Logger::info("[WEBTRACE] " + std::string(step) + " (+" +
+                 std::to_string(traceMs()) + "ms) " + msg);
+}
+
+void traceWarn(const char* step, const std::string& msg) {
+    Logger::warn("[WEBTRACE] " + std::string(step) + " (+" +
+                 std::to_string(traceMs()) + "ms) " + msg);
+}
+}  // namespace
+
+ChromeBridge& ChromeBridge::instance() {
+    static ChromeBridge inst;
+    return inst;
+}
+
+ChromeBridge::ChromeBridge() = default;
+
+ChromeBridge::~ChromeBridge() {
+    stop();
+}
+
+// ── Tìm gói trình duyệt của chính RomCloud ───────────────────────────
+// Bố cục khi đã ráp (chrome/fetch-rc-web.sh) và đẩy lên máy:
+//   Apps/RomCloud/rc-web/launch.sh         (script của ta, có quyền X)
+//   Apps/RomCloud/rc-web/electron/electron (Electron từ electronjs.org)
+bool ChromeBridge::findWebDir(std::string& outDir) {
+    std::string appRoot = AppConfig::instance().getAppRoot();
+    if (appRoot.empty()) appRoot = "/mnt/SDCARD/Apps/RomCloud";
+    std::string d = appRoot + "/rc-web";
+    bool hasLauncher = access((d + "/launch.sh").c_str(), X_OK) == 0;
+    bool hasElectron =
+        access((d + "/electron/electron").c_str(), X_OK) == 0;
+    trace("B01", "kiểm gói rc-web tại " + d + ": launch.sh=" +
+              std::string(hasLauncher ? "OK" : "THIẾU/không X") +
+              " electron=" + (hasElectron ? "OK" : "THIẾU/không X"));
+    if (hasLauncher && hasElectron) {
+        outDir = d;
+        return true;
+    }
+    return false;
+}
+
+bool ChromeBridge::openUrl(const std::string& url) {
+    return start(url);
+}
+
+bool ChromeBridge::openPortal(const std::string& portalUrl) {
+    trace("B00", "openPortal: " + portalUrl);
+    return start(portalUrl);
+}
+
+// Env cho tiến trình con: chép environ của RomCloud nhưng bỏ các biến
+// nạp thư viện (LD_LIBRARY_PATH trỏ vào lib/ của RomCloud sẽ làm
+// electron/weston nạp nhầm .so), rồi thêm URL mở đầu. Gói rc-web tự đặt
+// LD_LIBRARY_PATH của riêng nó trong launch.sh.
+static std::vector<std::string> sanitizedEnv(const std::string& startUrl) {
+    std::vector<std::string> env;
+    for (char** e = environ; e && *e; ++e) {
+        std::string s = *e;
+        if (s.rfind("LD_LIBRARY_PATH=", 0) == 0) continue;
+        if (s.rfind("LD_PRELOAD=", 0) == 0) continue;
+        if (s.rfind("LD_AUDIT=", 0) == 0) continue;
+        if (s.rfind("RC_WEB_URL=", 0) == 0) continue;
+        env.push_back(s);
+    }
+    env.push_back("RC_WEB_URL=" + startUrl);
+    return env;
+}
+
+bool ChromeBridge::start(const std::string& url) {
+    g_t0 = std::chrono::steady_clock::now();
+    trace("B00", "yêu cầu mở phiên RC-Web, url='" + url + "'" +
+              (isRunning() ? " -> đang có phiên, sẽ deep-link"
+                           : " -> mở phiên mới"));
+    if (isRunning()) {
+        // Đang trong phiên: mở URL mới bằng deep-link CDP.
+        if (!url.empty()) deepLink(url);
+        return true;
+    }
+    // Dọn xác phiên cũ (reap + log mã thoát) trước khi mở phiên mới.
+    pollExited();
+    stop();
+    m_ready.store(false);
+    m_failed.store(false);
+
+    std::string dir;
+    if (!findWebDir(dir)) {
+        traceWarn("B01", "chưa có gói rc-web dùng được "
+                     "(chạy chrome/fetch-rc-web.sh trên Mac rồi đẩy vào "
+                     "Apps/RomCloud/rc-web) -> hủy mở phiên");
+        return false;
+    }
+    trace("B02", "sẽ fork launch.sh trong " + dir);
+
+    std::string target = url.empty() ? "https://duckduckgo.com/" : url;
+    m_currentUrl = target;
+
+    // URL mở đầu cho electron main của ta (nó tự đọc lúc khởi động;
+    // CDP khi đó chưa lên).
+    bool urlFileOk = false;
+    if (FILE* f = fopen("/tmp/rc-web-start-url", "w")) {
+        fputs(target.c_str(), f);
+        fclose(f);
+        urlFileOk = true;
+    }
+    trace("B02", "URL mở đầu='" + target + "' ghi /tmp/rc-web-start-url: " +
+              std::string(urlFileOk ? "OK" : "THẤT BẠI (main còn biến "
+                                             "RC_WEB_URL để dùng)"));
+
+    std::string cmd = "cd \"" + dir + "\" && exec ./launch.sh";
+    char* argv[] = {(char*)"/bin/sh", (char*)"-c", (char*)cmd.c_str(),
+                    nullptr};
+
+    std::vector<std::string> envStore = sanitizedEnv(target);
+    std::vector<char*> envp;
+    envp.reserve(envStore.size() + 1);
+    for (auto& s : envStore) envp.push_back(s.data());
+    envp.push_back(nullptr);
+
+    // Session riêng cho phiên duyệt web: tín hiệu gửi tới process group
+    // của RomCloud (thoát app, kill từ MainUI...) không lan sang weston,
+    // và stop() giết được trọn nhóm của phiên.
+    posix_spawnattr_t attr;
+    posix_spawnattr_init(&attr);
+#ifdef POSIX_SPAWN_SETSID
+    posix_spawnattr_setflags(&attr, POSIX_SPAWN_SETSID);
+#endif
+    pid_t pid = -1;
+    trace("B03", "posix_spawn /bin/sh -c '" + cmd + "' (setsid: " +
+#ifdef POSIX_SPAWN_SETSID
+              std::string("có")
+#else
+              std::string("không — header thiếu POSIX_SPAWN_SETSID")
+#endif
+              + ")");
+    int rc = posix_spawn(&pid, "/bin/sh", nullptr, &attr, argv, envp.data());
+    posix_spawnattr_destroy(&attr);
+    if (rc != 0) {
+        traceWarn("B03", "fork launch.sh rc-web THẤT BẠI: rc=" +
+                      std::to_string(rc) + " " + std::string(strerror(rc)));
+        return false;
+    }
+    m_pid = pid;
+    trace("B03", "đã fork phiên RC-Web, pid con=" + std::to_string(pid));
+
+    // Luồng nền chờ CDP (dấu hiệu electron đã lên và nhận điều khiển).
+    // URL đầu không deep-link: main đã tự mở từ RC_WEB_URL nên vòng này
+    // chỉ đặt cờ sẵn sàng; quá 90s thì báo failed để UI quay về menu.
+    try {
+        std::thread([] {
+            ChromeBridge& self = ChromeBridge::instance();
+            trace("B04", "bắt đầu chờ CDP :9222 (tối đa 90s)");
+            for (int i = 0; i < 180; ++i) {  // 180 x 500ms = 90s
+                if (self.m_pid <= 0) {
+                    trace("B04", "huỷ chờ CDP: phiên đã đóng (pid<=0)");
+                    return;
+                }
+                if (ChromeBridge::cdpReady()) {
+                    self.m_ready.store(true);
+                    trace("B05", "CDP :9222 đã trả lời — phiên sẵn sàng");
+                    return;
+                }
+                if (i > 0 && i % 10 == 0) {  // nhịp tim mỗi 5s
+                    trace("B04", "đang chờ CDP... đã " +
+                              std::to_string(i / 2) + "s");
+                }
+                usleep(500 * 1000);
+            }
+            self.m_failed.store(true);
+            traceWarn("B06", "quá 90s vẫn chưa thấy CDP :9222 -> failed, "
+                             "UI sẽ báo mở thất bại");
+        }).detach();
+    } catch (...) {
+        // Hiếm: máy hết RAM không tạo được thread. UI vẫn poll trạng thái
+        // tiến trình con nên không kẹt; chỉ mất mốc "sẵn sàng".
+        Logger::warn("ChromeBridge: không tạo được thread chờ CDP");
+    }
+    return true;
+}
+
+bool ChromeBridge::isRunning() {
+    if (m_pid <= 0) return false;
+    // Chỉ kiểm sự tồn tại, KHÔNG reap ở đây: pollExited() là nơi reap
+    // duy nhất để còn ghi được mã thoát/tín hiệu vào log. (Con đã chết
+    // thành zombie vẫn trả lời kill(,0)==0 cho tới khi pollExited reap.)
+    return kill(m_pid, 0) == 0 || errno == EPERM;
+}
+
+bool ChromeBridge::pollExited() {
+    if (m_pid <= 0) return true;
+    int status = 0;
+    pid_t r = waitpid(m_pid, &status, WNOHANG);
+    if (r == m_pid) {
+        // Ghi rõ cách phiên kết thúc: thoát sạch / mã lỗi / bị tín hiệu
+        // (9=SIGKILL thường là hết RAM). Trước đây status bị vứt bỏ nên
+        // không phân biệt được trình duyệt tự đóng hay bị hệ thống giết.
+        if (WIFEXITED(status)) {
+            trace("B08", "tiến trình con đã thoát SẠCH, exit code " +
+                         std::to_string(WEXITSTATUS(status)) +
+                         " (thời lượng phiên xem mốc +ms ở trên)" +
+                         (WEXITSTATUS(status) == 0
+                              ? ""
+                              : " — xem rc-web.log đoạn cuối để biết bước nào lỗi"));
+        } else if (WIFSIGNALED(status)) {
+            traceWarn("B08", "tiến trình con bị TÍN HIỆU " +
+                         std::to_string(WTERMSIG(status)) +
+                         " (9=SIGKILL thường là hết RAM, 15=SIGTERM bị dừng từ ngoài)" +
+                         " — xem rc-web.log xem electron chết ở bước nào");
+        } else {
+            trace("B08", "tiến trình con kết thúc, raw status " +
+                         std::to_string(status));
+        }
+        m_pid = -1;
+        m_ready.store(false);
+        return true;
+    }
+    if (r < 0 && errno == ECHILD) {  // đã bị reap ở nơi khác
+        trace("B08", "tiến trình con đã được reap ở nơi khác (ECHILD)");
+        m_pid = -1;
+        m_ready.store(false);
+        return true;
+    }
+    return false;
+}
+
+bool ChromeBridge::stop() {
+    if (m_pid <= 0) return true;
+    trace("B09", "stop(): gửi SIGTERM tới pid con " + std::to_string(m_pid) +
+              " (chờ tối đa 3s cho trap cleanup trong launch.sh chạy)");
+    // SIGTERM tới đúng tiến trình script: trap cleanup trong launch.sh
+    // của ta dọn weston/electron/gptokeyb rồi trả màn hình cho MainUI.
+    kill(m_pid, SIGTERM);
+    for (int i = 0; i < 150; ++i) {  // tối đa ~3s
+        if (pollExited()) {
+            trace("B09", "phiên đã đóng sau ~" +
+                      std::to_string(i * 20) + "ms kể từ SIGTERM");
+            return true;
+        }
+        usleep(20 * 1000);
+    }
+    // Quá hạn: leo thang tới cả nhóm tiến trình của phiên (script đã
+    // setsid khi fork nên nhóm là -pid; không đụng nhóm của RomCloud).
+    traceWarn("B10", "quá 3s chưa thoát -> SIGKILL cả nhóm tiến trình phiên");
+    kill(-m_pid, SIGKILL);
+    kill(m_pid, SIGKILL);
+    int status = 0;
+    waitpid(m_pid, &status, 0);
+    traceWarn("B10", "đã SIGKILL xong, raw status " +
+                  std::to_string(status));
+    m_pid = -1;
+    m_ready.store(false);
+    return true;
+}
+
+// ── CDP qua socket trần (không phụ thuộc curl trên máy) ─────────────
+static int cdpHttp(const std::string& request) {
+    int fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (fd < 0) return -1;
+    struct timeval tv;
+    tv.tv_sec = 4;
+    tv.tv_usec = 0;
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(9222);
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    if (connect(fd, (struct sockaddr*)&addr, sizeof(addr)) != 0) {
+        close(fd);
+        return -1;
+    }
+    if (send(fd, request.data(), request.size(), 0) < 0) {
+        close(fd);
+        return -1;
+    }
+    char buf[512];
+    ssize_t n = recv(fd, buf, sizeof(buf) - 1, 0);
+    close(fd);
+    if (n <= 0) return -1;
+    buf[n] = 0;
+    const char* sp = strchr(buf, ' ');  // "HTTP/1.1 200 ..."
+    if (!sp) return -1;
+    return atoi(sp + 1);
+}
+
+bool ChromeBridge::cdpReady() {
+    std::string req = "GET /json/version HTTP/1.1\r\n"
+                      "Host: 127.0.0.1:9222\r\nConnection: close\r\n\r\n";
+    int fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (fd < 0) return false;
+    struct timeval tv;
+    tv.tv_sec = 1;
+    tv.tv_usec = 0;
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(9222);
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    bool ok = false;
+    if (connect(fd, (struct sockaddr*)&addr, sizeof(addr)) == 0 &&
+        send(fd, req.data(), req.size(), 0) >= 0) {
+        char buf[512];
+        ssize_t n = recv(fd, buf, sizeof(buf) - 1, 0);
+        if (n > 0) {
+            buf[n] = 0;
+            ok = strstr(buf, "200") != nullptr;
+        }
+    }
+    close(fd);
+    return ok;
+}
+
+bool ChromeBridge::cdpPut(const std::string& path) {
+    std::string req = "PUT " + path +
+        " HTTP/1.1\r\nHost: 127.0.0.1:9222\r\nContent-Length: 0\r\n"
+        "Connection: close\r\n\r\n";
+    int code = cdpHttp(req);
+    return code >= 200 && code < 300;
+}
+
+bool ChromeBridge::deepLink(const std::string& url) {
+    if (url.empty()) return false;
+    trace("B07", "deep-link (CDP PUT /json/new): " + url +
+              " — phiên đang " +
+              (m_ready.load() ? "sẵn sàng" : "CHƯA sẵn sàng"));
+    // CDP /json/new?<URL>: chỉ khoảng trắng là bắt buộc thoát trong thực
+    // tế dùng (ô địa chỉ của ta không sinh ký tự điều khiển).
+    std::string enc;
+    enc.reserve(url.size());
+    for (char c : url) enc += (c == ' ') ? "%20" : std::string(1, c);
+    bool ok = cdpPut("/json/new?" + enc);
+    if (ok) {
+        m_currentUrl = url;
+        trace("B07", "deep-link OK");
+    } else {
+        traceWarn("B07", "deep-link THẤT BẠI (CDP không trả 2xx): " + url);
+    }
+    return ok;
+}
+
+void ChromeBridge::render(SDL_Renderer*) {
+    // Browser thật do weston hiển thị toàn màn hình; UIManager tự vẽ
+    // màn chờ trong lúc boot nên ở đây không vẽ gì.
+}
+
+} // namespace RomCloud

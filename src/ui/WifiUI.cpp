@@ -1,4 +1,5 @@
 #include "UIManager.h"
+#include "../browser/chrome/ChromeBridge.h"
 #include "../wifi/WifiManager.h"
 #include "../config/AppConfig.h"
 #include "../input/InputManager.h"
@@ -59,13 +60,29 @@ void UIManager::startWifiPortal() {
         showToast("Đang làm Wi-Fi, chờ chút...", {245, 158, 11, 255}, 1500);
         return;
     }
-    // Tự xác nhận portal (form click-through). Browser tay đấu sau với NetSurf.
+    // Portal cần đăng nhập tay (cafe user/pass): mở bằng Chrome.
+    // Click-through tự động vẫn giữ cho mạng bấm-chấp-nhận.
     m_wifiBusy = true;
     m_wifiStatus = "Đang kiểm tra portal...";
     m_wifiTask.run([](TaskProgress &) {
-        std::string msg;
-        WifiManager::instance().acceptPortalBlocking(msg);
-        UIManager::instance().m_wifiStatus = msg;
+        PortalInfo pi = WifiManager::instance().checkPortal();
+        if (pi.portal && !pi.url.empty()) {
+            UIManager::instance().m_wifiStatus = "Mở trang portal bằng Chrome...";
+            if (ChromeBridge::instance().openPortal(pi.url))
+                UIManager::instance().m_chromeEnterRequested = true;
+            else
+                UIManager::instance().m_wifiStatus = "Chưa cài RC-Web (xem chrome/README)";
+        } else if (pi.portal) {
+            UIManager::instance().m_wifiStatus = "Mở trang portal bằng Chrome...";
+            if (ChromeBridge::instance().openPortal(""))
+                UIManager::instance().m_chromeEnterRequested = true;
+            else
+                UIManager::instance().m_wifiStatus = "Chưa cài RC-Web (xem chrome/README)";
+        } else {
+            std::string msg;
+            WifiManager::instance().acceptPortalBlocking(msg);
+            UIManager::instance().m_wifiStatus = msg;
+        }
     });
 }
 
@@ -101,6 +118,12 @@ void UIManager::renderWifiTab() {
             m_wifiScroll = 0;
         }
         m_wifiStatusMs = 0; // ép cập nhật dòng trạng thái ngay
+    }
+    // Portal yêu cầu Chrome từ task nền: vào state trên UI thread.
+    if (m_chromeEnterRequested && !m_wifiTask.isRunning()) {
+        m_chromeEnterRequested = false;
+        setState(UIState::CHROME);
+        return;
     }
     // Vào tab lần đầu: quét luôn.
     if (m_wifiNeedScan && !m_wifiBusy && !m_wifiTask.isRunning() && m_wifiStatus.empty()) {

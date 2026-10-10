@@ -7,6 +7,7 @@ let filteredChannels = [];
 let currentPage = 1;
 let pageSize = 100;
 let probePollingTimer = null;
+let selectedExportGroups = new Set(); // Các nhóm kênh được chọn để xuất bản
 
 // Video Player State
 let hlsInstance = null;
@@ -212,6 +213,7 @@ async function loadChannels() {
     allChannels = data.channels || [];
 
     updateGroupsDropdown(allChannels);
+    updateExportGroupCheckboxes(allChannels);
     onFilterChange();
     loadStats();
   } catch (err) {
@@ -1096,7 +1098,142 @@ async function saveRules() {
   }
 }
 
-// 14. Export & OTA Publish with Quality Filter Criteria
+// 14. Export & OTA Publish with Group & Quality Filter Criteria
+function updateExportGroupCheckboxes(channels) {
+  const container = document.getElementById("exportGroupCheckboxesGrid");
+  const badge = document.getElementById("selectedGroupsCountBadge");
+  if (!container) return;
+
+  const groupCounts = {};
+  channels.forEach(ch => {
+    const grp = ch.group || "Khác";
+    groupCounts[grp] = (groupCounts[grp] || 0) + 1;
+  });
+
+  const sortedGroups = Object.keys(groupCounts).sort();
+
+  // Khởi tạo: nếu chưa chọn nhóm nào hoặc lần đầu tải, mặc định chọn tất cả
+  if (selectedExportGroups.size === 0 && sortedGroups.length > 0) {
+    sortedGroups.forEach(g => selectedExportGroups.add(g));
+  } else {
+    // Loại bỏ những nhóm không còn trong dữ liệu
+    const currentValid = new Set(sortedGroups);
+    for (const g of selectedExportGroups) {
+      if (!currentValid.has(g)) selectedExportGroups.delete(g);
+    }
+    // Nếu bị rỗng, phục hồi chọn tất cả
+    if (selectedExportGroups.size === 0) {
+      sortedGroups.forEach(g => selectedExportGroups.add(g));
+    }
+  }
+
+  container.innerHTML = "";
+  sortedGroups.forEach(grp => {
+    const isChecked = selectedExportGroups.has(grp);
+    const count = groupCounts[grp] || 0;
+
+    const label = document.createElement("label");
+    label.className = "checkbox-card";
+    label.style.borderLeft = isChecked ? "3px solid var(--accent-cyan)" : "3px solid transparent";
+    label.style.transition = "all 0.2s ease";
+
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.value = grp;
+    input.checked = isChecked;
+    input.addEventListener("change", (e) => {
+      toggleExportGroup(grp, e.target.checked, label);
+    });
+
+    const content = document.createElement("div");
+    content.className = "chk-content";
+    content.innerHTML = `
+      <span class="chk-title">${escapeHtml(grp)}</span>
+      <span class="chk-sub">${count} kênh</span>
+    `;
+
+    label.appendChild(input);
+    label.appendChild(content);
+    container.appendChild(label);
+  });
+
+  if (badge) {
+    badge.textContent = `Đã chọn ${selectedExportGroups.size} / ${sortedGroups.length} nhóm`;
+  }
+
+  updatePublishPreview();
+}
+
+function toggleExportGroup(grp, isChecked, labelEl = null) {
+  if (isChecked) {
+    selectedExportGroups.add(grp);
+  } else {
+    selectedExportGroups.delete(grp);
+  }
+
+  if (labelEl) {
+    labelEl.style.borderLeft = isChecked ? "3px solid var(--accent-cyan)" : "3px solid transparent";
+  }
+
+  const badge = document.getElementById("selectedGroupsCountBadge");
+  const checkboxes = document.querySelectorAll("#exportGroupCheckboxesGrid input[type='checkbox']");
+  if (badge) {
+    badge.textContent = `Đã chọn ${selectedExportGroups.size} / ${checkboxes.length} nhóm`;
+  }
+
+  updatePublishPreview();
+}
+
+function selectAllExportGroups(selectAll) {
+  const container = document.getElementById("exportGroupCheckboxesGrid");
+  if (!container) return;
+  const checkboxes = container.querySelectorAll("input[type='checkbox']");
+
+  selectedExportGroups.clear();
+  checkboxes.forEach(cb => {
+    cb.checked = selectAll;
+    const parentLabel = cb.closest(".checkbox-card");
+    if (selectAll) {
+      selectedExportGroups.add(cb.value);
+      if (parentLabel) parentLabel.style.borderLeft = "3px solid var(--accent-cyan)";
+    } else {
+      if (parentLabel) parentLabel.style.borderLeft = "3px solid transparent";
+    }
+  });
+
+  const badge = document.getElementById("selectedGroupsCountBadge");
+  if (badge) {
+    badge.textContent = `Đã chọn ${selectedExportGroups.size} / ${checkboxes.length} nhóm`;
+  }
+
+  updatePublishPreview();
+}
+
+function invertExportGroups() {
+  const container = document.getElementById("exportGroupCheckboxesGrid");
+  if (!container) return;
+  const checkboxes = container.querySelectorAll("input[type='checkbox']");
+
+  checkboxes.forEach(cb => {
+    cb.checked = !cb.checked;
+    const parentLabel = cb.closest(".checkbox-card");
+    if (cb.checked) {
+      selectedExportGroups.add(cb.value);
+      if (parentLabel) parentLabel.style.borderLeft = "3px solid var(--accent-cyan)";
+    } else {
+      selectedExportGroups.delete(cb.value);
+      if (parentLabel) parentLabel.style.borderLeft = "3px solid transparent";
+    }
+  });
+
+  const badge = document.getElementById("selectedGroupsCountBadge");
+  if (badge) {
+    badge.textContent = `Đã chọn ${selectedExportGroups.size} / ${checkboxes.length} nhóm`;
+  }
+
+  updatePublishPreview();
+}
+
 function getPublishFilters() {
   return {
     allow_good: document.getElementById("chkPubGood") ? document.getElementById("chkPubGood").checked : true,
@@ -1105,7 +1242,8 @@ function getPublishFilters() {
     allow_standby: document.getElementById("chkPubStandby") ? document.getElementById("chkPubStandby").checked : true,
     allow_dead: document.getElementById("chkPubDead") ? document.getElementById("chkPubDead").checked : false,
     good_threshold_ms: pingThresholds.good_ms,
-    fair_threshold_ms: pingThresholds.fair_ms
+    fair_threshold_ms: pingThresholds.fair_ms,
+    selected_groups: Array.from(selectedExportGroups)
   };
 }
 
@@ -1118,8 +1256,16 @@ function updatePublishPreview() {
   let countStandby = 0;
   let countDead = 0;
   let countWillExport = 0;
+  let totalInSelectedGroups = 0;
 
   allChannels.forEach(ch => {
+    const grp = ch.group || "Khác";
+    // Nếu nhóm này không được chọn trong danh sách xuất, bỏ qua
+    if (selectedExportGroups.size > 0 && !selectedExportGroups.has(grp)) {
+      return;
+    }
+    totalInSelectedGroups++;
+
     const tier = getStreamQualityTier(ch.best_stream);
     if (tier === "GOOD") countGood++;
     else if (tier === "FAIR") countFair++;
@@ -1150,12 +1296,16 @@ function updatePublishPreview() {
 
   const badge = document.getElementById("previewPublishCountBadge");
   if (badge) {
-    const pct = allChannels.length > 0 ? ((countWillExport / allChannels.length) * 100).toFixed(1) : 0;
-    badge.textContent = `Dự kiến xuất bản: ${countWillExport} / ${allChannels.length} kênh (${pct}%)`;
+    const pct = totalInSelectedGroups > 0 ? ((countWillExport / totalInSelectedGroups) * 100).toFixed(1) : 0;
+    badge.textContent = `Dự kiến xuất bản: ${countWillExport} / ${totalInSelectedGroups} kênh (${pct}%) • ${selectedExportGroups.size} nhóm chọn`;
   }
 }
 
 async function exportPlaylist() {
+  if (selectedExportGroups.size === 0) {
+    showToast("⚠️ Vui lòng chọn ít nhất 1 nhóm kênh trước khi xuất bản!", true);
+    return;
+  }
   const includeBackup = document.getElementById("chkIncludeBackup") ? document.getElementById("chkIncludeBackup").checked : true;
   const pubFilters = getPublishFilters();
   showToast("Đang tạo file live.m3u và iptv_manifest.json theo bộ lọc tiêu chí...");
@@ -1186,8 +1336,12 @@ async function exportPlaylist() {
 }
 
 async function publishToRomCloud() {
+  if (selectedExportGroups.size === 0) {
+    showToast("⚠️ Vui lòng chọn ít nhất 1 nhóm kênh trước khi xuất bản!", true);
+    return;
+  }
   const filters = getPublishFilters();
-  if (!confirm("Đẩy file live.m3u và manifest đã qua chọn lọc theo tiêu chí chất lượng trực tiếp vào thư mục RomCloud iptv/ để máy handheld dùng ngay?")) return;
+  if (!confirm(`Đẩy file live.m3u và manifest của ${selectedExportGroups.size} nhóm kênh đã chọn trực tiếp vào thư mục RomCloud iptv/ để máy handheld dùng ngay?`)) return;
   showToast("Đang xuất bản vào thư mục RomCloud/iptv/...");
 
   try {
@@ -1208,6 +1362,50 @@ async function publishToRomCloud() {
     }
   } catch (err) {
     showToast(`Lỗi: ${err}`, true);
+  }
+}
+
+async function publishAndCommitToGitHub() {
+  if (selectedExportGroups.size === 0) {
+    showToast("⚠️ Vui lòng chọn ít nhất 1 nhóm kênh trước khi xuất bản!", true);
+    return;
+  }
+  const filters = getPublishFilters();
+  const ok = confirm(`Hành động này sẽ:\n1. Xuất file live.m3u & iptv_manifest.json cho ${selectedExportGroups.size} nhóm kênh đã chọn\n2. Tự động Git Commit chỉ riêng thư mục iptv/\n3. Git Push thẳng lên GitHub (main) để máy handheld cập nhật OTA ngay lập tức\n\nBạn có muốn thực hiện không?`);
+  if (!ok) return;
+
+  showToast("⏳ Đang xuất bản file, tạo Git commit và push lên GitHub...", false);
+
+  try {
+    const res = await fetch("/api/git_commit_push_ota", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        include_backup: true,
+        publish_filters: filters
+      })
+    });
+    const data = await res.json();
+    if (data.success) {
+      const m = data.result?.manifest;
+      const count = m ? m.channel_count : "";
+      const hash = data.commit_hash ? ` [${data.commit_hash}]` : "";
+      showToast(`🎉 Đã commit${hash} & push OTA (${count} kênh) lên GitHub thành công!`);
+
+      // Cập nhật lại UI hộp kết quả
+      const resBox = document.getElementById("exportResultBox");
+      if (resBox) {
+        resBox.style.display = "block";
+        const sumText = document.getElementById("exportSummaryText");
+        if (sumText) {
+          sumText.innerHTML = `Đã xuất <b>${count}</b> kênh và Push lên GitHub thành công (Commit: <code>${data.commit_hash || 'OK'}</code>). URL Manifest: <a href="https://raw.githubusercontent.com/bun2it/RomCloud/main/iptv/iptv_manifest.json" target="_blank" style="color: var(--accent);">GitHub Raw</a>`;
+        }
+      }
+    } else {
+      showToast(`❌ Lỗi: ${data.error || 'Không thể commit & push lên GitHub'}`, true);
+    }
+  } catch (err) {
+    showToast(`❌ Lỗi kết nối: ${err}`, true);
   }
 }
 

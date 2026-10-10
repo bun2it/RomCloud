@@ -2,49 +2,106 @@
   "group_mappings": {
     "VTV / Quốc Gia": [
       "VTV",
+      "VTVcab",
+      "VTV CAB",
       "VTV / QUỐC GIA",
       "KÊNH VTV",
       "QUỐC GIA",
       "TRUYỀN HÌNH QUỐC GIA",
-      "TH QUỐC GIA"
+      "TH QUỐC GIA",
+      "ON",
+      "Sự Kiện VTVPrime",
+      "VTVPRIME",
+      "🌐| Thiết yếu",
+      "Thiết yếu"
     ],
     "HTV / TP.HCM": [
       "HTV",
+      "HTVC",
       "HTV / TP.HCM",
       "TRUYỀN HÌNH TP.HCM",
       "KÊNH HTV"
     ],
+    "SCTV": [
+      "SCTV",
+      "KÊNH SCTV",
+      "TRUYỀN HÌNH SAIGONTOURIST"
+    ],
+    "Địa phương": [
+      "Địa phương",
+      "ĐỊA PHƯƠNG",
+      "KÊNH ĐỊA PHƯƠNG",
+      "THVL",
+      "ĐÀI TỈNH",
+      "TỈNH"
+    ],
     "Thể Thao": [
+      "Thể Thao",
       "THỂ THAO",
       "THỂ THAO QUỐC TẾ",
       "THỂ THAO TRONG NƯỚC",
-      "⚽| THỂ THAO QUỐC TẾ",
-      "⚽ THỂ THAO",
+      "⚽| Thể thao quốc tế",
+      "⚽ Thể thao",
+      "COLA TV",
+      "GÀ VÀNG",
+      "KHÁN ĐÀI TV",
       "SPORTS",
       "K+",
       "K PLUS",
       "CANAL+"
     ],
-    "Tin Tức": [
-      "TIN TỨC",
-      "NEWS",
-      "THỜI SỰ",
-      "VTC"
-    ],
     "Phim & Giải Trí": [
+      "Giải Trí",
+      "GIẢI TRÍ",
+      "In The Box",
+      "📦| In The Box",
+      "TVB",
       "PHIM",
       "PHIM TRUYỆN",
-      "GIẢI TRÍ",
       "ENTERTAINMENT",
       "CINEMA",
       "HBO"
     ],
     "Quốc Tế": [
+      "Quốc Tế",
       "QUỐC TẾ",
       "INTERNATIONAL",
       "KÊNH NƯỚC NGOÀI",
+      "Israel",
       "DISCOVERY",
       "NATIONAL GEOGRAPHIC"
+    ],
+    "🇨🇳 Trung Quốc": [
+      "Trung Quốc",
+      "🇨🇳| Trung Quốc",
+      "CCTV"
+    ],
+    "🇰🇷 Hàn Quốc": [
+      "Hàn Quốc",
+      "🇰🇷| Hàn Quốc",
+      "KOREA",
+      "SBS",
+      "MBC"
+    ],
+    "🇹🇭 Thái Lan": [
+      "Thái Lan",
+      "🇹🇭| Thái Lan",
+      "THAILAND"
+    ],
+    "Radio": [
+      "Radio",
+      "UK Radio",
+      "🇬🇧 UK Radio",
+      "VOV",
+      "VOH"
+    ],
+    "LIVE EVENTS": [
+      "LIVE EVENTS",
+      "LIVE EVENTS 🔴",
+      "Sự Kiện FPT PLAY",
+      "Sự Kiện TV360",
+      "TRỰC TIẾP",
+      "SỰ KIỆN"
     ]
   },
   "channel_aliases": {

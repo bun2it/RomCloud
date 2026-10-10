@@ -24,8 +24,10 @@
 #include "../sync/DriveSyncEngine.h"
 #include "../sync/UploadManager.h"
 #include "../browser/BrowserManager.h"
+#include "../browser/chrome/ChromeBridge.h"
 #include "../browser/HtmlRenderer.h"
 #include "../browser/netsurf/NetSurfEngine.h"
+#include "../browser/netsurf/NetSurfWorkerBridge.h"
 #include "BoxartScraper.h"
 #include "QrRenderer.h"
 #include "TelexHelper.h"
@@ -95,7 +97,7 @@ void UIManager::initGridMenu() {
       {"cast", "GAME CAST", "CAST.png", "Cast lên TV & Laptop"},
       {"explorer", "FILE EXPLORER", "FOLDER.png", "Duyet file SD"},
       {"weather", "OFFICEGO", "OFFICEGO.png", "Thời tiết & Lịch"},
-      {"browser", "BROWSER", "BROWSER.png", "Duyệt web & portal"},
+      {"browser", "WEB", "BROWSER.png", "Web Chrome ngoài + portal"},
       {"localsend", "LOCALSEND", "LOCALSEND.png", "Chia se P2P trong LAN"},
       {"wallpaper", "HÌNH NỀN", "WALLPAPER.png", "Hình nền & Giao diện"},
       {"settings", "CÀI ĐẶT", "SETTINGS.png", "Cấu hình"}};
@@ -114,10 +116,13 @@ bool UIManager::init(SDL_Window *window, SDL_Renderer *renderer) {
   }
 
   std::string fontPath = AppConfig::instance().getFontPath();
-  // Ưu tiên NotoSans-Regular của app (full TV), font hệ thống fallback sau.
+  // Ưu tiên NotoSans-Regular của app (full TV), DejaVuSans (deploy kèm app,
+  // đã verify 100% TV) rồi mới tới font hệ thống.
   const char *fallbackFonts[] = {
       "/mnt/SDCARD/Apps/RomCloud/assets/fonts/NotoSans-Regular.ttf",
       "assets/fonts/NotoSans-Regular.ttf",
+      "/mnt/SDCARD/Apps/RomCloud/assets/fonts/DejaVuSans.ttf",
+      "assets/fonts/DejaVuSans.ttf",
       "/rom/usr/trimui/res/full.ttf",
       "/usr/trimui/res/full.ttf",
       "/usr/trimui/res/regular.ttf",
@@ -281,6 +286,9 @@ bool UIManager::init(SDL_Window *window, SDL_Renderer *renderer) {
     }
   });
 
+  // P0 Screensaver: khởi tạo engine
+  m_saver.init(this, m_renderer);
+
   return true;
 }
 
@@ -441,8 +449,10 @@ void UIManager::setState(UIState state) {
   } else if (state == UIState::CLOUD_LOGIN) {
     // Vào màn liên kết: tự lấy mã thiết bị nền (user chỉ nhập mã trên ĐT).
     m_cloudPortalView = false;
-    m_cloudAutoSync = AuthManager::instance().isLinked();
-    if (!AuthManager::instance().isLinked()) {
+    // Đích của màn liên kết là Drive cá nhân (sao lưu/upload). Đã nối thư
+    // mục tải game (public) vẫn phải cho đăng nhập cá nhân tiếp.
+    m_cloudAutoSync = AuthManager::instance().canUpload();
+    if (!AuthManager::instance().canUpload()) {
       AuthManager::instance().cancelDeviceFlow();
       std::thread([] { AuthManager::instance().startDeviceFlow(); }).detach();
     }
@@ -593,7 +603,7 @@ void UIManager::update() {
 
   // CLOUD_LOGIN: vừa link xong -> toast + tự sync, user khỏi bấm thêm.
   if (m_currentState == UIState::CLOUD_LOGIN &&
-      AuthManager::instance().isLinked() && !m_cloudAutoSync) {
+      AuthManager::instance().canUpload() && !m_cloudAutoSync) {
     m_cloudAutoSync = true;
     showToast("Đã liên kết Drive! Đang đồng bộ...", {34, 197, 94, 255}, 2500);
     DriveSyncEngine::instance().startSync();
@@ -808,6 +818,33 @@ void UIManager::update() {
   lastAuthState = curAuthState;
 
   switch (m_currentState) {
+  case UIState::SCREENSAVER: {
+    // P1: update starfield (tính dt)
+    static uint32_t lastMs = 0;
+    uint32_t nowMs = SDL_GetTicks();
+    float dt = lastMs == 0 ? 0.016f : (nowMs - lastMs) / 1000.0f;
+    if (dt > 0.1f) dt = 0.1f;  // kẹp hitch
+    lastMs = nowMs;
+    m_saver.update(dt);
+    
+    // P3-Tai: Y/X chuyển mode, các nút khác tùy saver xử lý
+    // handleInput trả về true = đã xử lý (không thoát), false = thoát
+    bool anyPressed = false;
+    for (int b = 0; b < 16; b++) {
+      if (input.isButtonJustPressed(static_cast<Button>(b))) {
+        anyPressed = true;
+        if (m_saver.handleInput(b)) {
+          anyPressed = false;  // saver đã xử lý (đổi mode, settings...)
+        }
+        break;
+      }
+    }
+    if (anyPressed) {
+      goBack();
+      lastMs = 0;  // reset khi thoát
+    }
+    break;
+  }
   case UIState::MENU: {
     int itemCount = static_cast<int>(m_gridMenuItems.size());
 
@@ -864,8 +901,21 @@ void UIManager::update() {
       } else if (selectedId == "weather") {
         openWeather();
       } else if (selectedId == "browser") {
-        // Browser NetSurf (đấu nối sau).
-        setState(UIState::BROWSER);
+        // FULL = Chrome nhúng (viewport stream); LITE = trình duyệt tích hợp.
+        if (BrowserManager::instance().engineMode() == BrowserEngine::FULL) {
+          std::string url = BrowserManager::instance().currentUrl();
+          if (url.empty()) url = m_browserUrl;
+          if (ChromeBridge::instance().openUrl(url)) {
+            m_urlEditorFromChrome = false;
+            setState(UIState::CHROME);
+          } else {
+            showToast("Chưa cài RC-Web (xem chrome/README)...",
+                      {239, 68, 68, 255}, 3000);
+            setState(UIState::BROWSER);
+          }
+        } else {
+          setState(UIState::BROWSER);
+        }
       } else if (selectedId == "iptv") {
         if (IPTVManager::instance().playlistCount() == 0) {
           IPTVManager::instance().loadPlaylists();
@@ -912,8 +962,9 @@ void UIManager::update() {
         m_expScroll[1] = 0;
         setState(UIState::FILE_EXPLORER);
       } else if (selectedId == "wallpaper") {
-        showToast("Tính năng Hình Nền đang được phát triển...",
-                  {0, 180, 216, 255}, 2000);
+        // P0 Screensaver: mở screensaver (tạm dùng icon HÌNH NỀN)
+        setState(UIState::SCREENSAVER);
+        m_saver.setMode(SaverMode::CLOCK_FLIP);
       } else if (selectedId == "settings") {
         // P5: Settings giờ có 2 tab [CHUNG] [CẬP NHẬT]. Nếu có bản OTA mới,
         // auto-switch sang tab CẬP NHẬT để badge "NEW" trên icon Cài đặt
@@ -1532,7 +1583,7 @@ void UIManager::update() {
 
       if (input.isButtonJustPressed(Button::A)) {
         if (m_selectedSettingsRow == 0) {
-          if (!AuthManager::instance().isLinked()) {
+          if (!AuthManager::instance().canUpload()) {
             setState(UIState::DISCLAIMER);
           }
         } else if (m_selectedSettingsRow == 2) {
@@ -1776,7 +1827,7 @@ void UIManager::update() {
   }
 
   case UIState::CLOUD_LOGIN: {
-    if (AuthManager::instance().isLinked()) {
+    if (AuthManager::instance().canUpload()) {
       if (input.isButtonJustPressed(Button::A) ||
           input.isButtonJustPressed(Button::B)) {
         refreshSystems();
@@ -3121,6 +3172,11 @@ void UIManager::update() {
 
   case UIState::BROWSER: {
     handleBrowserInput();
+    break;
+  }
+
+  case UIState::CHROME: {
+    handleChromeInput();
     break;
   }
 
@@ -5078,18 +5134,23 @@ void UIManager::renderSettingsState() {
     items.reserve(9);
 
     // 0: Google Drive Account
+    // "Đã kết nối" chỉ khi có Drive cá nhân (đích của sao lưu/upload).
+    // Mới nối thư mục tải game (public) thì vẫn mời đăng nhập cá nhân.
+    bool personalLinked = AuthManager::instance().canUpload();
+    bool folderLinked = AuthManager::instance().isLinked();
     items.push_back(
         {UiStrings::SETTING_DRIVE_STATUS,
-         AuthManager::instance().isLinked()
+         personalLinked
              ? (std::string(UiStrings::SETTING_CONNECTED) + " (" + email + ")")
-             : std::string(UiStrings::SETTING_DISCONNECTED),
-         AuthManager::instance().isLinked() ? SDL_Color{34, 197, 94, 255}
-                                            : SDL_Color{239, 68, 68, 255},
-         AuthManager::instance().isLinked()
-             ? std::string(UiStrings::SETTING_LOGOUT_BTN)
-             : std::string(UiStrings::SETTING_CONNECT_WEB_BTN),
-         AuthManager::instance().isLinked() ? UiTheme::ACCENT_RED
-                                            : UiTheme::FOCUS_BG,
+             : (folderLinked
+                    ? std::string("ĐÃ NỐI THƯ MỤC TẢI GAME")
+                    : std::string(UiStrings::SETTING_DISCONNECTED)),
+         personalLinked ? SDL_Color{34, 197, 94, 255}
+                        : (folderLinked ? SDL_Color{245, 158, 11, 255}
+                                        : SDL_Color{239, 68, 68, 255}),
+         personalLinked ? std::string(UiStrings::SETTING_LOGOUT_BTN)
+                        : std::string(UiStrings::SETTING_CONNECT_WEB_BTN),
+         personalLinked ? UiTheme::ACCENT_RED : UiTheme::FOCUS_BG,
          SDL_Color{255, 255, 255, 255}});
 
     // 1: Thư mục Drive
@@ -5261,10 +5322,17 @@ void UIManager::renderSettingsState() {
 
   if (m_settingsTab == 0 && m_selectedSettingsRow == 0 &&
       AuthManager::instance().isLinked()) {
-    drawAppFooter({{UiTheme::PadBtn::A, "Chọn"},
-                   {UiTheme::PadBtn::B, "Lùi"},
-                   {UiTheme::PadBtn::X, "Đăng xuất"},
-                   {UiTheme::PadBtn::L1R1, "Chuyển tab"}});
+    if (AuthManager::instance().canUpload()) {
+      drawAppFooter({{UiTheme::PadBtn::A, "Chọn"},
+                     {UiTheme::PadBtn::B, "Lùi"},
+                     {UiTheme::PadBtn::X, "Đăng xuất"},
+                     {UiTheme::PadBtn::L1R1, "Chuyển tab"}});
+    } else {
+      drawAppFooter({{UiTheme::PadBtn::A, "Đăng nhập Google"},
+                     {UiTheme::PadBtn::B, "Lùi"},
+                     {UiTheme::PadBtn::X, "Đăng xuất"},
+                     {UiTheme::PadBtn::L1R1, "Chuyển tab"}});
+    }
   } else if (m_settingsTab == 1) {
     drawAppFooter({{UiTheme::PadBtn::A, "Thực hiện"},
                    {UiTheme::PadBtn::B, "Lùi"},
@@ -5288,7 +5356,7 @@ void UIManager::renderCloudLoginState() {
   drawText(UiStrings::HEADER_WEB_CONNECT, 512, cardY + 22, {0, 180, 216, 255},
            m_fontTitle ? m_fontTitle : m_fontLarge, true);
 
-  if (AuthManager::instance().isLinked()) {
+  if (AuthManager::instance().canUpload()) {
     int boxW = 680;
     int boxH = 340;
     int boxX = (1024 - boxW) / 2;
@@ -5330,12 +5398,14 @@ void UIManager::renderCloudLoginState() {
       drawText(truncateToWidth(info.verificationUrl, m_fontSmall, 700), 512,
                dy + 226, {0, 180, 216, 255}, m_fontSmall, true);
     }
-    drawText("B2: Nhập mã. Google cảnh báo: bấm Nâng cao → Tiếp tục", 512,
+    drawText("B2: Nhập mã đăng nhập tài khoản Google cá nhân:", 512,
              dy + 256, {200, 215, 230, 255}, m_fontSmall, true);
     if (st == AuthState::AWAITING_USER && !info.userCode.empty()) {
       TTF_Font* fCode = m_fontHuge ? m_fontHuge : m_fontLarge;
       drawText(info.userCode, 512, dy + 282, {255, 255, 255, 255}, fCode,
                true);
+      drawText("✓ Ứng dụng đã được Google xác minh thương hiệu chính thức", 512,
+               dy + 360, {34, 197, 94, 255}, m_fontSmall, true);
       int nd = (int)((SDL_GetTicks() / 500) % 4);
       drawText("Đang chờ xác nhận" + std::string(nd, '.'), 512, dy + 388,
                {250, 204, 21, 255}, m_fontSmall, true);
@@ -5965,6 +6035,17 @@ void UIManager::renderReverseSyncState() {
       drawText(std::to_string(prog.gamesFailed) + " game thất bại.",
                cardX + cardW / 2, contentY + 170, {239, 68, 68, 255},
                m_fontSmall, true);
+      if (!prog.errorMessage.empty()) {
+        std::istringstream rsnStream(prog.errorMessage);
+        std::string rsnLine;
+        int rsnY = contentY + 205;
+        while (std::getline(rsnStream, rsnLine) && rsnY < contentY + 320) {
+          drawText(truncateToWidth(rsnLine, m_fontSmall, 700),
+                   cardX + cardW / 2, rsnY, {200, 210, 225, 255},
+                   m_fontSmall, true);
+          rsnY += 26;
+        }
+      }
     }
     break;
   }
@@ -7124,6 +7205,15 @@ void UIManager::render() {
     return;
   }
 
+  // Phiên RC-Web (weston + Electron giữ màn hình): RomCloud không vẽ
+  // gì cả, kể cả lúc đang boot. Màn trạng thái toàn cảnh ("Đang mở
+  // trình duyệt..." / "Đang duyệt bằng Chrome") từng đè lên viewport
+  // mỗi khi isReady() chập chờn dưới tải CPU cao. Trạng thái mở/tải
+  // trang do header của vỏ RC-Web hiển thị.
+  if (m_currentState == UIState::CHROME) {
+    return;
+  }
+
   SDL_SetRenderDrawColor(m_renderer, UiTheme::BG_APP.r, UiTheme::BG_APP.g,
                          UiTheme::BG_APP.b, 255);
   SDL_RenderClear(m_renderer);
@@ -7252,9 +7342,17 @@ void UIManager::render() {
   case UIState::BROWSER:
     renderBrowserState();
     break;
+  case UIState::CHROME:
+    renderChromeState();
+    break;
   case UIState::BROWSER_INPUT:
     renderBrowserInputState();
     break;
+  case UIState::SCREENSAVER:
+    // P0: Screensaver render fullscreen, không header/footer
+    m_saver.render();
+    SDL_RenderPresent(m_renderer);
+    return;  // bỏ qua footer/toast
   default:
     break;
   }
@@ -7300,8 +7398,8 @@ void UIManager::renderBrowserState() {
   static bool autoLoadTried = false;
   if (!initialized) {
     // P9: pass the resolved font file so CSS font-size can open siblings.
-    HtmlRenderer::instance().init(m_renderer, m_fontMedium, m_fontPathUsed, 20);
-    NetSurfEngine::instance().init(m_renderer, m_fontMedium, m_fontPathUsed, 20);
+    HtmlRenderer::instance().init(m_renderer, m_fontMedium, m_fontPathUsed, 36);
+    NetSurfEngine::instance().init(m_renderer, m_fontMedium, m_fontPathUsed, 36);
     BrowserManager::instance().init();
     initialized = true;
     autoLoadTried = false;
@@ -7350,7 +7448,7 @@ void UIManager::renderBrowserState() {
     int titleW = 0;
     TTF_SizeUTF8(titleFont, mainTitle, &titleW, nullptr);
     bool isFull = BrowserManager::instance().engineMode() == BrowserEngine::FULL;
-    std::string modeBadge = isFull ? "[FULL ENGINE]" : "[LITE ENGINE]";
+    std::string modeBadge = isFull ? "[CHROME]" : "[LITE ENGINE]";
     SDL_Color badgeCol = isFull ? UiTheme::ACCENT_CYAN : SDL_Color{150, 200, 100, 255};
     drawText(modeBadge, 24 + titleW + 16, hcy, badgeCol, titleFont, false);
   }
@@ -7384,9 +7482,19 @@ void UIManager::renderBrowserState() {
 
   // 3. PHẦN HIỂN THỊ WEB (Y 112..714, h = 603)
   {
-    // Render browser content
+    // Render browser content. P20: FULL has two paths — in-process
+    // (NetSurfEngine, libcss+libhubbub in our own process) and daemon
+    // (NetSurfWorkerBridge, fork+SHM). In-process is the default; the
+    // daemon is opt-in fallback for crashy pages.
     if (BrowserManager::instance().engineMode() == BrowserEngine::FULL) {
-      NetSurfEngine::instance().render();
+      const auto& s = BrowserManager::instance().settings();
+      if (s.inProcessFull &&
+          NetSurfEngine::instance().isInitialized() &&
+          !BrowserManager::instance().testInProcessFailed()) {
+        NetSurfEngine::instance().render();
+      } else {
+        NetSurfWorkerBridge::instance().render(m_renderer);
+      }
     } else {
       HtmlRenderer::instance().render();
     }
@@ -7414,10 +7522,6 @@ void UIManager::renderBrowserState() {
     }
   }
 
-  // Draw footer
-  drawRect(0, 715, 1024, 53, {15, 15, 20, 255}, true);
-  drawRect(0, 715, 1024, 1, {40, 40, 60, 255}, true);
-
   // Footer buttons
   if (m_browserUrlFocused) {
     // P8: URL bar focused — A edits, DOWN returns to page
@@ -7442,34 +7546,45 @@ void UIManager::renderBrowserState() {
       {UiTheme::PadBtn::SELECT, m_browserVk.telexMode ? "Telex: Bật" : "Telex: Tắt"}
     });
   } else {
-    // P8: dpad = move between events, A/B = action (YouTube-style)
-    // P15.2: START = find in page, SELECT = browser settings.
-    // P17: FULL mode — hint A theo loại control đang focus (Nhập/Chọn/Gửi).
-    std::string aHint = "Mở";
     if (BrowserManager::instance().engineMode() == BrowserEngine::FULL) {
-      RenderBox* ffb = NetSurfEngine::instance().focusedBox();
-      if (ffb && (ffb->type == RenderBoxType::INPUT ||
-                  ffb->type == RenderBoxType::BUTTON)) {
-        const std::string& ft = ffb->inputType;
-        if (ffb->type == RenderBoxType::INPUT &&
-            (ft == "text" || ft == "password" || ft == "textarea"))
-          aHint = "Nhập";
-        else if (ft == "checkbox" || ft == "radio" || ft == "select")
-          aHint = "Chọn";
-        else
-          aHint = "Gửi";
+      // P20: in-process FULL has no cursor mode (4-way focus nav only,
+      // no mouse pointer). Footer reflects that.
+      const auto& s = BrowserManager::instance().settings();
+      bool isInProc = s.inProcessFull &&
+                      NetSurfEngine::instance().isInitialized() &&
+                      !BrowserManager::instance().testInProcessFailed();
+      if (isInProc) {
+        drawAppFooter({
+          {UiTheme::PadBtn::B, "Quay lại"},
+          {UiTheme::PadBtn::UPDOWN, "Di chuyển"},
+          {UiTheme::PadBtn::A, "Chọn"},
+          {UiTheme::PadBtn::SELECT, "Cài đặt"},
+          {UiTheme::PadBtn::START, "Nhập URL"},
+          {UiTheme::PadBtn::L1R1, "Cuộn"}
+        });
+      } else {
+        bool isCursor = NetSurfWorkerBridge::instance().isCursorMode();
+        drawAppFooter({
+          {UiTheme::PadBtn::B, "Quay lại"},
+          {UiTheme::PadBtn::UPDOWN, isCursor ? "Di chuột" : "Cuộn trang"},
+          {UiTheme::PadBtn::A, "Chọn"},
+          {UiTheme::PadBtn::SELECT, "Cài đặt"},
+          {UiTheme::PadBtn::START, "Nhập URL"},
+          {UiTheme::PadBtn::L1R1, "Cuộn nhanh"}
+        });
       }
+    } else {
+      drawAppFooter({
+        {UiTheme::PadBtn::B, "Quay lại"},
+        {UiTheme::PadBtn::UPDOWN, "Mục"},
+        {UiTheme::PadBtn::L1R1, "Trang"},
+        {UiTheme::PadBtn::A, "Mở"},
+        {UiTheme::PadBtn::X, "Tiến"},
+        {UiTheme::PadBtn::Y, "URL"},
+        {UiTheme::PadBtn::SELECT, "Cài đặt"},
+        {UiTheme::PadBtn::START, "Tìm"}
+      });
     }
-    drawAppFooter({
-      {UiTheme::PadBtn::B, "Quay lại"},
-      {UiTheme::PadBtn::UPDOWN, "Mục"},
-      {UiTheme::PadBtn::L1R1, "Trang"},
-      {UiTheme::PadBtn::A, aHint.c_str()},
-      {UiTheme::PadBtn::X, "Tiến"},
-      {UiTheme::PadBtn::Y, "URL"},
-      {UiTheme::PadBtn::SELECT, "Cài đặt"},
-      {UiTheme::PadBtn::START, "Tìm"}
-    });
   }
 
   // Loading/error overlay
@@ -7485,7 +7600,7 @@ void UIManager::renderBrowserState() {
   } else if (BrowserManager::instance().state() == BrowserState::ERROR) {
     drawRect(0, 290, 1024, 130, {0, 0, 0, 180}, true);
     drawText(BrowserManager::instance().errorMessage(), 512, 320, {255, 80, 80, 255}, m_fontMedium, true);
-    drawText("A: thử lại   Y: đổi URL", 512, 360, {180, 180, 180, 255}, m_fontMedium, true);
+    drawText("A: thử lại   START: đổi URL", 512, 360, {180, 180, 180, 255}, m_fontMedium, true);
   }
 
   // Feature settings overlay (topmost).
@@ -7523,12 +7638,19 @@ void UIManager::handleBrowserInput() {
       return;
     }
     if (m_browserUrlFocused) {
-      // P8: leave the URL bar, back to page focus
+      // Leave the URL bar, back to page focus
       m_browserUrlFocused = false;
+      return;
+    }
+    if (BrowserManager::instance().engineMode() == BrowserEngine::FULL) {
+      if (BrowserManager::instance().canGoBack()) {
+        BrowserManager::instance().goBack();
+      } else {
+        BrowserManager::instance().close();
+        m_browserUrlFocused = false;
+        setState(UIState::MENU);
+      }
     } else {
-      // P15.2: first B clears an active find, second B goes back.
-      // P18: nothing left to go back to → exit the browser (the old
-      // url-input-mode start screen is gone).
       if (HtmlRenderer::instance().findCount() > 0) {
         HtmlRenderer::instance().clearFind();
         showToast("Đã xóa tìm kiếm", {150, 150, 160, 255}, 1200);
@@ -7544,42 +7666,41 @@ void UIManager::handleBrowserInput() {
     return;
   }
 
-  // Error state shortcuts: A = retry, Y = edit URL
+  // Error state shortcuts: A = retry, START / Y = edit URL
   if (BrowserManager::instance().state() == BrowserState::ERROR) {
     if (input.isButtonJustPressed(Button::A)) {
       Logger::info("Browser: retrying " + m_browserUrl);
       BrowserManager::instance().openUrl(m_browserUrl);
       return;
     }
-    if (input.isButtonJustPressed(Button::Y)) {
+    if (input.isButtonJustPressed(Button::START) || input.isButtonJustPressed(Button::Y)) {
       openBrowserUrlEditor();
       return;
     }
   }
 
-  // Y: quick URL entry — straight to the keyboard (P18: the old
-  // url-input-mode sample screen is gone).
+  // START or Y: quick URL entry — straight to the URL keyboard modal
   // Not while editing a page <input> — there Y = backspace (field VK).
-  if (input.isButtonJustPressed(Button::Y) && !m_browserFieldEditing) {
+  if ((input.isButtonJustPressed(Button::START) || input.isButtonJustPressed(Button::Y)) &&
+      !m_browserFieldEditing && !m_browserSettingsOpen) {
     openBrowserUrlEditor();
     return;
   }
 
   {
-    // P8: URL-bar focus (YouTube-style search input on top).
     HtmlRenderer& html = HtmlRenderer::instance();
     // Settings overlay eats everything except its own keys.
     if (m_browserSettingsOpen) {
-      if (input.isButtonJustPressed(Button::SELECT)) {
+      if (input.isButtonJustPressed(Button::SELECT) || input.isButtonJustPressed(Button::B)) {
         m_browserSettingsOpen = false;
         return;
       }
       if (input.isButtonJustPressed(Button::UP)) {
-        m_browserSettingsSel = (m_browserSettingsSel + 8) % 9;
+        m_browserSettingsSel = (m_browserSettingsSel + 10) % 11;
         return;
       }
       if (input.isButtonJustPressed(Button::DOWN)) {
-        m_browserSettingsSel = (m_browserSettingsSel + 1) % 9;
+        m_browserSettingsSel = (m_browserSettingsSel + 1) % 11;
         return;
       }
       if (input.isButtonJustPressed(Button::A)) {
@@ -7588,9 +7709,8 @@ void UIManager::handleBrowserInput() {
       }
       return;
     }
+    // Nút SELECT luôn mở menu cài đặt cho trình duyệt trong mọi chế độ
     if (input.isButtonJustPressed(Button::SELECT)) {
-      // P8c: open feature settings (content mode only — field edit and
-      // URL input use SELECT for Telex/.vn already).
       if (!m_browserFieldEditing) {
         m_browserSettingsOpen = true;
         m_browserSettingsSel = 0;
@@ -7631,19 +7751,11 @@ void UIManager::handleBrowserInput() {
       }
       return;  // swallow UP/others while on URL bar
     }
-    // UP at the absolute top of the page (widget 0 and scroll at 0) -> URL bar
-    if (input.isButtonJustPressed(Button::UP)) {
-      if (BrowserManager::instance().engineMode() == BrowserEngine::FULL) {
-        NetSurfEngine& ns = NetSurfEngine::instance();
-        if (ns.scrollY() <= 0 && (!ns.focusedBox() || ns.focusedBox()->y <= 80)) {
-          m_browserUrlFocused = true;
-          return;
-        }
-      } else {
-        if (html.focusIndex() <= 0 && html.scrollY() <= 0) {
-          m_browserUrlFocused = true;
-          return;
-        }
+    // UP at the absolute top of the page (widget 0 and scroll at 0) -> URL bar (Lite mode only)
+    if (input.isButtonJustPressed(Button::UP) && BrowserManager::instance().engineMode() != BrowserEngine::FULL) {
+      if (html.focusIndex() <= 0 && html.scrollY() <= 0) {
+        m_browserUrlFocused = true;
+        return;
       }
     }
     // Browser page navigation mode (or field edit when active).
@@ -7739,66 +7851,15 @@ void UIManager::handleBrowserInput() {
     } else {
       // Browser navigation mode
       if (BrowserManager::instance().engineMode() == BrowserEngine::FULL) {
-        NetSurfEngine& ns = NetSurfEngine::instance();
-        if (input.isButtonJustPressed(Button::UP)) {
-          ns.navigate(NavDirection::UP);
-        } else if (input.isButtonJustPressed(Button::DOWN)) {
-          ns.navigate(NavDirection::DOWN);
-        } else if (input.isButtonJustPressed(Button::LEFT)) {
-          ns.navigate(NavDirection::LEFT);
-        } else if (input.isButtonJustPressed(Button::RIGHT)) {
-          ns.navigate(NavDirection::RIGHT);
-        } else if (input.isButtonJustPressed(Button::A)) {
-          // P17: form controls trước — link sau.
-          RenderBox* fb = ns.focusedBox();
-          bool handled = false;
-          if (fb && (fb->type == RenderBoxType::INPUT ||
-                     fb->type == RenderBoxType::BUTTON)) {
-            const std::string& t = fb->inputType;
-            if (fb->type == RenderBoxType::INPUT &&
-                (t == "text" || t == "password" || t == "textarea")) {
-              ns.setEditing(true);  // VK flow ở trên sẽ pick up frame sau
-              handled = true;
-            } else if (t == "checkbox" || t == "radio") {
-              ns.toggleFocusedCheck();
-              handled = true;
-            } else if (t == "select") {
-              ns.cycleFocusedSelect();
-              std::string opt = ns.focusedSelectOption();
-              if (!opt.empty())
-                showToast(opt, {0, 180, 255, 255}, 900);
-              handled = true;
-            } else if ((fb->type == RenderBoxType::BUTTON && t == "submit") ||
-                       (fb->type == RenderBoxType::INPUT &&
-                        (t == "submit" || t == "image"))) {
-              if (ns.submitFocusedForm())
-                showToast("Đang gửi...", {0, 180, 255, 255}, 1200);
-              else
-                showToast("Form không gửi được", {255, 120, 120, 255}, 1500);
-              handled = true;
-            } else {
-              // <button type="button"> — inert khi không có JS.
-              showToast("Nút này cần JavaScript", {150, 150, 150, 255}, 1200);
-              handled = true;
-            }
-          }
-          if (!handled) {
-            std::string link = ns.currentFocusedLink();
-            if (!link.empty()) {
-              std::string resolved = HtmlRenderer::instance().resolveUrl(link);
-              if (!resolved.empty()) {
-                BrowserManager::instance().openUrl(resolved);
-              }
-            }
-          }
-        } else if (input.isButtonJustPressed(Button::X)) {
-          if (html.canGoForward()) html.goForward();
-        } else if (input.isButtonJustPressed(Button::START)) {
-          openBrowserFindEditor();
-        } else if (input.isButtonJustPressed(Button::L1)) {
-          ns.scrollBy(-120);
-        } else if (input.isButtonJustPressed(Button::R1)) {
-          ns.scrollBy(120);
+        // P20: in-process FULL has its own input handler. Daemon path
+        // (NetSurfWorkerBridge::handleInput) keeps the SHM mouse + cursor
+        // mode code for opt-in fallback (inProcessFull=false).
+        const auto& s = BrowserManager::instance().settings();
+        if (s.inProcessFull && NetSurfEngine::instance().isInitialized() &&
+            !BrowserManager::instance().testInProcessFailed()) {
+          NetSurfEngine::instance().handleInput();
+        } else {
+          NetSurfWorkerBridge::instance().handleInput();
         }
       } else {
         // Lite engine navigation
@@ -7977,11 +8038,22 @@ void UIManager::toggleBrowserSetting(int idx) {
       s.fullEngine = !s.fullEngine;
       BrowserManager::instance().saveSettings();
       HtmlRenderer::instance().refreshAfterSettings();
-      showToast(s.fullEngine ? "Chế độ duyệt: FULL (đầy đủ)" : "Chế độ duyệt: LITE (nhanh/portal)",
+      showToast(s.fullEngine ? "Chế độ duyệt: Chrome (RC-Web)" : "Chế độ duyệt: LITE (tích hợp)",
                 {0, 180, 255, 255}, 1500);
       return;
     }
-    case 8: s.article = !s.article; break;
+    case 8: {
+      // NetSurf đã thay bằng Chrome ngoài: mục này giữ chỗ, không tác dụng.
+      showToast("Chrome ngoài thay NetSurf (xem mục 7)", {245, 158, 11, 255}, 1500);
+      return;
+    }
+    case 9: {
+      // Điều khiển chuột/D-Pad của NetSurf cũ: giữ chỗ, không tác dụng
+      // (trong Chrome dùng mapping tay cầm rc-browser.gptk của ta).
+      showToast("Trong Chrome: xem chrome/README mục tay cầm", {245, 158, 11, 255}, 1500);
+      return;
+    }
+    case 10: s.article = !s.article; break;
     default: return;
   }
   BrowserManager::instance().saveSettings();
@@ -7989,20 +8061,21 @@ void UIManager::toggleBrowserSetting(int idx) {
   HtmlRenderer::instance().refreshAfterSettings();
   const char* names[] = {"Ảnh", "CSS", "Cỡ chữ", "Ảnh động GIF",
                          "Video trong trang", "SVG", "JavaScript",
-                         "Chế độ duyệt", "Chế độ bài viết"};
-  showToast(std::string(names[idx < 0 || idx > 8 ? 0 : idx]) + ": đã lưu",
+                         "Chế độ duyệt", "FULL in-process", "Điều khiển", "Chế độ bài viết"};
+  showToast(std::string(names[idx < 0 || idx > 10 ? 0 : idx]) + ": đã lưu",
             {0, 180, 255, 255}, 1200);
 }
 
 void UIManager::renderBrowserSettings() {
   // Dim + centered panel, drawn last (topmost).
   drawRect(0, 0, 1024, 768, {0, 0, 0, 170}, true);
-  const int pw = 640, ph = 524, px = (1024 - pw) / 2, py = (768 - ph) / 2;
+  // Panel height fits 11 rows: pw=640, ph=600, py=84
+  const int pw = 640, ph = 600, px = (1024 - pw) / 2, py = (768 - ph) / 2;
   drawRect(px, py, pw, ph, {18, 22, 32, 255}, true);
   drawRect(px, py, pw, ph, {0, 180, 255, 255}, false);
   TTF_Font* titleF = m_fontLarge ? m_fontLarge : m_fontMedium;
   TTF_Font* rowF = m_fontMedium ? m_fontMedium : m_fontSmall;
-  if (titleF) drawText("CÀI ĐẶT TRÌNH DUYỆT", 512, py + 18, {0, 180, 255, 255}, titleF, true);
+  if (titleF) drawText("CÀI ĐẶT TRÌNH DUYỆT", 512, py + 16, {0, 180, 255, 255}, titleF, true);
   const BrowserSettings& s = BrowserManager::instance().settings();
   struct Row {
     const char* label;
@@ -8011,7 +8084,9 @@ void UIManager::renderBrowserSettings() {
   };
   char scaleBuf[16];
   snprintf(scaleBuf, sizeof(scaleBuf), "%d%%", s.fontScalePct);
-  Row rows[9] = {
+  bool isCursor = NetSurfWorkerBridge::instance().isCursorMode();
+  std::string mouseModeStr = isCursor ? "Chuột (Mouse)" : "D-Pad (Cuộn)";
+  Row rows[11] = {
       {"Ảnh", s.images ? "Bật" : "Tắt", false},
       {"CSS", s.css ? "Bật" : "Tắt", false},
       {"Cỡ chữ", scaleBuf, false},
@@ -8019,11 +8094,13 @@ void UIManager::renderBrowserSettings() {
       {"Video trong trang", s.video ? "Bật" : "Tắt", true},
       {"SVG", s.svg ? "Bật" : "Tắt", true},
       {"JavaScript", s.js ? "Bật" : "Tắt", true},
-      {"Chế độ duyệt", s.fullEngine ? "Full" : "Lite (Mặc định)", false},
+      {"Chế độ duyệt", s.fullEngine ? "Chrome" : "Lite (Mặc định)", false},
+      {"Chrome ngoài", s.fullEngine ? "(RC-Web)" : "(LITE)", false},
+      {"Điều khiển", mouseModeStr, false},
       {"Chế độ bài viết", s.article ? "Bật" : "Tắt", false},
   };
-  for (int i = 0; i < 9; i++) {
-    int ry = py + 76 + i * 44;
+  for (int i = 0; i < 11; i++) {
+    int ry = py + 62 + i * 44;
     bool sel = (i == m_browserSettingsSel);
     if (sel) drawRect(px + 16, ry - 4, pw - 32, 40, {0, 70, 110, 255}, true);
     SDL_Color lc = sel ? SDL_Color{255, 255, 255, 255} : SDL_Color{200, 205, 215, 255};
@@ -8033,7 +8110,8 @@ void UIManager::renderBrowserSettings() {
       if (rows[i].soon) v += " (Sắp có)";
       SDL_Color vc = rows[i].soon ? SDL_Color{150, 150, 160, 255}
                      : (rows[i].value == "Bật" || rows[i].value == "Full" ||
-                        rows[i].value == "Lite (Mặc định)" || rows[i].value == scaleBuf)
+                        rows[i].value == "Lite (Mặc định)" || rows[i].value == scaleBuf ||
+                        rows[i].value == "Chuột (Mouse)" || rows[i].value == "D-Pad (Cuộn)")
                          ? SDL_Color{0, 200, 120, 255}
                          : SDL_Color{200, 200, 200, 255};
       int vw = m_ui.textWidth(v, rowF);
@@ -8041,7 +8119,7 @@ void UIManager::renderBrowserSettings() {
     }
   }
   if (rowF) {
-    drawText("A: đổi • B/SELECT: đóng", 512, py + ph - 34,
+    drawText("A: đổi • B/SELECT: đóng", 512, py + ph - 28,
              {130, 140, 155, 255}, m_fontSmall ? m_fontSmall : rowF, true);
   }
 }
@@ -8076,9 +8154,47 @@ void UIManager::addBrowserHistory(const std::string& url) {
   }
 }
 
+void UIManager::commitBrowserInput(const std::string& url, bool addHist) {
+  // Điểm chốt duy nhất cho mọi commit editor (history/TLD/keyboard):
+  // FULL -> deep-link vào phiên Chrome ngoài, LITE -> browser cũ.
+  // (Gõ chữ trong trang dùng bàn phím ảo của Chrome (Y), không qua đây.)
+  m_browserTldMode = false;
+  m_browserHistoryMode = false;
+  m_browserFindMode = false;
+  if (BrowserManager::instance().engineMode() == BrowserEngine::FULL) {
+    if (!url.empty()) {
+      if (addHist) addBrowserHistory(url);
+      if (ChromeBridge::instance().openUrl(url)) {
+        setState(UIState::CHROME);
+      } else {
+        showToast("Chưa cài RC-Web (xem chrome/README)...",
+                  {239, 68, 68, 255}, 3000);
+        setState(UIState::BROWSER);
+      }
+    } else {
+      setState(UIState::CHROME);
+    }
+  } else {
+    setState(UIState::BROWSER);
+    if (!url.empty()) {
+      if (addHist) addBrowserHistory(url);
+      BrowserManager::instance().openUrl(url);
+    }
+  }
+}
+
+void UIManager::cancelBrowserInput() {
+  m_browserTldMode = false;
+  m_browserHistoryMode = false;
+  m_browserFindMode = false;
+  setState(m_urlEditorFromChrome ? UIState::CHROME : UIState::BROWSER);
+}
+
 void UIManager::openBrowserUrlEditor() {  // P8: URLs are ASCII — telex would mangle "www"/"vn", so default OFF.
   // Shift/symbol still available via the action row + R1.
   initBrowserHistory();
+  m_urlEditorFromChrome = (m_currentState == UIState::CHROME);
+  m_browserFindMode = false;
   VirtualKeyboard::reset(m_browserVk, false);
   std::string cur = BrowserManager::instance().currentUrl();
   m_browserVk.query = cur.empty() ? m_browserUrl : cur;
@@ -8147,6 +8263,67 @@ void UIManager::cancelBrowserFieldEdit() {
   m_browserFieldEditing = false;
 }
 
+// RC-Web (Electron) ghi /tmp/rc-web-ui-mode lúc mở lớp phụ: bàn phím
+// ảo = "kb", con trỏ = "pointer". B khi lớp phụ đang mở chỉ đóng lớp
+// đó (Electron nhận F1 và tự đóng), chưa thoát phiên.
+static bool rcWebUiModeOpen() {
+  FILE* f = fopen("/tmp/rc-web-ui-mode", "r");
+  if (!f) return false;
+  char buf[16] = {0};
+  size_t n = fread(buf, 1, sizeof(buf) - 1, f);
+  fclose(f);
+  return n > 0 && buf[0] != '\n';
+}
+
+void UIManager::handleChromeInput() {
+  // Phiên RC-Web (weston takeover toàn màn hình): RomCloud supervise +
+  // deep-link. Nút trong trang do mapping gptokeyb của gói rc-web (của
+  // RomCloud) đảm nhiệm; RomCloud chỉ giữ B thoát (theo tầng).
+  auto& bridge = ChromeBridge::instance();
+  auto& input = InputManager::instance();
+  if (bridge.pollExited() || !bridge.isRunning()) {
+    showToast("Chrome đã thoát", {150, 160, 175, 255}, 1500);
+    goBack();
+    return;
+  }
+  if (!bridge.isReady()) {
+    if (bridge.failed()) {
+      showToast("Mở Chrome thất bại", {239, 68, 68, 255}, 2000);
+      bridge.stop();
+      goBack();
+      return;
+    }
+    // Đang boot weston/electron: B thoát được. SELECT nay là nút bật
+    // con trỏ (phía Electron) nên không thoát nữa.
+    if (input.isButtonJustPressed(Button::B)) {
+      bridge.stop();
+      goBack();
+    }
+    return;
+  }
+  // B = lùi lại 1 tiến trình (Tai chốt): lớp phụ của web (bàn phím ảo
+  // / con trỏ) đang mở thì B chỉ đóng lớp đó — Electron nhận F1 và tự
+  // đóng, RomCloud không dừng phiên. Không lớp phụ nào mở thì B thoát.
+  if (input.isButtonJustPressed(Button::B)) {
+    if (!rcWebUiModeOpen()) {
+      bridge.stop();  // trap cleanup của launcher dọn weston/electron/gptokeyb
+      goBack();
+      return;
+    }
+  }
+  // START cũng để phiên web lo (mở ô địa chỉ + bàn phím ảo ngay trong
+  // trình duyệt); RomCloud không mở trình sửa địa chỉ của mình ở đây.
+  // Các nút còn lại (A/D-pad/L1/R1/X/Y/START) do gptokeyb của RC-Web
+  // xử lý trong phiên ngoài — RomCloud không can thiệp.
+}
+
+void UIManager::renderChromeState() {
+  // Đã bỏ màn trạng thái toàn cảnh theo yêu cầu của Tai: trong phiên
+  // web weston/Electron giữ toàn màn hình, RomCloud không vẽ gì cả
+  // (render() đã thoát sớm ở state CHROME). Trạng thái "đang mở /
+  // đang tải" hiện ở header của vỏ RC-Web.
+}
+
 void UIManager::handleBrowserInputKeyboard() {
   InputManager& input = InputManager::instance();
 
@@ -8180,13 +8357,7 @@ void UIManager::handleBrowserInputKeyboard() {
       } else {
         m_browserUrl = m_browserVk.query;
       }
-      m_browserHistoryMode = false;
-      m_browserTldMode = false;
-      setState(UIState::BROWSER);
-      if (!m_browserUrl.empty()) {
-        addBrowserHistory(m_browserUrl);
-        BrowserManager::instance().openUrl(m_browserUrl);
-      }
+      commitBrowserInput(m_browserUrl, true);
       return;
     }
     if (input.isButtonJustPressed(Button::START)) {
@@ -8195,13 +8366,7 @@ void UIManager::handleBrowserInputKeyboard() {
       } else {
         m_browserUrl = m_browserVk.query;
       }
-      m_browserHistoryMode = false;
-      m_browserTldMode = false;
-      setState(UIState::BROWSER);
-      if (!m_browserUrl.empty()) {
-        addBrowserHistory(m_browserUrl);
-        BrowserManager::instance().openUrl(m_browserUrl);
-      }
+      commitBrowserInput(m_browserUrl, true);
       return;
     }
     return;
@@ -8236,13 +8401,7 @@ void UIManager::handleBrowserInputKeyboard() {
     }
     if (input.isButtonJustPressed(Button::START)) {
       m_browserUrl = m_browserVk.query;
-      m_browserTldMode = false;
-      m_browserHistoryMode = false;
-      setState(UIState::BROWSER);
-      if (!m_browserUrl.empty()) {
-        addBrowserHistory(m_browserUrl);
-        BrowserManager::instance().openUrl(m_browserUrl);
-      }
+      commitBrowserInput(m_browserUrl, true);
       return;
     }
     if (input.isButtonRepeat(Button::Y)) {
@@ -8254,10 +8413,7 @@ void UIManager::handleBrowserInputKeyboard() {
 
   // B: Cancel and go back
   if (input.isButtonJustPressed(Button::B)) {
-    m_browserTldMode = false;
-    m_browserHistoryMode = false;
-    m_browserFindMode = false;
-    setState(UIState::BROWSER);
+    cancelBrowserInput();
     return;
   }
 
@@ -8274,13 +8430,7 @@ void UIManager::handleBrowserInputKeyboard() {
       return;
     }
     m_browserUrl = m_browserVk.query;
-    m_browserTldMode = false;
-    m_browserHistoryMode = false;
-    setState(UIState::BROWSER);
-    if (!m_browserUrl.empty()) {
-      addBrowserHistory(m_browserUrl);
-      BrowserManager::instance().openUrl(m_browserUrl);
-    }
+    commitBrowserInput(m_browserUrl, true);
     return;
   }
 
@@ -8317,16 +8467,10 @@ void UIManager::handleBrowserInputKeyboard() {
         commitBrowserFind();
       } else {
         m_browserUrl = m_browserVk.query;
-        m_browserTldMode = false;
-        setState(UIState::BROWSER);
-        if (!m_browserUrl.empty()) {
-          BrowserManager::instance().openUrl(m_browserUrl);
-        }
+        commitBrowserInput(m_browserUrl, false);
       }
     } else if (act == VkAction::Cancel) {
-      m_browserTldMode = false;
-      m_browserFindMode = false;
-      setState(UIState::BROWSER);
+      cancelBrowserInput();
     }
   }
 }

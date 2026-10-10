@@ -88,6 +88,7 @@ private:
 
     void runWorker();
     bool uploadSingleGame(const LocalGameInfo& game);
+    bool uploadOneFile(const std::string& localPath, const std::string& driveName, const std::string& folderId, const std::string& token);
     std::vector<LocalGameInfo> scanLocalOnlyGames();
     std::string findOrCreateDriveFolder(const std::string& folderName, const std::string& parentFolderId, const std::string& token);
     std::string getTargetFolderForGame(const LocalGameInfo& game, const std::string& token);
@@ -108,6 +109,11 @@ private:
 
     // List of games to upload
     std::vector<LocalGameInfo> m_uploadQueue;
+
+    // Last per-file failure detail, surfaced to the UI through progress
+    std::string m_lastUploadError;
+    bool m_lastErrorIsAuth = false;
+    std::string m_lastUploadedFileId;
 };
 
 } // namespace RomCloud

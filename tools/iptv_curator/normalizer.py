@@ -85,36 +85,99 @@ class Normalizer:
         return cleaned_name
 
     def canonicalize_group(self, raw_group: str, canonical_ch_name: str = "") -> str:
-        """Chuẩn hóa tên nhóm theo danh mục chuẩn"""
-        norm_group = raw_group.strip()
+        """Chuẩn hóa tên nhóm theo danh mục chuẩn và logic series kênh"""
+        norm_group = raw_group.strip(' \t\n\r"\'')
         # Loại bỏ icon
-        norm_group = re.sub(r'[⚽🔥📺⚡⭐♦️🔴|]+', '', norm_group).strip()
+        norm_group = re.sub(r'[⚽🔥📺⚡⭐♦️🔴|]+', '', norm_group).strip(' \t\n\r"\'')
 
+        ch_upper = canonical_ch_name.upper().strip()
+        grp_upper = norm_group.upper().strip()
+
+        # 1. SERIES ON & VTVcab -> Đưa chung vào VTV / Quốc Gia
+        if (ch_upper.startswith("ON ") or ch_upper.startswith("ON-") or ch_upper == "ON" or
+            grp_upper in ["ON", "VTVCAB", "VTV CAB", "VTVPRIME", "VTV PRIME", "KÊNH ON"] or
+            any(k in ch_upper for k in ["VTVCAB", "VTV CAB", "VTVPRIME", "VTV PRIME"])):
+            return "VTV / Quốc Gia"
+
+        # 2. Logic cũ: Nếu raw_group khớp với danh mục chuẩn trong group_mappings
         if norm_group:
-            upper_group = norm_group.upper()
             for canonical_grp, aliases in self.group_mappings.items():
                 for alias in aliases:
-                    if alias.upper() in upper_group or upper_group in alias.upper():
+                    if alias.upper() in grp_upper or grp_upper in alias.upper():
                         return canonical_grp
 
-        # Nếu group rỗng hoặc không khớp, suy luận từ tên kênh chuẩn
-        ch_upper = canonical_ch_name.upper()
-        if ch_upper.startswith("VTV"):
+        # 3. Phân loại theo series kênh (khi group rỗng hoặc không khớp nhóm chuẩn)
+        # Series VTV
+        if ch_upper.startswith("VTV") or any(k in ch_upper for k in ["VIETNAM TODAY", "TRUYỀN HÌNH QUỐC HỘI", "ANTV", "AN NINH TV", "NHÂN DÂN", "QUỐC PHÒNG"]):
             return "VTV / Quốc Gia"
+
+        # Series HTV
         if ch_upper.startswith("HTV"):
             if "THỂ THAO" in ch_upper or "SPORT" in ch_upper:
                 return "Thể Thao"
             return "HTV / TP.HCM"
-        if ch_upper.startswith("VTC"):
+
+        # Series SCTV
+        if ch_upper.startswith("SCTV"):
+            return "SCTV"
+
+        # Series VTC & Tin tức
+        if ch_upper.startswith("VTC") or any(k in ch_upper for k in ["THỜI SỰ", "INFO TV", "FBNC", "TIN TỨC", "NEWS"]):
             return "Tin Tức"
-        if any(s in ch_upper for s in ["K+", "SPORT", "CANAL", "BONGDA", "FOOTBALL", "TENNIS", "F1"]):
+
+        # Series THVL & Đài Tỉnh / Địa Phương
+        local_prefixes = [
+            "THVL", "HÀ NỘI", "HANOI", "HẢI PHÒNG", "ĐÀ NẴNG", "CẦN THƠ", "BÌNH DƯƠNG", "ĐỒNG NAI",
+            "BÀ RỊA", "VŨNG TÀU", "LONG AN", "TIỀN GIANG", "BẾN TRE", "TRÀ VINH", "VĨNH LONG",
+            "ĐỒNG THÁP", "AN GIANG", "KIÊN GIANG", "CÀ MAU", "BẠC LIÊU", "SÓC TRĂNG", "HẬU GIANG",
+            "BÌNH PHƯỚC", "TÂY NINH", "LÂM ĐỒNG", "ĐẮK LẮK", "ĐẮK NÔNG", "GIA LAI", "KON TUM",
+            "NINH THUẬN", "BÌNH THUẬN", "KHÁNH HÒA", "PHÚ YÊN", "BÌNH ĐỊNH", "QUẢNG NGÃI",
+            "QUẢNG NAM", "THỪA THIÊN", "HUẾ", "QUẢNG TRỊ", "QUẢNG BÌNH", "HÀ TĨNH", "NGHỆ AN",
+            "THANH HÓA", "NINH BÌNH", "NAM ĐỊNH", "HÀ NAM", "THÁI BÌNH", "HẢI DƯƠNG", "HƯNG YÊN",
+            "BẮC NINH", "BẮC GIANG", "VĨNH PHÚC", "PHÚ THỌ", "THÁI NGUYÊN", "TUYÊN QUANG",
+            "HÀ GIANG", "CAO BẰNG", "BẮC KẠN", "LẠNG SƠN", "LÀO CAI", "YÊN BÁI", "ĐIỆN BIÊN",
+            "LAI CHÂU", "SƠN LA", "HÒA BÌNH", "QUẢNG NINH", "BHTTV", "BTV", "ĐNRTV", "NTV",
+            "QTV", "THP", "TTV", "KTV", "THTPCT", "HGTV", "TGV", "STV", "BLTV", "KGTV", "CMTV",
+            "LTV", "BRT", "BPTV", "DRT", "QRT", "PTQ", "QBTV", "TRT", "TBTV", "NBTV", "HYTV",
+            "VPPT", "PTN", "CBTV", "TNV", "BGTV"
+        ]
+        if any(lp in ch_upper for lp in local_prefixes) or any(k in grp_upper for k in ["ĐỊA PHƯƠNG", "TỈNH", "THVL", "PROVINCE"]):
+            return "Địa phương"
+
+        # Series K+ & Thể thao
+        sports_keywords = [
+            "K+", "K PLUS", "CANAL", "SPORT", "SPORTS", "BÓNG ĐÁ", "BONGDA",
+            "FOOTBALL", "TENNIS", "GOLF", "F1", "BEIN", "SPOTV", "NBA", "MUTV", "EUROSPORT"
+        ]
+        if any(k in ch_upper for k in sports_keywords) or any(k in grp_upper for k in ["THỂ THAO", "SPORTS", "FOOTBALL", "BÓNG ĐÁ"]):
             return "Thể Thao"
-        if any(s in ch_upper for s in ["HBO", "CINEMA", "PHIM", "DISNEY", "CARTOON"]):
+
+        # Series Phim & Giải trí
+        ent_keywords = [
+            "HBO", "CINEMA", "CINEMAX", "WARNER", "AXN", "DISNEY", "CARTOON",
+            "ANIMAX", "DREAMWORKS", "PHIM", "GIẢI TRÍ", "ENTERTAINMENT", "MOVIES", "CINE"
+        ]
+        if any(k in ch_upper for k in ent_keywords) or any(k in grp_upper for k in ["PHIM", "CINEMA", "GIẢI TRÍ", "ENTERTAINMENT"]):
             return "Phim & Giải Trí"
-        if any(s in ch_upper for s in ["DISCOVERY", "NATIONAL", "CNN", "BBC", "NHK"]):
+
+        # Series Quốc tế
+        intl_keywords = [
+            "DISCOVERY", "NATIONAL", "NAT GEO", "CNN", "BBC", "NHK", "CGTN",
+            "DW", "TV5MONDE", "KBS", "ARIRANG", "AL JAZEERA", "BLOOMBERG", "ABC", "CBS", "NBC"
+        ]
+        if any(k in ch_upper for k in intl_keywords) or any(k in grp_upper for k in ["QUỐC TẾ", "INTERNATIONAL", "KÊNH NƯỚC NGOÀI"]):
             return "Quốc Tế"
 
-        return norm_group if norm_group else "Khác"
+        # Series Radio
+        if any(k in ch_upper for k in ["VOV", "VOH", "RADIO"]) or "RADIO" in grp_upper:
+            return "Radio"
+
+        # Series Live Events
+        if any(k in ch_upper for k in ["LIVE EVENTS", "TRỰC TIẾP", "SỰ KIỆN", "FPT PLAY", "TV360"]) or any(k in grp_upper for k in ["LIVE EVENTS", "TRỰC TIẾP", "SỰ KIỆN"]):
+            return "LIVE EVENTS"
+
+        # 4. Không xếp được vào series nào -> Đưa vào Kênh Chung
+        return "Kênh Chung"
 
     def normalize(self, ch: RawChannel) -> Tuple[str, str]:
         """Trả về tuple: (canonical_name, canonical_group)"""

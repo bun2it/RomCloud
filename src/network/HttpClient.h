@@ -30,13 +30,18 @@ public:
     // P4 (vnexpress plan): cookie jar shared by all handles (portal logins
     // are multi-step and stateless handles would drop session cookies).
     // Backed by a file so cookies survive across easy handles.
+    // P23: path is configurable so cookies survive across reboots (defaults
+    // to /tmp/romcloud_cookies.txt for backwards-compat with LITE tests).
     void clearCookies();
+    void setCookieJarPath(const std::string& path);
+    const std::string& cookieJarPath() const { return m_cookieJarPath; }
 
 private:
     HttpClient() = default;
     ~HttpClient();
 
     bool m_initialized = false;
+    std::string m_cookieJarPath = "/tmp/romcloud_cookies.txt";
 };
 
 } // namespace RomCloud

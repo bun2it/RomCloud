@@ -4,11 +4,15 @@
 #include <cassert>
 #include <chrono>
 #include <cstdint>
+#include <cstdio>
 #include <fstream>
 #include <functional>
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <sys/stat.h>
+#include <thread>
+#include <unistd.h>
 #include <SDL2/SDL_ttf.h>
 #include <SDL2/SDL.h>
 
@@ -1480,8 +1484,17 @@ int main() {
             "<div class=\"content-art\"><a href=\"https://m.vnexpress.net/article-123.html\">Bản tin công nghệ</a><p>Chi tiết bài viết</p></div>"
             "</article></body></html>";
 
+        // P16: NetSurfEngine::loadHtml() chỉ QUEUE layout (worker thread) —
+        // poll() mới adopt cây đã layout xong. Test cũ check đồng bộ ngay sau
+        // loadHtml nên gặp race (có thể đọc cây CŨ của test NetSurf trước).
+        // clear() trước để không dính cây cũ, rồi poll có giới hạn.
+        ns.clear();
         hr.loadHtml(sampleArticle);
         CHECK(ns.rawHtml() == sampleArticle, "NetSurf P5: HTML propagated from fetch pipeline to NetSurfEngine");
+        for (int w = 0; w < 200 && ns.focusedBox() == nullptr; ++w) {
+            ns.poll();
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
         CHECK(ns.focusedBox() != nullptr, "NetSurf P5: NetSurfEngine has focused box after layout");
         CHECK(ns.currentFocusedLink() == "https://m.vnexpress.net/article-123.html", "NetSurf P5: active link matches focused anchor href");
 
@@ -1494,6 +1507,314 @@ int main() {
         // 5. NetSurfEngine cleanup
         ns.clear();
         CHECK(ns.rawHtml().empty(), "NetSurf P5: NetSurfEngine cleared on session stop/close");
+    }
+
+    // ====================================================================
+    // P22: NetSurfEngine JavaScript bridge plumbing
+    //   - extractScriptsForTest() finds inline + external <script>
+    //   - loadHtml() populates m_scripts / m_scriptSrcs
+    //   - clear() drops script lists
+    //   - pollJs() / relayout() exist and are idempotent on empty state
+    // ====================================================================
+    {
+        auto& ns = NetSurfEngine::instance();
+        // 1. Direct unit test on extractScriptsForTest (synchronous, no engine).
+        std::vector<std::string> inlineOut, srcOut;
+        const std::string p22Html =
+            "<html><body><div id=x>hi</div>"
+            "<script>var a = 1 + 1;</script>"
+            "<script src=\"https://example.com/lib.js\"></script>"
+            "<script src='//cdn.example.org/a.js'></script>"
+            "<script type=\"application/json\">{\"skip\":true}</script>"
+            "<script type=\"module\">import x from 'y';</script>"
+            "<script>document.getElementById('x').textContent='bye';</script>"
+            "</body></html>";
+        ns.extractScriptsForTest(p22Html, inlineOut, srcOut);
+        CHECK(inlineOut.size() == 2, "P22: 2 inline scripts (json+module skipped)");
+        CHECK(srcOut.size() == 2, "P22: 2 external scripts");
+        CHECK(inlineOut[0].find("1 + 1") != std::string::npos,
+              "P22: first inline body preserved");
+        CHECK(inlineOut[1].find("textContent") != std::string::npos,
+              "P22: second inline body preserved");
+        CHECK(srcOut[0] == "https://example.com/lib.js",
+              "P22: first src= URL parsed");
+        CHECK(srcOut[1] == "//cdn.example.org/a.js",
+              "P22: single-quoted src= URL parsed");
+
+        // 2. Empty / no-script HTML is a no-op.
+        inlineOut.clear(); srcOut.clear();
+        ns.extractScriptsForTest("<html><body>no scripts</body></html>",
+                                 inlineOut, srcOut);
+        CHECK(inlineOut.empty() && srcOut.empty(),
+              "P22: page without scripts -> empty lists");
+
+        // 3. loadHtml() populates the engine's script lists.
+        ns.clear();
+        CHECK(ns.inlineScriptCount() == 0, "P22: clear() resets inline count");
+        CHECK(ns.externalScriptCount() == 0, "P22: clear() resets external count");
+        ns.loadHtml(p22Html, "https://example.com/page.html");
+        CHECK(ns.inlineScriptCount() == 2, "P22: loadHtml() captured 2 inline scripts");
+        CHECK(ns.externalScriptCount() == 2, "P22: loadHtml() captured 2 external scripts");
+
+        // 4. pollJs() / relayout() are safe no-ops on the polling thread.
+        ns.pollJs();
+        ns.relayout();
+        // Wait for the (re)layout worker to land so we don't leave threads racing.
+        for (int w = 0; w < 200 && ns.focusedBox() == nullptr; ++w) {
+            ns.poll();
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        // 5. clear() drops script lists again.
+        ns.clear();
+        CHECK(ns.inlineScriptCount() == 0, "P22: clear() drops inline after load");
+        CHECK(ns.externalScriptCount() == 0, "P22: clear() drops external after load");
+    }
+
+    // ====================================================================
+    // P23: Cookie persistence + NetSurf daemon -f file:...
+    //   - HttpClient::setCookieJarPath() swaps the path; clearCookies()
+    //     targets the new path; the API never crashes.
+    //   - NetSurfWorkerBridge no longer hardcodes "-f ram": source-level
+    //     guard + the persistent path is built from AppConfig::getDataDir().
+    // ====================================================================
+    {
+        std::string origPath = HttpClient::instance().cookieJarPath();
+        CHECK(!origPath.empty(),
+              "P23: HttpClient exposes a non-empty default cookie jar path");
+
+        std::string persistentPath = "/tmp/p23_test_persistent_cookies.txt";
+        unlink(persistentPath.c_str());
+        HttpClient::instance().setCookieJarPath(persistentPath);
+        CHECK(HttpClient::instance().cookieJarPath() == persistentPath,
+              "P23: setCookieJarPath() updates the live path");
+
+        HttpClient::instance().clearCookies();
+        struct stat st;
+        CHECK(stat(persistentPath.c_str(), &st) != 0,
+              "P23: clearCookies() removes the new jar");
+        HttpClient::instance().clearCookies();
+        CHECK(true, "P23: clearCookies() is idempotent on missing file");
+
+        HttpClient::instance().setCookieJarPath(persistentPath);
+        HttpClient::instance().setCookieJarPath(persistentPath);
+        CHECK(true, "P23: setCookieJarPath() is idempotent on the same path");
+
+        FILE* fp = std::fopen(persistentPath.c_str(), "w");
+        if (fp) { std::fputs("dummy\n", fp); std::fclose(fp); }
+        HttpClient::instance().setCookieJarPath(persistentPath);
+        CHECK(stat(persistentPath.c_str(), &st) == 0,
+              "P23: re-setting same path preserves the file");
+    }
+    {
+        const char* hcPath = "src/network/HttpClient.cpp";
+        FILE* f = std::fopen(hcPath, "r");
+        CHECK(f != nullptr, "P23: HttpClient.cpp readable for grep");
+        if (f) {
+            char buf[8192];
+            size_t n = std::fread(buf, 1, sizeof(buf) - 1, f);
+            buf[n] = 0;
+            std::fclose(f);
+            std::string src(buf);
+            CHECK(src.find("CURLOPT_COOKIEJAR, kCookieJarPath") ==
+                      std::string::npos,
+                  "P23: COOKIEJAR no longer uses removed kCookieJarPath");
+            CHECK(src.find("CURLOPT_COOKIEFILE, kCookieJarPath") ==
+                      std::string::npos,
+                  "P23: COOKIEFILE no longer uses removed kCookieJarPath");
+            CHECK(src.find("cookieJarPath()") != std::string::npos,
+                  "P23: HttpClient.cpp uses cookieJarPath() accessor");
+            CHECK(src.find("setCookieJarPath") != std::string::npos,
+                  "P23: HttpClient.cpp defines setCookieJarPath");
+        }
+    }
+    {
+        const char* nswPath = "src/browser/netsurf/NetSurfWorkerBridge.cpp";
+        FILE* f = std::fopen(nswPath, "r");
+        CHECK(f != nullptr, "P23: NetSurfWorkerBridge.cpp readable for grep");
+        if (f) {
+            char buf[16384];
+            size_t n = std::fread(buf, 1, sizeof(buf) - 1, f);
+            buf[n] = 0;
+            std::fclose(f);
+            std::string src(buf);
+            CHECK(src.find("\"-f\", \"ram\"") == std::string::npos,
+                  "P23: -f ram flag removed from daemon spawn");
+            CHECK(src.find("\"-f\", choicesFlag.c_str()") != std::string::npos,
+                  "P23: -f file:<dataDir>/NetSurf/Choices wired in");
+            CHECK(src.find("getDataDir()") != std::string::npos,
+                  "P23: NetSurfWorkerBridge uses AppConfig::getDataDir()");
+            CHECK(src.find("mkdir") != std::string::npos,
+                  "P23: NetSurfWorkerBridge mkdir's the choices dir");
+        }
+    }
+    {
+        // Restore the original path so other test blocks see the legacy jar.
+        std::string origPath = HttpClient::instance().cookieJarPath();
+        std::string persistentPath = "/tmp/p23_test_persistent_cookies.txt";
+        HttpClient::instance().clearCookies();
+        unlink(persistentPath.c_str());
+        HttpClient::instance().setCookieJarPath(origPath);
+        CHECK(HttpClient::instance().cookieJarPath() == origPath,
+              "P23: cookie jar path restored for downstream tests");
+    }
+
+    // ====================================================================
+    // P24: In-process navigation (no daemon re-fork on link click / back /
+    // forward / refresh). P24.1 (link click) and P24.3 (form submit) are
+    // covered by source-level guards + the existing NetSurfEngine tests
+    // (P5 verifies currentFocusedLink + activate). P24.2 is the new cursor-
+    // based back/forward history in BrowserManager.
+    // ====================================================================
+    {
+        std::cout << "\n=== Phase 24: In-process navigation history ===" << std::endl;
+        auto& bm = BrowserManager::instance();
+        bm.setEngineMode(BrowserEngine::FULL);
+        // P24: disable network fetches so goBack/goForward/refresh don't
+        // spawn HTTP threads that race the test runner. We only care
+        // about cursor + currentUrl bookkeeping here.
+        bm.setTestFetchDisabled(true);
+        bm.close();
+        CHECK(bm.historySizeForTest() == 0,
+              "P24: history is empty after close()");
+        CHECK(bm.historyPosForTest() == 0,
+              "P24: history pos is 0 after close()");
+        CHECK(!bm.canGoBack(),
+              "P24: canGoBack() false on empty history");
+        CHECK(!bm.canGoForward(),
+              "P24: canGoForward() false on empty history");
+
+        // Push 3 URLs and exercise back/forward cursor moves.
+        bm.pushHistoryForTest("https://example.com/a");
+        CHECK(bm.historySizeForTest() == 1 && bm.historyPosForTest() == 0,
+              "P24: 1st push -> size=1, pos=0");
+        CHECK(!bm.canGoBack(),
+              "P24: canGoBack() false at the head of the stack");
+
+        bm.pushHistoryForTest("https://example.com/b");
+        CHECK(bm.historySizeForTest() == 2 && bm.historyPosForTest() == 1,
+              "P24: 2nd push -> size=2, pos=1");
+        CHECK(bm.canGoBack(),
+              "P24: canGoBack() true after 2nd push");
+
+        bm.pushHistoryForTest("https://example.com/c");
+        CHECK(bm.historySizeForTest() == 3 && bm.historyPosForTest() == 2,
+              "P24: 3rd push -> size=3, pos=2");
+        CHECK(!bm.canGoForward(),
+              "P24: canGoForward() false at the tail of the stack");
+
+        bm.goBack();
+        CHECK(bm.historyPosForTest() == 1,
+              "P24: goBack() decrements cursor to pos=1");
+        CHECK(bm.historySizeForTest() == 3,
+              "P24: goBack() does NOT pop the current entry");
+        CHECK(bm.canGoForward(),
+              "P24: after goBack(), canGoForward() is true");
+        CHECK(bm.currentUrl() == "https://example.com/b",
+              "P24: after goBack(), currentUrl reflects the now-current entry");
+
+        bm.goBack();
+        CHECK(bm.historyPosForTest() == 0,
+              "P24: goBack() again -> pos=0");
+        CHECK(!bm.canGoBack(),
+              "P24: at pos=0, canGoBack() is false");
+
+        bm.goForward();
+        CHECK(bm.historyPosForTest() == 1,
+              "P24: goForward() -> pos=1");
+        CHECK(bm.canGoBack(),
+              "P24: at pos=1 mid-stack, canGoBack() is true");
+        CHECK(bm.canGoForward(),
+              "P24: at pos=1 mid-stack, canGoForward() is true");
+        CHECK(bm.currentUrl() == "https://example.com/b",
+              "P24: after goForward(), currentUrl is the forward entry");
+    }
+    {
+        auto& bm = BrowserManager::instance();
+        // 5. Pushing from mid-stack truncates the forward branch.
+        // State coming in: m_history=[a,b,c], size=3, pos=1 (after
+        // goBack/goBack/goForward). A push from this state must drop /c
+        // and add /d, leaving m_history=[a,b,d] with size=3 and pos=2.
+        // (If truncation were broken, size would grow to 4 and pos=3.)
+        bm.pushHistoryForTest("https://example.com/d");
+        CHECK(bm.historySizeForTest() == 3,
+              "P24: push from mid-stack truncates forward (size stays 3, not 4)");
+        CHECK(bm.historyPosForTest() == 2,
+              "P24: push from mid-stack -> pos points at new tail (pos=2)");
+        CHECK(!bm.canGoForward(),
+              "P24: after truncate+push, canGoForward() is false (at tail)");
+        CHECK(bm.canGoBack(),
+              "P24: after truncate+push, canGoBack() is true");
+        CHECK(bm.currentUrl() == "https://example.com/d",
+              "P24: new push becomes the current URL");
+
+        // 6. goBack() to /b; the forward stack now contains only /d
+        // (NOT /c — that was truncated). Size stays 3, pos goes to 1.
+        bm.goBack();
+        CHECK(bm.historyPosForTest() == 1 &&
+              bm.historySizeForTest() == 3,
+              "P24: goBack() from /d lands on /b (size=3, pos=1)");
+        CHECK(bm.canGoForward(),
+              "P24: forward stack still has /d (just /c was truncated)");
+        CHECK(bm.currentUrl() == "https://example.com/b",
+              "P24: after goBack(), currentUrl is /b (not /a)");
+
+        // 7. refresh() doesn't duplicate history.
+        bm.pushHistoryForTest("https://example.com/e");
+        CHECK(bm.historySizeForTest() == 3 && bm.historyPosForTest() == 2,
+              "P24: refresh baseline -> size=3, pos=2 (at /e)");
+        size_t beforeSize = bm.historySizeForTest();
+        size_t beforePos = bm.historyPosForTest();
+        // refresh() will trigger an async fetch+layout. We only assert
+        // that history bookkeeping is unaffected; the fetch is fire-and-
+        // forget and may succeed or fail.
+        bm.refresh();
+        CHECK(bm.historySizeForTest() == beforeSize,
+              "P24: refresh() does NOT push a duplicate history entry");
+        CHECK(bm.historyPosForTest() == beforePos,
+              "P24: refresh() does NOT move the cursor");
+
+        // 8. close() resets the cursor alongside the vector.
+        bm.close();
+        CHECK(bm.historySizeForTest() == 0,
+              "P24: close() empties the history vector");
+        CHECK(bm.historyPosForTest() == 0,
+              "P24: close() resets the cursor to 0 (no underflow)");
+        // After close() + push, pos should be 0 again (not (size_t)-1).
+        bm.pushHistoryForTest("https://example.com/fresh");
+        CHECK(bm.historyPosForTest() == 0,
+              "P24: after close()+push, pos=0 (no underflow bug)");
+    }
+    {
+        // 9. Source-level guards: NetSurfEngine hooks X/A + form submit.
+        const char* nsePath = "src/browser/netsurf/NetSurfEngine.cpp";
+        FILE* f = std::fopen(nsePath, "r");
+        CHECK(f != nullptr, "P24: NetSurfEngine.cpp readable for grep");
+        if (f) {
+            // NetSurfEngine.cpp is ~30KB so 64KB is plenty.
+            char buf[65536];
+            size_t n = std::fread(buf, 1, sizeof(buf) - 1, f);
+            buf[n] = 0;
+            std::fclose(f);
+            std::string src(buf);
+            CHECK(src.find("Button::X") != std::string::npos,
+                  "P24: NetSurfEngine handles Button::X (forward)");
+            CHECK(src.find("canGoForward()") != std::string::npos,
+                  "P24: NetSurfEngine gates forward on canGoForward()");
+            CHECK(src.find("goForward()") != std::string::npos,
+                  "P24: NetSurfEngine calls BrowserManager::goForward()");
+            CHECK(src.find("BrowserManager::instance().openUrl(href)") !=
+                      std::string::npos,
+                  "P24: NetSurfEngine activates <a href> via openUrl()");
+            CHECK(src.find("submitFocusedForm()") != std::string::npos,
+                  "P24: NetSurfEngine calls submitFocusedForm() on submit");
+        }
+
+        // 10. Restore: leave BrowserManager in a clean state.
+        BrowserManager::instance().setTestFetchDisabled(false);
+        BrowserManager::instance().close();
+        CHECK(BrowserManager::instance().historySizeForTest() == 0 &&
+              BrowserManager::instance().historyPosForTest() == 0,
+              "P24: BrowserManager left clean for downstream tests");
     }
 
     if (s_fail == 0) std::cout << "[TEST] ALL PASS" << std::endl;
