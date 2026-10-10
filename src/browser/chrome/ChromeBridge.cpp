@@ -183,12 +183,13 @@ bool ChromeBridge::start(const std::string& url) {
 
     // Luồng nền chờ CDP (dấu hiệu electron đã lên và nhận điều khiển).
     // URL đầu không deep-link: main đã tự mở từ RC_WEB_URL nên vòng này
-    // chỉ đặt cờ sẵn sàng; quá 90s thì báo failed để UI quay về menu.
+    // chỉ đặt cờ sẵn sàng; quá 30s thì báo failed để UI tự quay về menu
+    // (trước đây 90s: màn hình đứng yên quá lâu khi electron chết/OOM).
     try {
         std::thread([] {
             ChromeBridge& self = ChromeBridge::instance();
-            trace("B04", "bắt đầu chờ CDP :9222 (tối đa 90s)");
-            for (int i = 0; i < 180; ++i) {  // 180 x 500ms = 90s
+            trace("B04", "bắt đầu chờ CDP :9222 (tối đa 30s)");
+            for (int i = 0; i < 60; ++i) {  // 60 x 500ms = 30s
                 if (self.m_pid <= 0) {
                     trace("B04", "huỷ chờ CDP: phiên đã đóng (pid<=0)");
                     return;
@@ -205,7 +206,7 @@ bool ChromeBridge::start(const std::string& url) {
                 usleep(500 * 1000);
             }
             self.m_failed.store(true);
-            traceWarn("B06", "quá 90s vẫn chưa thấy CDP :9222 -> failed, "
+            traceWarn("B06", "quá 30s vẫn chưa thấy CDP :9222 -> failed, "
                              "UI sẽ báo mở thất bại");
         }).detach();
     } catch (...) {
@@ -359,6 +360,68 @@ bool ChromeBridge::cdpPut(const std::string& path) {
     return code >= 200 && code < 300;
 }
 
+// GET /json/list (body có thể >512B nên đọc tới hết, không như cdpHttp
+// chỉ đọc 1 recv). Trả body JSON, rỗng khi lỗi.
+static std::string cdpGetBody(const std::string& path) {
+    int fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (fd < 0) return "";
+    struct timeval tv;
+    tv.tv_sec = 4;
+    tv.tv_usec = 0;
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(9222);
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    std::string resp;
+    if (connect(fd, (struct sockaddr*)&addr, sizeof(addr)) == 0) {
+        std::string req = "GET " + path +
+            " HTTP/1.1\r\nHost: 127.0.0.1:9222\r\n"
+            "Connection: close\r\n\r\n";
+        if (send(fd, req.data(), req.size(), 0) >= 0) {
+            char buf[4096];
+            ssize_t n;
+            while ((n = recv(fd, buf, sizeof(buf), 0)) > 0) {
+                resp.append(buf, (size_t)n);
+                if (resp.size() > 65536) break;  // list target không bao giờ to vậy
+            }
+        }
+    }
+    close(fd);
+    if (resp.compare(0, 5, "HTTP/") != 0) return "";
+    const char* sp = strchr(resp.c_str(), ' ');
+    if (!sp || atoi(sp + 1) < 200 || atoi(sp + 1) >= 300) return "";
+    size_t hdrEnd = resp.find("\r\n\r\n");
+    if (hdrEnd == std::string::npos) return "";
+    return resp.substr(hdrEnd + 4);
+}
+
+// Thu id các target type=page trong body /json/list (format ổn định của
+// Electron: ..."id":"HEX","title":"...","type":"page","url":"...").
+static std::vector<std::string> cdpPageIds(const std::string& body,
+                                           const std::string& wantUrl) {
+    std::vector<std::string> ids;
+    size_t pos = 0;
+    while ((pos = body.find("\"id\":\"", pos)) != std::string::npos) {
+        size_t s = pos + 6;
+        size_t e = body.find('"', s);
+        if (e == std::string::npos || e - s > 64) break;
+        std::string id = body.substr(s, e - s);
+        std::string window = body.substr(e, e + 2000 > body.size()
+                                                ? std::string::npos
+                                                : 2000);
+        bool isPage = window.find("\"type\":\"page\"") != std::string::npos;
+        bool urlOk = wantUrl.empty() ||
+                     window.find("\"url\":\"" + wantUrl + "\"") !=
+                         std::string::npos;
+        if (isPage && urlOk && !id.empty()) ids.push_back(id);
+        pos = e + 1;
+    }
+    return ids;
+}
+
 bool ChromeBridge::deepLink(const std::string& url) {
     if (url.empty()) return false;
     trace("B07", "deep-link (CDP PUT /json/new): " + url +
@@ -369,10 +432,24 @@ bool ChromeBridge::deepLink(const std::string& url) {
     std::string enc;
     enc.reserve(url.size());
     for (char c : url) enc += (c == ' ') ? "%20" : std::string(1, c);
+    // Chụp id các page đang có TRƯỚC khi mở mới: /json/new tạo target
+    // mới mà không đóng cũ -> renderer tích lũy -> hết RAM -> freeze
+    // (signal 9). Sau khi mở OK thì đóng các page cũ cùng URL trước đó.
+    std::string oldUrl = m_currentUrl;
+    std::vector<std::string> preIds =
+        oldUrl.empty() ? std::vector<std::string>()
+                       : cdpPageIds(cdpGetBody("/json/list"), oldUrl);
     bool ok = cdpPut("/json/new?" + enc);
     if (ok) {
         m_currentUrl = url;
         trace("B07", "deep-link OK");
+        int closed = 0;
+        for (const auto& id : preIds) {
+            if (cdpPut("/json/close/" + id)) closed++;
+        }
+        if (closed > 0)
+            trace("B07", "đã đóng " + std::to_string(closed) +
+                          " page cũ (" + oldUrl + ")");
     } else {
         traceWarn("B07", "deep-link THẤT BẠI (CDP không trả 2xx): " + url);
     }

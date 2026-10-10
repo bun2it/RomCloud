@@ -1,7 +1,9 @@
 [config]
 repeat_delay = 16
 repeat_rate = 40
-mouse_scale = 10
+# mouse_scale: số càng LỚN càng CHẬM (PortMaster: 8192 cho màn 640px).
+# Màn Brick 1024px -> ~5000; nhanh/chậm thì Tai chỉnh tiếp trên máy.
+mouse_scale = 5000
 mouse_delay = 16
 deadzone_mode = axial
 deadzone_scale = 10
@@ -13,9 +15,12 @@ dpad_mouse_normalize = true
 
 [controls]
 # Mapping tay cầm của RC-Web (RomCloud tự định nghĩa, Tai chốt):
+# Joystick: rê chuột hệ thống của weston (chế độ con trỏ SELECT dùng
+# nó để di chuyển, A = bấm). Không có 2 dòng left/right_analog dưới
+# thì gạt cần không sinh event chuột nào cả.
 # D-pad: trái = lui trang, phải = tới trang, lên/xuống = cuộn bước nhỏ
 # (phím mũi tên gốc của trang). L1/R1 = cuộn cả trang (PageUp/PageDown).
-# START = sửa địa chỉ (F6), SELECT = con trỏ (F9) — qua main.js.
+# START = địa chỉ (F6), SELECT = con trỏ (F9) — qua main.js.
 # B do RomCloud giữ (thoát theo tầng): F1 chỉ để main.js đóng lớp
 # phụ (bàn phím/con trỏ) trong lúc RomCloud nhường.
 #
@@ -39,3 +44,7 @@ up = up
 down = down
 left = f7
 right = f8
+# Cần gạt -> chuột tương đối của weston (xem chú thích đầu file).
+# Map cả 2 cần: máy chỉ có 1 cần thì dòng thừa vô tác dụng.
+left_analog = mouse_movement
+right_analog = mouse_movement

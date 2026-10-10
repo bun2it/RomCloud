@@ -17,12 +17,16 @@ LOG="$RC_DIR/rc-web.log"
 exec >>"$LOG" 2>&1
 
 # ── Hàm trace + chụp trạng thái máy ──────────────────────────────────
+# RC_WEB_DEBUG=1 mới chụp SNAP đầy đủ (free+ps+dmesg fork nhiều tiến
+# trình, chậm trên CPU yếu). Mặc định chỉ ghi dòng trace nhẹ.
+DEBUG="${RC_WEB_DEBUG:-0}"
 T0=$(date +%s)
 TR() {
   NOW=$(date +%s)
   echo "[WEBTRACE] $1 +$((NOW - T0))s $(date '+%H:%M:%S') $2"
 }
 SNAP() {
+  [ "$DEBUG" = 1 ] || return 0
   # Ảnh chụp nhanh: RAM trống + tiến trình ăn RAM nhất + cuối dmesg
   # (kernel ghi rõ khi giết tiến trình vì hết RAM).
   echo "--- SNAP ($1) ---"
@@ -40,8 +44,19 @@ set -x
 WROOT="$RC_DIR/weston"
 WLIB="$WROOT/lib/aarch64-linux-gnu"
 RUN_DIR=/tmp/rc-web-run
-mkdir -p "$RC_DIR/conf/profile" "$RC_DIR/conf/cache" "$RC_DIR/conf/tmp" "$RUN_DIR"
+mkdir -p "$RC_DIR/conf/profile" "$RUN_DIR"
 chmod 700 "$RUN_DIR" 2>/dev/null
+# Profile/cache/tmp của Electron sang tmpfs (/tmp = RAM): Chromium ghi
+# LevelDB + cache file nhỏ liên tục, để trên thẻ SD (FAT) vừa chậm vừa
+# dễ corrupt khi bị SIGKILL. Chỉ lịch sử địa chỉ là cần giữ lại qua
+# phiên (khôi phục/lưu ở dưới + trong cleanup).
+RUNDATA=/tmp/rc-web-data
+mkdir -p "$RUNDATA/profile" "$RUNDATA/cache" "$RUNDATA/tmp"
+if [ ! -f "$RUNDATA/profile/rc-history.json" ] && \
+   [ -f "$RC_DIR/conf/profile/rc-history.json" ]; then
+  cp -f "$RC_DIR/conf/profile/rc-history.json" \
+        "$RUNDATA/profile/rc-history.json" 2>/dev/null
+fi
 
 PIDS=""
 GOV_SAVE=""
@@ -50,6 +65,12 @@ SEATD_STARTED=0
 
 cleanup() {
   TR L12 "cleanup: dọn weston/electron/gptokeyb, trả màn hình"
+  # Giữ lại duy nhất lịch sử địa chỉ (file nhỏ) về thẻ SD; profile còn
+  # lại nằm trên tmpfs nên mất đi cũng không sao.
+  if [ -f "$RUNDATA/profile/rc-history.json" ]; then
+    cp -f "$RUNDATA/profile/rc-history.json" \
+          "$RC_DIR/conf/profile/rc-history.json" 2>/dev/null
+  fi
   # shellcheck disable=SC2086
   for p in $PIDS; do kill "$p" 2>/dev/null; done
   sleep 1
@@ -103,12 +124,12 @@ elif [ -x "$WROOT/bin/seatd" ]; then
   "$WROOT/bin/seatd" &
   SEATD_STARTED=1
   i=0
-  while [ ! -S "$SEATD_SOCK" ] && [ "$i" -lt 20 ]; do sleep 0.25; i=$((i+1)); done
+  while [ ! -S "$SEATD_SOCK" ] && [ "$i" -lt 12 ]; do sleep 0.25; i=$((i+1)); done
   if [ -S "$SEATD_SOCK" ]; then
     TR L04 "seatd đã lên sau $((i * 250))ms"
   else
     export LIBSEAT_BACKEND=builtin
-    TR L04 "seatd KHÔNG lên sau 5s -> LIBSEAT_BACKEND=builtin"
+    TR L04 "seatd KHÔNG lên sau 3s -> LIBSEAT_BACKEND=builtin"
   fi
 else
   export LIBSEAT_BACKEND=builtin
@@ -214,33 +235,41 @@ if [ -x "$RC_DIR/bin/gptokeyb2" ]; then
   TR L05F "gptokeyb2 đã chạy (trước weston), pid=$! (mapping browser.gptk)"
   if [ -n "$UDEVADM" ]; then
     "$UDEVADM" trigger --action=change --subsystem-match=input 2>/dev/null
-    "$UDEVADM" settle --timeout=5 2>/dev/null
+    "$UDEVADM" settle --timeout=2 2>/dev/null
   fi
   TR L05G "da kich change + settle udev input: UDEVADM=$UDEVADM"
-  sleep 1
+  sleep 0.3
 else
   TR L05F "CẢNH BÁO: thiếu bin/gptokeyb2 -> tay cầm không điều khiển được"
 fi
 
 # Weston 9 gọi backend bằng tên file module (drm-backend.so), không còn
 # tên ngắn "drm". Thử DRM trước, không lên thì lùi về fbdev (/dev/fb0
-# máy nào cũng có) — mỗi lần thử tối đa 15s.
+# máy nào cũng có) — mỗi lần thử tối đa 8s. Backend thành công lần
+# trước (conf/last-be) được thử trước để boot nhanh.
+LASTBE=""
+[ -f "$RC_DIR/conf/last-be" ] && LASTBE="$(cat "$RC_DIR/conf/last-be" 2>/dev/null)"
+BE_ORDER="drm-backend.so fbdev-backend.so"
+if [ "$LASTBE" = "fbdev-backend.so" ]; then
+  BE_ORDER="fbdev-backend.so drm-backend.so"
+fi
 WESTON_OK=0
-for BE in drm-backend.so fbdev-backend.so; do
+for BE in $BE_ORDER; do
   rm -f "$RUN_DIR/wayland-1" "$RUN_DIR/wayland-1.lock"
   "$WROOT/bin/weston" -c "$RC_DIR/conf/weston.ini" -B "$BE" --tty=1 \
     --shell=kiosk-shell.so --socket=wayland-1 \
     --idle-time=0 &
   WPID=$!
   PIDS="$PIDS $WPID"
-  TR L06 "weston ($BE) đã chạy nền, pid=$WPID; chờ socket wayland-1 (tối đa 15s)"
+  TR L06 "weston ($BE) đã chạy nền, pid=$WPID; chờ socket wayland-1 (tối đa 8s)"
   i=0
-  while [ ! -S "$RUN_DIR/wayland-1" ] && [ "$i" -lt 60 ]; do
+  while [ ! -S "$RUN_DIR/wayland-1" ] && [ "$i" -lt 32 ]; do
     kill -0 $WPID 2>/dev/null || break
     sleep 0.25; i=$((i+1))
   done
   if [ -S "$RUN_DIR/wayland-1" ]; then
     TR L07 "socket wayland-1 đã sẵn sàng (backend: $BE)"
+    echo "$BE" > "$RC_DIR/conf/last-be" 2>/dev/null
     WESTON_OK=1
     break
   fi
@@ -266,7 +295,7 @@ TR L08 "bỏ qua Xwayland — Electron chạy Wayland native"
 # hot-plug, duong ma cac phien truoc da thay no phan ung.
 if [ -n "$UDEVADM" ]; then
   "$UDEVADM" trigger --action=add --subsystem-match=input 2>/dev/null
-  "$UDEVADM" settle --timeout=5 2>/dev/null
+  "$UDEVADM" settle --timeout=2 2>/dev/null
 fi
 TR L08B "da phat lai add + settle input sau khi weston len"
 SNAP "weston đã lên"
@@ -279,8 +308,8 @@ export GDK_PIXBUF_MODULE_DIR="$RC_DIR/syslibs/pixbuf-loaders"
 export GDK_PIXBUF_MODULEDIR="$RC_DIR/syslibs/pixbuf-loaders"
 export GDK_PIXBUF_MODULE_FILE="$RC_DIR/syslibs/pixbuf-loaders/loaders.cache"
 export XDG_DATA_DIRS="$RC_DIR/share:/usr/local/share:/usr/share"
-export TMPDIR="$RC_DIR/conf/tmp"
-TR L10 "sắp chạy Electron: user-data=$RC_DIR/conf/profile URL đầu xem biến RC_WEB_URL"
+export TMPDIR="$RUNDATA/tmp"
+TR L10 "sắp chạy Electron: user-data=$RUNDATA/profile (tmpfs) URL đầu xem biến RC_WEB_URL"
 SNAP "ngay trước khi chạy Electron"
 "$RC_DIR/electron/electron" \
   --ozone-platform=wayland \
@@ -288,11 +317,21 @@ SNAP "ngay trước khi chạy Electron"
   --no-sandbox \
   --remote-debugging-port=9222 \
   --remote-debugging-address=127.0.0.1 \
-  --user-data-dir="$RC_DIR/conf/profile" \
-  --disk-cache-dir="$RC_DIR/conf/cache" \
+  --user-data-dir="$RUNDATA/profile" \
+  --disk-cache-dir="$RUNDATA/cache" \
+  --disk-cache-size=33554432 \
+  --media-cache-size=33554432 \
+  --renderer-process-limit=1 \
+  --autoplay-policy=user-gesture-required \
   --no-first-run \
   --disable-dev-shm-usage \
   --disable-gpu \
+  --disable-background-networking \
+  --disable-component-update \
+  --disable-sync \
+  --disable-default-apps \
+  --disable-domain-reliability \
+  --js-flags=--max-old-space-size=256 \
   "$RC_DIR/app" &
 EPID=$!
 PIDS="$PIDS $EPID"

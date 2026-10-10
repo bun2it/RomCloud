@@ -18,7 +18,7 @@ const { app, BrowserWindow, ipcMain, session } = require('electron');
 const fs = require('fs');
 const path = require('path');
 
-const HOME_URL = 'https://duckduckgo.com/';
+const HOME_URL = 'https://lite.duckduckgo.com/lite/';
 const MOBILE_UA = 'Mozilla/5.0 (Linux; Android 13; Mobile) ' +
   'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Mobile Safari/537.36';
 const ZOOM_STEPS = [0, 0.5, 1, 1.5, 2];
@@ -72,7 +72,7 @@ function startUrl() {
 let page = null;       // cửa sổ vỏ (shell): header + URL + webview + footer
 let pageWc = null;     // webContents của trang (webview hoặc cửa sổ CDP)
 let kbOpen = false;    // bàn phím ảo (lớp phủ trong vỏ) đang mở
-let urlHistory = [];   // lịch sử địa chỉ/tìm kiếm [{q,url}] (tối đa 20)
+let urlHistory = [];   // lịch sử địa chỉ/tìm kiếm [{q,url}] (tối đa 4)
 let zoomIdx = 0;
 let urlEdit = false;   // đang sửa địa chỉ trên thanh URL (START bật/tắt)
 
@@ -374,7 +374,7 @@ function loadHistory() {
   try {
     const arr = JSON.parse(fs.readFileSync(historyPath(), 'utf8'));
     if (Array.isArray(arr)) {
-      urlHistory = arr.filter((h) => h && h.q && h.url).slice(0, 20);
+      urlHistory = arr.filter((h) => h && h.q && h.url).slice(0, 4);
     }
   } catch (e) { /* chưa có file lịch sử: bỏ qua */ }
   TR('J37', 'lịch sử địa chỉ: ' + urlHistory.length + ' mục');
@@ -386,7 +386,7 @@ function saveHistory() {
 function pushHistory(q, url) {
   urlHistory = urlHistory.filter((h) => h.url !== url);
   urlHistory.unshift({ q: q, url: url });
-  if (urlHistory.length > 20) urlHistory.length = 20;
+  if (urlHistory.length > 4) urlHistory.length = 4;
   saveHistory();
 }
 
@@ -852,6 +852,14 @@ app.on('web-contents-created', (event, contents) => {
         ' exitCode=' + (details && details.exitCode) +
         ' — tự tải lại trang (nếu renderer bị kill vì RAM, xem ' +
         'SNAP/dmesg trong rc-web.log)');
+    // Chống loop OOM: quá 2 lần chết trong 1 webContents thì dừng, để
+    // yên trang lỗi cho user bấm F5 thủ công thay vì reload vô hạn.
+    contents.__rcGone = (contents.__rcGone || 0) + 1;
+    if (contents.__rcGone > 2) {
+      TRW('J15', 'renderer chết lần ' + contents.__rcGone +
+        ' -> DỪNG tự tải lại (bấm F5 để thử tay)');
+      return;
+    }
     if (!contents.isDestroyed()) contents.reload();
   });
   contents.once('dom-ready', () => {
@@ -866,18 +874,16 @@ app.on('web-contents-created', (event, contents) => {
     }
     TR('J13', 'dom-ready: ' + contents.getURL());
     attachPageKeys(contents);
-    // Ghi vị trí chuột hệ thống trong trang (cho nút A ở chế độ
-    // con trỏ biết bấm vào đâu) — gắn lại mỗi lần trang tải xong.
+    // Gộp 1 lần inject: ghi vị trí chuột hệ thống trong trang (cho nút
+    // A ở chế độ con trỏ biết bấm vào đâu) + đóng băng media tự chạy
+    // (video thumbnail chỉ hiện poster, không tự phát). Gắn lại mỗi lần
+    // trang tải xong. Gộp để bớt 1 vòng IPC main<->renderer.
     contents.executeJavaScript(
+      '(function(){' +
       'if(!window.__rcMouse){window.__rcMouse=null;' +
       'document.addEventListener("mousemove",function(e){' +
-      'window.__rcMouse={x:e.clientX,y:e.clientY}},true)}')
-      .catch(() => {});
-    // Đóng băng media tự chạy trong trang: video thumbnail chỉ
-    // hiện ảnh bìa (poster), không tự phát — như trên điện thoại.
-    // Ai muốn xem thì bấm vào, video vẫn phát tay được.
-    contents.executeJavaScript(
-      '(function(){if(window.__rcFrz)return;window.__rcFrz=1;' +
+      'window.__rcMouse={x:e.clientX,y:e.clientY}},true)}' +
+      'if(window.__rcFrz)return;window.__rcFrz=1;' +
       'function fz(v){try{v.pause();' +
       'v.removeAttribute("autoplay");v.preload="none"}' +
       'catch(e){}}' +
@@ -888,8 +894,8 @@ app.on('web-contents-created', (event, contents) => {
       'if(n.querySelectorAll)n.querySelectorAll("video")' +
       '.forEach(fz)}}}).observe(document.documentElement,' +
       '{childList:true,subtree:true})})()')
-      .then(() => TR('J45', 'đã đóng băng video tự chạy trong trang'))
-      .catch((e) => TRW('J45', 'đóng băng video lỗi: ' + e));
+      .then(() => TR('J45', 'đã gắn tracker chuột + đóng băng video tự chạy'))
+      .catch((e) => TRW('J45', 'inject trang lỗi: ' + e));
     if (contents.getType && contents.getType() === 'webview') {
       pageWc = contents;
       applyMobileMode(contents);
@@ -944,7 +950,10 @@ const AD_HOSTS = [
   'scorecardresearch.com', 'quantserve.com', 'moatads.com',
   'adsrvr.org', 'demdex.net', 'bluekai.com', 'casalemedia.com',
   'lijit.com', 'sovrn.com', 'teads.tv', 'eclick.vn',
-  'ads-twitter.com', 'analytics.tiktok.com', 'hotjar.com', 'fullstory.com'
+  'ads-twitter.com', 'analytics.tiktok.com', 'hotjar.com', 'fullstory.com',
+  'newrelic.com', 'nr-data.net', 'segment.io', 'segment.com',
+  'mixpanel.com', 'crazyegg.com', 'doubleverify.com', 'imasdk.googleapis.com',
+  'static.criteo.net', 'ybcsystem.com'
 ];
 let adBlocked = 0;
 function isAdUrl(u) {

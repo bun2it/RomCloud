@@ -7205,12 +7205,12 @@ void UIManager::render() {
     return;
   }
 
-  // Phiên RC-Web (weston + Electron giữ màn hình): RomCloud không vẽ
-  // gì cả, kể cả lúc đang boot. Màn trạng thái toàn cảnh ("Đang mở
-  // trình duyệt..." / "Đang duyệt bằng Chrome") từng đè lên viewport
-  // mỗi khi isReady() chập chờn dưới tải CPU cao. Trạng thái mở/tải
-  // trang do header của vỏ RC-Web hiển thị.
+  // Phiên RC-Web: khi weston/Electron đã ready thì nó giữ toàn màn
+  // hình, RomCloud không vẽ gì. Lúc đang boot (chưa ready) thì vẽ màn
+  // chờ + đếm giây để user biết máy đang làm gì (B hủy được); quá 30s
+  // không ready là bridge tự failed và update() đưa về menu.
   if (m_currentState == UIState::CHROME) {
+    renderChromeState();
     return;
   }
 
@@ -8274,6 +8274,36 @@ static bool rcWebUiModeOpen() {
   fclose(f);
   return n > 0 && buf[0] != '\n';
 }
+// Mốc lần cuối thấy B rơi vào lớp phụ của web. Cùng 1 lần bấm B, cả
+// gptokeyb (F1 repeat 40Hz cho Electron đóng lớp) lẫn RomCloud (poll
+// theo frame) đều thấy: frame sau Electron đã xóa ui-mode mà tay vẫn
+// giữ B -> RomCloud tưởng "không lớp phụ" và thoát web oan. Nuốt B
+// trong cửa sổ ngắn sau mốc này để B = lùi đúng 1 state.
+static uint32_t s_chromeLayerBMs = 0;
+static constexpr uint32_t kChromeLayerBDebounceMs = 500;
+// Watchdog kẹt RAM/CPU trong phiên web: máy 1GB không swap, Chromium +
+// weston ăn RAM tới khi kswapd thrash thì cả phiên đơ cứng, B cũng lag
+// hàng phút. Poll MemAvailable mỗi 2s, thấp 2 nhịp liên tiếp -> tự
+// thoát về menu thay vì kẹt (chỉ trên Linux; đọc không được thì thôi).
+static uint32_t s_chromeMemPollMs = 0;
+static int s_chromeMemLowCount = 0;
+static constexpr long kChromeMemLowKb = 30720;  // <30MB coi như sắp thrash
+static long chromeMemAvailableKb() {
+  FILE* f = fopen("/proc/meminfo", "r");
+  if (!f) return -1;
+  char line[128];
+  long avail = -1;
+  while (fgets(line, sizeof(line), f)) {
+    if (sscanf(line, "MemAvailable: %ld kB", &avail) == 1) break;
+  }
+  fclose(f);
+  return avail;
+}
+// Chốt màn chờ boot: đã ready 1 lần thì weston giữ màn từ đó, không vẽ
+// đè nữa (tránh isReady chập chờn dưới tải CPU cao đè lên viewport).
+// Reset khi phiên kết thúc (!isRunning).
+static bool s_chromeReadyLatched = false;
+static uint32_t s_chromeBootStartMs = 0;
 
 void UIManager::handleChromeInput() {
   // Phiên RC-Web (weston takeover toàn màn hình): RomCloud supervise +
@@ -8305,10 +8335,34 @@ void UIManager::handleChromeInput() {
   // / con trỏ) đang mở thì B chỉ đóng lớp đó — Electron nhận F1 và tự
   // đóng, RomCloud không dừng phiên. Không lớp phụ nào mở thì B thoát.
   if (input.isButtonJustPressed(Button::B)) {
-    if (!rcWebUiModeOpen()) {
+    if (rcWebUiModeOpen()) {
+      s_chromeLayerBMs = SDL_GetTicks();  // nuốt B này, chờ Electron đóng lớp
+    } else if (SDL_GetTicks() - s_chromeLayerBMs < kChromeLayerBDebounceMs) {
+      // B vừa đóng lớp phụ xong (tay giữ lâu/repeat): bỏ qua, chưa thoát.
+    } else {
       bridge.stop();  // trap cleanup của launcher dọn weston/electron/gptokeyb
       goBack();
       return;
+    }
+  }
+  // Watchdog RAM (chỉ khi phiên đã ready): MemAvailable thấp 2 nhịp
+  // liên tiếp (4s) -> tự thoát về menu, khỏi kẹt đơ chờ B.
+  {
+    uint32_t now = SDL_GetTicks();
+    if (now - s_chromeMemPollMs >= 2000) {
+      s_chromeMemPollMs = now;
+      long avail = chromeMemAvailableKb();
+      if (avail >= 0 && avail < kChromeMemLowKb) {
+        if (++s_chromeMemLowCount >= 2) {
+          s_chromeMemLowCount = 0;
+          showToast("Hết RAM, đã thoát web", {239, 68, 68, 255}, 2500);
+          bridge.stop();
+          goBack();
+          return;
+        }
+      } else {
+        s_chromeMemLowCount = 0;
+      }
     }
   }
   // START cũng để phiên web lo (mở ô địa chỉ + bàn phím ảo ngay trong
@@ -8318,10 +8372,45 @@ void UIManager::handleChromeInput() {
 }
 
 void UIManager::renderChromeState() {
-  // Đã bỏ màn trạng thái toàn cảnh theo yêu cầu của Tai: trong phiên
-  // web weston/Electron giữ toàn màn hình, RomCloud không vẽ gì cả
-  // (render() đã thoát sớm ở state CHROME). Trạng thái "đang mở /
-  // đang tải" hiện ở header của vỏ RC-Web.
+  // Chỉ vẽ màn chờ lúc đang boot. Đã ready thì weston giữ màn, return
+  // ngay (không present đè). Latch chống isReady chập chờn dưới tải CPU.
+  auto& bridge = ChromeBridge::instance();
+  if (!bridge.isRunning()) {
+    s_chromeReadyLatched = false;
+    s_chromeBootStartMs = 0;
+    return;  // update() sắp goBack, không vẽ
+  }
+  if (bridge.isReady()) {
+    s_chromeReadyLatched = true;
+    return;
+  }
+  if (s_chromeReadyLatched) return;
+  if (s_chromeBootStartMs == 0) s_chromeBootStartMs = SDL_GetTicks();
+  uint32_t elapsed =
+      (SDL_GetTicks() - s_chromeBootStartMs + 500) / 1000;  // làm tròn giây
+
+  SDL_SetRenderDrawColor(m_renderer, UiTheme::BG_APP.r, UiTheme::BG_APP.g,
+                         UiTheme::BG_APP.b, 255);
+  SDL_RenderClear(m_renderer);
+  renderHeader();
+  const int pw = 560, ph = 220, px = (1024 - pw) / 2, py = (768 - ph) / 2;
+  drawRect(px, py, pw, ph, {18, 22, 32, 255}, true);
+  drawRect(px, py, pw, ph, {0, 180, 255, 255}, false);
+  TTF_Font* titleF = m_fontLarge ? m_fontLarge : m_fontMedium;
+  TTF_Font* rowF = m_fontMedium ? m_fontMedium : m_fontSmall;
+  if (titleF)
+    drawText("ĐANG MỞ TRÌNH DUYỆT", 512, py + 30, {0, 180, 255, 255},
+             titleF, true);
+  if (rowF) {
+    char buf[64];
+    snprintf(buf, sizeof(buf), "Đang tải... %us / 30s", elapsed > 99 ? 99 : elapsed);
+    drawText(buf, 512, py + 100, {200, 205, 215, 255}, rowF, true);
+    drawText("B: hủy", 512, py + 150, {130, 140, 155, 255},
+             m_fontSmall ? m_fontSmall : rowF, true);
+  }
+  renderFooter();
+  renderToast();
+  SDL_RenderPresent(m_renderer);
 }
 
 void UIManager::handleBrowserInputKeyboard() {
