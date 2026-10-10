@@ -32,6 +32,8 @@ dpad_mouse_normalize = true
 # với bản cũ (a=f2, b=f1, x=enter, y=f3), Tai bấm Y thì gõ chữ
 # (x=enter -> Enter) và bấm X thì xoá (y=f3 -> F3) — khớp từng dòng.
 # Sơ đồ Tai chốt: A chọn, Y xoá, START tải web, B đóng/thoát, X trang chủ:
+# LƯU Ý token nút phụ của gptokeyb2 theo tên Xbox: SELECT vật lý = `back`
+# (không phải `select` — token đó không tồn tại, ghi là mất nút câm).
 a = f1
 b = enter
 x = f3
@@ -39,7 +41,7 @@ y = f2
 l1 = pageup
 r1 = pagedown
 start = f6
-select = f9
+back = f9
 up = up
 down = down
 left = f7

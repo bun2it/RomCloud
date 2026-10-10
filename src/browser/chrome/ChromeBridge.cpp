@@ -12,6 +12,8 @@
 #include <fcntl.h>
 #include <signal.h>
 #include <spawn.h>
+#include <string>
+#include <sys/ioctl.h>
 #include <thread>
 #include <chrono>
 #include <unistd.h>
@@ -43,6 +45,48 @@ void trace(const char* step, const std::string& msg) {
 void traceWarn(const char* step, const std::string& msg) {
     Logger::warn("[WEBTRACE] " + std::string(step) + " (+" +
                  std::to_string(traceMs()) + "ms) " + msg);
+}
+
+// ── Nhường/lấy lại DRM master quanh phiên weston ─────────────────────
+// RomCloud (SDL/KMSDRM) giữ DRM master nên weston drm-backend không
+// modeset đè lên được: nó vẫn render nhưng output nằm dưới frame của
+// RomCloud (cảm giác freeze ở UI RomCloud). Chạy root nên weston có
+// thể steal, nhưng chắc ăn nhất là RomCloud tự DROP_MASTER ngay trước
+// khi fork launch.sh và SET_MASTER lại sau stop(). Không cần libdrm:
+// _IO('d', nr) với nr từ drm.h (SET_MASTER=0x11, DROP_MASTER=0x1F).
+static int drmOpenCard() {
+    for (int i = 0; i < 4; ++i) {
+        char path[32];
+        snprintf(path, sizeof(path), "/dev/dri/card%d", i);
+        int fd = open(path, O_RDWR | O_CLOEXEC);
+        if (fd >= 0) return fd;
+    }
+    return -1;
+}
+
+static void drmDropMaster() {
+    int fd = drmOpenCard();
+    if (fd < 0) {
+        trace("B02", "không thấy /dev/dri/card* -> bỏ qua DROP_MASTER");
+        return;
+    }
+    if (ioctl(fd, _IO('d', 0x1F)) == 0)
+        trace("B02", "đã DROP_MASTER DRM (nhường màn cho weston)");
+    else
+        trace("B02", std::string("DROP_MASTER lỗi (có thể vốn không giữ): ") +
+                         strerror(errno));
+    close(fd);
+}
+
+static void drmSetMaster() {
+    int fd = drmOpenCard();
+    if (fd < 0) return;
+    if (ioctl(fd, _IO('d', 0x11)) == 0)
+        trace("B09", "đã SET_MASTER DRM lại (RomCloud giữ màn)");
+    else
+        traceWarn("B09",
+                  std::string("SET_MASTER DRM lỗi: ") + strerror(errno));
+    close(fd);
 }
 }  // namespace
 
@@ -130,6 +174,12 @@ bool ChromeBridge::start(const std::string& url) {
     }
     trace("B02", "sẽ fork launch.sh trong " + dir);
 
+    // Xóa socket wayland sót từ phiên trước: renderChromeState() dừng vẽ
+    // màn chờ ngay khi socket xuất hiện, nên socket cũ phải đi trước khi
+    // fork (không thì màn chờ tắt oan + weston cũng tự rm lại).
+    unlink("/tmp/rc-web-run/wayland-1");
+    unlink("/tmp/rc-web-run/wayland-1.lock");
+
     std::string target = url.empty() ? "https://duckduckgo.com/" : url;
     m_currentUrl = target;
 
@@ -144,6 +194,10 @@ bool ChromeBridge::start(const std::string& url) {
     trace("B02", "URL mở đầu='" + target + "' ghi /tmp/rc-web-start-url: " +
               std::string(urlFileOk ? "OK" : "THẤT BẠI (main còn biến "
                                              "RC_WEB_URL để dùng)"));
+
+    // Nhả DRM master TRƯỚC khi fork: weston drm-backend modeset đè lên
+    // được ngay, không còn cảnh render mà không hiện (freeze ở UI cũ).
+    drmDropMaster();
 
     std::string cmd = "cd \"" + dir + "\" && exec ./launch.sh";
     char* argv[] = {(char*)"/bin/sh", (char*)"-c", (char*)cmd.c_str(),
@@ -176,6 +230,7 @@ bool ChromeBridge::start(const std::string& url) {
     if (rc != 0) {
         traceWarn("B03", "fork launch.sh rc-web THẤT BẠI: rc=" +
                       std::to_string(rc) + " " + std::string(strerror(rc)));
+        drmSetMaster();  // fork hỏng: lấy lại màn ngay
         return false;
     }
     m_pid = pid;
@@ -251,12 +306,14 @@ bool ChromeBridge::pollExited() {
         }
         m_pid = -1;
         m_ready.store(false);
+        drmSetMaster();  // phiên tự chết: lấy lại màn cho RomCloud
         return true;
     }
     if (r < 0 && errno == ECHILD) {  // đã bị reap ở nơi khác
         trace("B08", "tiến trình con đã được reap ở nơi khác (ECHILD)");
         m_pid = -1;
         m_ready.store(false);
+        drmSetMaster();
         return true;
     }
     return false;
@@ -273,6 +330,7 @@ bool ChromeBridge::stop() {
         if (pollExited()) {
             trace("B09", "phiên đã đóng sau ~" +
                       std::to_string(i * 20) + "ms kể từ SIGTERM");
+            drmSetMaster();  // weston chết rồi: lấy lại màn cho RomCloud
             return true;
         }
         usleep(20 * 1000);
@@ -288,6 +346,7 @@ bool ChromeBridge::stop() {
                   std::to_string(status));
     m_pid = -1;
     m_ready.store(false);
+    drmSetMaster();
     return true;
 }
 

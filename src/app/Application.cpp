@@ -106,6 +106,12 @@ bool Application::initSDL() {
     Logger::error(std::string("SDL_CreateWindow failed: ") + SDL_GetError());
     return false;
   }
+  {
+    // Ghi driver video (KMSDRM/fbdev/wayland...): quyết định weston có
+    // cần RomCloud nhả DRM master không (xem ChromeBridge B02/B09).
+    const char* drv = SDL_GetCurrentVideoDriver();
+    Logger::info(std::string("SDL video driver: ") + (drv ? drv : "?"));
+  }
 
   m_renderer = SDL_CreateRenderer(
       m_window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);

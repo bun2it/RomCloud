@@ -8372,8 +8372,12 @@ void UIManager::handleChromeInput() {
 }
 
 void UIManager::renderChromeState() {
-  // Chỉ vẽ màn chờ lúc đang boot. Đã ready thì weston giữ màn, return
-  // ngay (không present đè). Latch chống isReady chập chờn dưới tải CPU.
+  // Chỉ vẽ màn chờ lúc CHƯA có weston. Weston's socket xuất hiện là màn
+  // hình thuộc về nó: dừng vẽ ngay (kể cả CDP chưa ready) để frame của
+  // weston luôn là frame sau cùng — chung /dev/fb0, ai vẽ sau thắng.
+  // Vẽ đè sau thời điểm này là nguyên nhân "freeze ở UI RomCloud" dù
+  // backend khỏe (weston idle khi trang tĩnh, không present lại để đè).
+  // Latch chống isReady chập chờn; reset khi phiên kết thúc.
   auto& bridge = ChromeBridge::instance();
   if (!bridge.isRunning()) {
     s_chromeReadyLatched = false;
@@ -8385,6 +8389,7 @@ void UIManager::renderChromeState() {
     return;
   }
   if (s_chromeReadyLatched) return;
+  if (access("/tmp/rc-web-run/wayland-1", F_OK) == 0) return;
   if (s_chromeBootStartMs == 0) s_chromeBootStartMs = SDL_GetTicks();
   uint32_t elapsed =
       (SDL_GetTicks() - s_chromeBootStartMs + 500) / 1000;  // làm tròn giây

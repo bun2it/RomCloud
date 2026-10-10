@@ -6,9 +6,10 @@
 // RomCloud (C++) đưa URL mở đầu qua biến RC_WEB_URL / file
 // /tmp/rc-web-start-url, và deep-link các URL sau qua CDP :9222
 // (PUT /json/new?<URL>). Phím chức năng do gptokeyb gửi (browser.gptk):
-//   F2 = trang chủ   F3 = bàn phím ảo   F6 = sửa địa chỉ (bật/tắt)
+//   F6 = sửa địa chỉ (bật/tắt)
 //   F7/F8 = lui/tới trang (D-pad trái/phải), L1/R1 = PageUp/PageDown.
-//   B thoát phiên do RomCloud lo.
+//   F2 (X) = tới trang, F3 (Y) = lui trang (duyệt web);
+//   Y = xóa lùi khi bàn phím ảo mở. B thoát phiên do RomCloud lo.
 //
 // TRACE: mọi mốc đều in 1 dòng [WEBTRACE] Jxx ra stdout/stderr, được
 // launch.sh gom vào rc-web.log. Mã bước: B=bridge (debug.log),
@@ -72,7 +73,7 @@ function startUrl() {
 let page = null;       // cửa sổ vỏ (shell): header + URL + webview + footer
 let pageWc = null;     // webContents của trang (webview hoặc cửa sổ CDP)
 let kbOpen = false;    // bàn phím ảo (lớp phủ trong vỏ) đang mở
-let urlHistory = [];   // lịch sử địa chỉ/tìm kiếm [{q,url}] (tối đa 4)
+let urlHistory = [];   // lịch sử địa chỉ/tìm kiếm [{q,url}] (tối đa 5)
 let zoomIdx = 0;
 let urlEdit = false;   // đang sửa địa chỉ trên thanh URL (START bật/tắt)
 
@@ -224,12 +225,16 @@ function buildShellHtml(startUrl) {
   'border:1px solid #323746;border-radius:10px;color:#e6ebf2;' +
   'font-size:22px;padding:9px 0}' +
   '.key.sel{background:#0e5a7a;border-color:#3fc1e8;color:#fff}' +
-  '#ptr{display:none;position:absolute;width:48px;height:48px;' +
-  'border:3px solid #3fc1e8;border-radius:50%;z-index:40;' +
+  '#ptr{display:none;position:absolute;width:96px;height:96px;' +
+  'border:5px solid #3fc1e8;border-radius:50%;z-index:40;' +
   'pointer-events:none;background:rgba(63,193,232,0.12)}' +
   '#ptr:before{content:"";position:absolute;left:50%;top:50%;' +
-  'width:6px;height:6px;margin:-3px 0 0 -3px;border-radius:50%;' +
+  'width:10px;height:10px;margin:-5px 0 0 -5px;border-radius:50%;' +
   'background:#3fc1e8}' +
+  '#toast{display:none;position:absolute;top:130px;left:50%;' +
+  'transform:translateX(-50%);background:rgba(10,16,24,0.93);' +
+  'border:1px solid #3fc1e8;color:#fff;font-size:24px;' +
+  'padding:12px 30px;border-radius:14px;z-index:50;white-space:nowrap}' +
   '</style>' +
   '<div id="hd">Trình duyệt web</div>' +
   '<div id="url"><div id="pill"><span id="urltxt"></span>' +
@@ -241,6 +246,7 @@ function buildShellHtml(startUrl) {
   'START: Địa chỉ &nbsp;·&nbsp; SELECT: Chuột &nbsp;·&nbsp; B: Thoát</div>' +
   '<div id="kb"><div id="kbhist"></div><div id="kbgrid"></div></div>' +
   '<div id="ptr"></div>' +
+  '<div id="toast"></div>' +
   '<scr' + 'ipt>' +
   'var _h=document.getElementById("hd"),' +
   '_t=document.getElementById("urltxt"),' +
@@ -273,7 +279,7 @@ function buildShellHtml(startUrl) {
   '["q","w","e","r","t","y","u","i","o","p"],' +
   '["a","s","d","f","g","h","j","k","l"],' +
   '["z","x","c","v","b","n","m",".","-","_"],' +
-  '["/","@","XÓA","CÁCH"]];' +
+  '["/","@","XÓA","CÁCH",".com",".net",".vn"]];' +
   'window.__rcKb={open:false,row:1,col:0,hist:[],onHist:false,hcol:0};' +
   'window.__rcKbRender=function(){' +
   'var s=window.__rcKb,' +
@@ -292,7 +298,9 @@ function buildShellHtml(startUrl) {
   'row.forEach(function(k,ci){' +
   'var d=document.createElement("div");' +
   'd.className="key"+(!s.onHist&&s.row===ri&&s.col===ci?" sel":"");' +
-  'if(k==="CÁCH")d.style.flex="3";' +
+  'var fl={"XÓA":"1.2","CÁCH":"2"};' +
+  'if(fl[k])d.style.flex=fl[k];' +
+  'if(k===".com"||k===".net"||k===".vn")d.style.fontSize="19px";' +
   'd.textContent=k;r.appendChild(d)});g.appendChild(r)});};' +
   'window.__rcKbSet=function(open,hist){' +
   'var s=window.__rcKb;s.open=!!open;' +
@@ -323,13 +331,14 @@ function buildShellHtml(startUrl) {
   'window.__rcPtr={on:false,x:512,y:413};' +
   'window.__rcPtrRender=function(){' +
   'var s=window.__rcPtr,p=document.getElementById("ptr");' +
-  'p.style.left=(s.x-24)+"px";p.style.top=(s.y-24)+"px"};' +
+  'p.style.left=(s.x-48)+"px";p.style.top=(s.y-48)+"px"};' +
   'window.__rcPtrSet=function(on){' +
   'var s=window.__rcPtr;s.on=!!on;' +
   'document.getElementById("ptr").style.display=' +
   's.on?"block":"none";' +
   'if(s.on){s.x=window.innerWidth/2;s.y=413;' +
-  'window.__rcPtrRender();}' +
+  'window.__rcPtrRender();window.__rcPadStart();}' +
+  'else{window.__rcPadStop();}' +
   'return s.on};' +
   'window.__rcPtrMove=function(dx,dy){' +
   'var s=window.__rcPtr;if(!s.on)return;' +
@@ -338,11 +347,39 @@ function buildShellHtml(startUrl) {
   'window.__rcPtrRender()};' +
   'window.__rcPtrPos=function(){' +
   'var s=window.__rcPtr,r=_w.getBoundingClientRect();' +
-  'return{x:s.x,y:s.y,wx:s.x-r.left,wy:s.y-r.top,' +
+  'return{x:s.x,y:s.y,wx:s.x-r.left,wy:s.y-r.top,rw:r.width,rh:r.height,' +
   'inWeb:(s.x>=r.left&&s.x<r.right&&s.y>=r.top&&s.y<r.bottom)}};' +
+  // Cần gạt trong vỏ qua Gamepad API (không qua con trỏ weston):
+  // poll mỗi frame khi pointer mở, deadzone 0.3, tốc độ theo độ nghiêng.
+  'window.__rcPad={raf:0};' +
+  'window.__rcPadStart=function(){' +
+  'window.__rcPadStop();' +
+  'var tick=function(){' +
+  'var s=window.__rcPtr;if(!s.on){window.__rcPad.raf=0;return;}' +
+  'try{var gs=navigator.getGamepads?navigator.getGamepads():[];' +
+  'for(var i=0;i<gs.length;i++){var g=gs[i];' +
+  'if(!g||!g.axes||g.axes.length<2)continue;' +
+  'var ax=g.axes[0]||0,ay=g.axes[1]||0;' +
+  'var m=Math.sqrt(ax*ax+ay*ay);' +
+  'if(m>0.3){var sp=16*Math.min(1,(m-0.3)/0.7);' +
+  's.x=Math.max(0,Math.min(window.innerWidth,s.x+ax/m*sp));' +
+  's.y=Math.max(0,Math.min(window.innerHeight,s.y+ay/m*sp));' +
+  'window.__rcPtrRender();}break;}}catch(e){}' +
+  'window.__rcPad.raf=requestAnimationFrame(tick)};' +
+  'tick()};' +
+  'window.__rcPadStop=function(){' +
+  'if(window.__rcPad.raf){cancelAnimationFrame(window.__rcPad.raf);' +
+  'window.__rcPad.raf=0}};' +
   'document.addEventListener("mousemove",function(e){' +
   'var s=window.__rcPtr;if(!s.on)return;' +
   's.x=e.clientX;s.y=e.clientY;window.__rcPtrRender()});' +
+  'window.__rcToastT=0;' +
+  'window.__rcToast=function(t){' +
+  'var d=document.getElementById("toast");' +
+  'd.textContent=t;d.style.display="block";' +
+  'if(window.__rcToastT)clearTimeout(window.__rcToastT);' +
+  'window.__rcToastT=setTimeout(function(){' +
+  'd.style.display="none";},1500);};' +
   '</scr' + 'ipt>';
 }
 
@@ -374,7 +411,7 @@ function loadHistory() {
   try {
     const arr = JSON.parse(fs.readFileSync(historyPath(), 'utf8'));
     if (Array.isArray(arr)) {
-      urlHistory = arr.filter((h) => h && h.q && h.url).slice(0, 4);
+      urlHistory = arr.filter((h) => h && h.q && h.url).slice(0, 5);
     }
   } catch (e) { /* chưa có file lịch sử: bỏ qua */ }
   TR('J37', 'lịch sử địa chỉ: ' + urlHistory.length + ' mục');
@@ -386,12 +423,12 @@ function saveHistory() {
 function pushHistory(q, url) {
   urlHistory = urlHistory.filter((h) => h.url !== url);
   urlHistory.unshift({ q: q, url: url });
-  if (urlHistory.length > 4) urlHistory.length = 4;
+  if (urlHistory.length > 5) urlHistory.length = 5;
   saveHistory();
 }
 
 // ── Bàn phím ảo (lớp phủ trong vỏ, ghim đáy màn hình) ─────────────
-// D-pad di chuyển ô sáng, A (Enter) = bấm phím, Y (F3) bật/tắt.
+// D-pad di chuyển ô sáng, A (Enter) = bấm phím, Y (F3) = xóa lùi.
 // Đang sửa địa chỉ thì chữ vào ô URL; bình thường chữ vào trang.
 // Đóng bàn phím giữa chừng lúc sửa địa chỉ = hủy sửa.
 function setKb(open) {
@@ -468,10 +505,10 @@ function kbRoute(key) {
 }
 
 // ── Con trỏ chuột (SELECT bật/tắt) ─────────────────────────────────
-// Vòng tròn 48px (= x2 con trỏ thường) vẽ ngay trong vỏ. D-pad di
-// chuyển, A = bấm vào trang, SELECT hoặc B = tắt. Gậy analog rê con
-// trỏ hệ thống của weston thì vòng tròn bám theo vị trí chuột thật
-// (sự kiện mousemove ở phía vỏ).
+// Cần gạt rê con trỏ THẬT của weston để nhìn. D-pad = di chuyển
+// highlight giữa các link/nút trong trang, A = kích hoạt phần tử đang
+// sáng (focus + click qua JS, miễn nhiễm tọa độ/scale). Rớt về click
+// chuột CDP khi trang không có link nào. B/SELECT = tắt.
 let ptrOn = false;
 function writeUiMode() {
   // RomCloud đọc /tmp/rc-web-ui-mode khi gặp nút B: lớp phụ (bàn
@@ -485,9 +522,19 @@ function writeUiMode() {
 function setPtr(on) {
   if (on && kbOpen) return;  // bàn phím đang mở: SELECT không tác dụng
   ptrOn = !!on;
-  // Con trỏ = chuột hệ thống của weston (joystick rê), không vẽ
-  // vòng riêng trong vỏ nữa (Tai chốt 2026-10-10).
+  // Không vẽ gì thêm: con trỏ thật của weston đã thấy được, cần gạt rê
+  // nó trực tiếp. Chỉ ghi ui-mode để RomCloud biết B = tắt lớp.
+  // Bật: highlight link gần giữa trang; tắt: xóa highlight.
+  if (pageWc && !pageWc.isDestroyed()) {
+    pageWc.executeJavaScript(ptrOn ?
+      'window.__rcHlMove ? window.__rcHlMove("Here") : "noinit"' :
+      'window.__rcHlClear ? (window.__rcHlClear(),"cleared") : "noinit"')
+      .then((t) => TR('J38', 'highlight init: ' + t))
+      .catch(() => {});
+  }
   writeUiMode();
+  shellJs('window.__rcToast && window.__rcToast(' +
+    JSON.stringify(ptrOn ? 'Cursor mode' : 'View mode') + ')');
   TR('J38', ptrOn ? 'bật chế độ con trỏ (SELECT)' : 'tắt con trỏ');
 }
 function togglePtr() { setPtr(!ptrOn); }
@@ -500,40 +547,69 @@ function ptrNormKey(key) {
     : key;
 }
 function ptrRoute(key) {
-  if (key !== 'Enter') return;  // D-pad: không gán ở chế độ con trỏ
-  // A = bấm chuột trái tại vị trí chuột hệ thống của weston.
-  // Trang tự ghi vị trí chuột cuối (tracker gắn ở dom-ready) theo
-  // toạ độ trang; điều hướng qua CDP Input cùng hệ toạ độ đó nên
-  // không phải đoán hệ số phóng.
+  // Chế độ con trỏ: D-pad = di chuyển highlight giữa các link/nút
+  // (điều hướng không gian), A (Enter) = kích hoạt phần tử đang sáng.
+  // Không dùng tọa độ chuột/CDP nên miễn nhiễm scale viewport.
   if (!pageWc || pageWc.isDestroyed()) return;
+  if (key === 'Left' || key === 'Right' || key === 'Up' || key === 'Down' ||
+      key === 'Here') {
+    pageWc.executeJavaScript(
+      'window.__rcHlMove ? window.__rcHlMove(' + JSON.stringify(key) + ') : "noinit"')
+      .then((t) => TR('J42', 'highlight [' + key + ']: ' + t))
+      .catch((e) => TRW('J42', 'di highlight lỗi: ' + e));
+    return;
+  }
+  if (key !== 'Enter') return;
+  // Bấm vào trang = có ý định xem: mở khóa tải video 30s cho lần phát
+  // này (tầng mạng chặn ở J46).
+  allowMediaUntil = Date.now() + 30000;
+  // Ưu tiên 1: hyperlink ngay dưới cursor (tọa độ tracker) -> focus +
+  // click thẳng qua JS, miễn nhiễm pipeline input/scale CDP.
   pageWc.executeJavaScript(
-    'window.__rcMouse ? [window.__rcMouse.x, window.__rcMouse.y,' +
-    ' window.innerWidth, window.innerHeight] : null')
-    .then((v) => {
+    '(()=>{if(!window.__rcMouse)return "nocursor";' +
+    'const e=document.elementFromPoint(window.__rcMouse.x,' +
+    'window.__rcMouse.y);' +
+    'if(!e)return "empty";' +
+    'const a=e.closest("a[href],button,[role=button],input[type=button]," +' +
+    '"input[type=submit]");' +
+    'if(!a)return e.tagName + ":notlink";' +
+    'try{a.focus();}catch(x){}' +
+    'try{a.click();}catch(x){return "err";}' +
+    'return "ok:"+a.tagName+"."+String(a.className).split(" ")[0];})()')
+    .then((r) => {
       if (!pageWc || pageWc.isDestroyed()) return;
-      const x = (v && v[0] != null) ? v[0] : (v ? v[2] / 2 : 0);
-      const y = (v && v[1] != null) ? v[1] : (v ? v[3] / 2 : 0);
-      TR('J42', 'A bấm chuột tại (' + Math.round(x) + ',' +
-        Math.round(y) + ')' + (v ? '' : ' — chưa có vị trí chuột,' +
-        ' dùng tâm trang'));
-      // Bấm chuột vào trang = có ý định xem: mở khóa tải video 30s
-      // cho lần phát này (tầng mạng chặn ở J46).
-      allowMediaUntil = Date.now() + 30000;
-      try {
-        if (!pageWc.debugger.isAttached()) {
-          pageWc.debugger.attach('1.3');
-        }
-        pageWc.debugger.sendCommand('Input.dispatchMouseEvent', {
-          type: 'mousePressed', x: x, y: y, button: 'left',
-          clickCount: 1 });
-        pageWc.debugger.sendCommand('Input.dispatchMouseEvent', {
-          type: 'mouseReleased', x: x, y: y, button: 'left',
-          clickCount: 1 });
-      } catch (e) {
-        TRW('J42', 'bấm chuột lỗi: ' + e);
-      }
+      TR('J42', 'A tại cursor: ' + r);
+      if (r !== 'nocursor' && r !== 'empty' && !/notlink$/.test(r) &&
+          r !== 'err') return;
+      // Ưu tiên 2: phần tử đang highlight (D-pad) nếu có.
+      return pageWc.executeJavaScript(
+        'window.__rcHlClick ? window.__rcHlClick() : "noinit"')
+        .then((h) => {
+          if (!pageWc || pageWc.isDestroyed()) return;
+          TR('J42', 'A kích hoạt highlight: ' + h);
+          if (h !== 'gone' && h !== 'noinit') return;
+      // Không có highlight (trang chưa inject/trống link): rớt về click
+      // chuột CDP tại vị trí chuột thật.
+      return pageWc.executeJavaScript(
+        'window.__rcMouse ? [window.__rcMouse.x, window.__rcMouse.y] : null')
+        .then((v) => {
+          if (!pageWc || pageWc.isDestroyed()) return;
+          if (!v) { TR('J42', 'A: không highlight, không vị trí chuột'); return; }
+          try {
+            if (!pageWc.debugger.isAttached()) pageWc.debugger.attach('1.3');
+            pageWc.debugger.sendCommand('Input.dispatchMouseEvent',
+              { type: 'mouseMoved', x: v[0], y: v[1] });
+            pageWc.debugger.sendCommand('Input.dispatchMouseEvent',
+              { type: 'mousePressed', x: v[0], y: v[1],
+                button: 'left', buttons: 1, clickCount: 1 });
+            pageWc.debugger.sendCommand('Input.dispatchMouseEvent',
+              { type: 'mouseReleased', x: v[0], y: v[1],
+                button: 'left', buttons: 0, clickCount: 1 });
+          } catch (e) { TRW('J42', 'bấm chuột lỗi: ' + e); }
+        });
+        });
     })
-    .catch((e) => TRW('J42', 'đọc vị trí chuột lỗi: ' + e));
+    .catch((e) => TRW('J42', 'A lỗi: ' + e));
 }
 
 // ── Sửa địa chỉ bằng START ─────────────────────────────────────────
@@ -606,6 +682,8 @@ function attachPageKeys(wc) {
       const isDir = kk === 'Up' || kk === 'Down' || kk === 'Left' ||
         kk === 'Right' || kk === 'Enter';
       if (ptrOn) {
+        // Chế độ con trỏ: D-pad/A điều khiển highlight link trong trang
+        // (cần gạt vẫn rê chuột thật để nhìn). B (F1) tắt con trỏ.
         if (isDir) { ptrRoute(kk); event.preventDefault(); return; }
         if (input.key === 'F1') {  // B: tắt con trỏ, chưa thoát web
           setPtr(false);
@@ -619,7 +697,7 @@ function attachPageKeys(wc) {
           return;
         }
         if (isDir) { kbRoute(kk); event.preventDefault(); return; }
-        if (input.key === 'F3') {  // Y = xóa lùi
+        if (input.key === 'F3') {  // Y = xóa lùi (chỉ trong bàn phím)
           kbBack();
           event.preventDefault();
           return;
@@ -638,13 +716,15 @@ function attachPageKeys(wc) {
         event.preventDefault();
         break;
       case 'F2':
-        TR('J22', 'phím F2 (X): về trang chủ');
-        wc.loadURL(HOME_URL);
+        // X: tới trang (lịch sử tiến).
+        TR('J22', 'phím F2 (X): tới trang');
+        if (wc.canGoForward()) wc.goForward();
         event.preventDefault();
         break;
       case 'F3':
-        TR('J23', 'phím F3 (Y): bật/tắt bàn phím ảo');
-        toggleKeyboard();
+        // Y: lui trang (lịch sử lùi). Trong bàn phím Y vẫn là xóa lùi.
+        TR('J23', 'phím F3 (Y): lui trang');
+        if (wc.canGoBack()) wc.goBack();
         event.preventDefault();
         break;
       case 'F9':
@@ -678,6 +758,11 @@ function attachPageKeys(wc) {
         if (wc.canGoForward()) wc.goForward();
         event.preventDefault();
         break;
+      case 'Enter':
+        // A chỉ sống trong chế độ highlight (pointer ON, đã return ở
+        // trên) và bàn phím (kbRoute). Ngoài đó nuốt luôn.
+        event.preventDefault();
+        break;
     }
   });
 }
@@ -698,6 +783,8 @@ function attachShellKeys(wc) {
       const isDir = kk === 'Up' || kk === 'Down' || kk === 'Left' ||
         kk === 'Right' || kk === 'Enter';
       if (ptrOn) {
+        // Chế độ con trỏ: D-pad/A điều khiển highlight link trong trang
+        // (cần gạt vẫn rê chuột thật để nhìn). B (F1) tắt con trỏ.
         if (isDir) { ptrRoute(kk); event.preventDefault(); return; }
         if (input.key === 'F1') {  // B: tắt con trỏ, chưa thoát web
           setPtr(false);
@@ -711,7 +798,7 @@ function attachShellKeys(wc) {
           return;
         }
         if (isDir) { kbRoute(kk); event.preventDefault(); return; }
-        if (input.key === 'F3') {  // Y = xóa lùi
+        if (input.key === 'F3') {  // Y = xóa lùi (chỉ trong bàn phím)
           kbBack();
           event.preventDefault();
           return;
@@ -729,13 +816,15 @@ function attachShellKeys(wc) {
         event.preventDefault();
         break;
       case 'F2':
-        TR('J33', 'phím F2 qua vỏ: về trang chủ');
-        if (guest) guest.loadURL(HOME_URL);
+        // X: tới trang (lịch sử tiến).
+        TR('J33', 'phím F2 qua vỏ: tới trang');
+        if (guest && guest.canGoForward()) guest.goForward();
         event.preventDefault();
         break;
       case 'F3':
-        TR('J33', 'phím F3 qua vỏ: bật/tắt bàn phím ảo');
-        toggleKeyboard();
+        // Y: lui trang (lịch sử lùi). Trong bàn phím Y vẫn là xóa lùi.
+        TR('J33', 'phím F3 qua vỏ: lui trang');
+        if (guest && guest.canGoBack()) guest.goBack();
         event.preventDefault();
         break;
       case 'F9':
@@ -767,11 +856,10 @@ function attachShellKeys(wc) {
         }
         break;
       case 'Enter':
-        if (!urlEdit && guest) {
-          guest.sendInputEvent({ type: 'keyDown', keyCode: 'Enter' });
-          guest.sendInputEvent({ type: 'keyUp', keyCode: 'Enter' });
-          event.preventDefault();
-        }
+        // A chỉ sống trong chế độ highlight (pointer ON, đã return ở
+        // trên) và bàn phím (kbRoute). Ngoài đó nuốt luôn, không chuyển
+        // vào trang.
+        event.preventDefault();
         break;
     }
   });
@@ -862,7 +950,11 @@ app.on('web-contents-created', (event, contents) => {
     }
     if (!contents.isDestroyed()) contents.reload();
   });
-  contents.once('dom-ready', () => {
+  // dom-ready MỖI lần (on, không once): trang reload/chuyển trang là
+  // document mới, helper inject (chuột/highlight/ads/video) phải gắn lại.
+  // Mọi thứ bên trong đều có guard riêng (__rcKeys/__rcMouse/__rcFrz/
+  // __rcAd/__rcHl/__rcMobile/__rcConfigured) nên chạy lại an toàn.
+  contents.on('dom-ready', () => {
     if (isShellContents(contents)) {
       TR('J13', 'vỏ trình duyệt (khung RomCloud + web) đã sẵn sàng');
       updateShell(true);
@@ -874,16 +966,15 @@ app.on('web-contents-created', (event, contents) => {
     }
     TR('J13', 'dom-ready: ' + contents.getURL());
     attachPageKeys(contents);
-    // Gộp 1 lần inject: ghi vị trí chuột hệ thống trong trang (cho nút
-    // A ở chế độ con trỏ biết bấm vào đâu) + đóng băng media tự chạy
-    // (video thumbnail chỉ hiện poster, không tự phát). Gắn lại mỗi lần
-    // trang tải xong. Gộp để bớt 1 vòng IPC main<->renderer.
+    // Gộp 1 lần inject: tracker chuột (nút A) + đóng băng media tự chạy
+    // + gộp khoảng trắng quảng cáo (CSS ẩn slot ads, sweep iframe rỗng).
+    // Gắn lại mỗi lần trang tải xong. Gộp để bớt vòng IPC main<->renderer.
     contents.executeJavaScript(
       '(function(){' +
       'if(!window.__rcMouse){window.__rcMouse=null;' +
       'document.addEventListener("mousemove",function(e){' +
       'window.__rcMouse={x:e.clientX,y:e.clientY}},true)}' +
-      'if(window.__rcFrz)return;window.__rcFrz=1;' +
+      'if(!window.__rcFrz){window.__rcFrz=1;' +
       'function fz(v){try{v.pause();' +
       'v.removeAttribute("autoplay");v.preload="none"}' +
       'catch(e){}}' +
@@ -892,9 +983,112 @@ app.on('web-contents-created', (event, contents) => {
       'i++){var ad=ms[i].addedNodes;for(var j=0;j<ad.length;j++)' +
       '{var n=ad[j];if(n.tagName==="VIDEO")fz(n);' +
       'if(n.querySelectorAll)n.querySelectorAll("video")' +
-      '.forEach(fz)}}}).observe(document.documentElement,' +
-      '{childList:true,subtree:true})})()')
-      .then(() => TR('J45', 'đã gắn tracker chuột + đóng băng video tự chạy'))
+      '.forEach(fz)}}if(window.__rcAdKick)window.__rcAdKick()})' +
+      '.observe(document.documentElement,' +
+      '{childList:true,subtree:true})}' +
+      'if(!window.__rcAd){window.__rcAd=1;' +
+      'var SEL="ins.adsbygoogle,.adsbygoogle,[id^=\\"div-gpt-ad\\"],' +
+      '[id^=\\"google_ads_iframe\\"],iframe[src*=\\"googlesyndication\\"],' +
+      'iframe[src*=\\"doubleclick\\"],[data-ad-slot],[data-ad-client],' +
+      '[aria-label=\\"advertisement\\"],[class*=\\"advertisement\\"],' +
+      '[id*=\\"advertisement\\"],[id*=\\"banner-ad\\"],' +
+      '[class*=\\"banner-ad\\"],.ad-slot,' +
+      '#banner_top,#TOP_BANNER,[id^=\\"banner_\\"],' +
+      '[class*=\\"banner_\\"],[id*=\\"sis_masthead\\"]";' +
+      'var st=document.createElement("style");st.id="__rcAdCss";' +
+      'st.textContent=SEL+"{display:none!important}";' +
+      '(document.head||document.documentElement).appendChild(st);' +
+      'window.__rcAdUp=function(el){' +
+      'for(var n=0;n<2;n++){var p=el.parentElement;if(!p)break;' +
+      'var kids=p.children,vis=false;' +
+      'for(var k=0;k<kids.length;k++){var c=kids[k];' +
+      'if(c.style.display!=="none"&&' +
+      '(c.innerText||"").replace(/\\s+/g,"").length>0){vis=true;break;}}' +
+      'if(vis)break;' +
+      'var s=(p.className||"")+" "+(p.id||"");' +
+      'if(!/ad|banner|quang[-_ ]cao|sponsor/i.test(s))break;' +
+      'p.style.setProperty("display","none","important");el=p;}};' +
+      'window.__rcAdSweep=function(){try{' +
+      'var q=document.querySelectorAll(SEL);' +
+      'for(var i=0;i<q.length;i++){' +
+      'q[i].style.setProperty("display","none","important");' +
+      'window.__rcAdUp(q[i]);}' +
+      'var fr=document.getElementsByTagName("iframe");' +
+      'for(var j=fr.length-1;j>=0;j--){var f=fr[j];' +
+      'if(f.style.display==="none")continue;' +
+      'var hide=/doubleclick|googlesyndication|googletag|adsbygoogle|' +
+      'adnxs|taboola|outbrain|criteo|pubmatic|rubicon|openx|moatads|' +
+      'demdex|bluekai|adsrvr|amazon-adsystem|scorecard|quantserve|' +
+      'eclick|imasdk/i.test(f.src||"");' +
+      'if(!hide){try{var d=f.contentDocument;' +
+      'if(d&&d.body){var t=(d.body.innerText||"")' +
+      '.replace(/\\s+/g,"");' +
+      'if(t.length===0&&d.images.length===0&&' +
+      '!d.querySelector("video,canvas,svg,img"))hide=true;}}' +
+      'catch(e){}}' +
+      'if(hide){f.style.setProperty("display","none","important");' +
+      'window.__rcAdUp(f);}}' +
+      '}catch(e){}};' +
+      'window.__rcAdKick=function(){var n=Date.now();' +
+      'if(n-(window.__rcAdT||0)>2000){window.__rcAdT=n;' +
+      'window.__rcAdSweep();}};' +
+      'window.__rcAdSweep();}' +
+      // Điều hướng link bằng D-pad (chế độ con trỏ): highlight phần tử
+      // bấm được gần nhất theo hướng, A = kích hoạt. Không phụ thuộc
+      // tọa độ chuột/scale viewport như click CDP.
+      'if(!window.__rcHl){window.__rcHl={i:-1,prev:null};' +
+      'window.__rcHlList=function(){' +
+      'var els=document.querySelectorAll("a[href],button,' +
+      'input[type=button],input[type=submit],[role=button]");' +
+      'var out=[],vw=window.innerWidth,vh=window.innerHeight;' +
+      'for(var k=0;k<els.length;k++){var e=els[k];' +
+      'try{var r=e.getBoundingClientRect();' +
+      'if(r.width<4||r.height<4)continue;' +
+      'if(r.bottom<-50||r.top>vh+50||r.right<-50||r.left>vw+50)continue;' +
+      'var cs=getComputedStyle(e);' +
+      'if(cs.visibility==="hidden"||cs.display==="none")continue;' +
+      'out.push(e);}catch(x){}}return out;};' +
+      'window.__rcHlShow=function(e){' +
+      'if(window.__rcHl.prev){try{window.__rcHl.prev.style.outline="";}' +
+      'catch(x){}}window.__rcHl.prev=e;' +
+      'if(e){e.style.outline="3px solid #3fc1e8";' +
+      'e.style.outlineOffset="2px";' +
+      'try{e.scrollIntoView({block:"nearest"});}catch(x){}}' +
+      'return e?1:0;};' +
+      'window.__rcHlClear=function(){window.__rcHl.i=-1;' +
+      'window.__rcHlShow(null);};' +
+      'window.__rcHlMove=function(dir){' +
+      'var list=window.__rcHlList();' +
+      'if(!list.length)return "none";' +
+      'var vw=window.innerWidth,vh=window.innerHeight,cx=vw/2,cy=vh/2;' +
+      'if(window.__rcHl.i>=0&&window.__rcHl.prev&&' +
+      'document.contains(window.__rcHl.prev)){' +
+      'var cr=window.__rcHl.prev.getBoundingClientRect();' +
+      'cx=cr.left+cr.width/2;cy=cr.top+cr.height/2;}' +
+      'var best=-1,bestScore=1e12;' +
+      'for(var k=0;k<list.length;k++){var e=list[k];' +
+      'var r=e.getBoundingClientRect(),ex=r.left+r.width/2,' +
+      'ey=r.top+r.height/2,dx=ex-cx,dy=ey-cy;' +
+      'if(dir==="Left"&&dx>=-4)continue;' +
+      'if(dir==="Right"&&dx<=4)continue;' +
+      'if(dir==="Up"&&dy>=-4)continue;' +
+      'if(dir==="Down"&&dy<=4)continue;' +
+      'var ad=Math.abs(dx),bd=Math.abs(dy);' +
+      'var sc=(dir==="Left"||dir==="Right")?(ad+bd*2.2):(bd+ad*2.2);' +
+      'if(sc<bestScore){bestScore=sc;best=k;}}' +
+      'if(best<0)best=0;' +
+      'window.__rcHl.i=best;window.__rcHlShow(list[best]);' +
+      'var t=list[best].textContent||list[best].value||' +
+      'list[best].getAttribute("href")||list[best].tagName;' +
+      'return String(t).replace(/\\s+/g," ").slice(0,60);};' +
+      'window.__rcHlClick=function(){' +
+      'var e=window.__rcHl.prev;' +
+      'if(!e||!document.contains(e))return "gone";' +
+      'try{e.focus();}catch(x){}' +
+      'try{e.click();}catch(x){return "err";}' +
+      'return "ok:"+e.tagName;};}' +
+      '})()')
+      .then(() => TR('J45', 'đã inject trang (chuột+video+ads+highlight link)'))
       .catch((e) => TRW('J45', 'inject trang lỗi: ' + e));
     if (contents.getType && contents.getType() === 'webview') {
       pageWc = contents;
@@ -905,6 +1099,9 @@ app.on('web-contents-created', (event, contents) => {
       pageWc = contents;
       applyMobileMode(contents);
     }
+    // pageWc vừa được gán (các updateShell trước đó rớt vì pageWc null):
+    // đẩy tiêu đề + URL lên thanh urlbar ngay, khỏi chờ title-update.
+    updateShell(false);
     const win = BrowserWindow.fromWebContents(contents);
     if (win && win !== page) {
       configureWindow(win);

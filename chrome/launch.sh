@@ -244,32 +244,46 @@ else
 fi
 
 # Weston 9 gọi backend bằng tên file module (drm-backend.so), không còn
-# tên ngắn "drm". Thử DRM trước, không lên thì lùi về fbdev (/dev/fb0
-# máy nào cũng có) — mỗi lần thử tối đa 8s. Backend thành công lần
-# trước (conf/last-be) được thử trước để boot nhanh.
+# tên ngắn "drm". Thực đo trên Brick (2026-10-10, adb rc-web.log):
+#  - drm-backend CHƯA BAO GIỜ lên được ("no drm device found" do thiếu
+#    udevd; kể cả chỉ card cũng kẹt "/dev/tty1 is already in graphics
+#    mode"). DRM chỉ còn là dự phòng.
+#  - fbdev-backend lên trong ~250ms và HIỂN THỊ ĐƯỢC (chung /dev/fb0 với
+#    RomCloud, ai vẽ sau thắng) -> thử fbdev TRƯỚC cho boot nhanh.
+# last-be chỉ ghi khi DRM thắng (hiếm); cache khác thì xóa.
 LASTBE=""
 [ -f "$RC_DIR/conf/last-be" ] && LASTBE="$(cat "$RC_DIR/conf/last-be" 2>/dev/null)"
-BE_ORDER="drm-backend.so fbdev-backend.so"
-if [ "$LASTBE" = "fbdev-backend.so" ]; then
-  BE_ORDER="fbdev-backend.so drm-backend.so"
+if [ "$LASTBE" != "drm-backend.so" ]; then
+  rm -f "$RC_DIR/conf/last-be" 2>/dev/null
 fi
 WESTON_OK=0
-for BE in $BE_ORDER; do
+for BE in fbdev-backend.so drm-backend.so; do
+  # fbdev hoặc lên ngay hoặc hỏng; DRM cho 15s modeset/steal-master.
+  if [ "$BE" = "drm-backend.so" ]; then MAXWAIT=60; else MAXWAIT=24; fi
+  # --drm-device: weston liệt kê card qua udev (máy không có udevd) nên
+  # phải chỉ thẳng card. --current-mode: giữ mode KMS hiện tại.
+  if [ "$BE" = "drm-backend.so" ]; then
+    BEARGS="--drm-device=card0 --current-mode"
+  else
+    BEARGS=""
+  fi
   rm -f "$RUN_DIR/wayland-1" "$RUN_DIR/wayland-1.lock"
   "$WROOT/bin/weston" -c "$RC_DIR/conf/weston.ini" -B "$BE" --tty=1 \
     --shell=kiosk-shell.so --socket=wayland-1 \
-    --idle-time=0 &
+    --idle-time=0 $BEARGS &
   WPID=$!
   PIDS="$PIDS $WPID"
-  TR L06 "weston ($BE) đã chạy nền, pid=$WPID; chờ socket wayland-1 (tối đa 8s)"
+  TR L06 "weston ($BE) đã chạy nền, pid=$WPID; chờ socket wayland-1 (tối đa $((MAXWAIT / 4))s)"
   i=0
-  while [ ! -S "$RUN_DIR/wayland-1" ] && [ "$i" -lt 32 ]; do
+  while [ ! -S "$RUN_DIR/wayland-1" ] && [ "$i" -lt "$MAXWAIT" ]; do
     kill -0 $WPID 2>/dev/null || break
     sleep 0.25; i=$((i+1))
   done
   if [ -S "$RUN_DIR/wayland-1" ]; then
     TR L07 "socket wayland-1 đã sẵn sàng (backend: $BE)"
-    echo "$BE" > "$RC_DIR/conf/last-be" 2>/dev/null
+    if [ "$BE" = "drm-backend.so" ]; then
+      echo "$BE" > "$RC_DIR/conf/last-be" 2>/dev/null
+    fi
     WESTON_OK=1
     break
   fi
