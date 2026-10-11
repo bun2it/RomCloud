@@ -1,5 +1,4 @@
 #include "UIManager.h"
-#include "../browser/chrome/ChromeBridge.h"
 #include "../wifi/WifiManager.h"
 #include "../config/AppConfig.h"
 #include "../input/InputManager.h"
@@ -60,24 +59,20 @@ void UIManager::startWifiPortal() {
         showToast("Đang làm Wi-Fi, chờ chút...", {245, 158, 11, 255}, 1500);
         return;
     }
-    // Portal cần đăng nhập tay (cafe user/pass): mở bằng Chrome.
+    // Portal cần đăng nhập tay (cafe user/pass): mở bằng LITE engine
+    // (HtmlRenderer + HttpClient: cookie/POST/bỏ verify cert), không cần
+    // weston. Điền form trong trang, submit xong B về menu.
     // Click-through tự động vẫn giữ cho mạng bấm-chấp-nhận.
     m_wifiBusy = true;
     m_wifiStatus = "Đang kiểm tra portal...";
     m_wifiTask.run([](TaskProgress &) {
         PortalInfo pi = WifiManager::instance().checkPortal();
         if (pi.portal && !pi.url.empty()) {
-            UIManager::instance().m_wifiStatus = "Mở trang portal bằng Chrome...";
-            if (ChromeBridge::instance().openPortal(pi.url))
-                UIManager::instance().m_chromeEnterRequested = true;
-            else
-                UIManager::instance().m_wifiStatus = "Chưa cài RC-Web (xem chrome/README)";
+            UIManager::instance().m_wifiStatus = "Mở trang portal (Lite)...";
+            UIManager::instance().openPortalLite(pi.url);
         } else if (pi.portal) {
-            UIManager::instance().m_wifiStatus = "Mở trang portal bằng Chrome...";
-            if (ChromeBridge::instance().openPortal(""))
-                UIManager::instance().m_chromeEnterRequested = true;
-            else
-                UIManager::instance().m_wifiStatus = "Chưa cài RC-Web (xem chrome/README)";
+            UIManager::instance().m_wifiStatus = "Mở trang portal (Lite)...";
+            UIManager::instance().openPortalLite("");
         } else {
             std::string msg;
             WifiManager::instance().acceptPortalBlocking(msg);

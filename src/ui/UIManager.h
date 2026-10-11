@@ -456,6 +456,8 @@ private:
   void handleBrowserInputKeyboard();
   // P8: seed + open the URL editor (telex OFF — URLs are ASCII).
   void openBrowserUrlEditor();
+  // Portal wifi: mở URL bằng LITE cưỡng chế (bất kể engine mặc định).
+  void openPortalLite(const std::string& url);
   // Chrome nhúng: commit/cancel editor điều hướng về CHROME hay BROWSER.
   void commitBrowserInput(const std::string& url, bool addHist);
   void cancelBrowserInput();

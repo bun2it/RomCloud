@@ -53,7 +53,14 @@ public:
     void refresh();
 
     // Engine Mode
-    BrowserEngine engineMode() const { return m_settings.fullEngine ? BrowserEngine::FULL : BrowserEngine::LITE; }
+    BrowserEngine engineMode() const {
+        // Portal wifi cưỡng chế LITE (m_forceLite): đăng nhập portal bằng
+        // HtmlRenderer + HttpClient (cookie, POST, bỏ verify cert), không
+        // cần weston. Hết portal (commit URL mới / về MENU) thì tắt cờ.
+        if (m_forceLite) return BrowserEngine::LITE;
+        return m_settings.fullEngine ? BrowserEngine::FULL : BrowserEngine::LITE;
+    }
+    void setForceLite(bool v) { m_forceLite = v; }
     void setEngineMode(BrowserEngine mode) {
         m_settings.fullEngine = (mode == BrowserEngine::FULL);
         saveSettings();
@@ -132,6 +139,8 @@ private:
     // m_historyPos without mutating the vector; goForward() increments.
     std::vector<std::string> m_history;
     size_t m_historyPos = 0;
+    // Portal wifi: cưỡng chế LITE cho cả phiên portal (xem engineMode).
+    bool m_forceLite = false;
     // P24: test-only fetch-suppression (see setTestFetchDisabled). When
     // true, openUrlNoHistory() updates cursor/currentUrl but skips the
     // actual fetch+layout+engine side-effect. Lets test_browser.cpp
