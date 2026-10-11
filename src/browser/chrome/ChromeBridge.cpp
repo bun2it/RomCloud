@@ -110,9 +110,6 @@ static void killWebProcesses() {
 }
 }  // namespace
 
-// Khai báo trước (định nghĩa ở dưới, dùng trong luồng chờ của start()).
-static std::string cdpGetBody(const std::string& path);
-
 ChromeBridge& ChromeBridge::instance() {
     static ChromeBridge inst;
     return inst;
@@ -275,26 +272,6 @@ bool ChromeBridge::start(const std::string& url) {
                 if (ChromeBridge::cdpReady()) {
                     self.m_ready.store(true);
                     trace("B05", "CDP :9222 đã trả lời — phiên sẵn sàng");
-                    // CDP lên không đồng nghĩa cửa sổ vỏ đã mở (app.whenReady
-                    // có thể kẹt: ozone-wayland/GPU...). Chờ target type=page
-                    // (vỏ shell data: URL) tối đa 15s nữa; không thấy thì
-                    // failed để stop() dọn sạch — không kẹt màn chờ vô hạn.
-                    for (int j = 0; j < 30; ++j) {
-                        if (self.m_pid <= 0) {
-                            trace("B05", "huỷ chờ vỏ: phiên đã đóng");
-                            return;
-                        }
-                        std::string list = cdpGetBody("/json/list");
-                        if (list.find("\"type\":\"page\"") !=
-                            std::string::npos) {
-                            trace("B05", "vỏ trình duyệt đã mở — phiên khỏe");
-                            return;
-                        }
-                        usleep(500 * 1000);
-                    }
-                    self.m_failed.store(true);
-                    traceWarn("B05", "quá 15s CDP lên mà không thấy vỏ "
-                                     "(app.whenReady kẹt?) -> failed");
                     return;
                 }
                 if (i > 0 && i % 10 == 0) {  // nhịp tim mỗi 5s
