@@ -15,6 +15,9 @@ fi
 
 # Clean up any leftover temporary files from prior sessions
 rm -f /tmp/romcloud_*.tmp 2>/dev/null
+# RC-Web: xóa socket wayland sót để phiên web đầu tiên sau khi mở app
+# không nhầm socket cũ (weston mới tự tạo lại khi fork phiên).
+rm -rf /tmp/rc-web-run 2>/dev/null
 
 # RomCloud now auto-falls back to 8082/8081/... if 8080 is held by SFTPGo.
 # Do NOT kill 8080 here: that would take down TrimUI's built-in SFTPGo.

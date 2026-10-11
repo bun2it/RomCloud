@@ -7464,6 +7464,21 @@ void UIManager::handleChromeInput() {
   // trình duyệt); RomCloud không mở trình sửa địa chỉ của mình ở đây.
   // Các nút còn lại (A/D-pad/L1/R1/X/Y/START) do gptokeyb của RC-Web
   // xử lý trong phiên ngoài — RomCloud không can thiệp.
+  // Heartbeat chẩn đoán (5s): kẹt màn hình thì log cho biết weston
+  // socket/CDP tới đâu — đọc debug.log là phân biệt được weston chưa
+  // lên / electron kẹt / weston không present.
+  {
+    static uint32_t s_chromeHbMs = 0;
+    uint32_t nowHb = SDL_GetTicks();
+    if (nowHb - s_chromeHbMs >= 5000) {
+      s_chromeHbMs = nowHb;
+      bool sock = (access("/tmp/rc-web-run/wayland-1", F_OK) == 0);
+      Logger::info(std::string("[WEBTRACE] BHB ready=") +
+                   (bridge.isReady() ? "1" : "0") + " failed=" +
+                   (bridge.failed() ? "1" : "0") + " socket=" +
+                   (sock ? "1" : "0") + " ui=" + rcWebUiMode());
+    }
+  }
 }
 
 void UIManager::renderChromeState() {
