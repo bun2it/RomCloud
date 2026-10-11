@@ -292,12 +292,37 @@ bool ChromeBridge::start(const std::string& url) {
     return true;
 }
 
+// PID tái chế: kill(pid,0) vẫn đúng với tiến trình khác chiếm số pid
+// cũ (máy 1GB quay vòng PID nhanh) hoặc zombie. Xác thực cmdline chứa
+// launch.sh, sai là coi như phiên đã chết (tránh reaper bỏ qua +
+// start() deep-link nhầm vào phiên ma).
+static bool pidIsOurLauncher(pid_t pid) {
+    char path[64];
+    snprintf(path, sizeof(path), "/proc/%d/cmdline", (int)pid);
+    FILE* f = fopen(path, "r");
+    if (!f) return false;
+    char buf[512] = {0};
+    size_t n = fread(buf, 1, sizeof(buf) - 1, f);
+    fclose(f);
+    if (n == 0) return false;  // zombie/không đọc được
+    return strstr(buf, "launch.sh") != nullptr;
+}
+
 bool ChromeBridge::isRunning() {
     if (m_pid <= 0) return false;
     // Chỉ kiểm sự tồn tại, KHÔNG reap ở đây: pollExited() là nơi reap
     // duy nhất để còn ghi được mã thoát/tín hiệu vào log. (Con đã chết
     // thành zombie vẫn trả lời kill(,0)==0 cho tới khi pollExited reap.)
-    return kill(m_pid, 0) == 0 || errno == EPERM;
+    if (kill(m_pid, 0) != 0 && errno != EPERM) return false;
+    if (!pidIsOurLauncher(m_pid)) {
+        // PID bị tái chế/zombie: phiên thật đã chết, trả m_pid về để
+        // reaper quét + phiên sau fork mới (không deep-link nhầm).
+        trace("B08", "m_pid không còn là launch.sh (tái chế/zombie) -> coi như đã thoát");
+        m_pid = -1;
+        m_ready.store(false);
+        return false;
+    }
+    return true;
 }
 
 bool ChromeBridge::pollExited() {

@@ -14,6 +14,10 @@ cd "$(dirname "$0")" || exit 1
 RC_DIR="$PWD"
 LOG="$RC_DIR/rc-web.log"
 : > "$LOG"
+# Cờ lớp phụ của RomCloud (/tmp/rc-web-ui-mode) vòng đời theo phiên:
+# xóa lúc mở + lúc dọn — Electron chết giữa chừng (file kẹt "kb"/
+# "pointer") thì B lần sau vẫn thoát được, không rò phiên.
+rm -f /tmp/rc-web-ui-mode
 exec >>"$LOG" 2>&1
 
 # ── Hàm trace + chụp trạng thái máy ──────────────────────────────────
@@ -65,6 +69,7 @@ SEATD_STARTED=0
 
 cleanup() {
   TR L12 "cleanup: dọn weston/electron/gptokeyb, trả màn hình"
+  rm -f /tmp/rc-web-ui-mode
   # Giữ lại duy nhất lịch sử địa chỉ (file nhỏ) về thẻ SD; profile còn
   # lại nằm trên tmpfs nên mất đi cũng không sao.
   if [ -f "$RUNDATA/profile/rc-history.json" ]; then
@@ -118,6 +123,12 @@ fi
 # ── seatd (quản quyền /dev/dri + input cho weston) ──────────────────
 export LIBSEAT_BACKEND=seatd
 export SEATD_SOCK=/run/seatd.sock
+# Socket sót (seatd cũ chết mà file còn): weston tưởng seatd sống sẽ treo
+# chờ. Không có tiến trình seatd thì xóa socket đi làm lại từ đầu.
+if [ -S "$SEATD_SOCK" ] && ! pidof seatd >/dev/null 2>&1; then
+  rm -f "$SEATD_SOCK"
+  TR L04 "xóa socket seatd sót (không có tiến trình seatd)"
+fi
 if [ -S "$SEATD_SOCK" ]; then
   TR L04 "seatd đã chạy sẵn (socket $SEATD_SOCK) -> dùng luôn"
 elif [ -x "$WROOT/bin/seatd" ]; then
@@ -349,14 +360,42 @@ SNAP "ngay trước khi chạy Electron"
   "$RC_DIR/app" &
 EPID=$!
 PIDS="$PIDS $EPID"
-TR L10 "Electron đã chạy, pid=$EPID -> chờ nó thoát"
+# Ghi lại starttime + cmdline của electron để vòng chờ dưới phát hiện
+# PID bị tái chế (hệ 1GB quay vòng PID nhanh): kill -0 đúng với tiến
+# trình khác tên là treo vĩnh viễn. So khớp mỗi nhịp, lệch là thoát.
+ESTART="$(cut -d' ' -f22 /proc/$EPID/stat 2>/dev/null)"
+TR L10 "Electron đã chạy, pid=$EPID (starttime=$ESTART) -> chờ nó thoát"
 # Chờ bằng vòng ngủ ngắn thay cho 'wait' thẳng: ash gác trap
 # TERM khi đang wait nên RomCloud bấm B là launch.sh không dọn
 # dẹp được, lần nào RomCloud cũng phải SIGKILL cả nhóm (giết
 # cứng Electron giữa chừng, profile dễ lỗi -> web lúc lên lúc
 # không). Ngủ ngắn từng nhịp thì trap có cơ hội chạy.
+# Đồng thời phát hiện electron ZOMBIE (chết mà chưa reap): kill -0 vẫn
+# đúng với zombie nên vòng cũ treo vĩnh viễn. Đọc state /proc, gặp Z
+# (hoặc mất /proc) là thoát vòng để wait/cleanup chạy.
 STATUS=0
-while kill -0 $EPID 2>/dev/null; do sleep 0.5; done
+while kill -0 $EPID 2>/dev/null; do
+  ST=""
+  if [ -r "/proc/$EPID/stat" ]; then
+    ST="$(cut -d' ' -f3 /proc/$EPID/stat 2>/dev/null)"
+  fi
+  if [ "$ST" = "Z" ] || [ -z "$ST" ]; then
+    TR L10 "Electron thành zombie/mất tích (pid=$EPID) -> thoát vòng chờ"
+    break
+  fi
+  # PID tái chế: tiến trình khác chiếm số pid cũ (starttime/cmdline đổi).
+  CURST="$(cut -d' ' -f22 /proc/$EPID/stat 2>/dev/null)"
+  CURCMD="$(tr '\0' ' ' < /proc/$EPID/cmdline 2>/dev/null)"
+  case "$CURCMD" in
+    *electron*) ;;
+    *) TR L10 "pid $EPID không còn là electron -> thoát vòng chờ"; break;;
+  esac
+  if [ -n "$ESTART" ] && [ -n "$CURST" ] && [ "$CURST" != "$ESTART" ]; then
+    TR L10 "pid $EPID bị tái chế (starttime đổi) -> thoát vòng chờ"
+    break
+  fi
+  sleep 0.5
+done
 wait $EPID
 STATUS=$?
 set +x
