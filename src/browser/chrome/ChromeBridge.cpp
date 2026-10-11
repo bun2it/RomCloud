@@ -305,7 +305,13 @@ static bool pidIsOurLauncher(pid_t pid) {
     size_t n = fread(buf, 1, sizeof(buf) - 1, f);
     fclose(f);
     if (n == 0) return false;  // zombie/không đọc được
-    return strstr(buf, "launch.sh") != nullptr;
+    // cmdline cách nhau bằng NUL (argv[0]="/bin/sh", "launch.sh" nằm ở
+    // argv sau) nên phải quét cả buffer (memmem), strstr dừng ở NUL đầu.
+    static const char kNeedle[] = "launch.sh";
+    for (size_t i = 0; i + sizeof(kNeedle) - 1 <= n; ++i) {
+        if (memcmp(buf + i, kNeedle, sizeof(kNeedle) - 1) == 0) return true;
+    }
+    return false;
 }
 
 bool ChromeBridge::isRunning() {
