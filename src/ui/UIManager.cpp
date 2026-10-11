@@ -901,21 +901,15 @@ void UIManager::update() {
       } else if (selectedId == "weather") {
         openWeather();
       } else if (selectedId == "browser") {
-        // FULL = Chrome nhúng (viewport stream); LITE = trình duyệt tích hợp.
+        // Vào menu trình duyệt của RomCloud trước (URL/history/cài đặt
+        // engine ở SELECT): weston chỉ fork khi user chốt URL ở chế độ
+        // FULL, tránh giành DRM ngay lúc vào.
+        initBrowserHistory();
         if (BrowserManager::instance().engineMode() == BrowserEngine::FULL) {
-          std::string url = BrowserManager::instance().currentUrl();
-          if (url.empty()) url = m_browserUrl;
-          if (ChromeBridge::instance().openUrl(url)) {
-            m_urlEditorFromChrome = false;
-            setState(UIState::CHROME);
-          } else {
-            showToast("Chưa cài RC-Web (xem chrome/README)...",
-                      {239, 68, 68, 255}, 3000);
-            setState(UIState::BROWSER);
-          }
-        } else {
-          setState(UIState::BROWSER);
+          showToast("Chế độ Chrome — START nhập URL để mở",
+                    {0, 180, 255, 255}, 2000);
         }
+        setState(UIState::BROWSER);
       } else if (selectedId == "iptv") {
         if (IPTVManager::instance().playlistCount() == 0) {
           IPTVManager::instance().loadPlaylists();
