@@ -11,6 +11,7 @@
 #include <string>
 #include <unistd.h>
 #include <vector>
+#include <chrono>
 #include <sys/wait.h>
 
 extern char** environ;
@@ -94,6 +95,9 @@ bool EmuLauncher::play(const std::string& systemCode,
         return false;
     }
     m_pid = pid;
+    m_startMs = (uint64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now().time_since_epoch())
+                    .count();
     return true;
 }
 

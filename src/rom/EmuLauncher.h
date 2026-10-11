@@ -5,6 +5,7 @@
 // Trong lúc chơi emulator giữ toàn màn hình, RomCloud không vẽ gì
 // (state GAME_PLAYING) và chỉ giữ nút B để thoát.
 #include <atomic>
+#include <chrono>
 #include <string>
 #include <sys/types.h>
 
@@ -23,6 +24,9 @@ public:
     bool pollExited();
 
     std::string currentTitle() const { return m_title; }
+    // Mốc bắt đầu phiên (ms steady clock) — UI dùng phát hiện emulator
+    // chết tức thì (core hỏng) để báo đúng bệnh thay vì đá về list im lặng.
+    uint64_t startMs() const { return m_startMs; }
 
 private:
     EmuLauncher() = default;
@@ -34,6 +38,7 @@ private:
 
     pid_t m_pid = -1;
     std::string m_title;
+    uint64_t m_startMs = 0;
 };
 
 } // namespace RomCloud

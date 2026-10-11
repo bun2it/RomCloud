@@ -3199,6 +3199,15 @@ void UIManager::update() {
     // B cưỡng chế dừng.
     auto& emu = EmuLauncher::instance();
     if (emu.pollExited() || !emu.isRunning()) {
+      // Chết tức thì (<3s, exit lỗi): gần chắc core/libretro hỏng
+      // (file 0 byte trên thẻ FAT) — báo rõ thay vì đá về im lặng.
+      uint64_t nowMs = (uint64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
+                           std::chrono::steady_clock::now().time_since_epoch())
+                           .count();
+      if (emu.startMs() != 0 && nowMs - emu.startMs() < 3000) {
+        showToast("Emulator thoát ngay: core hệ này hỏng (0 byte), thử hệ khác",
+                  {239, 68, 68, 255}, 3500);
+      }
       goBack();
       break;
     }
