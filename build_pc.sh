@@ -61,17 +61,7 @@ esac
 
 echo "Target binary: $OUTPUT_BIN"
 
-# nsgif is strict C99 (uses `restrict`) — compile as C, not C++.
-CC_CMD="cc"
-case "$CXX_CMD" in
-    "zig c++") CC_CMD="zig cc" ;;
-    *g++*) CC_CMD="${CXX_CMD%g++*}gcc" ;;
-    *clang++*) CC_CMD="${CXX_CMD%clang++*}clang" ;;
-esac
 mkdir -p build
-$CC_CMD -O2 -Isrc/browser/nsgif -c src/browser/nsgif/gif.c -o build/nsgif_gif.o
-$CC_CMD -O2 -Isrc/browser/nsgif -c src/browser/nsgif/lzw.c -o build/nsgif_lzw.o
-$CC_CMD -O2 -Isrc/browser/duktape -c src/browser/duktape/duktape.c -o build/duktape.o
 
 $CXX_CMD -std=c++17 -O2 -Wall -Wextra \
     -DPC_SIMULATOR_MODE \
@@ -116,19 +106,7 @@ $CXX_CMD -std=c++17 -O2 -Wall -Wextra \
     src/localsend/LocalSendManager.cpp \
     src/cast/CastManager.cpp \
     src/ui/ExplorerSync.cpp \
-    src/browser/HtmlRenderer.cpp \
-    src/browser/BrowserManager.cpp \
     src/browser/chrome/ChromeBridge.cpp \
-    src/browser/JsEngine.cpp \
-    src/browser/SvgRaster.cpp \
-    src/browser/netsurf/NetSurfBridge.cpp \
-    src/browser/netsurf/NetSurfLayout.cpp \
-    src/browser/netsurf/NetSurfRenderer.cpp \
-    src/browser/netsurf/NetSurfEngine.cpp \
-    src/browser/netsurf/NetSurfJsBridge.cpp \
-    build/nsgif_gif.o \
-    build/nsgif_lzw.o \
-    build/duktape.o \
     src/weather/WeatherManager.cpp \
     src/calendar/CalManager.cpp \
     src/ui/WeatherUI.cpp \

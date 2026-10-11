@@ -22,29 +22,8 @@ fi
 echo "=== Compiling RomCloud for TrimUI Brick Pro (aarch64-linux-gnu.2.33) ==="
 mkdir -p bin
 
-# P20: NetSurf library stack (HTML5 parser, DOM, CSS engine) is now the
-# default — we link it unconditionally for in-process FULL browsing. Set
-# BUILD_LIBNETSURF=0 to opt out (e.g. when libnetsurf-src isn't unpacked
-# and you want a faster dev build). The libs end up in sysroot/lib/
-# (libcss.a, libhubbub.a, libdom.a, libparserutils.a, libwapcaplet.a,
-# libnslog.a, libnsutils.a) and headers in sysroot/include/. See
-# scripts/build-libnetsurf.py for the cross-compile recipe.
-if [ "${BUILD_LIBNETSURF:-1}" = "1" ]; then
-    if [ ! -e "libnetsurf-src" ]; then
-        if [ -d "$HOME/Downloads/netsurf-all-3.11" ]; then
-            ln -s "$HOME/Downloads/netsurf-all-3.11" libnetsurf-src
-        elif [ -d "/Users/tai/Downloads/netsurf-all-3.11" ]; then
-            ln -s "/Users/tai/Downloads/netsurf-all-3.11" libnetsurf-src
-        else
-            echo "WARNING: BUILD_LIBNETSURF=1 set but no libnetsurf source found."
-            echo "        Expected ~/Downloads/netsurf-all-3.11/. Skipping."
-        fi
-    fi
-    if [ -e "libnetsurf-src" ]; then
-        echo "=== Building libnetsurf stack ==="
-        python3 scripts/build-libnetsurf.py
-    fi
-fi
+# NetSurf stack REMOVED (Chrome-only browser): no libnetsurf build.
+# (Old BUILD_LIBNETSURF block + scripts/build-libnetsurf.py deleted.)
 
 # Release mode: RELEASE=1 ./build.sh
 #   - Build nhu dev (giu debug info), copy ban debug sang bin/*.debug,
@@ -57,15 +36,7 @@ RELEASE="${RELEASE:-0}"
 GIT_SHA="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
 echo "Build commit: $GIT_SHA"
 
-# nsgif is strict C99 (uses `restrict`) — compile as C, not C++.
 mkdir -p build
-$ZIG cc -target aarch64-linux-gnu.2.33 -O2 -Isrc/browser/nsgif \
-    -c src/browser/nsgif/gif.c -o build/nsgif_gif.o
-$ZIG cc -target aarch64-linux-gnu.2.33 -O2 -Isrc/browser/nsgif \
-    -c src/browser/nsgif/lzw.c -o build/nsgif_lzw.o
-# Duktape is C99 — same treatment.
-$ZIG cc -target aarch64-linux-gnu.2.33 -O2 -Isrc/browser/duktape \
-    -c src/browser/duktape/duktape.c -o build/duktape.o
 
 $ZIG c++ \
     -target aarch64-linux-gnu.2.33 \
@@ -132,26 +103,9 @@ $ZIG c++ \
     src/rom/RomDetector.cpp \
     src/rom/RomOrganizer.cpp \
     src/localsend/LocalSendManager.cpp \
-    src/browser/HtmlRenderer.cpp \
-    src/browser/BrowserManager.cpp \
     src/browser/chrome/ChromeBridge.cpp \
-    src/browser/JsEngine.cpp \
-    src/browser/SvgRaster.cpp \
-    src/browser/netsurf/NetSurfBridge.cpp \
-    src/browser/netsurf/NetSurfLayout.cpp \
-    src/browser/netsurf/NetSurfRenderer.cpp \
-    src/browser/netsurf/NetSurfEngine.cpp \
-    src/browser/netsurf/NetSurfJsBridge.cpp \
-    build/nsgif_gif.o \
-    build/nsgif_lzw.o \
-    build/duktape.o \
     src/cast/CastManager.cpp \
     -Lsysroot/lib \
-    -lcss \
-    -ldom \
-    -lhubbub \
-    -lparserutils \
-    -lwapcaplet \
     -lSDL2 \
     -lSDL2_image \
     -lSDL2_ttf \
