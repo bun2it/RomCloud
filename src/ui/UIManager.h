@@ -514,6 +514,10 @@ private:
   // Chrome nhúng: task nền (portal WiFi) yêu cầu vào state CHROME —
   // update() tiêu thụ trên UI thread (không setState từ worker).
   bool m_chromeEnterRequested = false;
+  // Portal Lite: task nền yêu cầu mở URL bằng LITE cưỡng chế —
+  // renderWifiTab tiêu thụ trên UI thread (không setState từ worker).
+  bool m_portalLiteRequested = false;
+  std::string m_portalLiteUrl;
   void handleChromeInput();
   void renderChromeState();
   // Value gốc của field khi mới vào edit mode — dùng để restore khi user

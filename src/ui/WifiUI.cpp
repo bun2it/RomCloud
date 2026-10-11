@@ -69,10 +69,13 @@ void UIManager::startWifiPortal() {
         PortalInfo pi = WifiManager::instance().checkPortal();
         if (pi.portal && !pi.url.empty()) {
             UIManager::instance().m_wifiStatus = "Mở trang portal (Lite)...";
-            UIManager::instance().openPortalLite(pi.url);
+            // Nhảy sang UI thread mới được đổi state (xem renderWifiTab).
+            UIManager::instance().m_portalLiteRequested = true;
+            UIManager::instance().m_portalLiteUrl = pi.url;
         } else if (pi.portal) {
             UIManager::instance().m_wifiStatus = "Mở trang portal (Lite)...";
-            UIManager::instance().openPortalLite("");
+            UIManager::instance().m_portalLiteRequested = true;
+            UIManager::instance().m_portalLiteUrl.clear();
         } else {
             std::string msg;
             WifiManager::instance().acceptPortalBlocking(msg);
@@ -118,6 +121,12 @@ void UIManager::renderWifiTab() {
     if (m_chromeEnterRequested && !m_wifiTask.isRunning()) {
         m_chromeEnterRequested = false;
         setState(UIState::CHROME);
+        return;
+    }
+    // Portal Lite: mở URL bằng LITE cưỡng chế trên UI thread.
+    if (m_portalLiteRequested && !m_wifiTask.isRunning()) {
+        m_portalLiteRequested = false;
+        openPortalLite(m_portalLiteUrl);
         return;
     }
     // Vào tab lần đầu: quét luôn.
