@@ -1,0 +1,11 @@
+prefix=/Users/tai/RomCloud/sysroot
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+
+Name: libnsutils
+Description: NetSurf utility functions
+Version: 0.1.1
+Requires: 
+Libs: -L${libdir} -lnsutils
+Cflags: -I${includedir}

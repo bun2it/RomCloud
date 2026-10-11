@@ -1,0 +1,10 @@
+prefix=/Users/tai/RomCloud/sysroot
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+
+Name: libnspsl
+Description: Public Suffix List library
+Version: 0.1.7
+Libs: -L${libdir} -lnspsl
+Cflags: -I${includedir}

@@ -1,0 +1,11 @@
+prefix=/Users/tai/RomCloud/sysroot
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+
+Name: libpng
+Description: Loads and writes PNG images
+Version: 1.6.43
+Requires: zlib
+Libs: -L${libdir} -lpng
+Cflags: -I${includedir}

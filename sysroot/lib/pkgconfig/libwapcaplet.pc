@@ -1,0 +1,11 @@
+prefix=/Users/tai/RomCloud/sysroot
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+
+Name: libwapcaplet
+Description: String interning library
+Version: 0.4.3
+Requires: 
+Libs: -L${libdir} -lwapcaplet
+Cflags: -I${includedir}

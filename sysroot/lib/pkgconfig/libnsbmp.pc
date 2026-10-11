@@ -1,0 +1,11 @@
+prefix=/Users/tai/RomCloud/sysroot
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+
+Name: libnsbmp
+Description: NetSurf BMP decoder
+Version: 0.1.3
+Requires: 
+Libs: -L${libdir} -lnsbmp
+Cflags: -I${includedir}

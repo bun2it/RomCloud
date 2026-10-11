@@ -1,0 +1,11 @@
+prefix=/Users/tai/RomCloud/sysroot
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+
+Name: libdom
+Description: W3C DOM implementation
+Version: 0.4.2
+Requires: libhubbub, libwapcaplet
+Libs: -L${libdir} -ldom
+Cflags: -I${includedir}

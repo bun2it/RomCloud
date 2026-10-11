@@ -1,0 +1,11 @@
+prefix=/Users/tai/RomCloud/sysroot
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+
+Name: libhubbub
+Description: HTML5 parser library
+Version: 0.3.8
+Requires: libparserutils
+Libs: -L${libdir} -lhubbub
+Cflags: -I${includedir}

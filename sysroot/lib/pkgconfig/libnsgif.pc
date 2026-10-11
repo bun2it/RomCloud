@@ -1,0 +1,11 @@
+prefix=/Users/tai/RomCloud/sysroot
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+
+Name: libnsgif
+Description: NetSurf GIF decoder
+Version: 0.2.1
+Requires: 
+Libs: -L${libdir} -lnsgif
+Cflags: -I${includedir}

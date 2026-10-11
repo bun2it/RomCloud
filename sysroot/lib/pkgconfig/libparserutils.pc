@@ -1,0 +1,11 @@
+prefix=/Users/tai/RomCloud/sysroot
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+
+Name: libparserutils
+Description: Parser utilities library
+Version: 0.2.5
+Requires: 
+Libs: -L${libdir} -lparserutils
+Cflags: -I${includedir}

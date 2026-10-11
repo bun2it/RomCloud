@@ -1,0 +1,11 @@
+prefix=/Users/tai/RomCloud/sysroot
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+
+Name: libnslog
+Description: NetSurf logging library
+Version: 0.1.3
+Requires: 
+Libs: -L${libdir} -lnslog
+Cflags: -I${includedir}

@@ -1,0 +1,11 @@
+prefix=/Users/tai/RomCloud/sysroot
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+
+Name: libnsfb
+Description: NetSurf Framebuffer library
+Version: 0.2.2
+Requires: libnslog, libnsutils
+Libs: -L${libdir} -lnsfb
+Cflags: -I${includedir} -I${includedir}/libnsfb

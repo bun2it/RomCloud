@@ -68,8 +68,6 @@ enum class UIState {
   WEATHER,       // Thời tiết & Lịch (+ tab Đồng hồ, Camera)
   CLOCK_ALARM,   // Modal báo thức kêu (briefing)
   GAME_CAST,     // GameCast TV & Laptop streaming
-  BROWSER,       // Browser main state (URL bar + content)
-  BROWSER_INPUT, // Browser URL input (virtual keyboard)
   CHROME,        // Chromium nhúng (viewport stream + map nút)
   SCREENSAVER,   // P0: Screensaver (starfield/fire/clock/picture)
   EXIT_REQUESTED
@@ -429,13 +427,16 @@ private:
   void renderWifiTab();
   bool handleWifiTabInput();
   void startWifiScan();
-  // Browser NetSurf (chạy riêng process, mở từ launcher/Wi-Fi).
-  // Khung UI đấu nối sau khi nsfb build xong.
   void startWifiConnect(const std::string& ssid, const std::string& psk,
                         bool hidden, bool useSaved);
   void startWifiPortal();
   void openWifiModal(int mode, const std::string& title,
                      const std::string& placeholder);
+  // Chrome nhúng: task nền (portal WiFi) yêu cầu vào state CHROME —
+  // update() tiêu thụ trên UI thread (không setState từ worker).
+  bool m_chromeEnterRequested = false;
+  void handleChromeInput();
+  void renderChromeState();
   // Picker đích dùng chung (DEST_PICKER): 0=không, 1=Sao chép, 2=Chuyển đi,
   // 3=Bung tới thư mục. Mọi thao tác đều qua picker + confirm mới chạy.
   int m_pickerPendingOp = 0;
@@ -450,76 +451,8 @@ private:
   bool handleExplorerKeyboardFor(FileExplorer &ex);
   bool handleFolderPickerInput();
   bool handleExplorerBrowser();
-  void renderBrowserState();
-  void handleBrowserInput();
-  void renderBrowserInputState();
-  void handleBrowserInputKeyboard();
-  // P8: seed + open the URL editor (telex OFF — URLs are ASCII).
-  void openBrowserUrlEditor();
-  // Chrome nhúng: commit/cancel editor điều hướng về CHROME hay BROWSER.
-  void commitBrowserInput(const std::string& url, bool addHist);
-  void cancelBrowserInput();
-  // Cancel a page <input> edit: restore the original value, end the
-  // session (B key while the field-edit VK overlay is up).
-  void cancelBrowserFieldEdit();
-  // P15.2: find-in-page editor (telex ON for Vietnamese queries).
-  void openBrowserFindEditor();
-  // P15.2: run the find and return to the page.
-  void commitBrowserFind();
-  // P8c: browser feature settings overlay.
-  void toggleBrowserSetting(int idx);
-  void renderBrowserSettings();
-  // P8b: TLD suffix pills for the URL keyboard (browser only).
-  static constexpr int kBrowserTldCount = 3;
-  const char* browserTldLabel(int idx) const;
-  // Browser URL input
-  VkState m_browserVk;
-  // P15.2: find-in-page reuses the URL keyboard; commit searches, START
-  // jumps between matches while results are active.
-  bool m_browserFindMode = false;
-  // P8: URL-bar focus (YouTube-style). UP from the first page widget lands
-  // on the URL bar; A opens the URL keyboard; DOWN returns to the page.
-  bool m_browserUrlFocused = false;
-  // Browser feature settings overlay (SELECT in browser content mode).
-  bool m_browserSettingsOpen = false;
-  int m_browserSettingsSel = 0;
-  // P13: fullscreen media playback launched from the page (mpv owns screen).
-  bool m_browserMediaPlaying = false;
-  void pollBrowserMedia();
-  // Browser URL history & quick sample site pills (YouTube-style)
-  struct BrowserHistoryItem {
-    std::string label;
-    std::string url;
-  };
-  std::vector<BrowserHistoryItem> m_browserHistory;
-  int m_browserHistorySel = 0;
-  bool m_browserHistoryMode = false;
-  void initBrowserHistory();
-  void addBrowserHistory(const std::string& url);
-
-  // P8b: TLD suffix pills above the URL keyboard (like history pills).
-  // UP from keyboard row 0 enters pill mode; A appends the suffix.
-  bool m_browserTldMode = false;
-  int m_browserTldSel = 0;
-  // Phase 1 — audit P1-2c: true khi user đang gõ vào một <input> trong page
-  // (HtmlRenderer.m_editingText = true). UIManager sync giá trị giữa
-  // m_browserVk.query (VirtualKeyboard Telex transform) và
-  // HtmlRenderer::setFocusedInputValue().
-  bool m_browserFieldEditing = false;
-  // Chrome nhúng: true khi editor mở từ state CHROME (Y = gõ vào trang,
-  // START = sửa địa chỉ) — commit/cancel quay về CHROME thay vì BROWSER.
-  bool m_urlEditorFromChrome = false;
-  // Chrome nhúng: task nền (portal WiFi) yêu cầu vào state CHROME —
-  // update() tiêu thụ trên UI thread (không setState từ worker).
-  bool m_chromeEnterRequested = false;
-  void handleChromeInput();
-  void renderChromeState();
-  // Value gốc của field khi mới vào edit mode — dùng để restore khi user
-  // bấm "Hủy" (Cancel). Khi "Xong" (Commit) thì giữ value hiện tại.
-  std::string m_browserFieldOriginal;
-  // Default landing page: vnexpress.net (user's daily read; also exercises
-    // libcurl + DNS + CSS + images on every launch).
-    std::string m_browserUrl = "https://vnexpress.net";
+  // Default landing page for WEB menu.
+  std::string m_browserUrl = "https://vnexpress.net";
   void syncExplorerDialogs();
   // Action dùng chung cho phím tắt (Y/X/MENU) và popup menu (A trên file)
   void expCopyCurrent();
