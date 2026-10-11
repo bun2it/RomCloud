@@ -456,8 +456,6 @@ private:
   void handleBrowserInputKeyboard();
   // P8: seed + open the URL editor (telex OFF — URLs are ASCII).
   void openBrowserUrlEditor();
-  // Portal wifi: mở URL bằng LITE cưỡng chế (bất kể engine mặc định).
-  void openPortalLite(const std::string& url);
   // Chrome nhúng: commit/cancel editor điều hướng về CHROME hay BROWSER.
   void commitBrowserInput(const std::string& url, bool addHist);
   void cancelBrowserInput();
@@ -514,10 +512,6 @@ private:
   // Chrome nhúng: task nền (portal WiFi) yêu cầu vào state CHROME —
   // update() tiêu thụ trên UI thread (không setState từ worker).
   bool m_chromeEnterRequested = false;
-  // Portal Lite: task nền yêu cầu mở URL bằng LITE cưỡng chế —
-  // renderWifiTab tiêu thụ trên UI thread (không setState từ worker).
-  bool m_portalLiteRequested = false;
-  std::string m_portalLiteUrl;
   void handleChromeInput();
   void renderChromeState();
   // Value gốc của field khi mới vào edit mode — dùng để restore khi user

@@ -7636,7 +7636,6 @@ void UIManager::handleBrowserInput() {
         BrowserManager::instance().goBack();
       } else {
         BrowserManager::instance().close();
-        BrowserManager::instance().setForceLite(false);
         m_browserUrlFocused = false;
         setState(UIState::MENU);
       }
@@ -7648,7 +7647,6 @@ void UIManager::handleBrowserInput() {
         HtmlRenderer::instance().goBack();
       } else {
         BrowserManager::instance().close();
-        BrowserManager::instance().setForceLite(false);
         HtmlRenderer::instance().stop();
         m_browserUrlFocused = false;
         setState(UIState::MENU);
@@ -8135,11 +8133,9 @@ void UIManager::commitBrowserInput(const std::string& url, bool addHist) {
   // Điểm chốt duy nhất cho mọi commit editor (history/TLD/keyboard):
   // FULL -> deep-link vào phiên Chrome ngoài, LITE -> browser cũ.
   // (Gõ chữ trong trang dùng bàn phím ảo của Chrome (Y), không qua đây.)
-  // Commit URL mới = ý định duyệt thường -> tắt cưỡng chế portal-Lite.
   m_browserTldMode = false;
   m_browserHistoryMode = false;
   m_browserFindMode = false;
-  BrowserManager::instance().setForceLite(false);
   if (BrowserManager::instance().engineMode() == BrowserEngine::FULL) {
     if (!url.empty()) {
       if (addHist) addBrowserHistory(url);
@@ -8167,23 +8163,6 @@ void UIManager::cancelBrowserInput() {
   m_browserHistoryMode = false;
   m_browserFindMode = false;
   setState(m_urlEditorFromChrome ? UIState::CHROME : UIState::BROWSER);
-}
-
-// Mở trang portal wifi bằng LITE engine (cưỡng chế, bất kể engine mặc
-// định): HtmlRenderer + HttpClient (cookie/POST/bỏ verify cert) đủ đăng
-// nhập portal form thường, không cần weston. Điền form bằng VK Telex
-// trong trang, submit xong B về menu (tắt cưỡng chế).
-void UIManager::openPortalLite(const std::string& url) {
-  initBrowserHistory();
-  m_browserTldMode = false;
-  m_browserHistoryMode = false;
-  m_browserFindMode = false;
-  m_browserUrlFocused = false;
-  m_browserFieldEditing = false;
-  BrowserManager::instance().setForceLite(true);
-  BrowserManager::instance().openUrl(url.empty() ? "http://example.com/" : url);
-  showToast("Portal: điền form, START gửi — B thoát", {0, 180, 255, 255}, 3000);
-  setState(UIState::BROWSER);
 }
 
 void UIManager::openBrowserUrlEditor() {  // P8: URLs are ASCII — telex would mangle "www"/"vn", so default OFF.  // Shift/symbol still available via the action row + R1.

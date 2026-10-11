@@ -9,7 +9,7 @@
 //   F6 = sửa địa chỉ (bật/tắt)
 //   F7/F8 = lui/tới trang (D-pad trái/phải), L1/R1 = PageUp/PageDown.
 //   F2 (X) = tới trang, F3 (Y) = lui trang (duyệt web);
-//   Y = xóa lùi khi bàn phím ảo mở. B thoát phiên do RomCloud lo.
+//   X = xóa hết text, Y = xóa lùi khi bàn phím ảo mở. B thoát phiên do RomCloud lo.
 //
 // TRACE: mọi mốc đều in 1 dòng [WEBTRACE] Jxx ra stdout/stderr, được
 // launch.sh gom vào rc-web.log. Mã bước: B=bridge (debug.log),
@@ -19,7 +19,7 @@ const { app, BrowserWindow, ipcMain, session } = require('electron');
 const fs = require('fs');
 const path = require('path');
 
-const HOME_URL = 'https://lite.duckduckgo.com/lite/';
+const HOME_URL = 'http://www.google.com/';
 const MOBILE_UA = 'Mozilla/5.0 (Linux; Android 13; Mobile) ' +
   'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Mobile Safari/537.36';
 const ZOOM_STEPS = [0, 0.5, 1, 1.5, 2];
@@ -68,6 +68,39 @@ function startUrl() {
     if (/^https?:\/\//i.test(s)) return s;
   } catch (e) { /* chưa có file -> dùng trang chủ */ }
   return HOME_URL;
+}
+
+// Probe captive portal (wifi Highlands/quán cafe...): GET HTTP thường
+// tới generate_204. Mạng sạch -> 204. Sau tường portal -> redirect (3xx
+// + Location) hoặc 200 có nội dung -> trả URL trang đăng nhập để mở
+// thẳng. Timeout 4s, lỗi/timeout = không portal (mở trang chủ).
+function detectPortal() {
+  return new Promise((resolve) => {
+    let done = false;
+    const fin = (v) => { if (!done) { done = true; resolve(v); } };
+    try {
+      const req = require('http').get(
+        'http://connectivitycheck.gstatic.com/generate_204',
+        { timeout: 4000 },
+        (res) => {
+          const loc = res && res.headers && res.headers.location;
+          if (res.statusCode >= 300 && res.statusCode < 400 && loc &&
+              /^https?:\/\//i.test(loc)) {
+            TR('J02', 'phát hiện portal, chuyển tới: ' + loc);
+            fin(loc);
+          } else if (res.statusCode !== 204) {
+            TR('J02', 'portal trả mã lạ: ' + res.statusCode);
+            fin('http://connectivitycheck.gstatic.com/generate_204');
+          } else {
+            fin(null);
+          }
+          try { res.resume(); } catch (e) {}
+        });
+      req.on('timeout', () => { try { req.destroy(); } catch (e) {} fin(null); });
+      req.on('error', () => fin(null));
+      setTimeout(() => { try { req.destroy(); } catch (e) {} fin(null); }, 4500);
+    } catch (e) { fin(null); }
+  });
 }
 
 let page = null;       // cửa sổ vỏ (shell): header + URL + webview + footer
@@ -267,6 +300,7 @@ function buildShellHtml(startUrl) {
   '_p.style.borderColor="#323746";}};' +
   'window.__rcType=function(s){_i.value+=s};' +
   'window.__rcBack=function(){_i.value=_i.value.slice(0,-1)};' +
+  'window.__rcClear=function(){_i.value=""};' +
   'window.__rcUrl=function(){return _i.value};' +
   'window.__rcFocus=function(){try{_w.focus()}catch(e){}};' +
   'window.__rcFit=function(){_w.style.width=window.innerWidth+"px";' +
@@ -428,7 +462,8 @@ function pushHistory(q, url) {
 }
 
 // ── Bàn phím ảo (lớp phủ trong vỏ, ghim đáy màn hình) ─────────────
-// D-pad di chuyển ô sáng, A (Enter) = bấm phím, Y (F3) = xóa lùi.
+// D-pad di chuyển ô sáng, A (Enter) = bấm phím, X = xóa hết text,
+// Y (F3) = xóa lùi.
 // Đang sửa địa chỉ thì chữ vào ô URL; bình thường chữ vào trang.
 // Đóng bàn phím giữa chừng lúc sửa địa chỉ = hủy sửa.
 function setKb(open) {
@@ -461,6 +496,17 @@ function kbBack() {
   if (urlEdit) {
     shellJs('window.__rcBack && window.__rcBack()');
   } else if (pageWc && !pageWc.isDestroyed()) {
+    pageWc.sendInputEvent({ type: 'keyDown', keyCode: 'Backspace' });
+    pageWc.sendInputEvent({ type: 'keyUp', keyCode: 'Backspace' });
+  }
+}
+function kbClear() {
+  // X: xóa HẾT text đang gõ (Y xóa từng chữ, A gõ).
+  TR('J40', 'X xóa hết (urlEdit=' + urlEdit + ')');
+  if (urlEdit) {
+    shellJs('window.__rcClear && window.__rcClear()');
+  } else if (pageWc && !pageWc.isDestroyed()) {
+    pageWc.selectAll();
     pageWc.sendInputEvent({ type: 'keyDown', keyCode: 'Backspace' });
     pageWc.sendInputEvent({ type: 'keyUp', keyCode: 'Backspace' });
   }
@@ -692,7 +738,8 @@ function attachPageKeys(wc) {
         }
       }
       if (kbOpen) {
-        if (input.key === 'F2') {  // X: không gán trong bàn phím
+        if (input.key === 'F2') {  // X: xóa hết text trong bàn phím
+          kbClear();
           event.preventDefault();
           return;
         }
@@ -793,7 +840,8 @@ function attachShellKeys(wc) {
         }
       }
       if (kbOpen) {
-        if (input.key === 'F2') {  // X: không gán trong bàn phím
+        if (input.key === 'F2') {  // X: xóa hết text trong bàn phím
+          kbClear();
           event.preventDefault();
           return;
         }
@@ -925,12 +973,30 @@ app.on('web-contents-created', (event, contents) => {
       return;
     }
     if (isKeyboardContents(contents)) return;
+    // Portal wifi (Highlands/quán cafe...) chặn HTTPS bằng chứng chỉ tự
+    // ký -> Chromium báo lỗi cert (-200..-299) thay vì hiện trang đăng
+    // nhập. Chiêu cuối: portal có khi giả 204 cho probe nhưng chặn tất cả
+    // còn lại — tự thử 1 lần http://example.com/ (HTTP thường, nhẹ, không
+    // HSTS nên portal nào cũng chặn được để nhét trang login vào).
+    const isCertErr = errorCode <= -200 && errorCode >= -299;
+    if (isCertErr && !contents.__rcPortalRetry) {
+      contents.__rcPortalRetry = 1;
+      TR('J14', 'lỗi cert sau tường portal? thử example.com 1 lần');
+      contents.loadURL('http://example.com/');
+      return;
+    }
     const html = '<!doctype html><meta charset="utf-8">' +
       '<body style="background:#0b0e13;color:#cfd6e4;font-family:sans-serif;' +
       'display:flex;align-items:center;justify-content:center;height:100vh;' +
       'margin:0;text-align:center"><div><h2>Không tải được trang</h2>' +
       '<p style="color:#8a94a6">' + esc(url) + '</p>' +
       '<p>' + esc(errorDesc) + ' (' + errorCode + ')</p>' +
+      (isCertErr
+        ? '<p style="color:#ffd76a">Wifi này chặn chứng chỉ (thường là trang' +
+          ' đăng nhập wifi). Hãy mở địa chỉ HTTP thường, ví dụ' +
+          ' <b>http://example.com/</b>, để wifi chuyển tới trang' +
+          ' đăng nhập.</p>'
+        : '') +
       '<p>Bấm nút B để thoát, hoặc START để sửa địa chỉ.</p></div>';
     contents.loadURL('data:text/html;charset=utf-8,' +
       encodeURIComponent(html));
@@ -1109,8 +1175,15 @@ app.on('web-contents-created', (event, contents) => {
   });
 });
 
-function createShell() {
-  const url = startUrl();
+async function createShell() {
+  let url = startUrl();
+  // Chỉ probe portal khi mở trang chủ mặc định (URL chỉ định từ WifiUI/
+  // deep-link thì giữ nguyên — bên đó đã biết cần mở gì).
+  if (url === HOME_URL) {
+    TR('J02', 'mở trang chủ: probe portal trước...');
+    const portal = await detectPortal();
+    if (portal) url = portal;
+  }
   TR('J02', 'mở vỏ trình duyệt (khung RomCloud + web 1024x614), URL mở đầu: ' + url);
   page = new BrowserWindow({
     fullscreen: true, frame: false, backgroundColor: '#111418',
