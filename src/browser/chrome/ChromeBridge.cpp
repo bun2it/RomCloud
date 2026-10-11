@@ -506,6 +506,14 @@ static std::vector<std::string> cdpPageIds(const std::string& body,
     return ids;
 }
 
+// Reaper nền: gọi định kỳ khi không phiên nào chạy để dọn weston/
+// electron sót (launcher chết -9/OOM, trap cleanup không chạy).
+// Không bao giờ chạm phiên đang chạy (caller kiểm isRunning trước).
+void ChromeBridge::sweepStrays() {
+    if (instance().isRunning()) return;
+    killWebProcesses();
+}
+
 bool ChromeBridge::deepLink(const std::string& url) {
     if (url.empty()) return false;
     trace("B07", "deep-link (CDP PUT /json/new): " + url +

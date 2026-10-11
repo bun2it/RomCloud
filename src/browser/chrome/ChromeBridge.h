@@ -46,6 +46,10 @@ public:
     // Deep-link trang mới vào phiên đang chạy (CDP /json/new).
     bool deepLink(const std::string& url);
 
+    // Quét xác phiên web theo tên (dùng cho reaper nền khi không phiên
+    // nào chạy — xem UIManager::update).
+    static void sweepStrays();
+
 private:
     ChromeBridge();
     ~ChromeBridge();

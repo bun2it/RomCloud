@@ -592,6 +592,20 @@ void UIManager::update() {
   // Poll Hardware FN Switch for GameCast stream toggle
   CastManager::instance().update();
 
+  // Reaper nền phiên web: ngoài state CHROME mà không phiên nào chạy
+  // (m_pid<=0) thì quét xác theo tên mỗi 10s. Weston/electron sót (launcher
+  // chết -9, trap không chạy) sẽ vẽ chồng fb0 dưới menu/Lite — đây là
+  // nguồn "Chrome ẩn dưới" + flicker. Không chạm phiên đang chạy.
+  {
+    static uint32_t s_lastWebSweepMs = 0;
+    uint32_t nowMs = SDL_GetTicks();
+    if (m_currentState != UIState::CHROME &&
+        nowMs - s_lastWebSweepMs >= 10000) {
+      s_lastWebSweepMs = nowMs;
+      ChromeBridge::sweepStrays();
+    }
+  }
+
   // Đồng hồ: báo thức + pomodoro (poll 5s, giờ theo máy Brick)
   pollClock();
 
@@ -8197,14 +8211,19 @@ void UIManager::cancelBrowserFieldEdit() {
 // RC-Web (Electron) ghi /tmp/rc-web-ui-mode lúc mở lớp phụ: bàn phím
 // ảo = "kb", con trỏ = "pointer". B khi lớp phụ đang mở chỉ đóng lớp
 // đó (Electron nhận F1 và tự đóng), chưa thoát phiên.
-static bool rcWebUiModeOpen() {
+static std::string rcWebUiMode() {
+  // Nội dung cờ lớp phụ của web: "" = không lớp nào, "kb"/"pointer" =
+  // đang mở. File do launch.sh xóa đầu/cuối phiên nên không bao giờ
+  // sót qua phiên khác (xem launch.sh L00/L12).
   FILE* f = fopen("/tmp/rc-web-ui-mode", "r");
-  if (!f) return false;
+  if (!f) return "";
   char buf[16] = {0};
   size_t n = fread(buf, 1, sizeof(buf) - 1, f);
   fclose(f);
-  return n > 0 && buf[0] != '\n';
+  if (n == 0 || buf[0] == '\n') return "";
+  return std::string(buf);
 }
+static bool rcWebUiModeOpen() { return !rcWebUiMode().empty(); }
 // Mốc lần cuối thấy B rơi vào lớp phụ của web. Cùng 1 lần bấm B, cả
 // gptokeyb (F1 repeat 40Hz cho Electron đóng lớp) lẫn RomCloud (poll
 // theo frame) đều thấy: frame sau Electron đã xóa ui-mode mà tay vẫn
@@ -8212,6 +8231,10 @@ static bool rcWebUiModeOpen() {
 // trong cửa sổ ngắn sau mốc này để B = lùi đúng 1 state.
 static uint32_t s_chromeLayerBMs = 0;
 static constexpr uint32_t kChromeLayerBDebounceMs = 500;
+// Cưỡng chế thoát: B bấm liên tiếp mà cờ lớp phụ KHÔNG ĐỔI (Electron
+// chết/kẹt, không đóng lớp) thì lần thứ 3 thoát phiên luôn.
+static std::string s_chromeLayerMode;
+static int s_chromeLayerBCount = 0;
 // Watchdog kẹt RAM/CPU trong phiên web: máy 1GB không swap, Chromium +
 // weston ăn RAM tới khi kswapd thrash thì cả phiên đơ cứng, B cũng lag
 // hàng phút. Poll MemAvailable mỗi 2s, thấp 2 nhịp liên tiếp -> tự
@@ -8267,11 +8290,32 @@ void UIManager::handleChromeInput() {
   // / con trỏ) đang mở thì B chỉ đóng lớp đó — Electron nhận F1 và tự
   // đóng, RomCloud không dừng phiên. Không lớp phụ nào mở thì B thoát.
   if (input.isButtonJustPressed(Button::B)) {
-    if (rcWebUiModeOpen()) {
+    std::string mode = rcWebUiMode();
+    if (!mode.empty()) {
+      // Lớp phụ đang mở: nhường Electron đóng (F1). Nhưng nếu B bấm
+      // liên tiếp mà cờ KHÔNG ĐỔI (Electron chết/kẹt, không đóng lớp)
+      // thì lần thứ 3 cưỡng chế thoát phiên thay vì kẹt.
+      // Luồng đúng (đóng kb xong cờ thành "") không bao giờ chạm ngưỡng.
+      if (mode == s_chromeLayerMode) {
+        if (++s_chromeLayerBCount >= 3) {
+          s_chromeLayerBCount = 0;
+          showToast("Web không phản hồi, đã thoát", {239, 68, 68, 255}, 2500);
+          bridge.stop();
+          goBack();
+          return;
+        }
+      } else {
+        s_chromeLayerMode = mode;
+        s_chromeLayerBCount = 1;
+      }
       s_chromeLayerBMs = SDL_GetTicks();  // nuốt B này, chờ Electron đóng lớp
     } else if (SDL_GetTicks() - s_chromeLayerBMs < kChromeLayerBDebounceMs) {
       // B vừa đóng lớp phụ xong (tay giữ lâu/repeat): bỏ qua, chưa thoát.
+      s_chromeLayerMode.clear();
+      s_chromeLayerBCount = 0;
     } else {
+      s_chromeLayerMode.clear();
+      s_chromeLayerBCount = 0;
       bridge.stop();  // trap cleanup của launcher dọn weston/electron/gptokeyb
       goBack();
       return;
