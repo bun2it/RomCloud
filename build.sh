@@ -102,6 +102,7 @@ $ZIG c++ \
     src/backup/BackupManager.cpp \
     src/rom/RomDetector.cpp \
     src/rom/RomOrganizer.cpp \
+    src/rom/EmuLauncher.cpp \
     src/localsend/LocalSendManager.cpp \
     src/browser/chrome/ChromeBridge.cpp \
     src/cast/CastManager.cpp \

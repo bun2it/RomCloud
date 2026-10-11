@@ -103,6 +103,7 @@ $CXX_CMD -std=c++17 -O2 -Wall -Wextra \
     src/backup/BackupManager.cpp \
     src/rom/RomDetector.cpp \
     src/rom/RomOrganizer.cpp \
+    src/rom/EmuLauncher.cpp \
     src/localsend/LocalSendManager.cpp \
     src/cast/CastManager.cpp \
     src/ui/ExplorerSync.cpp \

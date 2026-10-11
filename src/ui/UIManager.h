@@ -40,7 +40,6 @@ enum class UIState {
   SEARCH,
   CONFIRM_DELETE,
   CONFIRM_BATCH_DELETE,
-  CONFIRM_UPLOAD,
   DISCLAIMER,
   CLOUD_LOGIN,
   SETTINGS,
@@ -69,6 +68,7 @@ enum class UIState {
   CLOCK_ALARM,   // Modal báo thức kêu (briefing)
   GAME_CAST,     // GameCast TV & Laptop streaming
   CHROME,        // Chromium nhúng (viewport stream + map nút)
+  GAME_PLAYING,  // Emulator giữ màn hình (không vẽ, B thoát)
   SCREENSAVER,   // P0: Screensaver (starfield/fire/clock/picture)
   EXIT_REQUESTED
 };
@@ -703,7 +703,6 @@ private:
   void renderSearchState();
   void openConfirmDeleteDialog();
   void openConfirmBatchDeleteDialog();
-  void openConfirmUploadDialog();
   void renderConfirmDialogFromState();
   void renderConfirmDeleteDialog();
   void renderConfirmBatchDeleteDialog();

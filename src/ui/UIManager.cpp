@@ -10,6 +10,7 @@
 #include "../diagnostics/DeviceIdentity.h"
 #include "../download/DownloadManager.h"
 #include "../filesystem/FileSystemManager.h"
+#include "../rom/EmuLauncher.h"
 #include "../input/InputManager.h"
 #include "../iptv/IPTVManager.h"
 #include "../localsend/LocalSendManager.h"
@@ -456,8 +457,6 @@ void UIManager::setState(UIState state) {
     openConfirmDeleteDialog();
   } else if (state == UIState::CONFIRM_BATCH_DELETE) {
     openConfirmBatchDeleteDialog();
-  } else if (state == UIState::CONFIRM_UPLOAD) {
-    openConfirmUploadDialog();
   }
 }
 
@@ -470,6 +469,19 @@ void UIManager::showToast(const std::string &message, SDL_Color color,
 
 void UIManager::refreshSystems() {
   m_cachedSystems = DatabaseManager::instance().getSystems(true);
+  // Tab THẺ NHỚ: chỉ hiện hệ có game thật trên thẻ (localCount > 0),
+  // không liệt kê hết các hệ chỉ có trên Drive.
+  if (m_libraryTab == LibraryTab::SDCARD) {
+    std::vector<SystemRecord> filtered;
+    for (const auto &s : m_cachedSystems) {
+      if (s.localCount > 0) filtered.push_back(s);
+    }
+    m_cachedSystems = std::move(filtered);
+  }
+  if (m_selectedSystemIndex >= static_cast<int>(m_cachedSystems.size())) {
+    m_selectedSystemIndex =
+        std::max(0, static_cast<int>(m_cachedSystems.size()) - 1);
+  }
 }
 
 void UIManager::refreshGames() {
@@ -1007,6 +1019,8 @@ void UIManager::update() {
       m_libraryTab = (m_libraryTab == LibraryTab::DRIVE) ? LibraryTab::SDCARD : LibraryTab::DRIVE;
       std::string tabName = (m_libraryTab == LibraryTab::DRIVE) ? "GOOGLE DRIVE" : "THẺ NHỚ";
       showToast("Tab: " + tabName, {0, 180, 216, 255}, 1200);
+      m_selectedSystemIndex = 0;
+      refreshSystems();
       break;
     }
 
@@ -1241,6 +1255,19 @@ void UIManager::update() {
                                       m_gameScrollOffset + pageSize);
       } else if (input.isButtonJustPressed(Button::A)) {
         const auto &g = m_cachedGames[m_selectedGameIndex];
+        if (g.localState == GameState::LOCAL &&
+            FileSystemManager::instance().fileExists(g.localPath)) {
+          // Game đã trên thẻ: chơi ngay bằng emulator stock (kể cả tab
+          // DRIVE — footer đã ghi "Chơi").
+          if (EmuLauncher::instance().play(m_activeSystem.code, g.localPath,
+                                           g.title)) {
+            setState(UIState::GAME_PLAYING);
+          } else {
+            showToast("Không có emulator cho hệ " + m_activeSystem.code,
+                      {239, 68, 68, 255}, 2500);
+          }
+          break;
+        }
         if (m_libraryTab == LibraryTab::DRIVE) {
           // Tab DRIVE: Tải game xuống thẻ
           if (g.localState == GameState::LOCAL) {
@@ -1263,8 +1290,9 @@ void UIManager::update() {
             }
           }
         } else {
-          // Tab THẺ NHỚ: Bấm A để sync lên Drive, có popup xác nhận
-          setState(UIState::CONFIRM_UPLOAD);
+          // Tab THẺ NHỚ chỉ liệt kê game đã trên thẻ — nhánh này không
+          // tới được, giữ toast phòng hờ.
+          showToast("Game chưa có trên thẻ nhớ.", {245, 158, 11, 255}, 2500);
         }
       } else if (input.isButtonJustPressed(Button::X)) {
         const auto &g = m_cachedGames[m_selectedGameIndex];
@@ -1339,17 +1367,6 @@ void UIManager::update() {
     if (input.isButtonJustPressed(Button::A)) {
       m_dialogs.confirm.confirm();
       setState(UIState::GAME_LIST);
-    } else if (input.isButtonJustPressed(Button::B) ||
-               input.isButtonJustPressed(Button::X)) {
-      m_dialogs.confirm.cancel();
-      setState(UIState::GAME_LIST);
-    }
-    break;
-  }
-
-  case UIState::CONFIRM_UPLOAD: {
-    if (input.isButtonJustPressed(Button::A)) {
-      m_dialogs.confirm.confirm();
     } else if (input.isButtonJustPressed(Button::B) ||
                input.isButtonJustPressed(Button::X)) {
       m_dialogs.confirm.cancel();
@@ -3177,6 +3194,21 @@ void UIManager::update() {
     break;
   }
 
+  case UIState::GAME_PLAYING: {
+    // Emulator giữ màn hình: thoát game (tự thoát) thì về list,
+    // B cưỡng chế dừng.
+    auto& emu = EmuLauncher::instance();
+    if (emu.pollExited() || !emu.isRunning()) {
+      goBack();
+      break;
+    }
+    if (input.isButtonJustPressed(Button::B)) {
+      emu.stop();
+      goBack();
+    }
+    break;
+  }
+
   case UIState::LOCALSEND_SEND: {
     // Legacy: chuyển thẳng sang Game Picker (LOCALSEND_SEND giờ chỉ là
     // bước chọn device → mở game picker).
@@ -3734,7 +3766,9 @@ void UIManager::renderFooter() {
           isLocal =
               (m_cachedGames[m_selectedGameIndex].localState == GameState::LOCAL);
         }
-        std::string aAction = (m_libraryTab == LibraryTab::DRIVE) ? (isLocal ? "Chơi" : "Tải") : "Tải lên";
+        std::string aAction = (m_libraryTab == LibraryTab::DRIVE)
+                                        ? (isLocal ? "Chơi" : "Tải")
+                                        : "Chơi";
         x = drawFooterHint("A", aAction, x, barY, barH, fg, m_fontSmall, iconSize, gap) + 30;
         x = drawFooterHint("B", "Lùi", x, barY, barH, fg, m_fontSmall, iconSize, gap) + 30;
         if (isLocal) {
@@ -3797,13 +3831,6 @@ void UIManager::renderFooter() {
                          iconSize, gap) +
           30;
     }
-  } else if (m_currentState == UIState::CONFIRM_UPLOAD) {
-    x = drawFooterHint("A", "Đồng bộ", x, barY, barH, cyan, m_fontSmall, iconSize,
-                       gap) +
-        30;
-    x = drawFooterHint("B", "Hủy", x, barY, barH, fg, m_fontSmall, iconSize,
-                       gap) +
-        30;
   } else if (m_currentState == UIState::CONFIRM_DELETE ||
              m_currentState == UIState::CONFIRM_BATCH_DELETE) {
     x = drawFooterHint("A", "Xóa", x, barY, barH, red, m_fontSmall, iconSize,
@@ -4680,46 +4707,6 @@ void UIManager::openConfirmBatchDeleteDialog() {
         m_selectedGameIds.clear();
       },
       true);
-}
-
-void UIManager::openConfirmUploadDialog() {
-  if (m_selectedGameIndex < 0 ||
-      m_selectedGameIndex >= static_cast<int>(m_cachedGames.size())) {
-    return;
-  }
-  const auto &g = m_cachedGames[m_selectedGameIndex];
-  int64_t gameId = g.id;
-  std::string gameTitle = g.title;
-  std::string pathName = !m_activeSystem.romDir.empty() ? m_activeSystem.romDir : m_activeSystem.code;
-  std::string sizeStr = FileSystemManager::instance().formatBytes(g.sizeBytes);
-  bool alreadyBackedUp = !g.cloudFileId.empty();
-
-  std::vector<std::string> lines;
-  lines.push_back(truncateToWidth(gameTitle, m_fontMedium, 440));
-  lines.push_back("Hệ máy: " + m_activeSystem.name + " (" + m_activeSystem.code + ")  •  " + sizeStr);
-  lines.push_back("Đích Drive: root/Roms/" + pathName + "/" + g.filename);
-  lines.push_back(alreadyBackedUp
-                      ? "Game đã có trên Drive. Tải lên để đồng bộ lại?"
-                      : "Xác nhận sao lưu game này lên Google Drive?");
-
-  m_dialogs.confirm.open(
-      "ĐỒNG BỘ LÊN DRIVE", std::move(lines),
-      [this, gameId, gameTitle]() {
-        if (!AuthManager::instance().isLinked()) {
-          showToast(UiStrings::TOAST_CONNECT_DRIVE_FIRST, {245, 158, 11, 255}, 3000);
-          setState(UIState::GAME_LIST);
-          return;
-        }
-        if (!AuthManager::instance().canUpload()) {
-          showToast(UiStrings::TOAST_CONNECT_PERSONAL_DRIVE, {245, 158, 11, 255}, 4000);
-          setState(UIState::GAME_LIST);
-          return;
-        }
-        showToast("Bắt đầu sao lưu \"" + gameTitle + "\"...", {168, 85, 247, 255}, 2000);
-        UploadManager::instance().startUploadGames({gameId});
-        setState(UIState::REVERSE_SYNC);
-      },
-      false);
 }
 
 void UIManager::renderConfirmDialogFromState() {
@@ -7182,6 +7169,11 @@ void UIManager::render() {
     return;
   }
 
+  // Emulator giữ toàn màn hình: không vẽ gì cả (giống CHROME).
+  if (m_currentState == UIState::GAME_PLAYING) {
+    return;
+  }
+
   SDL_SetRenderDrawColor(m_renderer, UiTheme::BG_APP.r, UiTheme::BG_APP.g,
                          UiTheme::BG_APP.b, 255);
   SDL_RenderClear(m_renderer);
@@ -7220,10 +7212,6 @@ void UIManager::render() {
   case UIState::CONFIRM_BATCH_DELETE:
     renderGameListState();
     renderConfirmBatchDeleteDialog();
-    break;
-  case UIState::CONFIRM_UPLOAD:
-    renderGameListState();
-    renderConfirmDialogFromState();
     break;
   case UIState::DISCLAIMER:
     renderDisclaimerState();
