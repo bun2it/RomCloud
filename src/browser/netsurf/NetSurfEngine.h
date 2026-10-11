@@ -69,12 +69,10 @@ public:
     // Reset/clear
     void clear();
 
-    // P20: in-process FULL input handler. Mirrors NetSurfWorkerBridge::
-    // handleInput() but without the SHM mouse path — in-process has no
-    // cursor mode, just 4-way D-Pad focus nav + scroll + form submit.
+    // FULL input handler (in-process only): 4-way D-Pad focus nav +
+    // scroll + form submit. No cursor mode, no click-at-pixel.
     // Returns true if the event was consumed. UIManager calls this when
-    // fullEngine + inProcessFull are both true; otherwise it calls
-    // NetSurfWorkerBridge::handleInput().
+    // engineMode is FULL.
     bool handleInput();
 
     // P17: form editing — FULL-mode counterpart of HtmlRenderer's P1-2c API.

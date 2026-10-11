@@ -7794,9 +7794,9 @@ void UIManager::handleBrowserInput() {
         engEndEdit();
       }
     } else {
-      // Browser navigation mode
+      // Browser navigation mode: FULL = NetSurfEngine in-process input
+      // handler; LITE = HtmlRenderer.
       if (BrowserManager::instance().engineMode() == BrowserEngine::FULL) {
-        // FULL in-process input handler (daemon removed).
         if (NetSurfEngine::instance().isInitialized()) {
           NetSurfEngine::instance().handleInput();
         }
@@ -7977,8 +7977,16 @@ void UIManager::toggleBrowserSetting(int idx) {
       s.fullEngine = !s.fullEngine;
       BrowserManager::instance().saveSettings();
       HtmlRenderer::instance().refreshAfterSettings();
-      showToast(s.fullEngine ? "Chế độ duyệt: Chrome (RC-Web)" : "Chế độ duyệt: LITE (tích hợp)",
-                {0, 180, 255, 255}, 1500);
+      // Đổi engine = thoát web về menu cho sạch (tránh state cũ của
+      // engine trước còn vẽ/xử lý): vào lại để áp dụng.
+      m_browserSettingsOpen = false;
+      m_browserFieldEditing = false;
+      m_browserUrlFocused = false;
+      BrowserManager::instance().close();
+      showToast(s.fullEngine ? "Chế độ Chrome — vào lại web để áp dụng"
+                             : "Chế độ LITE — vào lại web để áp dụng",
+                {0, 180, 255, 255}, 2000);
+      setState(UIState::MENU);
       return;
     }
     case 8: s.article = !s.article; break;

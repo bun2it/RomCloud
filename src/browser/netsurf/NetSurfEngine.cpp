@@ -495,10 +495,8 @@ bool NetSurfEngine::submitFocusedForm() {
 }
 
 bool NetSurfEngine::handleInput() {
-    // P20: in-process FULL input handler. Mirrors the daemon's handler
-    // in NetSurfWorkerBridge but without the SHM mouse path — in-process
-    // FULL is keyboard/4-way-nav only, no cursor mode, no click-at-pixel.
-    // Returns true if the event was consumed.
+    // FULL input handler (in-process only): keyboard/4-way-nav, no cursor
+    // mode, no click-at-pixel. Returns true if the event was consumed.
     if (!m_initialized) return false;
     InputManager& input = InputManager::instance();
 

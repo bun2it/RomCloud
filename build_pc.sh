@@ -126,7 +126,6 @@ $CXX_CMD -std=c++17 -O2 -Wall -Wextra \
     src/browser/netsurf/NetSurfRenderer.cpp \
     src/browser/netsurf/NetSurfEngine.cpp \
     src/browser/netsurf/NetSurfJsBridge.cpp \
-    src/browser/netsurf/NetSurfWorkerBridge.cpp \
     build/nsgif_gif.o \
     build/nsgif_lzw.o \
     build/duktape.o \

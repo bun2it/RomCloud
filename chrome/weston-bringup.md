@@ -55,9 +55,10 @@ export FONTCONFIG_FILE=/mnt/SDCARD/Apps/RomCloud/rc-web/fonts.conf
 
 ## Electron (đã kiểm chứng)
 
-* Loader: cần closure 76 lib (Debian bullseye + kv runtime/lib) + file
-  `compat_shim.so` của ta (`localtime64`, `nspr_use_zone_allocator`).
-  Xem `fetchsyslibs.py` (ngoài repo, đã chạy xong) + `src/browser/chrome/compat_shim.c`.
+* Loader: cần closure 76 lib (Debian bullseye + kv runtime/lib).
+  Xem `fetchsyslibs.py` (ngoài repo, đã chạy xong).
+  (Ghi chú 2026-10: `compat_shim.c` đã bỏ — Electron chạy ổn không cần
+  LD_PRELOAD trên glibc hiện tại.)
 * `--version` chạy OK (= loader/libs/CPU ổn). V8 OK (`ELECTRON_RUN_AS_NODE=1`).
 * Flags chắc chắn: `--no-sandbox` PHẢI nằm trên argv (JS appendSwitch quá muộn).
 * Ozone: headless absent (trap im lặng), wayland cần xdg_shell,

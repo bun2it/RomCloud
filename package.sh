@@ -52,11 +52,6 @@ if [ -f bin/gamecast_d ]; then
     cp bin/gamecast_d "$STAGING_DIR/Apps/RomCloud/bin/"
     chmod +x "$STAGING_DIR/Apps/RomCloud/bin/gamecast_d"
 fi
-if [ -f bin/netsurf ]; then
-    cp bin/netsurf "$STAGING_DIR/Apps/RomCloud/bin/"
-    chmod +x "$STAGING_DIR/Apps/RomCloud/bin/netsurf"
-fi
-
 # Copy YouTube support (python3 + yt-dlp)
 # yt-dlp-glibc (38MB) chi dong trong goi Full; goi Lite se tu tai qua
 # mpv_bundle.zip khi phat YouTube lan dau (UpdateManager::checkAndInstallDependencies).

@@ -6,7 +6,6 @@
 #include "../config/AppConfig.h"
 #include "netsurf/NetSurfBridge.h"
 #include "netsurf/NetSurfEngine.h"
-#include "netsurf/NetSurfWorkerBridge.h"
 #include <unistd.h>  // access()
 #include <pthread.h>
 #include <fstream>
@@ -57,7 +56,6 @@ void BrowserManager::loadSettings() {
         else if (k == "svg") m_settings.svg = boolean(v);
         else if (k == "js") m_settings.js = boolean(v);
         else if (k == "fullEngine") m_settings.fullEngine = boolean(v);
-        else if (k == "inProcessFull") m_settings.inProcessFull = boolean(v);
         else if (k == "article") m_settings.article = boolean(v);
     }
 }
@@ -76,7 +74,6 @@ void BrowserManager::saveSettings() {
     f << "svg=" << (m_settings.svg ? 1 : 0) << "\n";
     f << "js=" << (m_settings.js ? 1 : 0) << "\n";
     f << "fullEngine=" << (m_settings.fullEngine ? 1 : 0) << "\n";
-    f << "inProcessFull=" << (m_settings.inProcessFull ? 1 : 0) << "\n";
     f << "article=" << (m_settings.article ? 1 : 0) << "\n";
 }
 
@@ -211,17 +208,6 @@ void BrowserManager::fetchAndLoadFull(const std::string& url) {
     pthread_detach(tid);
 }
 
-void BrowserManager::fallbackToDaemon(const std::string& reason) {
-    // P20: called when NetSurfEngine init fails (libs missing on device,
-    // libcss/libhubbub couldn't be loaded). Flip the in-process flag off
-    // for the rest of the session so openUrl() routes to the daemon
-    // binary path. Does NOT change m_settings.inProcessFull — that's
-    // user-controlled; only this session flips.
-    if (m_inProcessFullFailed) return;
-    Logger::warn("BrowserManager: in-process FULL unavailable, falling back to daemon: " + reason);
-    m_inProcessFullFailed = true;
-}
-
 std::string BrowserManager::normalizeUrl(const std::string& raw) {
     // Trim leading/trailing whitespace (VK can leave some).
     size_t b = raw.find_first_not_of(" \t\r\n");
@@ -252,7 +238,6 @@ void BrowserManager::close() {
     // underflow) on the very first push, leaving canGoBack() true for a
     // single-entry history.
     m_historyPos = 0;
-    NetSurfWorkerBridge::instance().stop();
     NetSurfEngine::instance().clear();
 }
 
@@ -308,8 +293,7 @@ void BrowserManager::openUrlNoHistory(const std::string& url) {
     // P24: load a URL without touching m_history / m_historyPos. Used by
     // goBack() / goForward() / refresh() so navigating history doesn't
     // push a duplicate entry. Mirrors HtmlRenderer::loadUrlNoHistory.
-    // We still run the M6 whitelist + the in-process vs daemon split, but
-    // skip the push-back-to-history step.
+    // We still run the M6 whitelist, but skip the push-back-to-history step.
     std::string fixed = normalizeUrl(url);
     if (fixed.substr(0, 7) != "http://" && fixed.substr(0, 8) != "https://") {
         Logger::error("BrowserManager: refused non-http(s) URL: " + fixed);
@@ -324,22 +308,18 @@ void BrowserManager::openUrlNoHistory(const std::string& url) {
     // P24: test-only fast path. When the test has disabled fetches, we
     // just acknowledge the URL (cursor + currentUrl already updated above)
     // and flip to RENDERING so the caller can observe a stable state.
-    // No network, no daemon fork, no engine load. This keeps the P24
+    // No network, no engine load. This keeps the P24
     // history-cursor tests fully offline.
     if (m_testFetchDisabled) {
         m_state = BrowserState::RENDERING;
         return;
     }
     if (m_settings.fullEngine) {
-        if (m_settings.inProcessFull && !m_inProcessFullFailed) {
-            Logger::info("BrowserManager: FULL engine (in-process) for " + fixed);
-            NetSurfEngine::instance().clear();
-            fetchAndLoadFull(fixed);
-        } else {
-            Logger::info("BrowserManager: FULL engine (daemon) for " + fixed);
-            NetSurfWorkerBridge::instance().start(fixed);
-            m_state = BrowserState::RENDERING;
-        }
+        // FULL back/forward/reload stays in-process (NetSurfEngine);
+        // fresh nav goes to Chrome (see openUrl).
+        Logger::info("BrowserManager: FULL engine (in-process) for " + fixed);
+        NetSurfEngine::instance().clear();
+        fetchAndLoadFull(fixed);
     } else {
         HtmlRenderer::instance().loadUrl(fixed);
     }
@@ -357,9 +337,7 @@ void BrowserManager::refresh() {
 }
 
 void BrowserManager::stop() {
-    // P20: stop BOTH engines (in-process + daemon) — whichever was active
-    // shuts down cleanly, the other one is a no-op.
-    NetSurfWorkerBridge::instance().stop();
+    // Stop in-process engine + LITE renderer (daemon removed).
     HtmlRenderer::instance().stop();
     NetSurfEngine::instance().clear();
     m_state = BrowserState::IDLE;

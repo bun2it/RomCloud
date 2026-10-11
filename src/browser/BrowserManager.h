@@ -29,10 +29,7 @@ struct BrowserSettings {
     bool video = false;     // in-page video: off (1st frame / poster only)
     bool svg = false;       // SVG raster
     bool js = false;        // JavaScript engine
-    bool fullEngine = true; // true = FULL (NetSurf), false = LITE (HtmlRenderer)
-    // Full Engine: Mặc định sử dụng NetSurf Native Daemon (NetSurfWorkerBridge)
-    // để NetSurf tự xử lý layout 2D, CSS cascade và JavaScript qua framebuffer SHM.
-    bool inProcessFull = false;
+    bool fullEngine = true; // true = FULL (Chrome RC-Web), false = LITE (HtmlRenderer)
     bool article = true;    // P11 reader mode: keep article, hide chrome
 };
 
@@ -64,13 +61,13 @@ public:
 
     // P24: history test seams. Cursor-based history lets us goBack AND
     // goForward after the user opens several URLs. Used by test_browser.cpp
-    // to verify the in-process navigation paths don't re-fork the daemon.
+    // to verify the in-process navigation paths.
     size_t historySizeForTest() const { return m_history.size(); }
     size_t historyPosForTest() const { return m_historyPos; }
     // P24: test-only seam to push a URL onto the history cursor without
     // triggering the async fetch+layout side-effect (which would race the
     // test runner). Same logic as openUrl()'s history-cursor update but
-    // skips the network/daemon/engine branch.
+    // skips the network/engine branch.
     void pushHistoryForTest(const std::string& url) {
         if (m_historyPos + 1 < m_history.size()) {
             m_history.resize(m_historyPos + 1);
@@ -81,7 +78,7 @@ public:
     }
     // P24: test-only fetch-suppression. When set, openUrlNoHistory() will
     // update the cursor + currentUrl but skip the actual fetchAndLoadFull /
-    // NetSurfWorkerBridge / HtmlRenderer::loadUrl branch. This keeps the
+    // HtmlRenderer::loadUrl branch. This keeps the
     // test offline and avoids log spam from real HTTP requests to
     // example.com during CI. Default false.
     void setTestFetchDisabled(bool v) { m_testFetchDisabled = v; }
@@ -99,11 +96,6 @@ public:
     const BrowserSettings& settings() const { return m_settings; }
     void saveSettings();
 
-    // P20: read-only session flag — true after in-process FULL init failed
-    // and we've auto-flipped to daemon. Used by UIManager render loop to
-    // route the right way without touching the user-controlled settings.
-    bool testInProcessFailed() const { return m_inProcessFullFailed; }
-
     // Cleanup
     void stop();
 
@@ -120,21 +112,15 @@ private:
     void loadSettings();
     std::string settingsPath() const;
 
-    // P20: async fetch HTML and feed NetSurfEngine (in-process FULL).
-    // Spawns a detached pthread so the UI stays responsive. On error,
-    // sets m_state = BrowserState::ERROR with a user-readable message.
-    // Mirrors HtmlRenderer::loadUrl's worker-thread pattern.
+    // Fetch HTML and feed NetSurfEngine (in-process FULL). Spawns a
+    // detached pthread so the UI stays responsive. On error, sets m_state
+    // = BrowserState::ERROR with a user-readable message.
     void fetchAndLoadFull(const std::string& url);
 
     // P24: load a URL without modifying m_history / m_historyPos. Used by
     // goBack() / goForward() / refresh() so navigating history doesn't
     // push a new entry (mirrors HtmlRenderer::loadUrlNoHistory).
     void openUrlNoHistory(const std::string& url);
-
-    // P20: switch to daemon fallback when in-process FULL init fails
-    // (missing libcss/libhubbub). Called from UIManager at boot if
-    // NetSurfEngine reports !isInitialized() after init().
-    void fallbackToDaemon(const std::string& reason);
 
     BrowserState m_state = BrowserState::IDLE;
     std::string m_currentUrl;
@@ -146,9 +132,6 @@ private:
     // m_historyPos without mutating the vector; goForward() increments.
     std::vector<std::string> m_history;
     size_t m_historyPos = 0;
-    // P20: true after we tried in-process FULL and it failed at init
-    // time (auto-fallback to daemon for the rest of the session).
-    bool m_inProcessFullFailed = false;
     // P24: test-only fetch-suppression (see setTestFetchDisabled). When
     // true, openUrlNoHistory() updates cursor/currentUrl but skips the
     // actual fetch+layout+engine side-effect. Lets test_browser.cpp

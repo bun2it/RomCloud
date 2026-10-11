@@ -142,7 +142,6 @@ $ZIG c++ \
     src/browser/netsurf/NetSurfRenderer.cpp \
     src/browser/netsurf/NetSurfEngine.cpp \
     src/browser/netsurf/NetSurfJsBridge.cpp \
-    src/browser/netsurf/NetSurfWorkerBridge.cpp \
     build/nsgif_gif.o \
     build/nsgif_lzw.o \
     build/duktape.o \
@@ -178,28 +177,6 @@ if [ "$RELEASE" = "1" ]; then
     ls -lh bin/RomCloud bin/RomCloud.debug
     file bin/RomCloud
 fi
-
-echo "=== Compiling NetSurf mobile-UA shim (ua_shim) ==="
-mkdir -p lib
-$ZIG cc \
-    -target aarch64-linux-gnu.2.33 \
-    -O2 \
-    -shared -fPIC \
-    src/browser/netsurf/ua_shim.c \
-    -o lib/netsurf_ua_shim.so
-ls -lh lib/netsurf_ua_shim.so
-file lib/netsurf_ua_shim.so
-
-echo "=== Compiling Chromium compat shim (LD_PRELOAD) ==="
-mkdir -p build
-$ZIG cc \
-    -target aarch64-linux-gnu.2.33 \
-    -O2 \
-    -shared -fPIC \
-    src/browser/chrome/compat_shim.c \
-    -o build/rc-compat_shim.so
-ls -lh build/rc-compat_shim.so
-file build/rc-compat_shim.so
 
 echo "=== Compiling GameCast Daemon (gamecast_d) ==="
 $ZIG c++ \
