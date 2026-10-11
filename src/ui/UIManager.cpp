@@ -914,15 +914,23 @@ void UIManager::update() {
       } else if (selectedId == "weather") {
         openWeather();
       } else if (selectedId == "browser") {
-        // Vào menu trình duyệt của RomCloud trước (URL/history/cài đặt
-        // engine ở SELECT): weston chỉ fork khi user chốt URL ở chế độ
-        // FULL, tránh giành DRM ngay lúc vào.
-        initBrowserHistory();
+        // Vào thẳng engine đang chọn (không qua menu trung gian):
+        // FULL = fork weston (CHROME), LITE = duyệt inline (BROWSER).
+        // Đổi engine ở Cài đặt → Tùy chọn → "Chế độ duyệt web".
         if (BrowserManager::instance().engineMode() == BrowserEngine::FULL) {
-          showToast("Chế độ Chrome — START nhập URL để mở",
-                    {0, 180, 255, 255}, 2000);
+          std::string url = BrowserManager::instance().currentUrl();
+          if (url.empty()) url = m_browserUrl;
+          if (ChromeBridge::instance().openUrl(url)) {
+            m_urlEditorFromChrome = false;
+            setState(UIState::CHROME);
+          } else {
+            showToast("Chưa cài RC-Web (xem chrome/README)...",
+                      {239, 68, 68, 255}, 3000);
+            setState(UIState::BROWSER);
+          }
+        } else {
+          setState(UIState::BROWSER);
         }
-        setState(UIState::BROWSER);
       } else if (selectedId == "iptv") {
         if (IPTVManager::instance().playlistCount() == 0) {
           IPTVManager::instance().loadPlaylists();
@@ -1644,8 +1652,8 @@ void UIManager::update() {
         }
       }
     } else if (m_settingsTab == 1) {
-      // ─── Tab 1: CÀI ĐẶT (6 rows: 0..5) ──────────────────────────────
-      const int totalRows = 6;
+      // ─── Tab 1: CÀI ĐẶT (7 rows: 0..6) ──────────────────────────────
+      const int totalRows = 7;
       if (input.isButtonJustPressed(Button::UP)) {
         if (m_selectedSettingsRow > 0) {
           m_selectedSettingsRow--;
@@ -1736,6 +1744,16 @@ void UIManager::update() {
           runWifiDiagnostics();
           showToast("Đang kiểm tra kết nối mạng Wi-Fi...", {0, 180, 255, 255},
                     2000);
+        } else if (m_selectedSettingsRow == 6) {
+          // Chế độ duyệt web: Chrome (RC-Web) <-> LITE. Áp dụng lần vào
+          // web sau (đang trong web thì đổi ở SELECT trong web).
+          BrowserSettings& bs = BrowserManager::instance().settings();
+          bs.fullEngine = !bs.fullEngine;
+          BrowserManager::instance().saveSettings();
+          HtmlRenderer::instance().refreshAfterSettings();
+          showToast(bs.fullEngine ? "Duyệt web: Chrome (RC-Web)"
+                                  : "Duyệt web: LITE (tích hợp)",
+                    {0, 180, 255, 255}, 2000);
         }
       }
     } else if (m_settingsTab == 2) {
@@ -5228,6 +5246,18 @@ void UIManager::renderSettingsState() {
     items.push_back({"Kiểm tra mạng Wi-Fi", m_wifiDiagStatus, m_wifiDiagColor,
                      "[A] Kiểm tra", SDL_Color{21, 94, 117, 255},
                      SDL_Color{255, 255, 255, 255}});
+
+    // 6: Chế độ duyệt web (Chrome RC-Web / LITE tích hợp). Áp dụng lần
+    // vào web sau (đang trong web thì đổi ở SELECT, tự về menu).
+    {
+      bool isFull =
+          BrowserManager::instance().engineMode() == BrowserEngine::FULL;
+      items.push_back(
+          {"Chế độ duyệt web", isFull ? "Chrome (RC-Web)" : "LITE (tích hợp)",
+           isFull ? SDL_Color{0, 180, 255, 255} : SDL_Color{34, 197, 94, 255},
+           "[A] Đổi", SDL_Color{88, 28, 135, 255},
+           SDL_Color{255, 255, 255, 255}});
+    }
   }
 
   int cardX = 24;
