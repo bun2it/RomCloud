@@ -33,7 +33,6 @@ enum class VkAction {
     None,       // vua nhap ky tu / doi trang thai, o lai ban phim
     Commit,     // START / o "Xong" — query san sang commit
     Cancel,     // B khi query rong / o "Huy" — thoat khong commit
-    Backspace,  // B khi query con chu — giong hanh vi YouTube hien tai
 };
 
 class VirtualKeyboard {
@@ -169,12 +168,6 @@ public:
     static void toggleTelex(VkState& s, ToastFn&& toast) {
         s.telexMode = !s.telexMode;
         toast(s.telexMode ? "Chế độ: TELEX" : "Chế độ: TIẾNG ANH (US)");
-    }
-
-    // Nut B: xoa dan neu con chu, het chu thi thoat (khop hanh vi YouTube cu).
-    static VkAction pressB(VkState& s) {
-        if (!s.query.empty()) { TelexHelper::popUtf8(s.query); return VkAction::Backspace; }
-        return VkAction::Cancel;
     }
 
 private:

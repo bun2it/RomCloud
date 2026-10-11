@@ -779,48 +779,6 @@ void UiRenderer::drawPill(int x, int y, int w, int h, const std::string &text,
   drawText(disp, x + w / 2, textYCentered(y, h, f), fg, f, true);
 }
 
-void UiRenderer::drawButton(int x, int y, int w, int h,
-                            const std::string &label, bool focused,
-                            bool danger) {
-  if (w <= 0)
-    w = buttonWidth(label, m_fSmall);
-  else if (w < UiTheme::BTN_MIN_W)
-    w = UiTheme::BTN_MIN_W;
-  SDL_Color bg;
-  if (danger && focused)
-    bg = UiTheme::ACCENT_RED;
-  else if (focused)
-    bg = UiTheme::FOCUS_BG;
-  else
-    bg = UiTheme::PILL_BG;
-  drawRoundedRect(x, y, w, h, UiTheme::RADIUS_BTN, bg, true);
-  if (focused)
-    drawRoundedBorder(x, y, w, h, UiTheme::RADIUS_BTN, UiTheme::FOCUS_GLOW, 2);
-  else
-    drawRoundedBorder(x, y, w, h, UiTheme::RADIUS_BTN, UiTheme::PILL_BORDER, 1);
-  if (!m_fSmall)
-    return;
-  std::string disp = truncateToWidth(label, m_fSmall, w - 24);
-  drawText(disp, x + w / 2, textYCentered(y, h, m_fSmall), UiTheme::TEXT_MAIN, m_fSmall,
-           true);
-}
-
-void UiRenderer::drawRow(int x, int y, int w, int h, bool focused, bool dim) {
-  if (focused) {
-    drawRoundedRect(x - 2, y - 2, w + 4, h + 4, UiTheme::RADIUS_ROW + 2,
-                    UiTheme::FOCUS_GLOW, false);
-    SDL_BlendMode prev;
-    SDL_GetRenderDrawBlendMode(m_r, &prev);
-    SDL_SetRenderDrawBlendMode(m_r, SDL_BLENDMODE_BLEND);
-    drawRoundedRect(x, y, w, h, UiTheme::RADIUS_ROW, UiTheme::FOCUS_BG_SOFT, true);
-    SDL_SetRenderDrawBlendMode(m_r, prev);
-  } else {
-    SDL_Color bg = dim ? UiTheme::CARD_BG : UiTheme::CARD_SOLID;
-    drawRoundedRect(x, y, w, h, UiTheme::RADIUS_ROW, bg, true);
-    drawRoundedBorder(x, y, w, h, UiTheme::RADIUS_ROW, UiTheme::CARD_BORDER, 1);
-  }
-}
-
 int UiRenderer::textYCentered(int y, int h, TTF_Font *font) {
   if (!font) return y + h / 2 - 8;
   // Can giua quang hoc theo khoi glyph (ascent+|descent|) thay vi FontHeight
@@ -1028,11 +986,6 @@ void UiRenderer::drawAppBackground() {
   drawRect(0, 0, UiTheme::APP_W, UiTheme::APP_H, UiTheme::BG_APP, true);
 }
 
-void UiRenderer::drawCard(int x, int y, int w, int h) {
-  drawRoundedRect(x, y, w, h, UiTheme::RADIUS_CARD, UiTheme::CARD_BG, true);
-  drawRoundedBorder(x, y, w, h, UiTheme::RADIUS_CARD, UiTheme::CARD_BORDER, 1);
-}
-
 void UiRenderer::drawFocusRow(int x, int y, int w, int h) {
   drawRoundedRect(x - 2, y - 2, w + 4, h + 4, UiTheme::RADIUS_ROW + 2,
                   UiTheme::FOCUS_GLOW, false);
@@ -1208,73 +1161,6 @@ void UiRenderer::drawAppHeader(const std::string &title,
                24, startY + titleH + gap, UiTheme::TEXT_DIM, m_fSmall);
   }
   drawHeaderStatus();
-}
-
-void UiRenderer::drawPadIcon(UiTheme::PadBtn btn, int x, int y, int size) {
-  using PB = UiTheme::PadBtn;
-  if (btn == PB::L1R1) {
-    int half = size / 2 - 1;
-    drawButtonIcon("L1", x, y + (size - half) / 2, half);
-    drawButtonIcon("R1", x + half + 2, y + (size - half) / 2, half);
-    return;
-  }
-  if (btn == PB::UPDOWN) {
-    int half = size / 2 - 1;
-    drawButtonIcon("UP", x, y + (size - half) / 2, half);
-    drawButtonIcon("DOWN", x + half + 2, y + (size - half) / 2, half);
-    return;
-  }
-  const char *s = "A";
-  switch (btn) {
-  case PB::A:
-    s = "A";
-    break;
-  case PB::B:
-    s = "B";
-    break;
-  case PB::X:
-    s = "X";
-    break;
-  case PB::Y:
-    s = "Y";
-    break;
-  case PB::START:
-    s = "START";
-    break;
-  case PB::SELECT:
-    s = "SELECT";
-    break;
-  case PB::MENU:
-    s = "MENU";
-    break;
-  case PB::DPAD:
-    s = "DPAD";
-    break;
-  case PB::L1:
-    s = "L1";
-    break;
-  case PB::R1:
-    s = "R1";
-    break;
-  case PB::L2:
-    s = "L2";
-    break;
-  case PB::R2:
-    s = "R2";
-    break;
-  case PB::PLAY:
-    s = "PLAY";
-    break;
-  case PB::AB:
-    s = "A";
-    break;
-  default:
-    s = "A";
-    break;
-  }
-  drawButtonIcon(s, x, y, size);
-  if (btn == PB::AB)
-    drawButtonIcon("B", x + size / 2, y, size / 2);
 }
 
 void UiRenderer::drawAppFooter(const std::vector<UiTheme::FooterHint> &hints) {

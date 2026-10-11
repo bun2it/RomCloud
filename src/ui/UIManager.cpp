@@ -3483,15 +3483,6 @@ void UIManager::drawPill(int x, int y, int w, int h, const std::string &text,
   m_ui.drawPill(x, y, w, h, text, active, font);
 }
 
-void UIManager::drawButton(int x, int y, int w, int h, const std::string &label,
-                           bool focused, bool danger) {
-  m_ui.drawButton(x, y, w, h, label, focused, danger);
-}
-
-void UIManager::drawRow(int x, int y, int w, int h, bool focused, bool dim) {
-  m_ui.drawRow(x, y, w, h, focused, dim);
-}
-
 int UIManager::textYCentered(int y, int h, TTF_Font *font) {
   return m_ui.textYCentered(y, h, font);
 }
@@ -3513,14 +3504,6 @@ int UIManager::drawFooterHint(const std::string &button,
                               int iconSize, int gap) {
   return m_ui.drawFooterHint(button, label, x, barY, barH, color, font,
                              iconSize, gap);
-}
-
-void UIManager::drawFooterHintsCentered(
-    const std::vector<std::pair<std::string, std::string>> &hints, int barY,
-    int barH, SDL_Color color, TTF_Font *font, int iconSize, int gap,
-    int hintGap) {
-  m_ui.drawFooterHintsCentered(hints, barY, barH, color, font, iconSize, gap,
-                               hintGap);
 }
 
 void UIManager::drawBadgeDual(int x, int y, int w, int h,
@@ -3548,9 +3531,6 @@ void UIManager::drawModalDialog(int x, int y, int w, int h, int radius,
                                 int titleH) {
   m_ui.drawModalDialog(x, y, w, h, radius, bodyBg, titleBg, titleH);
 }
-void UIManager::drawCard(int x, int y, int w, int h) {
-  m_ui.drawCard(x, y, w, h);
-}
 void UIManager::drawFocusRow(int x, int y, int w, int h) {
   m_ui.drawFocusRow(x, y, w, h);
 }
@@ -3574,9 +3554,6 @@ void UIManager::drawAppHeader(const std::string &title,
   m_ui.drawAppHeader(title, sub);
 }
 void UIManager::drawHeaderStatus() { m_ui.drawHeaderStatus(); }
-void UIManager::drawPadIcon(UiTheme::PadBtn btn, int x, int y, int size) {
-  m_ui.drawPadIcon(btn, x, y, size);
-}
 void UIManager::drawAppFooter(const std::vector<UiTheme::FooterHint> &hints) {
   m_ui.drawAppFooter(hints);
 }
@@ -7269,9 +7246,8 @@ void UIManager::render() {
   case UIState::DIAGNOSTICS:
     renderDiagnosticsState();
     break;
-  // P5: UIState::OTA_UPDATE không còn được set nữa (OTA là tab 1 trong
-  // Settings, dispatch tới renderSettingsState ở trên). Enum giữ để tránh
-  // breaking change.
+  // P5: OTA là tab 1 trong Settings (dispatch tới renderSettingsState
+  // ở trên), không còn state riêng.
   case UIState::OTA_CHANGELOG:
     renderOTAChangelogState();
     break;

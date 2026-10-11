@@ -56,14 +56,6 @@ public:
   bool hideJunk() const { return m_hideJunk; }
   bool romOnly() const { return m_romOnly; }
   bool dirOnly() const { return m_dirOnly; }
-  void setHideJunk(bool v) {
-    m_hideJunk = v;
-    refresh();
-  }
-  void setRomOnly(bool v) {
-    m_romOnly = v;
-    refresh();
-  }
   void setDirOnly(bool v) {
     m_dirOnly = v;
     refresh();
@@ -268,12 +260,6 @@ public:
     return false;
   }
 
-  // Bung file .zip/.rar/.7z đang chọn vào chính thư mục đang đứng.
-  // Chạy nền qua m_task → progress dialog + hủy + toast có sẵn.
-  bool extractArchiveHere() {
-    return extractArchiveTo(m_path, "");
-  }
-
   // Bung archive (mặc định = file đang chọn) vào dstDir.
   bool extractArchiveTo(const std::string& dstDir, const std::string& archiveOverride = "") {
     const ExplorerEntry *e = current();
@@ -329,19 +315,6 @@ public:
         refresh();
       });
     });
-  }
-
-  static std::string propertiesOf(const ExplorerEntry &e) {
-    std::string out = e.name + "\n";
-    if (e.isDir) {
-      DirStats s = FileSystemManager::instance().getDirStats(e.path);
-      out += std::to_string(s.files) + " file / " + std::to_string(s.dirs) +
-             " folder\n";
-      out += FileSystemManager::instance().formatBytes(s.bytes);
-    } else {
-      out += FileSystemManager::instance().formatBytes(e.sizeBytes);
-    }
-    return out;
   }
 
   std::string suggestNewFolderName() const {

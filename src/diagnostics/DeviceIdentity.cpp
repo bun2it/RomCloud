@@ -86,13 +86,6 @@ std::string DeviceIdentity::getDeviceId() {
     return m_deviceId;
 }
 
-std::string DeviceIdentity::getFullHash() {
-    if (!m_initialized) {
-        getDeviceId();  // Force init
-    }
-    return m_fullHash;
-}
-
 std::string DeviceIdentity::tryChipId() {
     // TrimUI Brick Pro uses MTD partition for device ID
     // Common paths for various devices

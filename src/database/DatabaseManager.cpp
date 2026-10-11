@@ -744,44 +744,6 @@ bool DatabaseManager::getGameByFilename(int systemId, const std::string& filenam
     return found;
 }
 
-bool DatabaseManager::getGameByCloudId(const std::string& cloudFileId, GameRecord& outGame) {
-    if (cloudFileId.empty()) return false;
-    std::lock_guard<std::recursive_mutex> lock(m_mutex);
-    if (!m_db) return false;
-
-    const char* sql = "SELECT id, cloud_file_id, system_id, filename, title, size_bytes, mime_type, drive_modified_time, checksum_sha256, local_path, local_state, cover_path, created_at, updated_at FROM games WHERE cloud_file_id = ? LIMIT 1;";
-    sqlite3_stmt* stmt = nullptr;
-    bool found = false;
-
-    if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
-        sqlite3_bind_text(stmt, 1, cloudFileId.c_str(), -1, SQLITE_STATIC);
-        if (sqlite3_step(stmt) == SQLITE_ROW) {
-            outGame.id = sqlite3_column_int64(stmt, 0);
-            outGame.cloudFileId = cloudFileId;
-            outGame.systemId = sqlite3_column_int(stmt, 2);
-            outGame.filename = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 3));
-            outGame.title = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 4));
-            outGame.sizeBytes = static_cast<uint64_t>(sqlite3_column_int64(stmt, 5));
-            const char* mime = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 6));
-            if (mime) outGame.mimeType = mime;
-            const char* mod = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 7));
-            if (mod) outGame.driveModifiedTime = mod;
-            const char* sha = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 8));
-            if (sha) outGame.checksumSha256 = sha;
-            const char* lpath = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 9));
-            if (lpath) outGame.localPath = lpath;
-            outGame.localState = static_cast<GameState>(sqlite3_column_int(stmt, 10));
-            const char* cov = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 11));
-            if (cov) outGame.coverPath = cov;
-            outGame.createdAt = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 12));
-            outGame.updatedAt = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 13));
-            found = true;
-        }
-        sqlite3_finalize(stmt);
-    }
-    return found;
-}
-
 bool DatabaseManager::upsertGame(const GameRecord& game, int64_t* outInsertedId) {
     std::lock_guard<std::recursive_mutex> lock(m_mutex);
     if (!m_db) return false;
@@ -979,24 +941,6 @@ bool DatabaseManager::updateGameLocalState(int64_t gameId, GameState state, cons
         sqlite3_bind_text(stmt, 2, localPath.c_str(), -1, SQLITE_STATIC);
         sqlite3_bind_text(stmt, 3, now.c_str(), -1, SQLITE_STATIC);
         sqlite3_bind_int64(stmt, 4, gameId);
-        sqlite3_step(stmt);
-        sqlite3_finalize(stmt);
-        return true;
-    }
-    return false;
-}
-
-bool DatabaseManager::updateGameCover(int64_t gameId, const std::string& coverPath) {
-    std::lock_guard<std::recursive_mutex> lock(m_mutex);
-    if (!m_db) return false;
-
-    std::string now = getCurrentTimestamp();
-    const char* sql = "UPDATE games SET cover_path = ?, updated_at = ? WHERE id = ?;";
-    sqlite3_stmt* stmt = nullptr;
-    if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
-        sqlite3_bind_text(stmt, 1, coverPath.c_str(), -1, SQLITE_STATIC);
-        sqlite3_bind_text(stmt, 2, now.c_str(), -1, SQLITE_STATIC);
-        sqlite3_bind_int64(stmt, 3, gameId);
         sqlite3_step(stmt);
         sqlite3_finalize(stmt);
         return true;

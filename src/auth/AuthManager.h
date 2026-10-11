@@ -40,7 +40,6 @@ public:
     void cancelDeviceFlow();
     void logout();
     void linkPublicFolder(const std::string& folderId, const std::string& folderUrl);
-    bool exchangeAuthCode(const std::string& code, const std::string& redirectUri);
 
     // Personal token and upload permission check
     bool canUpload() const;

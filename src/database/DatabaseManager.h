@@ -73,11 +73,9 @@ public:
     std::vector<GameRecord> getUnscrapedLocalGames(int limit = 0);
     bool getGameById(int64_t gameId, GameRecord& outGame);
     bool getGameByFilename(int systemId, const std::string& filename, GameRecord& outGame);
-    bool getGameByCloudId(const std::string& cloudFileId, GameRecord& outGame);
 
     bool upsertGame(const GameRecord& game, int64_t* outInsertedId = nullptr);
     bool updateGameLocalState(int64_t gameId, GameState state, const std::string& localPath = "");
-    bool updateGameCover(int64_t gameId, const std::string& coverPath);
     bool updateGameMetadata(int64_t gameId, const std::string& description, const std::string& releaseYear, const std::string& developer, const std::string& genre, const std::string& coverPath = "");
     bool moveGameToSystem(int64_t gameId, int newSystemId, const std::string& newLocalPath, const std::string& newCoverPath = "");
     bool markGameDeletedLocally(int64_t gameId);

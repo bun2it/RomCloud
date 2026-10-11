@@ -70,9 +70,6 @@ public:
     // ---- widget ----
     void drawPill(int x, int y, int w, int h, const std::string& text,
                   bool active, TTF_Font* font = nullptr);
-    void drawButton(int x, int y, int w, int h, const std::string& label,
-                    bool focused, bool danger = false);
-    void drawRow(int x, int y, int w, int h, bool focused, bool dim = false);
     int textYCentered(int y, int h, TTF_Font* font);
     void drawRowMainSub(int x, int y, int h, const std::string& main, TTF_Font* fMain,
                         const std::string& sub, TTF_Font* fSub,
@@ -96,12 +93,10 @@ public:
 
     // ---- theme helpers ----
     void drawAppBackground();
-    void drawCard(int x, int y, int w, int h);
     void drawFocusRow(int x, int y, int w, int h);
     void drawAppHeader(const std::string& title, const std::string& sub = "");
     // Cum status phai header kieu stock: [wifi] [% pin + icon pin] [gio]
     void drawHeaderStatus();
-    void drawPadIcon(UiTheme::PadBtn btn, int x, int y, int size);
     void drawAppFooter(const std::vector<UiTheme::FooterHint>& hints);
     void beginModalDim();
 

@@ -17,9 +17,7 @@ int NetSurfLayoutEngine::measureText(const std::string& text, int fontSizePx,
                                      int letterSpacing, int wordSpacing) const {
     if (text.empty() || fontSizePx <= 0) return 0;
     int totalPx = 0;
-    if (m_textMeasurer) {
-        totalPx = m_textMeasurer(text, fontSizePx);
-    } else {
+    {
         // High-accuracy UTF-8 character length estimator
         size_t i = 0;
         while (i < text.size()) {

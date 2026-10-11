@@ -134,10 +134,6 @@ std::string AppConfig::getDatabasePath() const {
   return getDataDir() + "/library.db";
 }
 
-std::string AppConfig::getSchemaVersionPath() const {
-  return getDataDir() + "/schema_version";
-}
-
 std::string AppConfig::getSettingsPath() const {
   return getConfigDir() + "/settings.json";
 }
@@ -185,34 +181,6 @@ std::string AppConfig::getImgsDir() const {
     return m_sdRoot + "/Roms";
   }
   return m_sdRoot + "/Imgs";
-}
-
-std::string AppConfig::getSystemImgsDir(const std::string &systemName) const {
-  return getImgsDir() + "/" + systemName;
-}
-
-// Media player path for IPTV (Hardware-accelerated mpv CedarX)
-std::string AppConfig::getMediaPlayerPath() const {
-  struct stat st;
-  std::string appMpv = getBinDir() + "/mpv";
-  const std::string players[] = {appMpv,
-                                 m_sdRoot + "/System/bin/mpv",
-                                 m_sdRoot + "/Emus/VIDEOS/mpv.sh",
-                                 m_sdRoot + "/Emu/VIDEOS/mpv.sh",
-                                 m_sdRoot + "/Emu/MEDIA/bin64/ffplay",
-                                 m_sdRoot + "/Emu/MEDIA/bin32/ffplay",
-                                 "/usr/trimui/bin/mpv",
-                                 "/usr/bin/mpv",
-                                 getBinDir() + "/ffplay",
-                                 m_sdRoot + "/System/bin/ffplay",
-                                 "/usr/bin/ffplay"};
-
-  for (const auto &p : players) {
-    if (stat(p.c_str(), &st) == 0 && access(p.c_str(), X_OK) == 0) {
-      return p;
-    }
-  }
-  return appMpv;
 }
 
 // ============================================================================

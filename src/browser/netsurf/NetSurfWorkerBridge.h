@@ -17,9 +17,6 @@ public:
     void stop();
     bool isRunning() const;
 
-    // Navigate to a new URL
-    void navigate(const std::string& url);
-
     // Render viewport into SDL_Renderer
     void render(SDL_Renderer* renderer);
 
@@ -30,14 +27,9 @@ public:
     void pushEvent(const NetSurfShmEvent& event);
     void sendClick(int x, int y, int mouseButton = NS_SHM_KEY_MOUSE_1);
     void sendMouseMove(int x, int y);
-    void sendKey(int keycode, bool down);
-    void sendChar(char c);
 
     // Modes & Cursor
     bool isCursorMode() const { return m_cursorMode; }
-    void toggleCursorMode() { m_cursorMode = !m_cursorMode; }
-    int cursorX() const { return m_cursorX; }
-    int cursorY() const { return m_cursorY; }
 
     // Scroll
     void scrollBy(int deltaY);

@@ -50,7 +50,6 @@ public:
     std::string getIpAddress(const std::string& interfaceName = "wlan0");
 
     // Device and aspect ratio detection
-    DeviceType getDeviceType();
     AspectRatio getAspectRatio();
     std::string getDeviceName();
     void getDisplayMetrics(int& width, int& height, float& aspectRatio);

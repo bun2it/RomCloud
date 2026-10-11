@@ -45,7 +45,6 @@ enum class UIState {
   CLOUD_LOGIN,
   SETTINGS,
   DIAGNOSTICS,
-  OTA_UPDATE,
   // P6: Full changelog sub-page từ Cập nhật tab → Y → xem "Tính năng mới".
   OTA_CHANGELOG,
   REVERSE_SYNC,
@@ -865,11 +864,7 @@ private:
   // Chip/button/badge tron mem (phuong an A: pill full-round h/2)
   void drawPill(int x, int y, int w, int h, const std::string &text,
                 bool active, TTF_Font *font = nullptr);
-  // Button hanh dong (OK/Huy/Xoa...) radius BTN
-  void drawButton(int x, int y, int w, int h, const std::string &label,
-                  bool focused, bool danger = false);
   // Row list chuan (game/channel/file/cai dat...)
-  void drawRow(int x, int y, int w, int h, bool focused, bool dim = false);
   // Y can giua doc chuan cho 1 dong text trong box h (dung FontHeight)
   int textYCentered(int y, int h, TTF_Font *font);
   // Ve cap main/sub can giua doc trong row (fix main/sub lech tam)
@@ -886,10 +881,6 @@ private:
                      int barY, int barH, SDL_Color color, TTF_Font *font,
                      int iconSize = 30, int gap = 8);
   // Ve chuoi footer dang "icon label   icon label..." can giua ngang + doc
-  void drawFooterHintsCentered(
-      const std::vector<std::pair<std::string, std::string>> &hints, int barY,
-      int barH, SDL_Color color, TTF_Font *font, int iconSize = 30, int gap = 8,
-      int hintGap = 28);
   // Ve 1 badge co 2 icon nut (vd: "[A] Kiem tra  •  [B] Quay lai")
   void drawBadgeDual(int x, int y, int w, int h, const std::string &btn1,
                      const std::string &label1, const std::string &btn2,
@@ -901,14 +892,12 @@ private:
                                int iconSize = 26, int gap = 6);
   // ---- UiTheme helpers (Design Tokens, khong doi logic nghiep vu) ----
   void drawAppBackground();
-  void drawCard(int x, int y, int w, int h);
   void drawFocusRow(int x, int y, int w, int h);
   // Ô highlight chọn: FOCUS_BG_SOFT (trong suốt 25%) + blend cục bộ.
   // Truyền đúng rect đã căn giữa dọc theo row/khối (rule highlight).
   void drawHighlight(int x, int y, int w, int h);
   void drawAppHeader(const std::string &title, const std::string &sub = "");
   void drawHeaderStatus();
-  void drawPadIcon(UiTheme::PadBtn btn, int x, int y, int size);
   void beginModalDim();
 
   // Performance caches (60 FPS Smooth UI) — P2-2: dung ImageCache LRU chung.

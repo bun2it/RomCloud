@@ -130,10 +130,6 @@ class NetSurfLayoutEngine {
 public:
     static NetSurfLayoutEngine& instance();
 
-    // Callback to measure exact text width if available (e.g. via TTF_SizeUTF8)
-    using TextMeasureCallback = std::function<int(const std::string&, int)>;
-    void setTextMeasurer(TextMeasureCallback measurer) { m_textMeasurer = measurer; }
-
     // Estimate text width in pixels (UTF-8 safe)
     int measureText(const std::string& text, int fontSizePx,
                     int letterSpacing = 0, int wordSpacing = 0) const;
@@ -167,8 +163,6 @@ private:
     // horizontal flow with word wrapping. flowY advances past the run.
     void layoutInlineRun(RenderBox* parent, size_t begin, size_t end,
                          int innerW, int childX, int& flowY);
-
-    TextMeasureCallback m_textMeasurer = nullptr;
 };
 
 } // namespace RomCloud

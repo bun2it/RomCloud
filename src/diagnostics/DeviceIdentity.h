@@ -29,11 +29,6 @@ public:
     std::string getDeviceId();
 
     /**
-     * Get the full 64-char SHA-256 hash (for internal use).
-     */
-    std::string getFullHash();
-
-    /**
      * Check if this device has a hardware-based ID (vs install-based).
      */
     bool hasHardwareId() const { return m_hasHardwareId; }

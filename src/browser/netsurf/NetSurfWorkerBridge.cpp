@@ -300,12 +300,6 @@ bool NetSurfWorkerBridge::isRunning() const {
     return (res == 0);
 }
 
-void NetSurfWorkerBridge::navigate(const std::string& url) {
-    if (url.empty()) return;
-    Logger::info("NetSurfWorkerBridge: Navigate to: " + url);
-    start(url);
-}
-
 namespace {
 
 // --- Lazy-image shim cho daemon (NetSurf build không JS: DUKTAPE=NO) ---
@@ -868,20 +862,6 @@ void NetSurfWorkerBridge::sendClick(int x, int y, int mouseButton) {
     up.x = x;
     up.y = y;
     pushEvent(up);
-}
-
-void NetSurfWorkerBridge::sendKey(int keycode, bool down) {
-    NetSurfShmEvent ev;
-    ev.type = down ? NETSURF_SHM_EVENT_KEY_DOWN : NETSURF_SHM_EVENT_KEY_UP;
-    ev.keycode = keycode;
-    ev.x = m_cursorX;
-    ev.y = m_cursorY;
-    pushEvent(ev);
-}
-
-void NetSurfWorkerBridge::sendChar(char c) {
-    sendKey(static_cast<int>(c), true);
-    sendKey(static_cast<int>(c), false);
 }
 
 void NetSurfWorkerBridge::scrollBy(int deltaY) {

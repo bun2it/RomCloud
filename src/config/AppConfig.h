@@ -45,7 +45,6 @@ public:
     std::string getLogFilePath() const;
     std::string getDebugLogPath() const;
     std::string getDatabasePath() const;
-    std::string getSchemaVersionPath() const;
     std::string getSettingsPath() const;
     std::string getFontPath() const;
 
@@ -53,10 +52,6 @@ public:
     std::string getRomsDir() const;
     std::string getSystemRomsDir(const std::string& systemName) const;
     std::string getImgsDir() const;
-    std::string getSystemImgsDir(const std::string& systemName) const;
-
-    // mpv/ffmpeg path for IPTV
-    std::string getMediaPlayerPath() const;
 
     // LocalSend P2P config (alias + fingerprint persisted on /mnt/SDCARD)
     std::string getLocalSendAlias() const;

@@ -104,10 +104,6 @@ AspectRatio PlatformInfo::calculateAspectRatio(int width, int height) {
     return AspectRatio::RATIO_OTHER;
 }
 
-DeviceType PlatformInfo::getDeviceType() {
-    return m_deviceType;
-}
-
 AspectRatio PlatformInfo::getAspectRatio() {
     return calculateAspectRatio(m_displayWidth, m_displayHeight);
 }

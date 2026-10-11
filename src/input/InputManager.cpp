@@ -59,12 +59,6 @@ void InputManager::reset() {
     m_axisL2 = m_axisR2 = false;
 }
 
-const char* InputManager::getControllerName() const {
-    if (m_controller) return SDL_GameControllerName(m_controller);
-    if (m_joystick) return SDL_JoystickName(m_joystick);
-    return "None (Keyboard)";
-}
-
 void InputManager::mapKeyboardKey(SDL_Keycode key, bool isDown) {
     Button btn = Button::COUNT;
     switch (key) {
@@ -327,12 +321,6 @@ bool InputManager::isButtonJustPressed(Button btn) const {
     }
 
     return false;
-}
-
-bool InputManager::isButtonJustReleased(Button btn) const {
-    int idx = static_cast<int>(btn);
-    if (idx < 0 || idx >= static_cast<int>(Button::COUNT)) return false;
-    return !m_currentStates[idx] && m_previousStates[idx];
 }
 
 bool InputManager::isButtonRepeat(Button btn) const {
