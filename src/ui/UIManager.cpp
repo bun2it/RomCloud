@@ -27,7 +27,6 @@
 #include "../browser/chrome/ChromeBridge.h"
 #include "../browser/HtmlRenderer.h"
 #include "../browser/netsurf/NetSurfEngine.h"
-#include "../browser/netsurf/NetSurfWorkerBridge.h"
 #include "BoxartScraper.h"
 #include "QrRenderer.h"
 #include "TelexHelper.h"
@@ -7452,18 +7451,11 @@ void UIManager::renderBrowserState() {
 
   // 3. PHẦN HIỂN THỊ WEB (Y 112..714, h = 603)
   {
-    // Render browser content. P20: FULL has two paths — in-process
-    // (NetSurfEngine, libcss+libhubbub in our own process) and daemon
-    // (NetSurfWorkerBridge, fork+SHM). In-process is the default; the
-    // daemon is opt-in fallback for crashy pages.
+    // Render browser content. FULL = NetSurfEngine in-process; daemon
+    // đã bỏ. LITE = HtmlRenderer.
     if (BrowserManager::instance().engineMode() == BrowserEngine::FULL) {
-      const auto& s = BrowserManager::instance().settings();
-      if (s.inProcessFull &&
-          NetSurfEngine::instance().isInitialized() &&
-          !BrowserManager::instance().testInProcessFailed()) {
+      if (NetSurfEngine::instance().isInitialized()) {
         NetSurfEngine::instance().render();
-      } else {
-        NetSurfWorkerBridge::instance().render(m_renderer);
       }
     } else {
       HtmlRenderer::instance().render();
@@ -7517,32 +7509,15 @@ void UIManager::renderBrowserState() {
     });
   } else {
     if (BrowserManager::instance().engineMode() == BrowserEngine::FULL) {
-      // P20: in-process FULL has no cursor mode (4-way focus nav only,
-      // no mouse pointer). Footer reflects that.
-      const auto& s = BrowserManager::instance().settings();
-      bool isInProc = s.inProcessFull &&
-                      NetSurfEngine::instance().isInitialized() &&
-                      !BrowserManager::instance().testInProcessFailed();
-      if (isInProc) {
-        drawAppFooter({
-          {UiTheme::PadBtn::B, "Quay lại"},
-          {UiTheme::PadBtn::UPDOWN, "Di chuyển"},
-          {UiTheme::PadBtn::A, "Chọn"},
-          {UiTheme::PadBtn::SELECT, "Cài đặt"},
-          {UiTheme::PadBtn::START, "Nhập URL"},
-          {UiTheme::PadBtn::L1R1, "Cuộn"}
-        });
-      } else {
-        bool isCursor = NetSurfWorkerBridge::instance().isCursorMode();
-        drawAppFooter({
-          {UiTheme::PadBtn::B, "Quay lại"},
-          {UiTheme::PadBtn::UPDOWN, isCursor ? "Di chuột" : "Cuộn trang"},
-          {UiTheme::PadBtn::A, "Chọn"},
-          {UiTheme::PadBtn::SELECT, "Cài đặt"},
-          {UiTheme::PadBtn::START, "Nhập URL"},
-          {UiTheme::PadBtn::L1R1, "Cuộn nhanh"}
-        });
-      }
+      // FULL in-process: 4-way focus nav, no mouse pointer.
+      drawAppFooter({
+        {UiTheme::PadBtn::B, "Quay lại"},
+        {UiTheme::PadBtn::UPDOWN, "Di chuyển"},
+        {UiTheme::PadBtn::A, "Chọn"},
+        {UiTheme::PadBtn::SELECT, "Cài đặt"},
+        {UiTheme::PadBtn::START, "Nhập URL"},
+        {UiTheme::PadBtn::L1R1, "Cuộn"}
+      });
     } else {
       drawAppFooter({
         {UiTheme::PadBtn::B, "Quay lại"},
@@ -7666,11 +7641,11 @@ void UIManager::handleBrowserInput() {
         return;
       }
       if (input.isButtonJustPressed(Button::UP)) {
-        m_browserSettingsSel = (m_browserSettingsSel + 10) % 11;
+        m_browserSettingsSel = (m_browserSettingsSel + 8) % 9;
         return;
       }
       if (input.isButtonJustPressed(Button::DOWN)) {
-        m_browserSettingsSel = (m_browserSettingsSel + 1) % 11;
+        m_browserSettingsSel = (m_browserSettingsSel + 1) % 9;
         return;
       }
       if (input.isButtonJustPressed(Button::A)) {
@@ -7821,15 +7796,9 @@ void UIManager::handleBrowserInput() {
     } else {
       // Browser navigation mode
       if (BrowserManager::instance().engineMode() == BrowserEngine::FULL) {
-        // P20: in-process FULL has its own input handler. Daemon path
-        // (NetSurfWorkerBridge::handleInput) keeps the SHM mouse + cursor
-        // mode code for opt-in fallback (inProcessFull=false).
-        const auto& s = BrowserManager::instance().settings();
-        if (s.inProcessFull && NetSurfEngine::instance().isInitialized() &&
-            !BrowserManager::instance().testInProcessFailed()) {
+        // FULL in-process input handler (daemon removed).
+        if (NetSurfEngine::instance().isInitialized()) {
           NetSurfEngine::instance().handleInput();
-        } else {
-          NetSurfWorkerBridge::instance().handleInput();
         }
       } else {
         // Lite engine navigation
@@ -8012,18 +7981,7 @@ void UIManager::toggleBrowserSetting(int idx) {
                 {0, 180, 255, 255}, 1500);
       return;
     }
-    case 8: {
-      // NetSurf đã thay bằng Chrome ngoài: mục này giữ chỗ, không tác dụng.
-      showToast("Chrome ngoài thay NetSurf (xem mục 7)", {245, 158, 11, 255}, 1500);
-      return;
-    }
-    case 9: {
-      // Điều khiển chuột/D-Pad của NetSurf cũ: giữ chỗ, không tác dụng
-      // (trong Chrome dùng mapping tay cầm rc-browser.gptk của ta).
-      showToast("Trong Chrome: xem chrome/README mục tay cầm", {245, 158, 11, 255}, 1500);
-      return;
-    }
-    case 10: s.article = !s.article; break;
+    case 8: s.article = !s.article; break;
     default: return;
   }
   BrowserManager::instance().saveSettings();
@@ -8031,16 +7989,16 @@ void UIManager::toggleBrowserSetting(int idx) {
   HtmlRenderer::instance().refreshAfterSettings();
   const char* names[] = {"Ảnh", "CSS", "Cỡ chữ", "Ảnh động GIF",
                          "Video trong trang", "SVG", "JavaScript",
-                         "Chế độ duyệt", "FULL in-process", "Điều khiển", "Chế độ bài viết"};
-  showToast(std::string(names[idx < 0 || idx > 10 ? 0 : idx]) + ": đã lưu",
+                         "Chế độ duyệt", "Chế độ bài viết"};
+  showToast(std::string(names[idx < 0 || idx > 8 ? 0 : idx]) + ": đã lưu",
             {0, 180, 255, 255}, 1200);
 }
 
 void UIManager::renderBrowserSettings() {
   // Dim + centered panel, drawn last (topmost).
   drawRect(0, 0, 1024, 768, {0, 0, 0, 170}, true);
-  // Panel height fits 11 rows: pw=640, ph=600, py=84
-  const int pw = 640, ph = 600, px = (1024 - pw) / 2, py = (768 - ph) / 2;
+  // Panel height fits 9 rows: pw=640, ph=500, py=134
+  const int pw = 640, ph = 500, px = (1024 - pw) / 2, py = (768 - ph) / 2;
   drawRect(px, py, pw, ph, {18, 22, 32, 255}, true);
   drawRect(px, py, pw, ph, {0, 180, 255, 255}, false);
   TTF_Font* titleF = m_fontLarge ? m_fontLarge : m_fontMedium;
@@ -8054,9 +8012,7 @@ void UIManager::renderBrowserSettings() {
   };
   char scaleBuf[16];
   snprintf(scaleBuf, sizeof(scaleBuf), "%d%%", s.fontScalePct);
-  bool isCursor = NetSurfWorkerBridge::instance().isCursorMode();
-  std::string mouseModeStr = isCursor ? "Chuột (Mouse)" : "D-Pad (Cuộn)";
-  Row rows[11] = {
+  Row rows[9] = {
       {"Ảnh", s.images ? "Bật" : "Tắt", false},
       {"CSS", s.css ? "Bật" : "Tắt", false},
       {"Cỡ chữ", scaleBuf, false},
@@ -8065,11 +8021,9 @@ void UIManager::renderBrowserSettings() {
       {"SVG", s.svg ? "Bật" : "Tắt", true},
       {"JavaScript", s.js ? "Bật" : "Tắt", true},
       {"Chế độ duyệt", s.fullEngine ? "Chrome" : "Lite (Mặc định)", false},
-      {"Chrome ngoài", s.fullEngine ? "(RC-Web)" : "(LITE)", false},
-      {"Điều khiển", mouseModeStr, false},
       {"Chế độ bài viết", s.article ? "Bật" : "Tắt", false},
   };
-  for (int i = 0; i < 11; i++) {
+  for (int i = 0; i < 9; i++) {
     int ry = py + 62 + i * 44;
     bool sel = (i == m_browserSettingsSel);
     if (sel) drawRect(px + 16, ry - 4, pw - 32, 40, {0, 70, 110, 255}, true);
@@ -8080,8 +8034,7 @@ void UIManager::renderBrowserSettings() {
       if (rows[i].soon) v += " (Sắp có)";
       SDL_Color vc = rows[i].soon ? SDL_Color{150, 150, 160, 255}
                      : (rows[i].value == "Bật" || rows[i].value == "Full" ||
-                        rows[i].value == "Lite (Mặc định)" || rows[i].value == scaleBuf ||
-                        rows[i].value == "Chuột (Mouse)" || rows[i].value == "D-Pad (Cuộn)")
+                        rows[i].value == "Lite (Mặc định)" || rows[i].value == scaleBuf)
                          ? SDL_Color{0, 200, 120, 255}
                          : SDL_Color{200, 200, 200, 255};
       int vw = m_ui.textWidth(v, rowF);
@@ -8283,6 +8236,7 @@ void UIManager::handleChromeInput() {
   auto& input = InputManager::instance();
   if (bridge.pollExited() || !bridge.isRunning()) {
     showToast("Chrome đã thoát", {150, 160, 175, 255}, 1500);
+    bridge.stop();  // quét xác theo tên (weston sót sẽ vẽ chồng fb0)
     goBack();
     return;
   }

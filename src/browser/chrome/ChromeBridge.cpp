@@ -8,6 +8,7 @@
 #include <arpa/inet.h>
 #include <cerrno>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <fcntl.h>
 #include <signal.h>
@@ -87,6 +88,25 @@ static void drmSetMaster() {
         traceWarn("B09",
                   std::string("SET_MASTER DRM lỗi: ") + strerror(errno));
     close(fd);
+}
+
+// Quét xác phiên web theo TÊN tiến trình (electron/weston/gptokeyb2/
+// Xwayland): m_pid chỉ theo dõi script launch.sh; con cháu double-fork
+// hoặc sót sau ECHILD sẽ thoát lưới reap — sót 1 weston là 2 bên cùng
+// vẽ fb0 (flicker) hoặc "thấy Chrome ẩn dưới" ở menu/Lite. Chỉ chạy trên
+// máy (không bao giờ đụng tiến trình Mac khi build simulator).
+static void killWebProcesses() {
+#ifndef PC_SIMULATOR_MODE
+    static const char* kProcs[] = {"electron", "weston", "gptokeyb2",
+                                   "Xwayland"};
+    for (const char* p : kProcs) {
+        std::string cmd = std::string("killall -9 ") + p +
+                          " >/dev/null 2>&1";
+        int rc = system(cmd.c_str());
+        (void)rc;
+    }
+    trace("B09", "đã quét xác phiên web theo tên tiến trình");
+#endif
 }
 }  // namespace
 
@@ -320,7 +340,10 @@ bool ChromeBridge::pollExited() {
 }
 
 bool ChromeBridge::stop() {
-    if (m_pid <= 0) return true;
+    if (m_pid <= 0) {
+        killWebProcesses();  // không pid nào theo dõi: vẫn quét xác sót
+        return true;
+    }
     trace("B09", "stop(): gửi SIGTERM tới pid con " + std::to_string(m_pid) +
               " (chờ tối đa 3s cho trap cleanup trong launch.sh chạy)");
     // SIGTERM tới đúng tiến trình script: trap cleanup trong launch.sh
@@ -331,6 +354,7 @@ bool ChromeBridge::stop() {
             trace("B09", "phiên đã đóng sau ~" +
                       std::to_string(i * 20) + "ms kể từ SIGTERM");
             drmSetMaster();  // weston chết rồi: lấy lại màn cho RomCloud
+            killWebProcesses();  // quét xác sót theo tên (tránh 2 weston vẽ chồng)
             return true;
         }
         usleep(20 * 1000);
@@ -347,6 +371,7 @@ bool ChromeBridge::stop() {
     m_pid = -1;
     m_ready.store(false);
     drmSetMaster();
+    killWebProcesses();
     return true;
 }
 
