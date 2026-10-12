@@ -100,9 +100,9 @@ for pkg in $SYS_PKGS; do
 done
 echo "  syslibs: $(ls "$OUT/syslibs" | wc -l | tr -d ' ') file"
 
-# gdk-pixbuf (GTK cua Electron) chi nap loader anh tu mot thu muc rieng
-# kem file cache; syslibs dang phang nen gom loader vao pixbuf-loaders/
-# + cache viet san (duong dan tren may co dinh /mnt/SDCARD/Apps/RomCloud).
+# gdk-pixbuf (GTK của Electron) chỉ nạp loader ảnh từ một thư mục riêng
+# kèm file cache; syslibs đang phẳng nên gom loader vào pixbuf-loaders/
+# + cache viết sẵn (đường dẫn trên máy cố định /mnt/SDCARD/Apps/RomCloud).
 mkdir -p "$OUT/syslibs/pixbuf-loaders"
 cp -f "$OUT/syslibs"/libpixbufloader-*.so "$OUT/syslibs/pixbuf-loaders/" 2>/dev/null || true
 cp -f "$SCRIPT_DIR/pixbuf-loaders.cache" "$OUT/syslibs/pixbuf-loaders/loaders.cache" 2>/dev/null || true

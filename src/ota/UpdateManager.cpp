@@ -906,8 +906,8 @@ void UpdateManager::runDownloadWorker(UpdateInfo info) {
 
   Logger::info("OTA update completed!");
 
-  // 1 cham full: xong app thi tu tai + cai RC-Web (neu manifest co goi
-  // moi hon ban dang cai, hoac may chua co rc-web). Khong co goi moi thi
+  // 1 chạm full: xong app thì tự tải + cài RC-Web (nếu manifest có gói
+  // mới hơn bản đang cài, hoặc máy chưa có rc-web). Không có gói mới thì
   // bo qua, van COMPLETED binh thuong.
   {
     std::string curRcWeb = getInstalledRcWebVersion();
@@ -936,10 +936,10 @@ void UpdateManager::runDownloadWorker(UpdateInfo info) {
         if ((rcFree == 0 || rcFree >= rcNeed) && installRcWebZip(rcZipPath)) {
           Logger::info("OTA full: RC-Web installed too");
         } else {
-          Logger::warn("OTA full: bo qua RC-Web (thieu cho hoac loi giai nen)");
+          Logger::warn("OTA full: bỏ qua RC-Web (thiếu chỗ hoặc lỗi giải nén)");
         }
       } else {
-        Logger::warn("OTA full: khong tai duoc RC-Web");
+        Logger::warn("OTA full: không tải được RC-Web");
       }
       unlink(rcZipPath.c_str());
       if (m_cancelRequested) {

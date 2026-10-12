@@ -1,6 +1,6 @@
 #pragma once
 // RomCloud FileExplorer — logic duyet thu muc + clipboard 2 buoc, khong SDL.
-// UIManager chi goi enter()/handleButton()/refresh() va tu ve UI.
+// UIManager chỉ gọi enter()/handleButton()/refresh() và tự vẽ UI.
 #include <algorithm>
 #include <cctype>
 #include <cstdio>

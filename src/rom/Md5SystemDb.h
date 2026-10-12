@@ -6,23 +6,23 @@
 
 namespace RomCloud {
 
-// Md5SystemDb: tra cuu MD5 / CRC32 -> ma he may ("GBA", "FC", ...).
-// Du lieu doc tu file assets/md5systems.dat (moi dong: "<hash> <SYSTEMCODE>").
-//   - hash 32 ky tu hex = MD5 cua file ROM (khop No-Intro DAT)
-//   - hash 8 ky tu hex  = CRC32 cua file ben trong .zip (doc tu central
+// Md5SystemDb: tra cứu MD5 / CRC32 -> mã hệ máy ("GBA", "FC", ...).
+// Dữ liệu đọc từ file assets/md5systems.dat (mỗi dòng: "<hash> <SYSTEMCODE>").
+//   - hash 32 ký tự hex = MD5 của file ROM (khớp No-Intro DAT)
+//   - hash 8 ký tự hex  = CRC32 của file bên trong .zip (đọc từ central
 //     directory, khong can giai nen — khop truong crc trong No-Intro DAT)
-// File du lieu duoc sinh boi tools/gen_md5db.py tu No-Intro DATs.
-// Load lazy 1 lan khi tra cuu dau tien; thieu file thi tra cuu tra ve false
+// File dữ liệu được sinh bởi tools/gen_md5db.py từ No-Intro DATs.
+// Load lazy 1 lần khi tra cứu đầu tiên; thiếu file thì tra cứu trả về false
 // (khong crash, vong 1 van hoat dong binh thuong).
 class Md5SystemDb {
 public:
     static Md5SystemDb& instance();
 
-    // Tra cuu hash (md5 32 ky tu hoac crc32 8 ky tu, hex thuong).
-    // Tra ve true + outSystemCode neu tim thay.
+    // Tra cứu hash (md5 32 ký tự hoặc crc32 8 ký tự, hex thường).
+    // Trả về true + outSystemCode nếu tìm thấy.
     bool lookup(const std::string& hashHex, std::string& outSystemCode);
 
-    // So muc da nap (0 = chua nap hoac file khong ton tai).
+    // Số mục đã nạp (0 = chưa nạp hoặc file không tồn tại).
     size_t entryCount() const { return m_table.size(); }
     bool isLoaded() const { return m_loaded; }
 

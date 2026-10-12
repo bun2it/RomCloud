@@ -59,7 +59,7 @@ UIManager &UIManager::instance() {
   return instance;
 }
 
-// Tag home: tron bo theo yeu cau (feed + search + local, khong login).
+// Tag home: trọn bộ theo yêu cầu (feed + search + local, không login).
 const std::array<UIManager::Category, 10> UIManager::kYtCategories = {{
     {"music", "Âm nhạc", "feed:10"},
     {"gaming", "Trò chơi", "feed:20"},
@@ -98,7 +98,7 @@ void UIManager::initGridMenu() {
       {"explorer", "FILE EXPLORER", "FOLDER.png", "Duyet file SD"},
       {"weather", "OFFICEGO", "OFFICEGO.png", "Thời tiết & Lịch"},
       {"browser", "WEB", "BROWSER.png", "Web Chrome ngoài + portal"},
-      {"localsend", "LOCALSEND", "LOCALSEND.png", "Chia se P2P trong LAN"},
+      {"localsend", "LOCALSEND", "LOCALSEND.png", "Chia sẻ P2P trong LAN"},
       {"wallpaper", "HÌNH NỀN", "WALLPAPER.png", "Hình nền & Giao diện"},
       {"settings", "CÀI ĐẶT", "SETTINGS.png", "Cấu hình"}};
 }
@@ -385,9 +385,9 @@ void UIManager::setState(UIState state) {
        m_currentState == UIState::YOUTUBE_SEARCH) &&
       (state != UIState::YOUTUBE_RESULTS && state != UIState::YOUTUBE_SEARCH)) {
     // Chi xa GPU cache (VRAM). GIU file /tmp/yt_thumbs/*: render tu
-    // nap lai texture tu file trong 1-2 frame (drawYtStandardThumb) nen
-    // Back tu video ve list/Home khong bi mat thumbnail. Xoa file o day
-    // la ly do list tran truoc day (phai tai lai het tu mang).
+    // nạp lại texture từ file trong 1-2 frame (drawYtStandardThumb) nên
+    // Back từ video về list/Home không bị mất thumbnail. Xóa file ở đây
+    // là lý do list trắng trước đây (phải tải lại hết từ mạng).
     clearThumbnailCache();
   }
 
@@ -429,8 +429,8 @@ void UIManager::setState(UIState state) {
     loadYouTubeWatched();
     m_ytWatchedIndex = 0;
     // Giu vi tri (danh muc/trang/focus): chi khoi tao lan dau tien vao
-    // HOME ke tu luc mo app, cac lan quay lai sau giu nguyen de user tiep
-    // tuc cho dang xem do.
+    // HOME kể từ lúc mở app, các lần quay lại sau giữ nguyên để user tiếp
+    // tục chỗ đang xem dở.
     if (!m_ytHomeLoadedThisEnter) {
       m_ytSelectedCategory = 0;
       m_ytCategoryScrollOffset = 0;
@@ -551,7 +551,7 @@ void UIManager::triggerManualSync() {
   }
   showToast(UiStrings::TOAST_SCANNING_SD, {0, 180, 216, 255}, 2000);
 
-  // P0-3: dua tien trinh quet SD len ProgressDialog dung chung (thay vi chi
+  // P0-3: đưa tiến trình quét SD lên ProgressDialog dùng chung (thay vì chỉ
   // toast).
   m_dialogs.progress.open("Dang quet the SD...", false);
   auto systems = DatabaseManager::instance().getSystems(false);
@@ -637,9 +637,9 @@ void UIManager::update() {
     DriveSyncEngine::instance().startSync();
   }
 
-  // P1-2: Poll /api/status moi 2s khi dang o man GAME_CAST va co stream chay.
-  // Fetch qua detached thread de khong block UI; atomic de render doc gia tri
-  // moi frame nhanh.
+  // P1-2: Poll /api/status mỗi 2s khi đang ở màn GAME_CAST và có stream chạy.
+  // Fetch qua detached thread để không block UI; atomic để render đọc giá trị
+  // mới frame nhanh.
   if (m_currentState == UIState::GAME_CAST &&
       CastManager::instance().isRunning()) {
     uint32_t now = SDL_GetTicks();
@@ -704,7 +704,7 @@ void UIManager::update() {
   }
 
   // P0-3: poll tien trinh quet SD tu BackgroundTask -> ProgressDialog dung
-  // chung. Dat truoc early-return sync de dialog tu dong dong khi sync noi
+  // chung. Đặt trước early-return sync để dialog tự động đóng khi sync nối
   // tiep.
   if (isIndexing()) {
     const auto &tp = m_indexTask.progress();
@@ -719,7 +719,7 @@ void UIManager::update() {
              m_dialogs.progress.title == "Dang quet the SD...") {
     m_dialogs.progress.close();
   }
-  // P2-1: Explorer task (copy/xoa) -> ProgressDialog dung chung + forward
+  // P2-1: Explorer task (copy/xóa) -> ProgressDialog dùng chung + forward
   // toast/confirm.
   syncExplorerDialogs();
 
@@ -807,7 +807,7 @@ void UIManager::update() {
   }
 
   // Video kenh fetch nen xong -> nap vao trang channel view (UI thread).
-  // Chi nhan khi user van o trang kenh (khong thi drop, tranh tron).
+  // Chỉ nhận khi user vẫn ở trang kênh (không thì drop, tránh trộn).
   if (m_ytChannelReady.exchange(false)) {
     if (!m_ytInChannelView) {
       m_ytChannelPending.clear();
@@ -832,7 +832,7 @@ void UIManager::update() {
   }
 
   // Check if YouTube video stream resolution finished
-  // Mo ta ve sau resolve: day vao OSD dang phat cung video.
+  // Mô tả về sau resolve: đẩy vào OSD đang phát cùng video.
   if (m_ytDescReady.exchange(false)) {
     IPTVManager::instance().setYtDesc(m_ytPendingVideoDesc);
     m_ytPendingVideoDesc.clear();
@@ -852,9 +852,9 @@ void UIManager::update() {
       m_ytPlayingVideoId = vid;
       IPTVManager::instance().playYouTubeVideo(vid, url, vq, vtitle, vdesc);
       setState(UIState::YOUTUBE_RESULTS);
-      // Tu phat tiep (up next): uu tien video CUNG KENH voi video vua
-      // xem (quet xuoi tim uploader giong nhau), khong co thi lay muc ke
-      // tiep. Khong loop, bo qua hang kenh.
+      // Tự phát tiếp (up next): ưu tiên video CÙNG KÊNH với video vừa
+      // xem (quét xuôi tìm uploader giống nhau), không có thì lấy mục kế
+      // tiếp. Không loop, bỏ qua hàng kênh.
       if (IPTVManager::instance().ytNaturalEnd()) {
         std::string curUp;
         size_t curIdx = 0;
@@ -911,7 +911,7 @@ void UIManager::update() {
             break;
           }
           // Vong 2: muc ke tiep — CHI khi khong o trang kenh (trang kenh
-          // khong bao gio lan kenh khac; het video cung kenh thi dung).
+          // không bao giờ lấn kênh khác; hết video cùng kênh thì dừng).
           if (nextId.empty() && !m_ytInChannelView &&
               curIdx + 1 < m_ytSearchResults.size() &&
               m_ytSearchResults[curIdx + 1].rfind("CHANNEL|", 0) != 0) {
@@ -1046,8 +1046,8 @@ void UIManager::update() {
         }
         m_selectedPlaylistIndex = 0;
         m_playlistScrollOffset = 0;
-        // Neu co nhieu hon 1 playlist -> hien man hinh chon playlist
-        // Neu chi co 1 (hoac 0) -> vao thang danh sach kenh
+        // Nếu có nhiều hơn 1 playlist -> hiện màn hình chọn playlist
+        // Nếu chỉ có 1 (hoặc 0) -> vào thẳng danh sách kênh
         if (IPTVManager::instance().playlistCount() > 1) {
           setState(UIState::IPTV_PLAYLIST_SELECT);
         } else {
@@ -1696,7 +1696,7 @@ void UIManager::update() {
       if (m_searchVk.inResults) {
         m_searchVk.inResults = false; // ve ban phim nhu IPTV
       } else if (!m_searchVk.query.empty()) {
-        // Unified nhu YouTube: con chu thi xoa dan, het chu thi thoat.
+        // Unified như YouTube: còn chữ thì xóa dần, hết chữ thì thoát.
         VirtualKeyboard::backspace(m_searchVk);
         if (m_searchVk.query.length() >= 2) {
           m_searchResults =
@@ -2179,8 +2179,8 @@ void UIManager::update() {
         setState(UIState::IPTV_LIST);
       }
     } else if (input.isButtonJustPressed(Button::Y)) {
-      // Neu playlist duoc chon la URL tuy bien khac live.m3u, refresh URL do;
-      // Nguoc lai (mac dinh hoac khi chon live.m3u), chay cap nhat OTA Playlist
+      // Nếu playlist được chọn là URL tùy biến khác live.m3u, refresh URL đó;
+      // Ngược lại (mặc định hoặc khi chọn live.m3u), chạy cập nhật OTA Playlist
       bool isCustomUrl = false;
       const Playlist *selectedPl =
           (plCount > 0 && m_selectedPlaylistIndex < plCount)
@@ -2689,14 +2689,14 @@ void UIManager::update() {
       break;
 
     int totalResults = static_cast<int>(m_ytSearchResults.size());
-    // Che do Xem lai: chua co ket qua nhung co video da xem -> hang 2
-    // thanh danh sach Xem lai (len/xuong doi index, A phat lai).
+    // Chế độ Xem lại: chưa có kết quả nhưng có video đã xem -> hàng 2
+    // thành danh sách Xem lại (lên/xuống đổi index, A phát lại).
     bool watchMode = (totalResults == 0 && !m_ytIsSearching &&
                       !m_ytWatched.empty());
     int watchCount =
         std::min<int>(5, static_cast<int>(m_ytWatched.size()));
     // Che do list doc (Y): hang 2 la danh sach doc duy nhat, dieu huong
-    // theo index, khong theo cot. Channel card giu nguyen.
+    // theo index, không theo cột. Channel card giữ nguyên.
     bool listMode = (!m_ytViewMode && totalResults > 0 &&
                      !(m_ytMatchedChannel.matched && !m_ytInChannelView));
     if (input.isButtonJustPressed(Button::L1)) {
@@ -2757,7 +2757,7 @@ void UIManager::update() {
           m_ytSelectedCategory = static_cast<int>(kYtCategories.size()) - 1;
       } else if (m_ytHomeRow == 2) {
         if (listMode) {
-          // List doc: trai/phai khong dung.
+          // List dọc: trái/phải không dùng.
         } else if (m_ytMatchedChannel.matched && !m_ytInChannelView) {
           // Hàng 2 (Channel Card): 2 cột (0: Logo tròn, 1: Thông tin kênh)
           if (m_ytHomeCol > 0)
@@ -2771,7 +2771,7 @@ void UIManager::update() {
         }
       } else if (m_ytHomeRow == 3) {
         if (listMode) {
-          // List doc: chi co 1 danh sach o hang 2, hang 3 khong dung.
+          // List dọc: chỉ có 1 danh sách ở hàng 2, hàng 3 không dùng.
         } else {
           // Hàng 3 (Thumbnail hàng 2 / hoặc 3 video mới nhất của kênh)
           if (m_ytHomeCol > 0) {
@@ -2790,7 +2790,7 @@ void UIManager::update() {
             (m_ytSelectedCategory + 1) % kYtCategories.size();
       } else if (m_ytHomeRow == 2) {
         if (listMode) {
-          // List doc: trai/phai khong dung.
+          // List dọc: trái/phải không dùng.
         } else if (m_ytMatchedChannel.matched && !m_ytInChannelView) {
           // Hàng 2 (Channel Card): 2 cột (0: Logo, 1: Info)
           if (m_ytHomeCol < 1)
@@ -2825,7 +2825,7 @@ void UIManager::update() {
         m_ytHomeFocus = 0;
       } else if (m_ytHomeRow == 2) {
         if (listMode) {
-          // List doc: UP di chuyen index, het dau thi ve Hang 1.
+          // List dọc: UP di chuyển index, hết đầu thì về Hàng 1.
           if (m_ytHomeContentSelected > 0) {
             --m_ytHomeContentSelected;
           } else {
@@ -2833,7 +2833,7 @@ void UIManager::update() {
             m_ytHomeFocus = 1;
           }
         } else if (watchMode) {
-          // Xem lai: UP di chuyen index, het dau thi ve Hang 1.
+          // Xem lại: UP di chuyển index, hết đầu thì về Hàng 1.
           if (m_ytWatchedIndex > 0) {
             --m_ytWatchedIndex;
           } else {
@@ -2881,12 +2881,12 @@ void UIManager::update() {
         }
       } else if (m_ytHomeRow == 2) {
         if (listMode) {
-          // List doc: DOWN di chuyen index (toi da muc 5 hien duoc).
+          // List dọc: DOWN di chuyển index (tối đa mục 5 hiện được).
           int listMax = std::min(5, totalResults) - 1;
           if (m_ytHomeContentSelected < listMax)
             ++m_ytHomeContentSelected;
         } else if (watchMode && totalResults == 0) {
-          // Xem lai: DOWN di chuyen index (khong xuong hang 3).
+          // Xem lại: DOWN di chuyển index (không xuống hàng 3).
           if (m_ytWatchedIndex + 1 < watchCount)
             ++m_ytWatchedIndex;
         } else if (m_ytMatchedChannel.matched && !m_ytInChannelView &&
@@ -2917,7 +2917,7 @@ void UIManager::update() {
       } else if (m_ytHomeRow == 2) {
         if (m_ytMatchedChannel.matched && !m_ytInChannelView) {
           // Bấm A ở Logo kênh / Info: vao trang video MOI NHAT cua kenh
-          // (fetch nen theo channelId, khong dung lai ket qua search tron).
+          // (fetch nền theo channelId, không dùng lại kết quả search trộn).
           m_ytInChannelView = true;
           m_ytHomePage = 1;
           m_ytHomeRow = 2;
@@ -2925,8 +2925,8 @@ void UIManager::update() {
           m_ytHomeContentSelected = 0;
           m_ytChannelAllVideos.clear();
           m_ytSearchResults.clear();
-          // Xoa ca cache search tron cu: R1/L1 phan trang trong trang
-          // kenh chi duoc doc tu video kenh (consumer nap lai).
+          // Xóa cả cache search trộn cũ: R1/L1 phân trang trong trang
+          // kênh chỉ được đọc từ video kênh (consumer nạp lại).
           m_ytAllCachedResults.clear();
           rebuildYtItems();
           std::string cid = m_ytMatchedChannel.channelId;
@@ -2941,8 +2941,8 @@ void UIManager::update() {
               m_ytChannelReady = true;
             }).detach();
           } else {
-            // Khong co id kenh: dung tam ket qua search hien tai.
-            Logger::warn("[YouTube] Vao trang kenh KHONG co cid, dung ket qua tron");
+            // Không có id kênh: dùng tạm kết quả search hiện tại.
+            Logger::warn("[YouTube] Vào trang kênh KHÔNG có cid, dùng kết quả trộn");
             m_ytAllCachedResults = m_ytChannelAllVideos;
             int count = std::min<int>(
                 6, static_cast<int>(m_ytAllCachedResults.size()));
@@ -2958,7 +2958,7 @@ void UIManager::update() {
         } else if (watchMode && totalResults == 0 &&
                    m_ytWatchedIndex >= 0 &&
                    m_ytWatchedIndex < watchCount) {
-          // Xem lai: A phat lai video da xem.
+          // Xem lại: A phát lại video đã xem.
           playYouTubeVideo(m_ytWatched[m_ytWatchedIndex].id);
         }
       } else if (m_ytHomeRow == 3 && totalResults > 0) {
@@ -3159,7 +3159,7 @@ void UIManager::update() {
 
     const int pageSize = 6;
 
-    // Row-view: list doc, UP/DOWN di chuyen tung dong, LEFT/RIGHT bo qua
+    // Row-view: list dọc, UP/DOWN di chuyển từng dòng, LEFT/RIGHT bỏ qua
     if (input.isButtonJustPressed(Button::UP)) {
       if (m_ytSearchSelectedIndex > 0) {
         m_ytSearchSelectedIndex--;
@@ -3224,7 +3224,7 @@ void UIManager::update() {
           if (appRoot.empty())
             appRoot = "/mnt/SDCARD/Apps/RomCloud";
           int maxResults = std::min(targetPage * 6, 50);
-          // Lay dong tho qua helper chung (innertube + fallback).
+          // Lấy dòng thô qua helper chung (innertube + fallback).
           std::vector<std::string> rawLines =
               fetchSearchLines(query, maxResults, appRoot);
           std::vector<std::string> moreResults;
@@ -3618,8 +3618,8 @@ void UIManager::update() {
         }
       }
     } else if (input.isButtonJustPressed(Button::X)) {
-      // Chi X moi doi do phan giai. Y khong bind de tranh nham lan (footer chi
-      // show X). Xem `renderFooter` cho hint tuong ung.
+      // Chỉ X mới đổi độ phân giải. Y không bind để tránh nhầm lẫn (footer chỉ
+      // show X). Xem `renderFooter` cho hint tương ứng.
       bool curHd = CastManager::instance().isHdMode();
       CastManager::instance().setHdMode(!curHd);
       if (!curHd) {
@@ -3936,7 +3936,7 @@ void UIManager::renderSearchState() {
                                        : UiStrings::SEARCH_BADGE_CLOUD;
       drawBadge(rPanelX + 12, itemY + 12, 0, 28, stateLabel, badgeBg, badgeFg);
 
-      // Title (truncate theo pixel, khong cat giua UTF-8)
+      // Title (truncate theo pixel, không cắt giữa UTF-8)
       std::string title = truncateToWidth(g.title, m_fontMedium, rPanelW - 130);
       drawText(title, rPanelX + 102, itemY + 8, {230, 240, 255, 255},
                m_fontMedium);
@@ -5019,7 +5019,7 @@ void UIManager::renderDisclaimerState() {
   int cardW = 864;
   int cardH = 615;
 
-  // Modal dialog bo tron chuan (title bar cong theo goc)
+  // Modal dialog bo tròn chuẩn (title bar cong theo góc)
   drawModalDialog(cardX, cardY, cardW, cardH, UiTheme::RADIUS_MODAL,
                   {22, 27, 36, 255}, {50, 32, 12, 255}, 58);
   drawText(UiStrings::DISCLAIMER_TITLE, 512, cardY + 18, {245, 158, 11, 255},
@@ -6735,7 +6735,7 @@ void UIManager::renderOTAChangelogState() {
 }
 
 // renderIPTVPlaylistSelectState
-// Man hinh chon playlist khi co nhieu file .m3u
+// Màn hình chọn playlist khi có nhiều file .m3u
 void UIManager::renderIPTVPlaylistSelectState() {
   drawRect(0, 0, UiTheme::APP_W, UiTheme::HEADER_H, UiTheme::FOOTER_BG, true);
   drawRect(0, UiTheme::HEADER_H - 1, UiTheme::APP_W, 1, UiTheme::FOOTER_LINE,
@@ -6801,7 +6801,7 @@ void UIManager::renderIPTVPlaylistSelectState() {
 
       // Row 1: "[ten] - ten file.m3u" (medium)
       // Row 2: "Đã làm mới" (small, chi voi URL playlist)
-      // drawRowMainSub tu center ca block trong itemH (medium + small, gap 2)
+      // drawRowMainSub tự center cả block trong itemH (medium + small, gap 2)
       std::string plLine = pl.name;
       if (!pl.sourceFile.empty())
         plLine += " - " + pl.sourceFile;
@@ -6839,7 +6839,7 @@ void UIManager::renderIPTVPlaylistSelectState() {
     }
   }
 
-  // Footer chuan IPTV (drawAppFooter tu ve nen)
+  // Footer chuẩn IPTV (drawAppFooter tự vẽ nền)
   drawAppFooter({{UiTheme::PadBtn::Y, "Cập nhật OTA"},
                  {UiTheme::PadBtn::X, "Đổi chu kỳ"},
                  {UiTheme::PadBtn::B, "Menu"}});
@@ -6875,7 +6875,7 @@ void UIManager::centerIptvGroupBar(const std::vector<std::string> &groups,
   for (int gi = 0; gi < selIdx && gi < static_cast<int>(widths.size()); gi++)
     selX += widths[gi] + UiTheme::PILL_GAP;
   int selW = widths.empty() ? 0 : widths[selIdx];
-  // Center pill selected trong viewport, pin 2 bien khi tran.
+  // Center pill selected trong viewport, pin 2 biên khi tràn.
   int viewW = VIEW_RIGHT - VIEW_L;
   int target = selX - VIEW_L - viewW / 2 + selW / 2;
   if (target < 0)
@@ -6906,7 +6906,7 @@ void UIManager::renderIPTVState() {
   const int UI_TOP = 0;
   const int UI_H = SCREEN_H;
 
-  // Nen toan man hinh
+  // Nền toàn màn hình
   drawRect(0, UI_TOP, 1024, UI_H, {14, 18, 26, 255}, true);
 
   // Row 1: Header chuẩn chung + Logo TV + status bar (Wi-Fi, Pin, Giờ)
@@ -7019,7 +7019,7 @@ void UIManager::renderIPTVState() {
       m_iptvScrollOffset = m_selectedIPTVChannelIndex;
   }
 
-  // Group filter bar (nam ngay duoi header)
+  // Group filter bar (nằm ngay dưới header)
   const int GROUP_BAR_Y = headerBottom;
   const int GROUP_BAR_H = UiTheme::GROUP_BAR_H;
   drawRect(0, GROUP_BAR_Y, 1024, GROUP_BAR_H, {20, 26, 38, 255}, true);
@@ -7151,7 +7151,7 @@ void UIManager::renderIPTVState() {
         drawRoundedBorder(8, y, 1008, itemH, UiTheme::RADIUS_ROW,
                           UiTheme::ACCENT_CYAN, 2);
 
-      // So kenh + ten kenh can giua doc rieng theo font (fix Small/Medium chung
+      // Số kênh + tên kênh căn giữa dọc riêng theo font (fix Small/Medium chung
       // Y)
       int numY = textYCentered(y, itemH, m_fontSmall);
       int nameY = textYCentered(y, itemH, m_fontMedium);
@@ -7174,8 +7174,8 @@ void UIManager::renderIPTVState() {
       }
 
       // Right side: favorite icon | group tag | ping
-      // Icon dat o COT RIENG ben trai group title, group title KHONG shift
-      // (giu cot co dinh "nhu cu")
+      // Icon đặt ở CỘT RIÊNG bên trái group title, group title KHÔNG shift
+      // (giữ cột cố định "như cũ")
       int badgeCY = y + (itemH - 24) / 2;
       const int ICON_SIZE = 26;
       const int FAV_X = 590; // cot rieng, ben trai group
@@ -7372,7 +7372,7 @@ void UIManager::renderIPTVSearchState() {
       drawText(chanName, inX + 55, textYCentered(itemY, itemH, m_fontMedium),
                UiTheme::TEXT_MAIN, m_fontMedium);
 
-      // Favorite icon - COT RIENG ben trai group, group KHONG shift
+      // Favorite icon - CỘT RIÊNG bên trái group, group KHÔNG shift
       const int ICON_SIZE_S = 26;
       const int FAV_X_S = inX + inW - 235; // cot rieng (truoc group)
       const int GRP_X_S = inX + inW - 200; // group cot co dinh
@@ -7463,8 +7463,8 @@ void UIManager::renderIPTVSearchState() {
 }
 
 void UIManager::render() {
-  // Khi IPTV dang phat: khong render SDL de tranh conflict framebuffer voi mpv.
-  // mpv so huu man hinh, channel list hien qua mpv OSD native (IPC show-text).
+  // Khi IPTV đang phát: không render SDL để tránh conflict framebuffer với mpv.
+  // mpv sở hữu màn hình, channel list hiện qua mpv OSD native (IPC show-text).
   if (IPTVManager::instance().isIPTVPlaying() &&
       m_currentState == UIState::IPTV_LIST) {
     return;
@@ -7994,7 +7994,7 @@ void UIManager::saveYouTubeWatched(const std::string& id,
                                    const std::string& uploader) {
   if (id.empty())
     return;
-  // Da co: dua len dau, giu title/uploader cu neu lan nay rong.
+  // Đã có: đưa lên đầu, giữ title/uploader cũ nếu lần này rỗng.
   for (size_t i = 0; i < m_ytWatched.size(); ++i) {
     if (m_ytWatched[i].id == id) {
       YtWatched w = m_ytWatched[i];
@@ -8120,7 +8120,7 @@ std::vector<std::string> UIManager::runYouTubeSearch(const std::string &query,
   Logger::info("[YouTube] Smart search (P0-3): query='" + query +
                "', maxResults=" + std::to_string(maxResults));
 
-  // Lay dong tho qua helper chung (innertube + fallback).
+  // Lấy dòng thô qua helper chung (innertube + fallback).
   std::vector<std::string> rawLines =
       fetchSearchLines(query, maxResults, appRoot);
 
@@ -8185,8 +8185,8 @@ std::string UIManager::resolveYouTubeStreamUrl(const std::string &videoId,
 
   // 360p android (~2s, progressive sẵn audio) phát nhanh; 720p DASH nét
   // hơn cho auto-upgrade / SELECT (resolve ngầm, không chặn phát).
-  // Player API truoc (~1s): co URL truc tiep thi dung ngay, khong thi
-  // roi xuong yt-dlp cu (DASH/cipher).
+  // Player API trước (~1s): có URL trực tiếp thì dùng ngay, không thì
+  // rớt xuống yt-dlp cũ (DASH/cipher).
   {
     std::string q = quality.empty() ? "720" : quality;
     std::string direct = YoutubeInnertube::resolveStream(videoId, q);
@@ -8208,8 +8208,8 @@ std::string UIManager::resolveYouTubeStreamUrl(const std::string &videoId,
   }
 
   char buffer[4096];
-  // -g co the tra 1 URL (progressive, co san audio) hoac 2 URL
-  // (DASH video-only + audio). Giua ca 2 bang '|' de phat qua --audio-file.
+  // -g có thể trả 1 URL (progressive, có sẵn audio) hoặc 2 URL
+  // (DASH video-only + audio). Giữa cả 2 bằng '|' để phát qua --audio-file.
   std::string videoStreamUrl, audioStreamUrl;
   while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
     std::string line(buffer);
@@ -8500,7 +8500,7 @@ void UIManager::playYouTubeVideo(const std::string &videoId) {
   // Luu Xem lai (id|title|uploader) de gợi y khong can login.
   saveYouTubeWatched(videoId, videoTitle, videoUploader);
 
-  // Cache: force 720p, chi dung ban 720 da resolve.
+  // Cache: force 720p, chỉ dùng bản 720 đã resolve.
   std::string hit = cachedStreamUrl(videoId, "720");
   std::string hitQ = "720";
   if (!hit.empty()) {
@@ -8521,16 +8521,16 @@ void UIManager::playYouTubeVideo(const std::string &videoId) {
   showToast("Đang tải video...", UiTheme::ACCENT_CYAN, 4000);
 
   m_resolveTask.run([this, videoId](TaskProgress &) {
-    // Force 720p: chi resolve 720, that bai thi bao loi (khong rot 360).
+    // Force 720p: chỉ resolve 720, thất bại thì báo lỗi (không rớt 360).
     std::string streamUrl = resolveYouTubeStreamUrl(videoId, "720");
     std::string q = "720";
     m_ytPendingQuality = q;
     m_ytPendingStreamUrl = streamUrl;
-    // Mo ta chay thread rieng song song (khong +1s vao resolve).
-    // Ve sau thi update() day vao OSD dang phat.
+    // Mô tả chạy thread riêng song song (không +1s vào resolve).
+    // Về sau thì update() đẩy vào OSD đang phát.
     std::thread([this, videoId]() {
       std::string desc = YoutubeInnertube::videoDescription(videoId);
-      // Chi nhan neu user van dang xem dung video do (tranh nham sang B).
+      // Chỉ nhận nếu user vẫn đang xem đúng video đó (tránh nhầm sang B).
       if (!desc.empty() && m_ytPlayingVideoId == videoId) {
         m_ytPendingVideoDesc = desc;
         m_ytDescReady = true;
@@ -8889,7 +8889,7 @@ void UIManager::renderYouTubeSearchState() {
 }
 
 void UIManager::renderYouTubeResultsState() {
-  // RAM Management: giu thumbnail dang hien, xoa phan con lai khi vuot 24 (LRU
+  // RAM Management: giữ thumbnail đang hiện, xóa phần còn lại khi vượt 24 (LRU
   // 24).
   if (m_ytThumbCache.size() > 24) {
     std::unordered_set<std::string> currentVisible;
@@ -8905,7 +8905,7 @@ void UIManager::renderYouTubeResultsState() {
   drainReadyThumbs();
 
   // Header chuan chung + logo YouTube + query (khong sub TELEX/US vi
-  // keyboard da co bao hieu R2). Van giu nen/status chuan.
+  // keyboard đã có báo hiệu R2). Vẫn giữ nền/status chuẩn.
   // NOTE: drawAppBackground() đã vẽ header + line separator; KHÔNG vẽ lại ở
   // đây.
   drawAppBackground();
@@ -8933,7 +8933,7 @@ void UIManager::renderYouTubeResultsState() {
     std::string ytTitle = "YouTube";
     if (!m_ytVk.query.empty())
       ytTitle += ": " + m_ytVk.query;
-    // Chua 300px phai cho cum status (giong drawAppHeader)
+    // Chừa 300px phải cho cụm status (giống drawAppHeader)
     ytTitle = truncateToWidth(ytTitle, m_fontLarge, UiTheme::APP_W - 24 - 300);
     drawText(ytTitle, titleX, textYCentered(0, UiTheme::HEADER_H, m_fontLarge),
              UiTheme::ACCENT_CYAN, m_fontLarge);
@@ -8944,7 +8944,7 @@ void UIManager::renderYouTubeResultsState() {
   drawText("P0.5", UiTheme::APP_W - 50, 70, UiTheme::TEXT_FAINT, m_fontSmall,
            true);
 
-  // Row-view list doc: 5 rows/page, thumb trai 16:9 + info phai
+  // Row-view list dọc: 5 rows/page, thumb trái 16:9 + info phải
   // 5 * 110 + 4 * 8 = 582px (content area = 651px) -> thoáng cho title 2 dong
   const int itemsPerPage = 5;
   int totalResults = static_cast<int>(m_ytSearchResults.size());
@@ -9068,7 +9068,7 @@ void UIManager::renderYouTubeResultsState() {
                SDL_Color{229, 9, 20, 255}, m_fontSmall, true);
     }
 
-    // Info phai: chuan 2 dong canh trai, can giua deu voi thumbnail
+    // Info phải: chuẩn 2 dòng căn trái, căn giữa đều với thumbnail
     int infoX = thumbX + thumbW + 14;
     int infoW = startX + rowW - infoX - 12;
     if (item) {
@@ -9079,7 +9079,7 @@ void UIManager::renderYouTubeResultsState() {
     }
   }
 
-  // Page info nam tren footer (khong de len drawAppFooter)
+  // Page info nằm trên footer (không đè lên drawAppFooter)
   // Pill bo góc cho đẹp
   char pageInfo[64];
   int maxPage = std::max(
@@ -9090,7 +9090,7 @@ void UIManager::renderYouTubeResultsState() {
   drawRoundedRect(32, 680, 220, 26, 13, UiTheme::CARD_SOLID, true);
   drawText(pageInfo, 142, 685, UiTheme::TEXT_SUB, m_fontSmall, true);
 
-  // Scrollbar ben phai (chi khi nhieu hon 1 page)
+  // Scrollbar bên phải (chỉ khi nhiều hơn 1 page)
   int cachedTotal = static_cast<int>(m_ytAllCachedResults.size());
   if (cachedTotal > itemsPerPage) {
     int barX = UiTheme::APP_W - 14;
@@ -9175,7 +9175,7 @@ void UIManager::renderLocalSendHome() {
     const char *iconFile = (i == 0) ? "receive" : "send";
     drawPlayerIcon(iconFile, rx + 18, ry + 14, 32, 32);
     SDL_Color lblColor = sel ? UiTheme::TEXT_MAIN : UiTheme::TEXT_DIM;
-    // Can giua text theo glyph trong pill de tranh lech xuong duoi
+    // Căn giữa text theo glyph trong pill để tránh lệch xuống dưới
     drawText(sbLabels[i], rx + 64, textYCentered(ry, rH, m_fontMedium),
              lblColor, m_fontMedium, false);
   }
@@ -9453,7 +9453,7 @@ void UIManager::renderLocalSendFolderPicker() {
              {100, 116, 139, 255}, m_fontMedium, true);
   }
 
-  // Footer chuan IPTV (drawAppFooter tu ve nen)
+  // Footer chuẩn IPTV (drawAppFooter tự vẽ nền)
   drawAppFooter({{UiTheme::PadBtn::A, "Vào"},
                  {UiTheme::PadBtn::START, "Xác nhận mục lưu"},
                  {UiTheme::PadBtn::B, "Lùi"},
@@ -9605,7 +9605,7 @@ void UIManager::renderLocalSendGamePicker() {
     renderLsRomsList(px, listY, paneW, paneH);
   }
 
-  // Footer chuan IPTV (drawAppFooter tu ve nen)
+  // Footer chuẩn IPTV (drawAppFooter tự vẽ nền)
   drawAppFooter({{UiTheme::PadBtn::A, "Gửi file"},
                  {UiTheme::PadBtn::B, "Quay lại"},
                  {UiTheme::PadBtn::Y, "Tải lại"}});
@@ -9913,7 +9913,7 @@ void UIManager::renderGameCastState() {
            m_fontMedium, true);
 
   // P1-2: realtime stats tu /api/status — hien thi khi stream dang chay va
-  // da fetch thanh cong it nhat 1 lan (valid=true).
+  // đã fetch thành công ít nhất 1 lần (valid=true).
   bool showStats = running && !noWifi && m_castStats.valid.load();
   int statsY = urlY + 52; // text baseline (URL box cao 46, padding 6)
   int stepY = urlY + (showStats ? 78 : 58);
@@ -9986,8 +9986,8 @@ UIManager::YtItem UIManager::buildYtItemFromPipe(const std::string &raw) {
 
   // P0-3: detect CHANNEL| prefix from smart search backend
   // Format moi (innertube): "CHANNEL|<name>|<UC channelId>|<avatar>|<subs>"
-  // Format cu (.py): "CHANNEL|<name>|<subs>|<vcount>|<avatar>" (khong id).
-  // Phan biet: parts[1] dang UC... 24 ky tu thi la format moi.
+  // Format cũ (.py): "CHANNEL|<name>|<subs>|<vcount>|<avatar>" (không id).
+  // Phân biệt: parts[1] dạng UC... 24 ký tự thì là format mới.
   if (raw.compare(0, 8, "CHANNEL|") == 0) {
     it.type = YtItem::Type::Channel;
     auto parts = split(raw.substr(8), '|');
@@ -10067,7 +10067,7 @@ void UIManager::toggleYouTubeViewMode() {
   m_ytViewMode = !m_ytViewMode;
   saveYouTubeViewMode();
   if (!m_ytViewMode) {
-    // Ve list doc: gom ve hang 2, index trong 5 muc hien duoc.
+    // Về list dọc: gom về hàng 2, index trong 5 mục hiện được.
     if (m_ytHomeRow == 3)
       m_ytHomeRow = 2;
     int n = static_cast<int>(m_ytSearchResults.size());
@@ -10244,7 +10244,7 @@ void UIManager::renderYouTubeHomeState() {
     drawText("Đang tải...", UiTheme::APP_W / 2, contentTop + contentH / 2,
              UiTheme::TEXT_SUB, m_fontMedium, true);
   } else if (totalResults == 0) {
-    // Chua co ket qua: hien XEM LAI (video da xem, khong can login) neu co.
+    // Chưa có kết quả: hiện XEM LẠI (video đã xem, không cần login) nếu có.
     if (!m_ytWatched.empty()) {
       drawText("XEM LẠI", 36, contentTop + 8, UiTheme::TEXT_SUB, m_fontSmall,
                false);
@@ -10295,8 +10295,8 @@ void UIManager::renderYouTubeHomeState() {
       renderYouTubeHomeContentRow(contentTop, contentH);
   }
 
-  // Tu bu thumb: batch truoc co the bi skip (task ban) -> thu lai moi
-  // 4s cho trang hien tai (task tu bo qua neu dang ban).
+  // Tự bù thumb: batch trước có thể bị skip (task bận) -> thử lại mới
+  // 4s cho trang hiện tại (task tự bỏ qua nếu đang bận).
   {
     static uint32_t s_thumbRetryMs = 0;
     uint32_t nowMs = SDL_GetTicks();
@@ -10370,8 +10370,8 @@ void UIManager::renderYouTubeHomeState() {
 
 void UIManager::renderYouTubeHomeContentRow(int contentTop, int /*contentH*/) {
   // 5 rows/page, list vertical, thumb trái 16:9 + info phải.
-  // Che do list hien 5 muc dau cua trang hien tai (trang data 6 muc,
-  // muc thu 6 xem o che do luoi). Dieu huong doc lap theo index.
+  // Chế độ list hiện 5 mục đầu của trang hiện tại (trang data 6 mục,
+  // mục thứ 6 xem ở chế độ lưới). Điều hướng độc lập theo index.
   const int itemsPerPage = 5;
   int totalResults = static_cast<int>(m_ytSearchResults.size());
   int pageStartIndex = 0;
@@ -10391,7 +10391,7 @@ void UIManager::renderYouTubeHomeContentRow(int contentTop, int /*contentH*/) {
     if (idx >= totalResults)
       break;
     int cy = startY + i * (rowH + gapY);
-    // Chi highlight khi dpad dang o vung list (hang 2/3), khong thi tat
+    // Chỉ highlight khi dpad đang ở vùng list (hàng 2/3), không thì tắt
     // de khoi nham voi search box/pills.
     bool isSelected = (m_ytHomeRow >= 2 && idx == m_ytHomeContentSelected);
     bool isChannelRow = (idx < static_cast<int>(m_ytItems.size()) &&
@@ -10433,7 +10433,7 @@ void UIManager::renderYouTubeHomeContentRow(int contentTop, int /*contentH*/) {
     if (idx < static_cast<int>(m_ytItems.size())) {
       const auto &item = m_ytItems[idx];
       if (!isChannelRow) {
-        // Chuan: ten video + 1 hang "kenh - duration - views", can giua
+        // Chuẩn: tên video + 1 hàng "kênh - duration - views", căn giữa
         // deu voi thumb.
         int lh = textHeight(m_fontSmall);
         int step = lh + 4;
@@ -10681,10 +10681,10 @@ std::vector<std::string> UIManager::fetchSearchLines(
                     "/scripts/youtube_search.sh\" search \"" + escaped +
                     "\" 1 " + std::to_string(maxResults) +
                     "; fi 2>/tmp/yt_search_err.log";
-  // Innertube truoc (~2-3s): that bai moi xuong yt-dlp cu (~7s).
-  // Luu y: duong .sh khong hieu params (live/date) nen chi dung params
-  // khi innertube an; that bai innertube + co params thi tra rong thay vi
-  // ket qua sai ngu canh.
+  // Innertube trước (~2-3s): thất bại mới xuống yt-dlp cũ (~7s).
+  // Lưu ý: đường .sh không hiểu params (live/date) nên chỉ dùng params
+  // khi innertube ăn; thất bại innertube + có params thì trả rỗng thay vì
+  // kết quả sai ngữ cảnh.
   std::vector<std::string> rawLines =
       YoutubeInnertube::search(query, maxResults, params);
   if (!rawLines.empty())
@@ -10692,7 +10692,7 @@ std::vector<std::string> UIManager::fetchSearchLines(
   if (!params.empty())
     return rawLines;
   // Query kenh ("channel:<id>"): duong cu (.sh search chu "channel:ID")
-  // chi ra video tap nham -> tra rong de UI bao loi that, khong hien sai.
+  // chỉ ra video tạp nham -> trả rỗng để UI báo lỗi thật, không hiện sai.
   if (query.rfind("channel:", 0) == 0)
     return rawLines;
   FILE* fp = popen(cmd.c_str(), "r");
@@ -10778,7 +10778,7 @@ void UIManager::runTagAction(int index) {
     m_ytLastSearchQuery = q;
     runYouTubeHomeSearch(q);
   } else if (action == "latest:") {
-    // Moi tai len: search rong sap xep theo ngay tai len.
+    // Mới tải lên: search rỗng sắp xếp theo ngày tải lên.
     m_ytLastSearchQuery = "việt nam";
     m_ytLastSearchParams = "EgIIAg==";
     runYouTubeHomeSearch("việt nam", "EgIIAg==");
@@ -10819,7 +10819,7 @@ void UIManager::suggestFromHistory() {
   if (m_ytIsSearching)
     return;
   loadYouTubeWatched();
-  // Gom ten kenh da xem (toi da 3, giu thu tu moi nhat).
+  // Gom tên kênh đã xem (tối đa 3, giữ thứ tự mới nhất).
   std::vector<std::string> channels;
   for (const auto& w : m_ytWatched) {
     if (w.uploader.empty())
@@ -10846,7 +10846,7 @@ void UIManager::suggestFromHistory() {
     for (const auto& ch : channels) {
       if (out.size() >= 18)
         break;
-      // Tim UC-id qua search ten kenh (hang CHANNEL dau tien).
+      // Tìm UC-id qua search tên kênh (hàng CHANNEL đầu tiên).
       auto lines = YoutubeInnertube::search(ch, 6);
       std::string cid;
       for (const auto& l : lines) {
@@ -10884,7 +10884,7 @@ void UIManager::suggestFromHistory() {
       }
     }
     if (out.empty()) {
-      // Khong co lich su/khong goi duoc: roi ve trending.
+      // Không có lịch sử/không gọi được: rớt về trending.
       auto fb = YoutubeInnertube::search("thinh hanh viet nam", 18);
       for (const auto& l : fb) {
         if (l.compare(0, 8, "CHANNEL|") != 0)
@@ -10900,10 +10900,10 @@ void UIManager::suggestFromHistory() {
 }
 
 void UIManager::applyYouTubeSearchResults(std::vector<std::string> results) {
-  // Dang o trang kenh: ket qua search nen ve tre (phan trang cu) khong
-  // duoc ghi de len video kenh -> bo qua.
+  // Đang ở trang kênh: kết quả search nền về trễ (phân trang cũ) không
+  // được ghi đè lên video kênh -> bỏ qua.
   if (m_ytInChannelView) {
-    Logger::info("[YouTube] Bo qua ket qua search tre khi dang o trang kenh");
+    Logger::info("[YouTube] Bỏ qua kết quả search trễ khi đang ở trang kênh");
     return;
   }
   m_ytAllCachedResults = std::move(results);
@@ -10920,8 +10920,8 @@ void UIManager::applyYouTubeSearchResults(std::vector<std::string> results) {
     std::getline(ss, f3, '|');
     std::string subs, vcount, avatarUrl;
     if (f1.size() == 24 && f1.compare(0, 2, "UC") == 0) {
-      // Format moi: CHANNEL|name|id|avatar|subs (id khong can o day,
-      // YtItem giu id rieng cho nut Xem kenh)
+      // Format mới: CHANNEL|name|id|avatar|subs (id không cần ở đây,
+      // YtItem giữ id riêng cho nút Xem kênh)
       avatarUrl = f2;
       subs = f3;
     } else {
@@ -10933,7 +10933,7 @@ void UIManager::applyYouTubeSearchResults(std::vector<std::string> results) {
     m_ytMatchedChannel.matched = true;
     m_ytMatchedChannel.name = name;
     m_ytMatchedChannel.channelId = "";
-    // Lay UC-id tu dong CHANNEL goc (format moi co id o cot 2).
+    // Lấy UC-id từ dòng CHANNEL gốc (format mới có id ở cột 2).
     {
       std::stringstream ss2(m_ytAllCachedResults[0]);
       std::string t2, n2, f1;
@@ -10967,7 +10967,7 @@ void UIManager::applyYouTubeSearchResults(std::vector<std::string> results) {
 
   // Trang channel (query 'channel:<id>'): list full 6 video/trang ngay tu dau.
   // Search thuong co matched channel: giu 3 video (3 o HÀNG 3 la video moi
-  // nhat cua kenh, layout card mac dinh).
+  // nhất của kênh, layout card mặc định).
   bool isChannelQuery = m_ytLastSearchQuery.rfind("channel:", 0) == 0;
   int end =
       (m_ytMatchedChannel.matched && !isChannelQuery)

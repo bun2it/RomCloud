@@ -1,6 +1,6 @@
 #pragma once
 // RomCloud DialogManager — state logic cho toast/confirm/progress + render overlays.
-// P0-3: gom 6 overlay tu UIManager ve day; UIManager chi giu wrapper 1 dong.
+// P0-3: gom 6 overlay từ UIManager về đây; UIManager chỉ giữ wrapper 1 dòng.
 #include <chrono>
 #include <cstdint>
 #include <functional>
@@ -89,7 +89,7 @@ public:
     void renderLocalSendProgress(UiRenderer& ui, TTF_Font* fSmall, TTF_Font* fMedium,
                                  TTF_Font* fLarge, TTF_Font* fTitle,
                                  int& sel, int& scroll);
-    // 4 overlay global goi moi frame (toast + progress + sync + upload).
+    // 4 overlay global gọi mỗi frame (toast + progress + sync + upload).
     void renderGlobalOverlays(UiRenderer& ui, TTF_Font* fSmall, TTF_Font* fMedium, TTF_Font* fLarge);
 };
 

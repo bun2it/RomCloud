@@ -33,8 +33,8 @@ void DialogManager::renderToast(UiRenderer& ui, TTF_Font* fSmall) {
     int toastX = (1024 - toastW) / 2, toastY = 645;
     ui.drawRoundedRect(toastX, toastY, toastW, toastH, 24, {20, 24, 32, 245}, true);
     ui.drawRoundedBorder(toastX, toastY, toastW, toastH, 24, border, 2);
-    // Can giua text theo glyph (ascent+descent), khong hardcode +14 de tranh lech
-    // xuong duoi khi text co descender (g, p, y) hoac ky tu TV co dau.
+    // Căn giữa text theo glyph (ascent+descent), không hardcode +14 để tránh lệch
+    // xuống dưới khi text có descender (g, p, y) hoặc ký tự TV có dấu.
     int textY = ui.textYCentered(toastY, toastH, fSmall);
     ui.drawInlineHintsCentered(toast.message, 512, textY, {255, 255, 255, 255}, fSmall, 24);
 }

@@ -552,7 +552,7 @@ private:
   std::atomic<bool> m_ytDescReady{false}; // desc ve sau resolve
   std::string m_ytPendingQuality; // "720" mặc định, "360" nếu 720 rớt mới dùng
   std::vector<std::string> m_ytSearchHistory;
-  // Xem lai: video da xem (id|title|uploader), toi da 10, moi nhat truoc.
+  // Xem lại: video đã xem (id|title|uploader), tối đa 10, mới nhất trước.
   struct YtWatched { std::string id; std::string title; std::string uploader; };
   std::vector<YtWatched> m_ytWatched;
   int m_ytWatchedIndex = 0;
@@ -574,12 +574,12 @@ private:
     const char *id;     // "music", "live", "watched", ...
     const char *label;  // "Âm nhạc", "Trực tiếp", ...
     // Hanh dong khi pick pill:
-    //  "feed:<cat>"  -> trending (feed: = tat ca)
+    //  "feed:<cat>"  -> trending (feed: = tất cả)
     //  "live:<query>" -> live hien tai (params EgJAAQ==)
     //  "search:<query>" -> tim thuong
-    //  "latest:" -> moi tai len (search sap xep theo ngay)
-    //  "watched:" -> video da xem (local, khong mang)
-    //  "suggest:" -> de xuat theo kenh hay xem (RSS, khong login)
+    //  "latest:" -> mới tải lên (search sắp xếp theo ngày)
+    //  "watched:" -> video đã xem (local, không mạng)
+    //  "suggest:" -> đề xuất theo kênh hay xem (RSS, không login)
     const char *action;
   };
   static const std::array<Category, 10> kYtCategories;
@@ -608,7 +608,7 @@ private:
   };
   YtMatchedChannel m_ytMatchedChannel;
   bool m_ytInChannelView = false;
-  // Video kenh dang tai nen (thread fetch -> UI nhan).
+  // Video kênh đang tải nền (thread fetch -> UI nhận).
   std::vector<std::string> m_ytChannelPending;
   std::atomic<bool> m_ytChannelReady{false};
   std::vector<std::string> m_ytChannelAllVideos;
@@ -617,7 +617,7 @@ private:
                               const std::string &params = "");
   // Chay tag home theo action (feed/live/search/latest/watched/suggest).
   void runTagAction(int index);
-  // Hien video da xem (local). De xuat theo kenh hay xem (RSS, khong login).
+  // Hiện video đã xem (local). Đề xuất theo kênh hay xem (RSS, không login).
   void showWatchedVideos();
   void suggestFromHistory();
   void toggleYouTubeViewMode();
@@ -766,9 +766,9 @@ private:
   std::unordered_map<std::string, std::string> m_ytStreamUrlCache; // key vid|quality
   std::vector<std::string> runYouTubeSearch(const std::string &query,
                                             int page = 1);
-  // Lay dong ket qua tho (innertube truoc, yt-dlp fallback): dung chung cho
-  // moi duong search de khoi lap lai escape/cmd/popen. params innertube
-  // tuy chon (VD: "EgJAAQ==" loc live, "EgIIAg==" sap xep theo ngay).
+  // Lấy dòng kết quả thô (innertube trước, yt-dlp fallback): dùng chung cho
+  // mọi đường search để khỏi lặp lại escape/cmd/popen. params innertube
+  // tùy chọn (VD: "EgJAAQ==" lọc live, "EgIIAg==" sắp xếp theo ngày).
   static std::vector<std::string> fetchSearchLines(const std::string &query,
                                                    int maxResults,
                                                    const std::string &appRoot,
@@ -811,10 +811,10 @@ private:
   void drawPlayerIcon(const std::string &iconName, int x, int y, int w, int h);
   void drawButtonIcon(const std::string &button, int x, int y, int size);
   void drawGridIcon(const std::string &iconFile, int x, int y, int w, int h);
-  // Ve icon nut + label can giua doc trong footer (fix lech text vs button)
+  // Vẽ icon nút + label căn giữa dọc trong footer (fix lệch text vs button)
   int textHeight(TTF_Font *font);
   int textWidth(const std::string &text, TTF_Font *font);
-  // Cat chu theo pixel, khong cat giua ky tu UTF-8 (them "..." khi cat)
+  // Cắt chữ theo pixel, không cắt giữa ký tự UTF-8 (thêm "..." khi cắt)
   std::string truncateToWidth(const std::string &text, TTF_Font *font,
                               int maxPx);
   // Rong pill fit chu theo pixel (kep MIN/MAX)
@@ -827,28 +827,28 @@ private:
   void drawPill(int x, int y, int w, int h, const std::string &text,
                 bool active, TTF_Font *font = nullptr);
   // Row list chuan (game/channel/file/cai dat...)
-  // Y can giua doc chuan cho 1 dong text trong box h (dung FontHeight)
+  // Y căn giữa dọc chuẩn cho 1 dòng text trong box h (dùng FontHeight)
   int textYCentered(int y, int h, TTF_Font *font);
-  // Ve cap main/sub can giua doc trong row (fix main/sub lech tam)
+  // Vẽ cặp main/sub căn giữa dọc trong row (fix main/sub lệch tâm)
   void drawRowMainSub(int x, int y, int h, const std::string &main,
                       TTF_Font *fMain, const std::string &sub, TTF_Font *fSub,
                       int maxW = 0, int gap = 4);
-  // Ve text canh phai that (right-align theo pixel, cho goc
+  // Vẽ text canh phải thật (right-align theo pixel, cho góc
   // top-right/bottom-right)
   void drawTextRight(const std::string &text, int rightX, int y,
                      SDL_Color color, TTF_Font *font);
-  // Tra ve x sau khi ve xong 1 hint (de noi tiep nhieu hint). Icon va text can
-  // giua doc theo bar.
+  // Trả về x sau khi vẽ xong 1 hint (để nối tiếp nhiều hint). Icon và text căn
+  // giữa dọc theo bar.
   int drawFooterHint(const std::string &button, const std::string &label, int x,
                      int barY, int barH, SDL_Color color, TTF_Font *font,
                      int iconSize = 30, int gap = 8);
-  // Ve chuoi footer dang "icon label   icon label..." can giua ngang + doc
+  // Vẽ chuỗi footer dạng "icon label   icon label..." căn giữa ngang + dọc
   // Ve 1 badge co 2 icon nut (vd: "[A] Kiem tra  •  [B] Quay lai")
   void drawBadgeDual(int x, int y, int w, int h, const std::string &btn1,
                      const std::string &label1, const std::string &btn2,
                      const std::string &label2, SDL_Color bg, SDL_Color fg);
   // Ve 1 dong text co chua token [NUT] o bat ky vi tri nao -> thay bang icon
-  // that, can giua
+  // thật, căn giữa
   void drawInlineHintsCentered(const std::string &text, int centerX, int y,
                                SDL_Color color, TTF_Font *font,
                                int iconSize = 26, int gap = 6);
@@ -899,7 +899,7 @@ private:
 
   // P1-1: scan/index SD chay tren BackgroundTask (thay std::thread().detach()).
   BackgroundTask m_indexTask;
-  // Media tasks: search YT/TT rieng (tranh wait-block UI khi chuyen man hinh),
+  // Media tasks: search YT/TT riêng (tránh wait-block UI khi chuyển màn hình),
   // resolve (stream URL) + thumb (tai thumbnail) dung chung.
   BackgroundTask m_ytSearchTask;
   std::mutex m_ytSearchMutex;
@@ -915,7 +915,7 @@ private:
   std::atomic<bool> m_manualReportSending{false};
 
   // P1-2: realtime stream telemetry from GET http://127.0.0.1:8090/api/status.
-  // Polled moi 2s khi UIState=GAME_CAST, render moi frame. atomic de tranh
+  // Polled mỗi 2s khi UIState=GAME_CAST, render mỗi frame. atomic để tránh
   // race voi HTTP fetch thread.
   struct CastStats {
     std::atomic<int> fps{0};

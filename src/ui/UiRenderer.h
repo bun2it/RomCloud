@@ -21,7 +21,7 @@ class UiRenderer {
 public:
     UiRenderer() = default;
 
-    // Goi 1 lan sau khi co renderer + font. assetsDir vd AppConfig::getAssetsDir().
+    // Gọi 1 lần sau khi có renderer + font. assetsDir vd AppConfig::getAssetsDir().
     void bind(SDL_Renderer* r, TTF_Font* small, TTF_Font* medium,
               TTF_Font* large, const std::string& assetsDir);
     void unbind();  // giai phong cache texture
@@ -62,7 +62,7 @@ public:
     int textWidth(const std::string& text, TTF_Font* font);
     std::string truncateToWidth(const std::string& text, TTF_Font* font, int maxPx);
     int pillWidth(const std::string& text, TTF_Font* font = nullptr);
-    // Rong badge/button do theo pixel (w=0 -> tu do). Tra ve w sau clamp.
+    // Rộng badge/button đo theo pixel (w=0 -> tự do). Trả về w sau clamp.
     int badgeWidth(const std::string& text, int h, TTF_Font* font = nullptr);
     int buttonWidth(const std::string& label, TTF_Font* font = nullptr);
     int badgeDualWidth(const std::string& label1, const std::string& label2, int h);
@@ -95,12 +95,12 @@ public:
     void drawAppBackground();
     void drawFocusRow(int x, int y, int w, int h);
     void drawAppHeader(const std::string& title, const std::string& sub = "");
-    // Cum status phai header kieu stock: [wifi] [% pin + icon pin] [gio]
+    // Cụm status phải header kiểu stock: [wifi] [% pin + icon pin] [giờ]
     void drawHeaderStatus();
     void drawAppFooter(const std::vector<UiTheme::FooterHint>& hints);
     void beginModalDim();
 
-    // virtual keyboard chung (P0-2: gom 6 ban phim ve tay)
+    // virtual keyboard chung (P0-2: gom 6 bàn phím về đây)
     // Ve 4 hang phim QWERTY (VirtualKeyboard::lower/upperRows, symbolMode -> symbolRows) + hang action 5 o.
     // actionLabels: 5 nhan (vd {"abc","ABC","Cách","Xóa","Tìm"} — o 0/1 chi fallback khi withIcons=false); withIcons: ve icon nut L1/R1/X/Y/START.
     // actionStride: 1 = col 0..4 (Explorer/LsFolder/VirtualKeyboard::move), 2 = col 0..9 kieu YT/TT cu (col/2).

@@ -581,8 +581,8 @@ std::string DriveSyncEngine::matchFolderToSystemCode(const std::string& name) {
     if (s.find("master system") != std::string::npos || s == "ms" || s == "sms") return "MS";
     if (s.find("sega cd") != std::string::npos || s.find("segacd") != std::string::npos) return "SEGACD";
     if (s.find("neo geo") != std::string::npos || s.find("neogeo") != std::string::npos) return "NEOGEO";
-    // Ho arcade stock: ten cu the uu tien truoc ten chung (mame2010 chua
-    // "mame" nen phai check truoc).
+    // Họ arcade stock: tên cụ thể ưu tiên trước tên chung (mame2010 chứa
+    // "mame" nên phải check trước).
     if (s.find("mame2010") != std::string::npos) return "MAME2010";
     if (s.find("mame2003") != std::string::npos || s.find("mame 2003") != std::string::npos) return "MAME2003PLUS";
     if (s.find("fbneo") != std::string::npos || s.find("final burn") != std::string::npos) return "FBNEO";
@@ -776,7 +776,7 @@ void DriveSyncEngine::runSyncWorker() {
         int n = oneDriveSyncShare(share);
         {
             std::lock_guard<std::mutex> lock(m_mutex);
-            if (n < 0) { m_progress.status = SyncStatus::ERROR_OCCURRED; m_progress.errorMessage = "OneDrive share khong truy cap duoc. Kiem tra quyen Anyone with the link."; }
+            if (n < 0) { m_progress.status = SyncStatus::ERROR_OCCURRED; m_progress.errorMessage = "OneDrive share không truy cập được. Kiểm tra quyền Anyone with the link."; }
             else { m_progress.status = SyncStatus::COMPLETED; m_progress.cloudGamesFound = n; m_progress.newGamesIndexed = n; }
         }
         m_isRunning = false;

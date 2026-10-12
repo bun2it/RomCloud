@@ -693,7 +693,7 @@ int UiRenderer::pillWidth(const std::string &text, TTF_Font *font) {
   return w;
 }
 
-// Tach prefix "[X] " cua badge -> (btn, label). Tra btn rong neu khong co.
+// Tách prefix "[X] " của badge -> (btn, label). Trả btn rỗng nếu không có.
 static void splitBadgePrefix(const std::string &text, std::string &btn,
                              std::string &label) {
   btn.clear();
@@ -781,8 +781,8 @@ void UiRenderer::drawPill(int x, int y, int w, int h, const std::string &text,
 
 int UiRenderer::textYCentered(int y, int h, TTF_Font *font) {
   if (!font) return y + h / 2 - 8;
-  // Can giua quang hoc theo khoi glyph (ascent+|descent|) thay vi FontHeight
-  // (FontHeight cong them lineGap -> chia doi lech len 1-2px, lo ro voi dau TV).
+  // Căn giữa quang học theo khối glyph (ascent+|descent|) thay vì FontHeight
+  // (FontHeight cộng thêm lineGap -> chia đôi lệch lên 1-2px, lộ rõ với dấu TV).
   int lineH = TTF_FontAscent(font) - TTF_FontDescent(font);
   if (lineH <= 0) lineH = TTF_FontHeight(font);
   return y + (h - lineH) / 2;
@@ -795,7 +795,7 @@ void UiRenderer::drawRowMainSub(int x, int y, int h, const std::string &main,
   int thS = (!sub.empty() && fSub) ? TTF_FontHeight(fSub) : 0;
   int blockH = thM + (thS > 0 ? gap + thS : 0);
   if (blockH > h) {
-    // Chu lon hon row: uu tien ten file, giam gap -> khong de hang duoi
+    // Chữ lớn hơn row: ưu tiên tên file, giảm gap -> không để hàng dưới
     blockH = h;
     if (thS > 0 && thM + gap + thS > h)
       gap = 0;
@@ -1039,7 +1039,7 @@ void UiRenderer::drawHeaderStatus() {
 
   // Wifi: doc signal dBm qua `iw wlan0 link`, map 5 nac stock
   // >-50:5, >-60:4, >-67:3, >-75:2, connected:1, mat mang:off
-  // Cache 5s de khong spawn process moi frame
+  // Cache 5s để không spawn process mỗi frame
   static uint32_t lastWifiCheck = 0;
   static bool cachedLinked = false;
   static int cachedLevel = 0;
@@ -1072,7 +1072,7 @@ void UiRenderer::drawHeaderStatus() {
       pclose(pf);
     }
     if (!linked) {
-      // fallback: operstate up = co wifi nhung khong do duoc dBm
+      // fallback: operstate up = có wifi nhưng không đo được dBm
       FILE *of = fopen("/sys/class/net/wlan0/operstate", "r");
       if (of) {
         char s[16] = {0};
@@ -1094,7 +1094,7 @@ void UiRenderer::drawHeaderStatus() {
   if (t)
     strftime(tbuf, sizeof(tbuf), "%H:%M", t);
 
-  // Layout phai -> trai, can giua doc trong HEADER_H=64
+  // Layout phải -> trái, căn giữa dọc trong HEADER_H=64
   int cy = UiTheme::HEADER_H / 2;
   int x = UiTheme::APP_W - 24;
   SDL_Color fg = {190, 215, 228, 255};
@@ -1105,7 +1105,7 @@ void UiRenderer::drawHeaderStatus() {
     drawText(tbuf, x - tw, textYCentered(0, UiTheme::HEADER_H, m_fSmall), fg, m_fSmall);
     x -= tw + 14;
   }
-  // Icon pin stock theo muc + % ben trai
+  // Icon pin stock theo mức + % bên trái
   std::string battIcon = "hdr_batt_100";
   if (pct <= 5)
     battIcon = "hdr_batt_0";
@@ -1140,7 +1140,7 @@ void UiRenderer::drawAppHeader(const std::string &title,
            true);
   if (!m_fLarge)
     return;
-  // Chua ~280px phai cho cum status [wifi][% pin][gio]
+  // Chừa ~280px phải cho cụm status [wifi][% pin][giờ]
   const int statusReserve = 300;
   if (sub.empty()) {
     std::string t = truncateToWidth(title, m_fLarge, UiTheme::APP_W - 24 - statusReserve);

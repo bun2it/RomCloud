@@ -146,7 +146,7 @@ void InputManager::update() {
                     case SDL_CONTROLLER_BUTTON_RIGHTSHOULDER: setBtn(Button::R1, down); break;
                     case SDL_CONTROLLER_BUTTON_START:      setBtn(Button::START, down); break;
                     // Brick chin buttons (order L to R: MENU - SELECT - START)
-                    // nut trai = GUIDE (MENU), nut giua = BACK (SELECT), nut phai = START
+                    // nút trái = GUIDE (MENU), nút giữa = BACK (SELECT), nút phải = START
                     case SDL_CONTROLLER_BUTTON_BACK:       setBtn(Button::SELECT, down); break;
                     case SDL_CONTROLLER_BUTTON_GUIDE:      setBtn(Button::MENU, down); break;
                     case SDL_CONTROLLER_BUTTON_MISC1:
@@ -211,7 +211,7 @@ void InputManager::update() {
                         case 4: setBtn(Button::L1, down); break;
                         case 5: setBtn(Button::R1, down); break;
                         // Brick fallback (order L to R: MENU - SELECT - START):
-                        // nut trai = 8 (MENU), nut giua = 6 (SELECT), nut phai = 7 (START)
+                        // nút trái = 8 (MENU), nút giữa = 6 (SELECT), nút phải = 7 (START)
                         case 6: setBtn(Button::SELECT, down); break;
                         case 7: setBtn(Button::START, down); break;
                         case 8: setBtn(Button::MENU, down); break;

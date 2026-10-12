@@ -357,10 +357,10 @@ void Application::run() {
     InputManager::instance().update();
 
     // MENU thoat app toan cuc — nhung bo qua khi dang o FILE_EXPLORER
-    // (MENU giua trong Explorer dung de xoa 2-step, SELECT trai de thoat Explorer).
-    // Check state TRUOC roi moi doc phim: tranh double-consume latch MENU cua Explorer.
-    // Brick: BACK vat ly = MENU -> chi thoat khi o MENU chinh; cac man khac de back
-    // bang B (khong thoat app).
+    // (MENU giữa trong Explorer dùng để xóa 2-step, SELECT trái để thoát Explorer).
+    // Check state TRƯỚC rồi mới đọc phím: tránh double-consume latch MENU của Explorer.
+    // Brick: BACK vật lý = MENU -> chỉ thoát khi ở MENU chính; các màn khác để back
+    // bằng B (không thoát app).
     if (UIManager::instance().getState() == UIState::MENU &&
         InputManager::instance().isButtonJustPressed(Button::MENU)) {
       Logger::error("Menu button pressed at MAIN MENU, exiting cleanly...");

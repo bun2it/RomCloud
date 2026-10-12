@@ -408,7 +408,7 @@ std::vector<MisplacedRomRecord> RomOrganizer::organizeDirectory(const std::strin
     return results;
 }
 
-// Chuan hoa ten folder he may
+// Chuẩn hóa tên folder hệ máy
 
 static std::string normalizeFolderKey(const std::string& name) {
     std::string out;
@@ -420,11 +420,11 @@ static std::string normalizeFolderKey(const std::string& name) {
     return out;
 }
 
-// key (da chuan hoa) -> ma he may chuan. CHI gom ma he / romDir trong DB
+// key (đã chuẩn hóa) -> mã hệ máy chuẩn. CHỈ gồm mã hệ / romDir trong DB
 // (so hoa/thuong/khoang trang). KHONG doan alias (snes, mame, genesis...)
 // vi ten folder phai trung khop cach dat cua StockOS — doan sai se lam
-// game khong chay duoc. Folder ten la duoc xu ly bang cach chuyen FILE
-// ROM ben trong vao dung folder he may (khong doi ten folder).
+// game không chạy được. Folder tên lạ được xử lý bằng cách chuyển FILE
+// ROM bên trong vào đúng folder hệ máy (không đổi tên folder).
 static std::unordered_map<std::string, std::string> buildFolderAliasMap(
     const std::vector<SystemRecord>& systems) {
     std::unordered_map<std::string, std::string> m;
@@ -455,7 +455,7 @@ int RomOrganizer::normalizeSystemFolders(const std::string& romsBaseDir) {
         m_busy = false;
         return 0;
     }
-    // Thu thap truoc (doi ten folder trong luc duyet readdir khong an toan)
+    // Thu thập trước (đổi tên folder trong lúc duyệt readdir không an toàn)
     std::vector<std::string> subdirs;
     struct dirent* entry = nullptr;
     while ((entry = readdir(dir)) != nullptr) {
@@ -484,14 +484,14 @@ int RomOrganizer::normalizeSystemFolders(const std::string& romsBaseDir) {
         struct stat stTarget;
         bool targetExists = (stat(targetDir.c_str(), &stTarget) == 0);
         if (!targetExists) {
-            // Doi ten truc tiep: "gba" -> "GBA"
+            // Đổi tên trực tiếp: "gba" -> "GBA"
             if (rename(srcDir.c_str(), targetDir.c_str()) == 0) {
                 sync();
                 ++changed;
                 Logger::info("RomOrganizer: Doi ten folder " + name + " -> " +
                              sysIt->second.romDir);
             } else {
-                Logger::warn("RomOrganizer: Khong doi ten duoc folder " + name);
+                Logger::warn("RomOrganizer: Không đổi tên được folder " + name);
             }
         } else {
             // Gop: ca "GBA" va "gba" ton tai -> don file vao folder chuan
@@ -520,7 +520,7 @@ int RomOrganizer::normalizeSystemFolders(const std::string& romsBaseDir) {
     return changed;
 }
 
-// Sap xep de quy folder la (file ROM nam rac trong folder khong phai he may)
+// Sắp xếp đệ quy folder lạ (file ROM nằm rác trong folder không phải hệ máy)
 
 int RomOrganizer::organizeUnknownDirRecursive(
     const std::string& sourceDir, const std::string& baseDir,
@@ -530,7 +530,7 @@ int RomOrganizer::organizeUnknownDirRecursive(
     DIR* dir = opendir(sourceDir.c_str());
     if (!dir) return 0;
 
-    // Thu thap truoc de tranh sua folder trong luc duyet
+    // Thu thập trước để tránh sửa folder trong lúc duyệt
     std::vector<std::pair<std::string, bool>> entries; // (ten, laFolder)
     struct dirent* entry = nullptr;
     while ((entry = readdir(dir)) != nullptr) {
@@ -548,7 +548,7 @@ int RomOrganizer::organizeUnknownDirRecursive(
         std::string full = sourceDir + "/" + name;
         if (isDir) {
             moved += organizeUnknownDirRecursive(full, baseDir, codeToSys, summary);
-            // Xoa folder rong sau khi don sach
+            // Xóa folder rỗng sau khi dọn sạch
             DIR* chk = opendir(full.c_str());
             bool empty = true;
             if (chk) {
@@ -589,13 +589,13 @@ int RomOrganizer::organizeUnknownDirRecursive(
             if (stat(finalDst.c_str(), &st2) == 0) g.sizeBytes = st2.st_size;
             DatabaseManager::instance().upsertGame(g);
         } else {
-            summary.errors.push_back("Khong chuyen duoc: " + name);
+            summary.errors.push_back("Không chuyển được: " + name);
         }
     }
     return moved;
 }
 
-// Lam tron 1 lan: chuan hoa folder -> sap xep file la -> dua file lac cho ve
+// Làm tròn 1 lần: chuẩn hóa folder -> sắp xếp file lạ -> đưa file lạc chỗ về
 
 OrganizeSummary RomOrganizer::organizeAll(const std::string& romsBaseDir) {
     {
@@ -621,11 +621,11 @@ OrganizeSummary RomOrganizer::organizeAll(const std::string& romsBaseDir) {
         knownDirs[s.romDir] = true;
     }
 
-    // Buoc 1: sua ten folder he may ve chuan ("gba" -> "GBA", gop trung)
+    // Bước 1: sửa tên folder hệ máy về chuẩn ("gba" -> "GBA", gộp trùng)
     int renamed = normalizeSystemFolders(baseDir);
     summary.foldersRenamed = renamed;
 
-    // Buoc 2: sap xep file trong cac folder la (khong phai he may, khac _INBOX)
+    // Bước 2: sắp xếp file trong các folder lạ (không phải hệ máy, khác _INBOX)
     DIR* dir = opendir(baseDir.c_str());
     if (dir) {
         std::vector<std::string> unknownDirs;
@@ -644,7 +644,7 @@ OrganizeSummary RomOrganizer::organizeAll(const std::string& romsBaseDir) {
         closedir(dir);
         for (const auto& ud : unknownDirs) {
             organizeUnknownDirRecursive(ud, baseDir, codeToSys, summary);
-            // Xoa folder la neu da rong
+            // Xóa folder lạ nếu đã rỗng
             DIR* chk = opendir(ud.c_str());
             bool empty = true;
             if (chk) {
@@ -659,7 +659,7 @@ OrganizeSummary RomOrganizer::organizeAll(const std::string& romsBaseDir) {
         }
     }
 
-    // Buoc 3: dua file lac cho trong cac folder he may + root + _INBOX ve dung cho
+    // Bước 3: đưa file lạc chỗ trong các folder hệ máy + root + _INBOX về đúng chỗ
     auto fixed = fixMisplacedRoms(baseDir);
     for (const auto& item : fixed) {
         if (item.fixed) ++summary.filesMoved;

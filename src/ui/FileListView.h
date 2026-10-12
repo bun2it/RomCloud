@@ -1,7 +1,7 @@
 #pragma once
 // RomCloud FileListView — list 2 cot Master-Detail + footer tay cam dung chung.
 // Header-only, khong giu state: caller truyen entries + selected + detail lines.
-// Dung cho FileExplorer man hinh moi va LocalSend picker (dan thay renderLocalSendFolderPicker).
+// Dùng cho FileExplorer màn hình mới và LocalSend picker (dần thay renderLocalSendFolderPicker).
 #include <string>
 #include <vector>
 
@@ -32,13 +32,13 @@ public:
         int n = listH / rowH;
         return n > 0 ? n : 1;
     }
-    // Cat ngan tieu de theo so ky tu (fallback khi khong co font do text width).
+    // Cắt ngắn tiêu đề theo số ký tự (fallback khi không có font đo text width).
     static std::string shorten(const std::string& s, size_t maxChars = 26) {
         if (s.size() <= maxChars) return s;
         if (maxChars <= 2) return "..";
         return s.substr(0, maxChars - 2) + "..";
     }
-    // Layout A Master-Detail 65/35 tren 1024 (theo UiTheme tokens).
+    // Layout A Master-Detail 65/35 trên 1024 (theo UiTheme tokens).
     struct Layout {
         int leftX = 24, leftY = 128, leftW = 624, leftH = 574;
         int rightX = 664, rightW = 336, rightY = 128, rightH = 574;

@@ -75,20 +75,20 @@ void Logger::init(const std::string& logFilePath,
     m_logFile.open(logFilePath, std::ios::out | std::ios::app);
     m_initialized = m_logFile.is_open();
 
-    // KHONG goi logSessionHeader o day de tranh deadlock: header can PlatformInfo
+    // KHÔNG gọi logSessionHeader ở đây để tránh deadlock: header cần PlatformInfo
     // ma PlatformInfo constructor co the goi Logger::info => re-entrant mutex.
     // Caller (Application.cpp) goi Logger::instance().logSessionHeader() sau init.
 }
 
 void Logger::logSessionHeader() {
     if (!m_initialized) return;
-    // Lay diagnostics TRUOC khi giu mutex, vi PlatformInfo constructor co the goi
-    // Logger::info (qua getDiskSpace, v.v.) => se gay deadlock neu minh giu mutex.
+    // Lấy diagnostics TRƯỚC khi giữ mutex, vì PlatformInfo constructor có thể gọi
+    // Logger::info (qua getDiskSpace, v.v.) => sẽ gây deadlock nếu mình giữ mutex.
     SystemDiagnostics diag;
     std::string ipStr;
     {
-        // Constructor PlatformInfo co the log qua Logger => unlock tam thoi
-        // Su dung critical section rieng: goi getDiagnostics khong giu mutex Logger
+        // Constructor PlatformInfo có thể log qua Logger => unlock tạm thời
+        // Sử dụng critical section riêng: gọi getDiagnostics không giữ mutex Logger
         diag = PlatformInfo::instance().getDiagnostics();
         ipStr = getLocalIp();
     }
@@ -119,7 +119,7 @@ void Logger::header(const std::string& message) {
 
 void Logger::log(LogLevel level, LogCategory cat, const std::string& message,
                  const char* file, int line, const char* func) {
-    // Snapshot state TRUOC khi lock mutex (getStateSnapshot co the goi PlatformInfo/Logger::info)
+    // Snapshot state TRƯỚC khi lock mutex (getStateSnapshot có thể gọi PlatformInfo/Logger::info)
     std::string stateSnap;
     if (level == LogLevel::WARNING || level == LogLevel::LOG_ERROR) {
         stateSnap = getStateSnapshot();

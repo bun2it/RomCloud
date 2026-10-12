@@ -26,7 +26,7 @@ import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
 
-# Mirror No-Intro DATs (khong can tai khoan). Them --download de tu tai.
+# Mirror No-Intro DATs (không cần tài khoản). Thêm --download để tự tải.
 DAT_MIRROR = ("https://raw.githubusercontent.com/libretro/libretro-database"
               "/master/metadat/no-intro")
 DAT_FILES = [
@@ -68,10 +68,10 @@ def download_dats(dest_dir):
     print(f"Da tai {len(DAT_FILES)} DAT vao {dest_dir}")
     return dest_dir
 
-# Map ten DAT -> ma he may trong RomCloud (Schema.h)
-# Dung cho ca Logiqx XML (<header><name>) va ClrMamePro (name "...").
-# QUAN TRONG: pattern con (super nintendo, game boy advance/color) phai dung
-# TRUOC pattern cha (nintendo entertainment system, game boy) de khong nhan nham.
+# Map tên DAT -> mã hệ máy trong RomCloud (Schema.h)
+# Dùng cho cả Logiqx XML (<header><name>) và ClrMamePro (name "...").
+# QUAN TRỌNG: pattern con (super nintendo, game boy advance/color) phải đứng
+# TRƯỚC pattern cha (nintendo entertainment system, game boy) để không nhận nhầm.
 DAT_TO_SYSTEM = [
     (re.compile(r"game boy advance", re.I), "GBA"),
     (re.compile(r"game boy color", re.I), "GBC"),

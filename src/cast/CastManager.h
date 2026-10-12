@@ -25,11 +25,11 @@ public:
     // Hardware FN switch state (GPIO 243)
     bool isFnSwitchOn();
 
-    // P3-C: stream elapsed time (ms since start). 0 neu khong chay.
+    // P3-C: stream elapsed time (ms since start). 0 nếu không chạy.
     uint32_t getStreamElapsedMs() const;
 
     // P1-2: Callback khi FN switch ON/OFF hoặc A press. Tham so bool = running
-    // sau khi toggle. UI dang ky de show toast. Callback chay tren UI thread.
+    // sau khi toggle. UI đăng ký để show toast. Callback chạy trên UI thread.
     void setFnToggleCallback(std::function<void(bool running, bool viaFnSwitch)> cb) {
         m_fnToggleCb = std::move(cb);
     }
@@ -60,9 +60,9 @@ private:
     bool m_nativeRes = false;
     int m_lastFnState = -1;
     uint32_t m_lastFnPollTicks = 0;
-    // P3-C: SDL_GetTicks() luc bat dau stream (khoi tao = 0 khi khong chay).
+    // P3-C: SDL_GetTicks() lúc bắt đầu stream (khởi tạo = 0 khi không chạy).
     uint32_t m_streamStartedAt = 0;
-    // P3-B: user "wanted" running state. Set = true trong start() (khi bat dau
+    // P3-B: user "wanted" running state. Set = true trong start() (khi bắt đầu
     // stream), = false trong stop() (user chủ động stop). checkAutoReconnect()
     // so sánh với isRunning() để detect crash → tự restart.
     bool m_wantRunning = false;

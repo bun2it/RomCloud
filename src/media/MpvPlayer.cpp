@@ -200,8 +200,8 @@ bool MpvPlayer::play(const std::string& url,
     unlink(m_sockPath.c_str());
     FILE* fw = fopen("/tmp/stay_awake", "w");
     if (fw) { fputs("1\n", fw); fclose(fw); }
-    // Xac dinh file redirect: uu tien caller phi, neu khong thi auto-gen /tmp/mpv_<ts>.log
-    // Muc dich: stop() se forward vao debug.log chinh voi category MPV.
+    // Xác định file redirect: ưu tiên caller phí, nếu không thì auto-gen /tmp/mpv_<ts>.log
+    // Mục đích: stop() sẽ forward vào debug.log chính với category MPV.
     std::string actualLogFile = logFile;
     if (actualLogFile.empty()) {
         actualLogFile = "/tmp/mpv_" + std::to_string(SDL_GetTicks()) + ".log";
@@ -260,7 +260,7 @@ bool MpvPlayer::stop() {
             waitpid(m_pid, &status, 0);
         }
         m_pid = -1;
-        // Forward MPV stderr file vao debug.log (gom 1 file duy nhat) sau khi da reap
+        // Forward MPV stderr file vào debug.log (gom 1 file duy nhất) sau khi đã reap
         forwardMpvLogToDebug();
     }
     unlink(m_sockPath.c_str());

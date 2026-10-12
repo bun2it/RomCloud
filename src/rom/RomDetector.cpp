@@ -585,7 +585,7 @@ RomDetector::ArcadeCompat RomDetector::detectArcadeCompat(const std::string& zip
     auto pairs = getZipEntryNameCrcs(zipPath, 200);
     if (pairs.empty()) return ArcadeCompat::UNKNOWN;
 
-    // Set co biet den khong? (DAT FBNeo, tu dien MAME, hoac chip arcade)
+    // Set có biết đến không? (DAT FBNeo, từ điển MAME, hoặc chip arcade)
     bool inFbneo = FbneoCompatDb::instance().hasSet(stemLower);
     bool inMameDict = !BoxartScraper::instance().resolveArcadeTitle(stemLower).empty();
     int chipCount = 0;
@@ -621,8 +621,8 @@ RomDetector::ArcadeCompat RomDetector::detectArcadeCompat(const std::string& zip
     if (expected > 0 && !conflict && matched == expected) {
         return ArcadeCompat::FBNEO_OK;
     }
-    // Ten set quen (trong DAT hoac tu dien MAME) nhung ruot khong khop
-    // DAT FBNeo -> dump kieu MAME cu, chi core MAME an duoc.
+    // Tên set quen (trong DAT hoặc từ điển MAME) nhưng ruột không khớp
+    // DAT FBNeo -> dump kiểu MAME cũ, chỉ core MAME ăn được.
     return ArcadeCompat::MAME_ONLY;
 }
 
@@ -631,7 +631,7 @@ RomDetectionResult RomDetector::detectByChecksum(const std::string& filePath) {
     std::string ext = getFileExtension(filePath);
 
     // Vong 2a: file .zip — tra CRC32 cua file ben trong (khong giai nen).
-    // CRC32 nay khop truong crc trong No-Intro DAT.
+    // CRC32 này khớp trường crc trong No-Intro DAT.
     if (ext == "zip") {
         auto crcs = getZipEntryCrc32s(filePath, 30);
         for (const auto& c : crcs) {
@@ -652,7 +652,7 @@ RomDetectionResult RomDetector::detectByChecksum(const std::string& filePath) {
     if (ext == "7z") return res; // chua doc duoc CRC trong 7z
 
     // Vong 2b: file thuong — bam MD5 ca file (khop No-Intro DAT).
-    // Bo qua file dia qua lon (>256MB): bam lau tren Brick, da co vong
+    // Bỏ qua file đĩa quá lớn (>256MB): băm lâu trên Brick, đã có vòng
     // header magic xu ly.
     struct stat st;
     if (stat(filePath.c_str(), &st) == 0 &&
@@ -729,9 +729,9 @@ bool RomDetector::isFileInCorrectSystem(const std::string& filePath, const std::
     // Does the detected system code match the current folder's system code?
     if (outResult.systemCode == currentSystemCode) {
         // Ngoai le cuu ho (nut START): zip MAME_ONLY (dump kieu MAME, core
-        // moi/FBA cu khong an) dang nam o folder ARCADE/FBNEO/CPS/PGM ->
-        // danh dau lac de chuyen ve MAME. Chi ap dung khi verdict chac chan;
-        // FBNEO_OK va UNKNOWN giu nguyen (dung xao setup dang chay).
+        // mới/FBA cũ không ăn) đang nằm ở folder ARCADE/FBNEO/CPS/PGM ->
+        // đánh dấu lạc để chuyển về MAME. Chỉ áp dụng khi verdict chắc chắn;
+        // FBNEO_OK và UNKNOWN giữ nguyên (đừng xáo setup đang chạy).
         if ((currentSystemCode == "ARCADE" || currentSystemCode == "FBNEO" ||
              currentSystemCode == "CPS1" || currentSystemCode == "CPS2" ||
              currentSystemCode == "CPS3" || currentSystemCode == "PGM")) {
@@ -749,9 +749,9 @@ bool RomDetector::isFileInCorrectSystem(const std::string& filePath, const std::
                     outResult.details = "Dump kieu MAME (core FBNeo/FBA khong an) -> ve MAME";
                     return false;
                 }
-                // Chieu nguoc: set chuan FBNeo hien tai (FBNEO_OK) ma nam o
-                // folder core cu (ARCADE/CPS/PGM doi 2012) -> ve FBNEO (core
-                // moi). Dang o FBNEO hoac MAME* thi giu nguyen.
+                // Chiều ngược: set chuẩn FBNeo hiện tại (FBNEO_OK) mà nằm ở
+                // folder core cũ (ARCADE/CPS/PGM đời 2012) -> về FBNEO (core
+                // mới). Đang ở FBNEO hoặc MAME* thì giữ nguyên.
                 if (vc == ArcadeCompat::FBNEO_OK &&
                     (currentSystemCode == "ARCADE" || currentSystemCode == "CPS1" ||
                      currentSystemCode == "CPS2" || currentSystemCode == "CPS3" ||
@@ -760,7 +760,7 @@ bool RomDetector::isFileInCorrectSystem(const std::string& filePath, const std::
                     outResult.suggestedDir = "FBNEO";
                     outResult.systemName = m_systemNames["FBNEO"];
                     outResult.confidence = "ARCADE_COMPAT";
-                    outResult.details = "Set chuan FBNeo doi moi (core FBA 2012 khong an) -> ve FBNEO";
+                    outResult.details = "Set chuẩn FBNeo đời mới (core FBA 2012 không ăn) -> về FBNEO";
                     return false;
                 }
             }
@@ -768,9 +768,9 @@ bool RomDetector::isFileInCorrectSystem(const std::string& filePath, const std::
         return true;
     }
 
-    // Ho arcade (stock): MAME / FBNeo / CPS / PGM khong phan biet duoc bang
-    // noi dung file (cung dinh dang zip MAME) nen khong danh dau lac cho
-    // khi file nam trong bat ky folder nao cua ho nay. NEOGEO giu rieng
+    // Họ arcade (stock): MAME / FBNeo / CPS / PGM không phân biệt được bằng
+    // nội dung file (cùng định dạng zip MAME) nên không đánh dấu lạc chỗ
+    // khi file nằm trong bất kỳ folder nào của họ này. NEOGEO giữ riêng
     // (user van muon tach set NeoGeo).
     static const char* kArcadeFamily[] = {"ARCADE", "MAME", "MAME2003PLUS",
         "MAME2010", "FBNEO", "CPS1", "CPS2", "CPS3", "PGM"};
@@ -785,7 +785,7 @@ bool RomDetector::isFileInCorrectSystem(const std::string& filePath, const std::
     }
 
     // Zip MAME_ONLY lac o bat ky folder nao (VD: rớt vao ARCADE tu dot
-    // truoc, hoac nam trong NEOGEO) -> keo ve MAME thay vi giu dich ARCADE.
+    // trước, hoặc nằm trong NEOGEO) -> kéo về MAME thay vì giữ đích ARCADE.
     {
         size_t d = filePath.rfind('.');
         std::string ext = (d == std::string::npos) ? "" : filePath.substr(d + 1);

@@ -36,7 +36,7 @@
 namespace RomCloud {
 
 namespace {
-// Cat chuoi theo so ky tu UTF-8 (khong cat giua dau tieng Viet) cho OSD mpv
+// Cắt chuỗi theo số ký tự UTF-8 (không cắt giữa dấu tiếng Việt) cho OSD mpv
 static std::string truncateUtf8Chars(const std::string &s, size_t maxChars) {
     size_t count = 0, i = 0;
     size_t cutPos = 0;
@@ -81,19 +81,19 @@ IPTVManager::IPTVManager() {
     Logger::info("IPTVManager: Initializing from " + m_iptvDir);
     loadPlaylists(m_iptvDir);
 
-    // Chi giu playlist OTA (live.m3u): xoa default.m3u cu neu con sot
-    // (may doi tu ban cu sang). Khong tao playlist mac dinh nua.
+    // Chỉ giữ playlist OTA (live.m3u): xóa default.m3u cũ nếu còn sót
+    // (máy đời từ bản cũ sang). Không tạo playlist mặc định nữa.
     {
         std::string legacyDefault = m_iptvDir + "/default.m3u";
         struct stat stLegacy;
         if (stat(legacyDefault.c_str(), &stLegacy) == 0) {
             unlink(legacyDefault.c_str());
-            Logger::info("IPTVManager: da xoa playlist mac dinh cu");
+            Logger::info("IPTVManager: đã xóa playlist mặc định cũ");
             loadPlaylists(m_iptvDir);
         }
     }
 
-    // Neu chua co live.m3u (may moi / chua OTA bao gio): tai nen,
+    // Nếu chưa có live.m3u (máy mới / chưa OTA bao giờ): tải nền,
     // khong block startup.
     {
         struct stat stLive;
@@ -109,7 +109,7 @@ IPTVManager::IPTVManager() {
         }
     }
 
-    // Tu dong refresh cac playlist URL bi stale (khong block startup neu loi mang)
+    // Tự động refresh các playlist URL bị stale (không block startup nếu lỗi mạng)
     int refreshed = checkAndAutoRefresh();
     if (refreshed > 0) {
         Logger::info("IPTVManager: Auto-refreshed " + std::to_string(refreshed) + " URL playlist(s) on startup");
@@ -168,12 +168,12 @@ bool IPTVManager::loadPlaylists(const std::string& directory) {
 
     int loaded = 0;
     for (const auto& filename : playlistFiles) {
-        // Bo playlist mac dinh cu (chi giu OTA + playlist user tu them).
+        // Bỏ playlist mặc định cũ (chỉ giữ OTA + playlist user tự thêm).
         if (filename == "default.m3u")
             continue;
         std::string path = dirPath + "/" + filename;
 
-        // Xac dinh ten hien thi cho playlist nay
+        // Xác định tên hiển thị cho playlist này
         std::string sourceName;
         auto it = m_sourcesMeta.find(filename);
         if (it != m_sourcesMeta.end() && !it->second.name.empty()) {
@@ -207,7 +207,7 @@ bool IPTVManager::loadPlaylists(const std::string& directory) {
         pl.sourceFile = filename;
         pl.sourcePath = path;
 
-        // Lay URL neu co trong meta
+        // Lấy URL nếu có trong meta
         if (it != m_sourcesMeta.end()) pl.sourceUrl = it->second.url;
 
         struct stat st;
@@ -238,7 +238,7 @@ bool IPTVManager::loadPlaylists(const std::string& directory) {
 
 
 // parseM3UIntoPlaylist — Parse file .m3u vao mot Playlist doc lap
-// Khong cham vao m_channels hay m_groups toan cuc
+// Không chạm vào m_channels hay m_groups toàn cục
 bool IPTVManager::parseM3UIntoPlaylist(const std::string& filepath, Playlist& out) {
     std::ifstream file(filepath);
     if (!file.is_open()) {
@@ -288,7 +288,7 @@ bool IPTVManager::parseM3UIntoPlaylist(const std::string& filepath, Playlist& ou
 }
 
 // rebuildFlatChannelList — Gop toan bo m_playlists thanh m_channels
-// (backward-compat cho UIManager hien tai)
+// (backward-compat cho UIManager hiện tại)
 void IPTVManager::rebuildFlatChannelList() {
     m_channels.clear();
     m_groups.clear();
@@ -312,7 +312,7 @@ bool IPTVManager::parseM3UFile(const std::string& filepath, const std::string& s
     tmp.id = filename; tmp.name = sourceName; tmp.sourceFile = filename;
     if (!parseM3UIntoPlaylist(filepath, tmp)) return false;
     if (outChannelCount) *outChannelCount = tmp.channelCount();
-    // Ghi thang vao flat list (can thiet cho cac caller cu)
+    // Ghi thẳng vào flat list (cần thiết cho các caller cũ)
     for (const auto& item : tmp.channels) {
         IPTVChannel ch = IPTVChannel::fromItem(item, sourceName, filename);
         size_t idx = m_channels.size();
@@ -739,7 +739,7 @@ IPTVChannel* IPTVManager::getChannel(size_t index) {
 }
 
 // refreshPlaylistFromUrl
-// Tai lai noi dung tu URL nguon, ghi de file .m3u, cap nhat lastRefreshed
+// Tải lại nội dung từ URL nguồn, ghi đè file .m3u, cập nhật lastRefreshed
 bool IPTVManager::refreshPlaylistFromUrl(const std::string& filename, std::string& outError) {
     outError.clear();
     auto it = m_sourcesMeta.find(filename);
@@ -815,7 +815,7 @@ bool IPTVManager::refreshPlaylistFromUrl(const std::string& filename, std::strin
     it->second.fileSize = responseBody.size();
     saveSourcesMeta();
 
-    // Reload tat ca playlist
+    // Reload tất cả playlist
     loadPlaylists(m_iptvDir);
 
     Logger::info("IPTV: Refreshed '" + filename + "' OK (" +
@@ -934,8 +934,8 @@ bool IPTVManager::updateOtaPlaylist(std::string& outMessage) {
 
 
 // checkAndAutoRefresh
-// Goi sau loadPlaylists() luc startup, tu dong tai lai cac playlist stale
-// Tra ve so playlist da duoc refresh
+// Gọi sau loadPlaylists() lúc startup, tự động tải lại các playlist stale
+// Trả về số playlist đã được refresh
 int IPTVManager::checkAndAutoRefresh() {
     int refreshed = 0;
     std::vector<std::string> staleFiles;
@@ -1313,7 +1313,7 @@ bool IPTVManager::isIPTVPlaying() const {
 }
 
 bool IPTVManager::sendMpvIpcCommand(const std::string& jsonCmd, std::string* response, const std::string& sockPath) {
-    // P1-3: dung chung MpvPlayer (giu tuong thich sock cu).
+    // P1-3: dùng chung MpvPlayer (giữ tương thích sock cũ).
     std::string target = sockPath;
     if (target.empty()) {
         if (access("/tmp/mpv_iptv.sock", F_OK) == 0) target = "/tmp/mpv_iptv.sock";
@@ -1324,7 +1324,7 @@ bool IPTVManager::sendMpvIpcCommand(const std::string& jsonCmd, std::string* res
 }
 
 void IPTVManager::showOverlayIcon(const std::string& iconName, uint32_t durationMs) {
-    // P1-3: uy thac overlay + hen gio xoa cho MpvPlayer.
+    // P1-3: ủy thác overlay + hẹn giờ xóa cho MpvPlayer.
     std::string appRoot = AppConfig::instance().getAppRoot();
     if (appRoot.empty()) appRoot = "/mnt/SDCARD/Apps/RomCloud";
     MpvPlayer::instance().showOverlayIcon(appRoot, iconName, durationMs);
@@ -1470,12 +1470,12 @@ pid_t IPTVManager::spawnMpvForUrl(const std::string& url) {
 }
 static void killMpvPidBlocking(pid_t pid) {
     if (pid <= 0) return;
-    // P1-3: uy thac MpvPlayer (quit/TERM/KILL). Giu ten ham de khoi sua call-site.
+    // P1-3: ủy thác MpvPlayer (quit/TERM/KILL). Giữ tên hàm để khỏi sửa call-site.
     MpvPlayer::instance().stop();
     unlink("/tmp/mpv_iptv.sock");
 }
 
-// switchIPTVChannelByIndex: RESTART mpv sach cho kenh moi (thay vi loadfile).
+// switchIPTVChannelByIndex: RESTART mpv sạch cho kênh mới (thay vì loadfile).
 bool IPTVManager::switchIPTVChannelByIndex(size_t idx) {
     if (m_iptvChannelList.empty() || idx >= m_iptvChannelList.size()) return false;
     // Debounce: chặn double-fire trong 300ms (bấm A 2 lần)
@@ -1556,7 +1556,7 @@ bool IPTVManager::switchIPTVChannelByIndex(size_t idx) {
     return true;
 }
 
-// showIPTVChannelOSD: ve list 3 dong (prev/highlight/next) vao dai den duoi.
+// showIPTVChannelOSD: vẽ list 3 dòng (prev/highlight/next) vào dải đen dưới.
 // Video 16:9 full-width dinh mep tren (y=0..576) -> panel 1024x192 tai (0,576).
 void IPTVManager::showIPTVChannelOSD(
     const std::vector<IPTVChannel>& channels,
@@ -1575,7 +1575,7 @@ void IPTVManager::showIPTVChannelOSD(
     if (appRoot.empty()) appRoot = "/mnt/SDCARD/Apps/RomCloud";
     std::string fontPath = resolveOsdFont(appRoot);
 
-    // Open fonts if not cached (ten kenh to + header/footer nho)
+    // Open fonts if not cached (tên kênh to + header/footer nhỏ)
     static TTF_Font* s_fontBig = nullptr;
     static TTF_Font* s_fontSmall = nullptr;
     if (!s_fontBig) {
@@ -1585,7 +1585,7 @@ void IPTVManager::showIPTVChannelOSD(
         if (!s_fontBig || !s_fontSmall) return;
     }
 
-    // Panel 1024x192 nam gon trong dai den duoi video (576..768)
+    // Panel 1024x192 nằm gọn trong dải đen dưới video (576..768)
     const int CW = 1024;
     const int CH = 192;
     const int OY = 576;
@@ -1649,7 +1649,7 @@ void IPTVManager::showIPTVChannelOSD(
         }
     };
 
-    // Nen den mo + vien xanh tren (tone app)
+    // Nền đen mờ + viền xanh trên (tone app)
     fillRect(0, 0, CW, CH, 14, 18, 26, 235);
     fillRect(0, 0, CW, 3, 0, 180, 216, 255);
 
@@ -1664,7 +1664,7 @@ void IPTVManager::showIPTVChannelOSD(
     blitText(s_fontSmall, grp, gold, 20, 8, 255);
     blitText(s_fontSmall, cntBuf, gray, CW - 120, 8, 255);
 
-    // Cua so 3 dong neo theo highlight: [prev][highlight][next]
+    // Cửa sổ 3 dòng neo theo highlight: [prev][highlight][next]
     int n = (int)channels.size();
     int start = selectedIndex - 1;
     if (selectedIndex <= 0) start = 0;
@@ -1945,7 +1945,7 @@ bool IPTVManager::playChannel(const IPTVChannel& channel, size_t initialIndex, c
     }
     Logger::info("IPTV: playing channel: " + channel.name);
 
-    // P1-3: fork qua MpvPlayer (giu flag OSD/list kenh cu).
+    // P1-3: fork qua MpvPlayer (giữ flag OSD/list kênh cũ).
     if (!MpvPlayer::instance().play(url, {
             "--video-align-y=0", "--video-align-x=0",
             "--vd-lavc-fast", "--vd-lavc-skiploopfilter=nonref",
@@ -1961,7 +1961,7 @@ bool IPTVManager::playChannel(const IPTVChannel& channel, size_t initialIndex, c
         return false;
     }
     pid_t pid = MpvPlayer::instance().pid();
-    // P1-3: MpvPlayer da fork + doi sock; control loop ben duoi giu nguyen.
+    // P1-3: MpvPlayer đã fork + đợi sock; control loop bên dưới giữ nguyên.
         m_isPlaying = true;
         m_currentChannel = channel.name;
         uint32_t playStartTime = SDL_GetTicks();
@@ -1981,7 +1981,7 @@ bool IPTVManager::playChannel(const IPTVChannel& channel, size_t initialIndex, c
         MpvPlayer::instance().waitForSocket(2000);
 
         // Blocking control loop
-        // Video phat o center; hien ten kenh 2.5s dau
+        // Video phát ở center; hiện tên kênh 2.5s đầu
         channelListVisible = false;
         sendMpvIpcCommand("{\"command\":[\"show-text\",\"" + escapeJsonString(channel.name) + "\",2500]}", nullptr, "/tmp/mpv_iptv.sock");
         while (m_isPlaying && MpvPlayer::instance().isPlaying()) {
@@ -2019,7 +2019,7 @@ bool IPTVManager::playChannel(const IPTVChannel& channel, size_t initialIndex, c
                                     " total=" + std::to_string(SDL_GetTicks() - ta) + "ms");
                         }
                     }
-                    // Chon kenh xong: an OSD va tra video ve lai giua man hinh (auto center)
+                    // Chọn kênh xong: ẩn OSD và trả video về lại giữa màn hình (auto center)
                     channelListVisible = false;
                     sendMpvIpcCommand("{\"command\":[\"overlay-remove\",1]}", nullptr, "/tmp/mpv_iptv.sock");
                     sendMpvIpcCommand("{\"command\":[\"set_property\",\"video-align-y\",0]}", nullptr, "/tmp/mpv_iptv.sock");
@@ -2045,7 +2045,7 @@ bool IPTVManager::playChannel(const IPTVChannel& channel, size_t initialIndex, c
                 showOverlayIcon("forward", 1200);
                 sendMpvIpcCommand("{\"command\":[\"show-text\",\"{\\\\an2\\\\fs44\\\\bord2\\\\b1}▶▶  +10s\", 1200]}", nullptr, "/tmp/mpv_iptv.sock");
 
-            // L1: Nhay 8 kenh khi list hien, Seek -60s khi list an
+            // L1: Nhảy 8 kênh khi list hiện, Seek -60s khi list ẩn
             } else if (input.isButtonJustPressed(Button::L1)) {
                 if (channelListVisible && !m_iptvChannelList.empty()) {
                     m_iptvSelectedIndex = (m_iptvSelectedIndex >= 8) ? m_iptvSelectedIndex - 8 : 0;
@@ -2056,7 +2056,7 @@ bool IPTVManager::playChannel(const IPTVChannel& channel, size_t initialIndex, c
                     sendMpvIpcCommand("{\"command\":[\"show-text\",\"{\\\\an2\\\\fs44\\\\bord2\\\\b1}◀◀  -60s\", 1400]}", nullptr, "/tmp/mpv_iptv.sock");
                 }
 
-            // R1: Nhay 8 kenh khi list hien, Seek +60s khi list an
+            // R1: Nhảy 8 kênh khi list hiện, Seek +60s khi list ẩn
             } else if (input.isButtonJustPressed(Button::R1)) {
                 if (channelListVisible && !m_iptvChannelList.empty()) {
                     m_iptvSelectedIndex = std::min(m_iptvChannelList.size() - 1, m_iptvSelectedIndex + 8);
@@ -2067,7 +2067,7 @@ bool IPTVManager::playChannel(const IPTVChannel& channel, size_t initialIndex, c
                     sendMpvIpcCommand("{\"command\":[\"show-text\",\"{\\\\an2\\\\fs44\\\\bord2\\\\b1}▶▶  +60s\", 1400]}", nullptr, "/tmp/mpv_iptv.sock");
                 }
 
-            // UP: Chuyen highlight khi list hien (hoac tu mo OSD day video len tren)
+            // UP: Chuyển highlight khi list hiện (hoặc tự mở OSD đẩy video lên trên)
             } else if (input.isButtonJustPressed(Button::UP)) {
                 if (!channelListVisible) {
                     channelListVisible = true;
@@ -2079,7 +2079,7 @@ bool IPTVManager::playChannel(const IPTVChannel& channel, size_t initialIndex, c
                     showIPTVChannelOSD(m_iptvChannelList, (int)m_iptvSelectedIndex, "", 0);
                 }
 
-            // DOWN: Chuyen highlight khi list hien (hoac tu mo OSD day video len tren)
+            // DOWN: Chuyển highlight khi list hiện (hoặc tự mở OSD đẩy video lên trên)
             } else if (input.isButtonJustPressed(Button::DOWN)) {
                 if (!channelListVisible) {
                     channelListVisible = true;
@@ -2106,7 +2106,7 @@ bool IPTVManager::playChannel(const IPTVChannel& channel, size_t initialIndex, c
                 sendMpvIpcCommand("{\"command\":[\"cycle-values\",\"speed\",\"1.0\",\"1.25\",\"1.5\",\"0.75\"]}", nullptr, "/tmp/mpv_iptv.sock");
                 sendMpvIpcCommand("{\"command\":[\"show-text\",\"{\\\\an5\\\\fs80\\\\bord3\\\\b1}Tốc độ phát\", 1400]}", nullptr, "/tmp/mpv_iptv.sock");
 
-            // SELECT: Toggle channel list OSD (day video len tren / dua ve center)
+            // SELECT: Toggle channel list OSD (đẩy video lên trên / đưa về center)
             } else if (input.isButtonJustPressed(Button::SELECT)) {
                 channelListVisible = !channelListVisible;
                 if (channelListVisible) {
@@ -2412,7 +2412,7 @@ bool IPTVManager::playYouTubeVideo(const std::string& videoId, const std::string
         return false;
     }
     Logger::info("YouTube player started");
-    // P1-3: khoi fork truc tiep; control loop ben duoi giu nguyen.
+    // P1-3: khỏi fork trực tiếp; control loop bên dưới giữ nguyên.
     pid_t pid = MpvPlayer::instance().pid();
         m_isPlaying = true;
         m_currentChannel = "YouTube";
@@ -2509,7 +2509,7 @@ bool IPTVManager::playYouTubeVideo(const std::string& videoId, const std::string
                     }
                 }
             }
-            // YouTube OSD tick (UI-only): tu an sau 3s, ve lai tien trinh 1s/lan
+            // YouTube OSD tick (UI-only): tự ẩn sau 3s, vẽ lại tiến trình 1s/lần
             if (m_ytOsdOn) {
                 uint32_t nowOsd = SDL_GetTicks();
                 if (nowOsd >= m_ytOsdExpire) {
@@ -2531,7 +2531,7 @@ bool IPTVManager::playYouTubeVideo(const std::string& videoId, const std::string
         unlink("/tmp/mpv_youtube.sock");
         m_isPlaying = false;
         m_currentChannel = "";
-        // Vong lap thoat ma khong ai goi stop() = het video tu nhien.
+        // Vòng lặp thoát mà không ai gọi stop() = hết video tự nhiên.
         m_ytNaturalEnd = !m_ytStopRequested;
 
         SDL_PumpEvents();
@@ -2543,7 +2543,7 @@ bool IPTVManager::playYouTubeVideo(const std::string& videoId, const std::string
 
 bool IPTVManager::stop() {
     m_ytStopRequested = true;
-    // P1-3: quit ca sock cu (tuong thich), MpvPlayer reap PID hien tai.
+    // P1-3: quit cả sock cũ (tương thích), MpvPlayer reap PID hiện tại.
     sendMpvIpcCommand("{\"command\":[\"quit\"]}", nullptr, "/tmp/mpv_iptv.sock");
     sendMpvIpcCommand("{\"command\":[\"quit\"]}", nullptr, "/tmp/mpv_youtube.sock");
     MpvPlayer::instance().stop();

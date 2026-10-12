@@ -3997,7 +3997,7 @@ void WebServer::handleClient(int clientFd) {
         file.close();
       }
     } else {
-      content = "Chua co loi nao duoc ghi nhan trong debug.log. Log path: " + logPath;
+      content = "Chưa có lỗi nào được ghi nhận trong debug.log. Log path: " + logPath;
     }
     std::string res =
         "HTTP/1.1 200 OK\r\n"

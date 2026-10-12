@@ -29,7 +29,7 @@ struct Playlist {
 
     std::vector<PlaylistItem> channels;
 
-    // groups: ten group -> danh sach index trong `channels`
+    // groups: tên group -> danh sách index trong `channels`
     std::unordered_map<std::string, std::vector<size_t>> groups;
 
     size_t channelCount() const { return channels.size(); }
@@ -97,7 +97,7 @@ struct IPTVSource {
     std::string url;
     size_t channelCount = 0;
     size_t fileSize = 0;
-    // Auto-refresh (chi ap dung khi type == "url")
+    // Auto-refresh (chỉ áp dụng khi type == "url")
     std::time_t lastRefreshed     = 0;  // Unix timestamp lan refresh cuoi
     int  refreshIntervalHours     = 24; // 0 = tat tu dong refresh
 
@@ -136,7 +136,7 @@ public:
     }
     size_t playlistCount() const { return m_playlists.size(); }
 
-    // Backward-compat: flat channel list gop tu tat ca playlists
+    // Backward-compat: flat channel list gộp từ tất cả playlists
     const std::vector<IPTVChannel>& getChannels() const { return m_channels; }
 
     // Sources management (Settings UI)
@@ -157,23 +157,23 @@ public:
     // Global search (cross-playlist)
     std::vector<IPTVChannel> search(const std::string& query) const;
 
-    // Deprecated helpers (giu de UIManager hien tai khong loi)
+    // Deprecated helpers (giữ để UIManager hiện tại không lỗi)
     std::vector<IPTVChannel> getChannelsByGroup(const std::string& group) const;
     std::vector<std::string> getGroups() const;
 
-    // Auto-refresh (cho playlist duoc add qua URL)
-    // Refresh mot playlist cu the bang cach tai lai tu URL nguon
+    // Auto-refresh (cho playlist được add qua URL)
+    // Refresh một playlist cụ thể bằng cách tải lại từ URL nguồn
     bool refreshPlaylistFromUrl(const std::string& filename, std::string& outError);
-    // Check va tu dong refresh tat ca URL-playlist bi stale (goi luc startup)
+    // Check và tự động refresh tất cả URL-playlist bị stale (gọi lúc startup)
     int  checkAndAutoRefresh(); // tra ve so playlist da duoc refresh
-    // Dat refresh interval (so gio, 0 = tat tu dong refresh)
+    // Đặt refresh interval (số giờ, 0 = tắt tự động refresh)
     void setRefreshInterval(const std::string& filename, int hours);
-    // Lay chuoi thoi gian refresh cuoi
+    // Lấy chuỗi thời gian refresh cuối
     std::string getLastRefreshedStr(const std::string& filename) const;
-    // Lay danh sach filename cua cac URL playlist can refresh
+    // Lấy danh sách filename của các URL playlist cần refresh
     std::vector<std::string> getStalePlaylistFiles() const;
 
-    // OTA Update Playlist (tai playlist M3U moi nhat tu xa)
+    // OTA Update Playlist (tải playlist M3U mới nhất từ xa)
     bool updateOtaPlaylist(std::string& outMessage);
 
     IPTVChannel* getChannel(size_t index);
@@ -189,8 +189,8 @@ public:
 
     int getLastPlayingIndex() const { return m_lastPlayingIndex; }
     bool playYouTubeVideo(const std::string& videoId, const std::string& initialUrl, const std::string& quality = "720", const std::string& title = "", const std::string& desc = "");
-    // true neu lan phat YouTube vua roi ket thuc tu nhien (het video),
-    // false neu user thoat (B) hoac loi. Dung cho tu phat tiep.
+    // true nếu lần phát YouTube vừa rồi kết thúc tự nhiên (hết video),
+    // false nếu user thoát (B) hoặc lỗi. Dùng cho tự phát tiếp.
     bool ytNaturalEnd() const { return m_ytNaturalEnd; }
     void setYtDesc(const std::string& d) { m_ytDesc = d; }
     bool playYouTubeUrl(const std::string& url);
@@ -211,7 +211,7 @@ public:
 
     // IPTV playback — blocking loop (mpv controls via IPC, SDL idle)
     bool playChannel(const IPTVChannel& channel, size_t initialIndex = 0, const std::vector<IPTVChannel>& customList = {});
-    // Chuyen kenh trong luc dang phat (loadfile replace, khong restart mpv)
+    // Chuyển kênh trong lúc đang phát (loadfile replace, không restart mpv)
     bool switchIPTVChannelByIndex(size_t idx);
     void showIPTVChannelOSD(const std::vector<IPTVChannel>& channels,
                             int selectedIndex,
@@ -234,10 +234,10 @@ private:
     IPTVManager& operator=(const IPTVManager&) = delete;
 
     // Parsing internals
-    // Phan tich mot file .m3u thanh mot Playlist object doc lap
+    // Phân tích một file .m3u thành một Playlist object độc lập
     bool parseM3UIntoPlaylist(const std::string& filepath, Playlist& out);
 
-    // Giu lai de khong vo cac call cu o phan playback
+    // Giữ lại để không vỡ các call cũ ở phần playback
     bool parseM3UFile(const std::string& filepath, const std::string& sourceName,
                       const std::string& filename, size_t* outChannelCount = nullptr);
 
@@ -253,7 +253,7 @@ private:
     // Data
     std::string m_iptvDir;
 
-    // MULTI-PLAYLIST (MOI): moi file .m3u = mot Playlist doc lap
+    // MULTI-PLAYLIST (MỚI): mỗi file .m3u = một Playlist độc lập
     std::vector<Playlist> m_playlists;
 
     // BACKWARD-COMPAT: flat list gop (rebuild tu m_playlists)

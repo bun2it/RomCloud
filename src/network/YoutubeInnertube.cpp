@@ -35,8 +35,8 @@ static std::string jsonEscape(const std::string& s) {
     return out;
 }
 
-// Doc chuoi JSON tu vi tri sau dau '"' mo. Tra ve (gia tri, vi tri sau
-// dau '"' dong) hoac ("", npos) khi loi.
+// Đọc chuỗi JSON từ vị trí sau dấu '"' mở. Trả về (giá trị, vị trí sau
+// dấu '"' đóng) hoặc ("", npos) khi lỗi.
 static std::pair<std::string, size_t> readJsonString(const std::string& j,
                                                      size_t pos) {
     std::string out;
@@ -173,14 +173,14 @@ static std::string cleanPipe(std::string s) {
     return out;
 }
 
-// POST + parse videoRenderer (dung chung cho search va browse).
-// Khai bao truoc de search() goi (dinh nghia o duoi).
+// POST + parse videoRenderer (dùng chung cho search và browse).
+// Khai báo trước để search() gọi (định nghĩa ở dưới).
 static std::vector<std::string> postAndParse(const std::string& url,
                                              const std::string& body,
                                              int maxResults,
                                              const std::string& logTag,
                                              const std::string& queryKey = "");
-// Chuan hoa de so khop ten kenh (khong dau, khong hoa/thuong, bo khoang).
+// Chuẩn hóa để so khớp tên kênh (không dấu, không hoa/thường, bỏ khoảng).
 static uint32_t utf8Decode(const std::string& s, size_t& i) {
     unsigned char c = s[i];
     if (c < 0x80) return s[i++];
@@ -264,7 +264,7 @@ static std::string normKey(const std::string& s) {
 std::vector<std::string> YoutubeInnertube::search(const std::string& query,
                                                  int maxResults,
                                                  const std::string& params) {
-    // Tien to dac biet khong phai search thuong.
+    // Tiền tố đặc biệt không phải search thường.
     if (query.size() >= 5 && query.compare(0, 5, "feed:") == 0) {
         std::string cat = query.substr(5);
         while (!cat.empty() && cat.front() == ' ') cat.erase(0, 1);
@@ -275,7 +275,7 @@ std::vector<std::string> YoutubeInnertube::search(const std::string& query,
         std::string cid = query.substr(8);
         while (!cid.empty() && cid.front() == ' ') cid.erase(0, 1);
         while (!cid.empty() && cid.back() == ' ') cid.pop_back();
-        // RSS tra video moi nhat truoc; rong thi de duong cu (.py) lo.
+        // RSS tra video mới nhất truoc; rong thi de duong cu (.py) lo.
         auto rss = channelVideos(cid, maxResults);
         if (!rss.empty())
             return rss;
@@ -298,7 +298,7 @@ std::vector<std::string> YoutubeInnertube::search(const std::string& query,
                         "search '" + query + "'", normKey(query));
 }
 
-// POST + parse videoRenderer (dung chung cho search va browse).
+// POST + parse videoRenderer (dùng chung cho search và browse).
 static std::vector<std::string> postAndParse(
     const std::string& url, const std::string& body, int maxResults,
     const std::string& logTag, const std::string& queryKey) {
@@ -319,9 +319,9 @@ static std::vector<std::string> postAndParse(
     const std::string& j = r.body;
     size_t pos = 0;
     // Hang kenh: chi hien khi tu khoa trung ten kenh (khong dau) — toi da
-    // 1 hang, giong backend cu. Home/feed khong bao gio co hang kenh
-    // (trending() da loc, day la van thu 2 cho search thuong).
-    // queryKey rong (= browse/khong co query) thi bo qua kenh.
+    // 1 hàng, giống backend cũ. Home/feed không bao giờ có hàng kênh
+    // (trending() đã lọc, đây là van thứ 2 cho search thường).
+    // queryKey rỗng (= browse/không có query) thì bỏ qua kênh.
     int chanCount = 0;
     while ((int)out.size() < maxResults && chanCount < 3 && !queryKey.empty()) {
         size_t p = j.find("\"channelRenderer\":{", pos);
@@ -339,7 +339,7 @@ static std::vector<std::string> postAndParse(
             }
         }
         if (cname.empty() || cid.empty()) continue;
-        // Trung khop: tu khoa nam trong ten kenh hoac nguoc lai.
+        // Trùng khớp: từ khóa nằm trong tên kênh hoặc ngược lại.
         std::string tk = normKey(cname);
         bool match = false;
         if (!tk.empty()) {
@@ -348,7 +348,7 @@ static std::vector<std::string> postAndParse(
         }
         if (!match) continue;
         ++chanCount;
-        // Avatar: thumbnail lon nhat (yt3, them https:).
+        // Avatar: thumbnail lớn nhất (yt3, thêm https:).
         std::string avatar;
         {
             size_t tp = pos;
@@ -365,8 +365,8 @@ static std::vector<std::string> postAndParse(
                 avatar = lastUrl;
         }
         // Subs that: videoCountText.simpleText ("5.2M subscribers").
-        // Chu y: trong block co them accessibility o giua nen tim block
-        // truoc roi moi tim simpleText (khong match cung chuoi).
+        // Chú ý: trong block có thêm accessibility ở giữa nên tìm block
+        // trước rồi mới tìm simpleText (không match cứng chuỗi).
         std::string subs;
         {
             size_t vb = j.find("\"videoCountText\":{", pos);
@@ -390,7 +390,7 @@ static std::vector<std::string> postAndParse(
         std::string vid = findField(j, "videoId", pos, kWindow);
         if (vid.empty() || vid.size() > 16) continue;
 
-        // Trung id thi bo (Up Next / playlist lap lai).
+        // Trùng id thì bỏ (Up Next / playlist lặp lại).
         bool dup = false;
         for (const auto& l : out) {
             if (l.size() > vid.size() && l.compare(0, vid.size(), vid) == 0 &&
@@ -415,7 +415,7 @@ static std::vector<std::string> postAndParse(
 
         std::string len;
         {
-            // lengthText co block rieng; khong lay simpleText lung tung
+            // lengthText có block riêng; không lấy simpleText lung tung
             // (viewCount/accessibility cung co simpleText).
             size_t lp = j.find("\"lengthText\":{", pos);
             if (lp != std::string::npos && lp - pos < kWindow) {
@@ -434,8 +434,8 @@ static std::vector<std::string> postAndParse(
         }
         std::string views = "0";
         {
-            // viewCountText xuat hien truoc ownerText trong block; quet ca
-            // window roi lay so cuoi (so gan video nhat o cuoi block).
+            // viewCountText xuất hiện trước ownerText trong block; quét cả
+            // window rồi lấy số cuối (số gần video nhất ở cuối block).
             size_t vp = pos;
             std::string last;
             while ((vp = j.find("\"viewCountText\":{\"simpleText\":\"", vp)) !=
@@ -460,9 +460,9 @@ static std::vector<std::string> postAndParse(
     return out;
 }
 
-// Trending: khong co Data API key nen dung fallback search giong backend
-// cu (.py): nhac -> "nhac viet hay nhat", con lai -> "thinh hanh viet nam".
-// (Browse FEtrending that: YouTube doi visitorData, khong lam duoc.)
+// Trending: không có Data API key nên dùng fallback search giống backend
+// cũ (.py): nhạc -> "nhac viet hay nhat", còn lại -> "thinh hanh viet nam".
+// (Browse FEtrending thất bại: YouTube đòi visitorData, không làm được.)
 std::vector<std::string> YoutubeInnertube::trending(const std::string& categoryId,
                                                    int maxResults) {
     std::string cat = categoryId;
@@ -470,7 +470,7 @@ std::vector<std::string> YoutubeInnertube::trending(const std::string& categoryI
     while (!cat.empty() && cat.back() == ' ') cat.pop_back();
     std::string q =
         (cat == "10") ? "nhac viet hay nhat" : "thinh hanh viet nam";
-    // Feed thi truong: chi lay video, bo hang kenh (sai ngu canh trending).
+    // Feed thị trường: chỉ lấy video, bỏ hàng kênh (sai ngữ cảnh trending).
     std::vector<std::string> out;
     for (const auto& l : search(q, maxResults)) {
         if (l.compare(0, 8, "CHANNEL|") != 0)
@@ -479,7 +479,7 @@ std::vector<std::string> YoutubeInnertube::trending(const std::string& categoryI
     return out;
 }
 
-// Resolve stream qua player API (ANDROID client cho ti le OK cao)
+// Resolve stream qua player API (ANDROID client cho tỉ lệ OK cao)
 static const char* kPlayerUrl =
     "https://www.youtube.com/youtubei/v1/player?key="
     "AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8&prettyPrint=false";
@@ -534,13 +534,13 @@ std::string YoutubeInnertube::resolveStream(const std::string& videoId,
     if (ps == std::string::npos) return std::string();
     std::string status = findField(j, "status", ps, 400);
     if (status != "OK") {
-        Logger::warn("[Innertube] video khong play duoc (" + status +
+        Logger::warn("[Innertube] video không play được (" + status +
                      ") -> fallback yt-dlp");
         return std::string();
     }
 
-    // Quet formats[] (progressive, co the co url truc tiep). Live khong
-    // co formats[] (chi adaptive) -> bo qua vong nay, xuong adaptive.
+    // Quét formats[] (progressive, có thể có url trực tiếp). Live không
+    // có formats[] (chỉ adaptive) -> bỏ qua vòng này, xuống adaptive.
     size_t fp = j.find("\"formats\":[", ps);
     size_t arrEnd = std::string::npos;
     if (fp != std::string::npos) {
@@ -555,7 +555,7 @@ std::string YoutubeInnertube::resolveStream(const std::string& videoId,
     while (p < arrEnd) {
         size_t ob = j.find('{', p);
         if (ob == std::string::npos || ob > arrEnd) break;
-        // Timig ngoac dong cua object (bo qua string).
+        // Tìm ngoặc đóng của object (bỏ qua string).
         size_t q = ob + 1, depth = 1;
         bool inS = false, esc = false;
         while (q < j.size() && depth > 0) {
@@ -571,7 +571,7 @@ std::string YoutubeInnertube::resolveStream(const std::string& videoId,
         p = q;
         int itag = findInt(blk, "itag", 0, blk.size());
         if (itag < 0) continue;
-        // Chi lay URL truc tiep (bo signatureCipher).
+        // Chỉ lấy URL trực tiếp (bỏ signatureCipher).
         std::string url;
         {
             size_t up = blk.find("\"url\":\"");
@@ -588,7 +588,7 @@ std::string YoutubeInnertube::resolveStream(const std::string& videoId,
         }
         if (height <= 0 || height > limit) continue;
         bool avc = blk.find("avc1") != std::string::npos;
-        // Uu tien: cao nhat trong gioi han, avc truoc.
+        // Ưu tiên: cao nhất trong giới hạn, avc trước.
         if (height > best.height ||
             (height == best.height && avc && !best.avc)) {
             best = {itag, height, url, avc};
@@ -600,9 +600,9 @@ std::string YoutubeInnertube::resolveStream(const std::string& videoId,
     if (best.itag < 0) {
         Logger::info("[Innertube] khong co progressive truc tiep");
     }
-    // Adaptive (video-only + audio) neu cao hon progressive tot nhat.
-    // VD quality=720: progressive chi co itag18 (360p) -> phai lay
-    // adaptive 720p keo ve, khong thi mai mai chi duoc 360p.
+    // Adaptive (video-only + audio) nếu cao hơn progressive tốt nhất.
+    // VD quality=720: progressive chỉ có itag18 (360p) -> phải lấy
+    // adaptive 720p kéo về, không thì mãi mãi chỉ được 360p.
     if (limit >= 360) {
         size_t ap = j.find("\"adaptiveFormats\":[", ps);
         if (ap != std::string::npos) {
@@ -643,7 +643,7 @@ std::string YoutubeInnertube::resolveStream(const std::string& videoId,
                 int h = findInt(blk, "height", 0, blk.size());
                 if (h <= 0 || h > limit) continue;
                 bool avc = blk.find("avc1") != std::string::npos;
-                // Bo 60fps tren may yeu (720p60 nang gap doi, de yt-dlp
+                // Bỏ 60fps trên máy yếu (720p60 nặng gấp đôi, để yt-dlp
                 // lo; chi lay <=30fps).
                 if (h >= 720 && blk.find("\"fps\":60") != std::string::npos)
                     continue;
@@ -675,7 +675,7 @@ std::vector<std::string> YoutubeInnertube::channelVideos(
     std::vector<std::string> out;
     if (channelId.empty() || maxResults <= 0) return out;
     if (maxResults > 30) maxResults = 30;
-    // Chi nhan UC-id that (chong injection duong dan).
+    // Chỉ nhận UC-id thật (chống injection đường dẫn).
     for (char c : channelId) {
         if (!(c >= 'A' && c <= 'Z') && !(c >= 'a' && c <= 'z') &&
             !(c >= '0' && c <= '9') && c != '_' && c != '-') {
@@ -715,7 +715,7 @@ std::vector<std::string> YoutubeInnertube::channelVideos(
         std::string vid = tag("yt:videoId");
         std::string title = tag("title");
         if (vid.empty() || vid.size() > 16 || title.empty()) continue;
-        // Ten kenh (author) de autoplay cung kenh + hien thi.
+        // Tên kênh (author) để autoplay cùng kênh + hiển thị.
         std::string author;
         {
             size_t a0 = entry.find("<author>");
@@ -746,7 +746,7 @@ std::vector<std::string> YoutubeInnertube::channelVideos(
                       "|0");
     }
     Logger::info("[Innertube] RSS kenh: tim thay " +
-                 std::to_string(out.size()) + " video moi nhat");
+                 std::to_string(out.size()) + " video mới nhất");
     return out;
 }
 

@@ -1,6 +1,6 @@
 #pragma once
 // P1-3: MpvPlayer — fork mpv + IPC dung chung cho IPTV/YouTube.
-// IPTVManager chi cung cap URL + mapping nut; khong fork truc tiep.
+// IPTVManager chỉ cung cấp URL + mapping nút; không fork trực tiếp.
 #include <string>
 #include <vector>
 #include <sys/types.h>
@@ -11,7 +11,7 @@ class MpvPlayer {
 public:
     static MpvPlayer& instance();
 
-    // Bat mpv moi cho url. extraArgs them sau flags handheld chuan.
+    // Bật mpv mới cho url. extraArgs thêm sau flags handheld chuẩn.
     // sockPath: /tmp/mpv_iptv.sock | /tmp/mpv_youtube.sock ...
     bool play(const std::string& url,
               const std::vector<std::string>& extraArgs = {},
@@ -21,7 +21,7 @@ public:
     pid_t pid() const { return m_pid; }
     const std::string& sockPath() const { return m_sockPath; }
 
-    // Gui lenh JSON IPC. sockOverride "" = dung m_sockPath hien tai.
+    // Gửi lệnh JSON IPC. sockOverride "" = dùng m_sockPath hiện tại.
     bool sendCmd(const std::string& json,
                  std::string* response = nullptr,
                  const std::string& sockOverride = "");

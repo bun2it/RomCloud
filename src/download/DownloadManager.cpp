@@ -296,7 +296,7 @@ void DownloadManager::runDownloadWorker() {
         if (odShareId.empty() || odItemId.empty()) {
             std::lock_guard<std::mutex> lock(m_mutex);
             m_progress.state = DownloadState::FAILED;
-            m_progress.errorMessage = "Thieu thong tin file OneDrive. Hay dong bo lai.";
+            m_progress.errorMessage = "Thiếu thông tin file OneDrive. Hãy đồng bộ lại.";
             Logger::error(m_progress.errorMessage);
             m_isRunning = false;
             return;
@@ -308,7 +308,7 @@ void DownloadManager::runDownloadWorker() {
         if (dl.empty()) {
             std::lock_guard<std::mutex> lock(m_mutex);
             m_progress.state = DownloadState::FAILED;
-            m_progress.errorMessage = "Khong lay duoc link tai OneDrive (HTTP " + std::to_string(meta.statusCode) + "). Hay dong bo lai.";
+            m_progress.errorMessage = "Không lấy được link tải OneDrive (HTTP " + std::to_string(meta.statusCode) + "). Hay dong bo lai.";
             Logger::error(m_progress.errorMessage);
             m_isRunning = false;
             return;
@@ -535,8 +535,8 @@ void DownloadManager::runDownloadWorker() {
                     std::lock_guard<std::mutex> lock(m_mutex);
                     m_progress.state = DownloadState::FAILED;
                     bool od = m_activeGame.cloudFileId.rfind("od1|", 0) == 0;
-                    m_progress.errorMessage = od ? "Link OneDrive het han. Hay dong bo lai."
-                        : "Drive chan quet virus file nay. Hay thu lai hoac dung link OneDrive.";
+                    m_progress.errorMessage = od ? "Link OneDrive hết hạn. Hãy đồng bộ lại."
+                        : "Drive chặn quét virus file này. Hãy thử lại hoặc dùng link OneDrive.";
                     Logger::error(m_progress.errorMessage);
                     m_isRunning = false;
                     return;

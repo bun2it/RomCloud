@@ -151,11 +151,11 @@ void ClockStore::saveWorldCities(const std::vector<WorldCity>& v) {
     DatabaseManager::instance().setSetting("clock_cities", out.str());
 }
 
-// Beep: phat file WAV qua aplay
-// (SDL ALSA underrun trien mien tren driver audiocodec cua Brick:
-// device mo OK, callback chay nhung appl_ptr dung yen -> cam.
-// aplay da verify keu ro nen dung tien trinh ngoai, loop toi khi stop.)
-// times <= 0 = keu lien tuc toi khi beepStop.
+// Beep: phát file WAV qua aplay
+// (SDL ALSA underrun triền miên trên driver audiocodec của Brick:
+// device mở OK, callback chạy nhưng appl_ptr đứng yên -> câm.
+// aplay đã verify kêu rõ nên dùng tiến trình ngoài, loop tới khi stop.)
+// times <= 0 = kêu liên tục tới khi beepStop.
 static std::atomic<bool> s_beepStop{false};
 static std::atomic<bool> s_beepRunning{false};
 static std::atomic<pid_t> s_beepPid{-1};
@@ -166,8 +166,8 @@ static bool haveFile(const char* p) {
     return false;
 }
 
-// Chon backend: uu tien alarm.wav qua aplay (path da verify keu,
-// khoi dong tuc thi), fallback alarm.mp3 qua mpv.
+// Chọn backend: ưu tiên alarm.wav qua aplay (path đã verify kêu,
+// khởi động tức thì), fallback alarm.mp3 qua mpv.
 static bool beepPick(std::string& player, std::string& file) {
     static const char* wavs[] = {
         "/mnt/SDCARD/Apps/RomCloud/assets/sounds/alarm.wav",
@@ -238,7 +238,7 @@ static void beepThreadMain(int times) {
             usleep(50000);
         }
         s_beepPid = pid_t(-1);
-        // player chet ngay (<0.5s) ma chua ai stop = khong co backend: nghi.
+        // player chết ngay (<0.5s) mà chưa ai stop = không có backend: nghỉ.
         uint32_t dur = SDL_GetTicks() - t0;
         if (!s_beepStop.load()) {
             int code = WIFEXITED(st) ? WEXITSTATUS(st) : -1;

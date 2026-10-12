@@ -109,7 +109,7 @@ bool UIManager::handleExplorerBrowser() {
         else if (e) openExpMenu();
         return true;
     }
-    // B: len thu muc cha; o goc /mnt/SDCARD thi thoat ve MENU
+    // B: lên thư mục cha; ở gốc /mnt/SDCARD thì thoát về MENU
     if (input.isButtonJustPressed(Button::B)) {
         const std::string cur = A.currentPath();
         if (cur == "/mnt/SDCARD" || cur == "/mnt/SDCARD/" || cur == "/" || cur.empty()) return false;
@@ -122,17 +122,17 @@ bool UIManager::handleExplorerBrowser() {
         m_expDeleteArmed = false;
         return true;
     }
-    // Y: copy active -> pane kia, co Confirm dialog (A xac nhan / B huy)
+    // Y: copy active -> pane kia, có Confirm dialog (A xác nhận / B hủy)
     if (input.isButtonJustPressed(Button::Y)) {
         expCopyCurrent();
         return true;
     }
-    // X: move active -> pane kia, co Confirm dialog (A xac nhan / B huy)
+    // X: move active -> pane kia, có Confirm dialog (A xác nhận / B hủy)
     if (input.isButtonJustPressed(Button::X)) {
         expMoveCurrent();
         return true;
     }
-    // START (phai): tao thu muc moi o pane active, mac dinh "New Folder"
+    // START (phải): tạo thư mục mới ở pane active, mặc định "New Folder"
     if (input.isButtonJustPressed(Button::PLAY) ||
         input.isButtonJustPressed(Button::START)) {
         A.beginCreateFolder();
@@ -143,7 +143,7 @@ bool UIManager::handleExplorerBrowser() {
         expDeleteCurrent();
         return true;
     }
-    // SELECT (giua) / B: thoat explorer ve MENU
+    // SELECT (giữa) / B: thoát explorer về MENU
     if (input.isButtonJustPressed(Button::SELECT)) return false;
     return true;
 }

@@ -72,7 +72,7 @@ void UIManager::renderExplorerKeyboardFor(FileExplorer& ex) {
                              exActs, true, true, 1);
 
     // Bottom Bar: drawAppFooter tự vẽ nền (B = Hủy)
-    // R1 = ABC/123 giong stock; SELECT = Telex (nhan hien trang thai).
+    // R1 = ABC/123 giống stock; SELECT = Telex (nhấn hiện trạng thái).
     std::string telexLbl = vk.telexMode ? "Telex: Bật" : "Telex: Tắt";
     drawAppFooter({{UiTheme::PadBtn::A, "Nhập"},
                    {UiTheme::PadBtn::X, "Cách"},

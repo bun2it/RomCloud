@@ -1,10 +1,10 @@
 #pragma once
 // RomCloud VirtualKeyboard — logic ban phim ao QWERTY dung chung, khong SDL.
-// UIManager / FileExplorer chi giu 1 VkState moi o nhap lieu thay vi 5 bo
+// UIManager / FileExplorer chỉ giữ 1 VkState mỗi ô nhập liệu thay vì 5 bộ
 // m_*KbRow/Col/Shift roi rac. Render van do UIManager dam nhiem (doi UiRenderer
-// tach xong se chuyen render ve day). Tich hop san TelexHelper::processTelex.
+// tách xong sẽ chuyển render về đây). Tích hợp sẵn TelexHelper::processTelex.
 // Mapping tay cam chuan (giong stock keyboard):
-//   UP/DOWN/LEFT/RIGHT: di chuyen | A: chon | B: huy/thoat | X: space
+//   UP/DOWN/LEFT/RIGHT: di chuyển | A: chọn | B: hủy/thoát | X: space
 //   Y: xoa (popUtf8) | L1: toggle Shift (abc/ABC)
 //   R1: toggle Bo chu (ABC/123: chu <-> so & ky tu dac biet)
 //   SELECT: toggle Telex (TELEX/US) | START: OK
@@ -37,7 +37,7 @@ class VirtualKeyboard {
 public:
     static const char* lowerRows[4];
     static const char* upperRows[4];
-    // Charset media YT/TT cu: hang so + qwerty thieu o (pixel-identical legacy).
+    // Charset media YT/TT cũ: hằng số + qwerty thiếu o (pixel-identical legacy).
     static const char* mediaLowerRows[4];
     static const char* mediaUpperRows[4];
     // Bo chu so & ky tu dac biet (R1 toggle, giong stock keyboard).
@@ -54,7 +54,7 @@ public:
         s.inResults = false;
     }
 
-    // Lay ky tu tai o hien tai (hang 0..3). Tra '\0' neu dang o hang action.
+    // Lấy ký tự tại ô hiện tại (hàng 0..3). Trả '\0' nếu đang ở hàng action.
     static char charAt(const VkState& s) {
         if (s.row < 0 || s.row > 3 || s.col < 0 || s.col > 9) return '\0';
         if (s.symbolMode)
@@ -64,7 +64,7 @@ public:
         return s.shift ? upperRows[s.row][s.col] : lowerRows[s.row][s.col];
     }
 
-    // Nhan 1 ky tu vao query (co Telex neu bat). Tra false neu qua maxLen.
+    // Nhận 1 ký tự vào query (có Telex nếu bật). Trả false nếu quá maxLen.
     static bool typeChar(VkState& s, char ch) {
         if (s.query.size() >= s.maxLen) return false;
         if (s.telexMode) s.query = TelexHelper::processTelex(s.query, ch);
@@ -91,8 +91,8 @@ public:
 
     static void backspace(VkState& s) { TelexHelper::popUtf8(s.query); }
 
-    // Dieu huong D-pad. Tra true neu da xu ly (de caller return early).
-    // upFromResults: khi focus dang o list ket qua, UP quay ve ban phim.
+    // Điều hướng D-pad. Trả true nếu đã xử lý (để caller return early).
+    // upFromResults: khi focus đang ở list kết quả, UP quay về bàn phím.
     // stride2: kieu media YT/TT cu — hang action col 0..9 buoc chan (col/2).
     static bool move(VkState& s, int dRow, int dCol, bool stride2 = false) {
         if (s.inResults) {
@@ -104,7 +104,7 @@ public:
             if (s.row < 0) s.row = 4;
             if (s.row > 4) s.row = 0;
             clampCol(s, stride2);
-            // Vao hang action kieu stride2: snap ve o chan gan nhat.
+            // Vào hàng action kiểu stride2: snap về ô chẵn gần nhất.
             if (stride2 && s.row == 4) s.col = (s.col / 2) * 2;
             return true;
         }
@@ -122,8 +122,8 @@ public:
         return false;
     }
 
-    // Nhan nut A (chon o hien tai). onToggleNotice: callback hien toast
-    // khi doi bo chu ABC/123 (truyen nullptr neu khong can).
+    // Nhấn nút A (chọn ô hiện tại). onToggleNotice: callback hiện toast
+    // khi đổi bộ chữ ABC/123 (truyền nullptr nếu không cần).
     template <typename ToastFn>
     static VkAction pressA(VkState& s, ToastFn&& toast, bool stride2 = false) {
         if (s.row < 4) {

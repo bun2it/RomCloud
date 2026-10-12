@@ -115,7 +115,7 @@ bool CastManager::isRunning() {
 }
 
 void CastManager::setHdMode(bool hd) {
-    // P3-A: persist preference truoc khi goi POST (khoi reboot/reseed van giu).
+    // P3-A: persist preference trước khi gọi POST (khỏi reboot/reseed vẫn giữ).
     if (m_nativeRes != hd) {
         m_nativeRes = hd;
         DatabaseManager::instance().setSetting("cast_hd_mode",
@@ -297,7 +297,7 @@ void CastManager::update() {
         m_lastFnState = current;
         bool fnActionSucceeded = true; // P3-D: neu skip do noWifi -> khong callback
         if (current == 1) {
-            // P3-D: kiem tra Wi-Fi truoc khi start. Neu IP placeholder (Wi-Fi
+            // P3-D: kiểm tra Wi-Fi trước khi start. Nếu IP placeholder (Wi-Fi
             // mat), skip start + invoke canhister callback de UI canh.
             if (getIpAddress() == "192.168.x.x") {
                 Logger::warn("FN ON but no Wi-Fi — skip start() to avoid "
@@ -314,9 +314,9 @@ void CastManager::update() {
             Logger::info("FN switch turned OFF -> Absolute STOP GameCast");
             stop();
         }
-        // P1-2: thong bao UI qua callback (running state + flag FN-driven).
-        // P3-D: chi callback thong thuong neu FN action that su start/stop
-        // (khong bao gom canhister "noWifi").
+        // P1-2: thông báo UI qua callback (running state + flag FN-driven).
+        // P3-D: chỉ callback thông thường nếu FN action thật sự start/stop
+        // (không bao gồm canister "noWifi").
         if (m_fnToggleCb && fnActionSucceeded) {
             m_fnToggleCb(isRunning(), true);
         }

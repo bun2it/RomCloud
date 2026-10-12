@@ -41,27 +41,27 @@ public:
     // Automatically fix / move all misplaced ROMs to their correct folders
     std::vector<MisplacedRomRecord> fixMisplacedRoms(const std::string& romsBaseDir = "");
 
-    // Chi sua file lac trong 1 folder he may (dung cho nut START o tab The nho).
-    // Loc ket qua audit theo currentSystemCode roi ap dung nhu fixMisplacedRoms.
+    // Chỉ sửa file lạc trong 1 folder hệ máy (dùng cho nút START ở tab Thẻ nhớ).
+    // Lọc kết quả audit theo currentSystemCode rồi áp dụng như fixMisplacedRoms.
     std::vector<MisplacedRomRecord> fixSystemFolder(const std::string& systemCode,
                                                     const std::string& romsBaseDir = "");
 
     // Organize a single specific directory (e.g. /mnt/SDCARD/Roms/_INBOX)
     std::vector<MisplacedRomRecord> organizeDirectory(const std::string& sourceDir, const std::string& romsBaseDir = "");
 
-    // Chuan hoa ten folder he may: "gba" -> "GBA", "snes" -> "SFC",
-    // "Mame" -> "ARCADE"... Folder trung (ca "GBA" va "gba") duoc gop.
-    // Tra ve so folder da sua/gop.
+    // Chuẩn hóa tên folder hệ máy: "gba" -> "GBA", "snes" -> "SFC",
+    // "Mame" -> "ARCADE"... Folder trùng (cả "GBA" và "gba") được gộp.
+    // Trả về số folder đã sửa/gộp.
     int normalizeSystemFolders(const std::string& romsBaseDir = "");
 
-    // Lam tron 1 lan: chuan hoa ten folder -> sap xep file trong folder la/
-    // root/_INBOX -> dua file lac cho ve dung he. Chay lau: goi tu thread nen.
+    // Làm tròn 1 lần: chuẩn hóa tên folder -> sắp xếp file trong folder lạ/
+    // root/_INBOX -> đưa file lạc chỗ về đúng hệ. Chạy lâu: gọi từ thread nền.
     OrganizeSummary organizeAll(const std::string& romsBaseDir = "");
 
     // Safely move a file across FAT32/exFAT with rename/copy+delete and sync
     bool safeMoveFile(const std::string& src, const std::string& dst, std::string& outFinalDst);
 
-    // Ap dung di chuyen + cap nhat DB cho danh sach audit (dung chung cho
+    // Áp dụng di chuyển + cập nhật DB cho danh sách audit (dùng chung cho
     // fixMisplacedRoms va fixSystemFolder).
     std::vector<MisplacedRomRecord> applyFixes(std::vector<MisplacedRomRecord> items,
                                                const std::string& baseDir);
@@ -76,7 +76,7 @@ private:
     RomOrganizer() = default;
     ~RomOrganizer() = default;
 
-    // Sap xep de quy 1 folder la (gom ca folder con ben trong)
+    // Sắp xếp đệ quy 1 folder lạ (gồm cả folder con bên trong)
     int organizeUnknownDirRecursive(const std::string& sourceDir,
                                     const std::string& baseDir,
                                     const std::unordered_map<std::string, SystemRecord>& codeToSys,

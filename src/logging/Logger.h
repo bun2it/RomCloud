@@ -46,7 +46,7 @@ public:
     void log(LogLevel level, LogCategory cat, const std::string& message,
              const char* file = nullptr, int line = 0, const char* func = nullptr);
 
-    // Banner co dinh (khong qua filter level).
+    // Banner cố định (không qua filter level).
     void header(const std::string& message);
 
     // Dump device/RAM/app version/commit vao 1 banner o dau session.
@@ -54,7 +54,7 @@ public:
 
     void flush();
 
-    // API moi co category + auto file:line:func qua macro RC_LOG_*
+    // API mới có category + auto file:line:func qua macro RC_LOG_*
     static void debug(LogCategory cat, const std::string& msg,
                       const char* file = nullptr, int line = 0, const char* func = nullptr);
     static void info (LogCategory cat, const std::string& msg,
@@ -64,7 +64,7 @@ public:
     static void error(LogCategory cat, const std::string& msg,
                       const char* file = nullptr, int line = 0, const char* func = nullptr);
 
-    // Back-compat: cu, default CORE, khong co file:line
+    // Back-compat: cũ, default CORE, không có file:line
     static void debug(const std::string& msg);
     static void info (const std::string& msg);
     static void warn (const std::string& msg);

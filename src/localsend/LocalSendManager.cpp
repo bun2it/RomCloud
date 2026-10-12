@@ -556,11 +556,11 @@ void LocalSendManager::pruneStaleDevices(int64_t maxAgeMs) {
 }
 
 void LocalSendManager::refreshDiscovery() {
-  // Fix rescan mat device: GIU list cu lam cache (khong prune o day),
-  // dong thoi unicast thang toi cac IP da biet + burst multicast.
-  // Ly do: multicast tren nhieu AP/router bi rot goi lan 2 tro di,
-  // chi gui multicast thi peer khong nghe thay -> khong reply -> list trang.
-  // Unicast toi IP cu thi ti le toi gan nhu 100% -> peer reply ngay.
+  // Fix rescan mất device: GIỮ list cũ làm cache (không prune ở đây),
+  // đồng thời unicast thẳng tới các IP đã biết + burst multicast.
+  // Lý do: multicast trên nhiều AP/router bị rớt gói lần 2 trở đi,
+  // chỉ gửi multicast thì peer không nghe thấy -> không reply -> list trắng.
+  // Unicast tới IP cũ thì tỉ lệ tới gần như 100% -> peer reply ngay.
   std::vector<std::string> cachedIps;
   std::vector<int> cachedPorts;
   {
@@ -573,14 +573,14 @@ void LocalSendManager::refreshDiscovery() {
     }
   }
   std::thread([this, cachedIps, cachedPorts]() {
-    // 1. Unicast go thang may quen (kich peer reply unicast ve ngay)
+    // 1. Unicast gõ thẳng máy quen (kích peer reply unicast về ngay)
     for (size_t i = 0; i < cachedIps.size() && m_running; ++i) {
       int p = (i < cachedPorts.size() && cachedPorts[i] > 0)
                   ? cachedPorts[i]
                   : LocalSendProto::kPort;
       sendUnicastAnnounce(cachedIps[i], p, true);
     }
-    // 2. Burst 3 goi multicast cach nhau 150ms de vuot qua loss WiFi/router
+    // 2. Burst 3 gói multicast cách nhau 150ms để vượt qua loss WiFi/router
     // chan multicast lan dau — chay nen de khong block UI.
     for (int i = 0; i < 3 && m_running; ++i) {
       sendMulticastAnnounce();
@@ -2359,8 +2359,8 @@ std::string LocalSendManager::sendFileMetaAsync(const LsFileMeta &inMeta,
     return "";
   LsFileMeta metaCopy = inMeta;
   std::string token = "queued-" + LsUtil::makeUuid();
-  // Chay nen: sendFileMeta (sync) se tu tao LsSendProgress that trong m_sends.
-  // Tra ve ngay de UI chuyen sang PROGRESS va poll
+  // Chạy nền: sendFileMeta (sync) sẽ tự tạo LsSendProgress thật trong m_sends.
+  // Trả về ngay để UI chuyển sang PROGRESS và poll
   // sendProgresses()/receiveProgresses().
   std::thread([this, metaCopy, absPath, target]() {
     this->sendFileMeta(metaCopy, absPath, target);

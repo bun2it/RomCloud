@@ -198,8 +198,8 @@ if [ -x "$WROOT/bin/xkbcomp" ] && ln -sf "$WROOT/bin/xkbcomp" /usr/bin/xkbcomp 2
 fi
 TR L05B "xkbcomp cho Xwayland: XKB_OK=$XKB_OK (1 = đã trỏ symlink vào /usr)"
 
-# gdk-pixbuf trong Electron van khong doc bien moi truong tro loader,
-# nen tro thang thu muc loader + cache vao duong dan mac dinh cua thu vien.
+# gdk-pixbuf trong Electron vẫn không đọc biến môi trường trỏ loader,
+# nên trỏ thẳng thư mục loader + cache vào đường dẫn mặc định của thư viện.
 PIXBUF_OK=0
 PB_DIR=/usr/lib/aarch64-linux-gnu/gdk-pixbuf-2.0/2.10.0
 if mkdir -p "$PB_DIR" 2>/dev/null; then
@@ -209,8 +209,8 @@ if mkdir -p "$PB_DIR" 2>/dev/null; then
 fi
 TR L05C "gdk-pixbuf loader mac dinh: PIXBUF_OK=$PIXBUF_OK"
 
-# Sinh lai loaders.cache ngay tren may bang cong cu cua chinh gdk-pixbuf
-# (ban viet tay co the lech dinh dang ma bo doc muc luc khong chap nhan).
+# Sinh lại loaders.cache ngay trên máy bằng công cụ của chính gdk-pixbuf
+# (bản viết tay có thể lệch định dạng mà bộ đọc mục lục không chấp nhận).
 PB_N=0
 if [ -x "$RC_DIR/gdk-pixbuf-query-loaders" ]; then
   LD_LIBRARY_PATH="$RC_DIR/syslibs" "$RC_DIR/gdk-pixbuf-query-loaders" > "$RC_DIR/syslibs/pixbuf-loaders/loaders.cache" 2>/dev/null
@@ -218,9 +218,9 @@ if [ -x "$RC_DIR/gdk-pixbuf-query-loaders" ]; then
 fi
 TR L05D "gdk-pixbuf loaders.cache sinh tren may: $PB_N loader"
 
-# libinput cua weston chi nhan thiet bi co the ID_INPUT; ban phim/chuot ao
-# cua gptokeyb2 (uinput) chua co the nen bi bo qua. Cai rule de udev gan
-# the ngay khi gptokeyb2 tao thiet bi (rootfs /etc ghi duoc).
+# libinput của weston chỉ nhận thiết bị có thẻ ID_INPUT; bàn phím/chuột ảo
+# của gptokeyb2 (uinput) chưa có thẻ nên bị bỏ qua. Cài rule để udev gán
+# thẻ ngay khi gptokeyb2 tạo thiết bị (rootfs /etc ghi được).
 UDEV_OK=0
 UDEVADM="$(command -v udevadm 2>/dev/null)"
 [ -x "$UDEVADM" ] || UDEVADM=/sbin/udevadm
@@ -315,9 +315,9 @@ TR L07 "socket wayland-1 sẵn sàng sau $((i * 250))ms"
 # không qua Xwayland nữa — lớp X11 của weston 9 lỗi assert khi app hiện cửa sổ.
 TR L08 "bỏ qua Xwayland — Electron chạy Wayland native"
 # weston/libinput bo qua thiet bi ao o buoc liet ke luc khoi dong (log
-# chi thay ban phim that du thiet bi ao co truoc va the da dung) -> phat
-# lai su kien 'add' cho cac thiet bi input de no nhan theo duong
-# hot-plug, duong ma cac phien truoc da thay no phan ung.
+# chỉ thấy bàn phím thật dù thiết bị ảo có trước và thẻ đã đúng) -> phát
+# lại sự kiện 'add' cho các thiết bị input để nó nhận theo đường
+# hot-plug, đường mà các phiên trước đã thấy nó phản ứng.
 if [ -n "$UDEVADM" ]; then
   "$UDEVADM" trigger --action=add --subsystem-match=input 2>/dev/null
   "$UDEVADM" settle --timeout=2 2>/dev/null
@@ -328,7 +328,7 @@ SNAP "weston đã lên"
 # ── Electron tiền cảnh (phiên kết thúc khi tiến trình này thoát) ────
 export LD_LIBRARY_PATH="$RC_DIR/syslibs:$WLIB"
 export FONTCONFIG_FILE="$RC_DIR/fonts.conf"
-# GTK (Electron) giai ma anh PNG/.. qua gdk-pixbuf: tro loader dung ban
+# GTK (Electron) giải mã ảnh PNG/.. qua gdk-pixbuf: trỏ loader đúng bản
 export GDK_PIXBUF_MODULE_DIR="$RC_DIR/syslibs/pixbuf-loaders"
 export GDK_PIXBUF_MODULEDIR="$RC_DIR/syslibs/pixbuf-loaders"
 export GDK_PIXBUF_MODULE_FILE="$RC_DIR/syslibs/pixbuf-loaders/loaders.cache"

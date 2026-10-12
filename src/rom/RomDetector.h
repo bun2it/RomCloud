@@ -39,18 +39,18 @@ public:
     // Helper: list filenames contained in a .zip file (without decompressing)
     std::vector<std::string> getZipEntries(const std::string& zipPath, size_t maxEntries = 50);
 
-    // Helper: CRC32 (hex 8 ky tu) cua cac file ben trong .zip, doc tu
-    // central directory (khong giai nen). Dung cho vong MD5/CRC32.
+    // Helper: CRC32 (hex 8 ký tự) của các file bên trong .zip, đọc từ
+    // central directory (không giải nén). Dùng cho vòng MD5/CRC32.
     std::vector<std::string> getZipEntryCrc32s(const std::string& zipPath, size_t maxEntries = 50);
 
-    // Helper: cap (ten file, CRC32 hex) ben trong .zip. Dung cho verdict
+    // Helper: cặp (tên file, CRC32 hex) bên trong .zip. Dùng cho verdict
     // tuong thich arcade (FBNEO_OK / MAME_ONLY).
     std::vector<std::pair<std::string, std::string>> getZipEntryNameCrcs(
         const std::string& zipPath, size_t maxEntries = 200);
 
-    // Verdict tuong thich arcade cho 1 file .zip (chi co nghia khi file la
-    // ROM arcade): FBNEO_OK = core moi an duoc; MAME_ONLY = dump kieu MAME
-    // (core moi khong an, de o MAME); UNKNOWN = khong du chung cu (de yen).
+    // Verdict tương thích arcade cho 1 file .zip (chỉ có nghĩa khi file là
+    // ROM arcade): FBNEO_OK = core mới ăn được; MAME_ONLY = dump kiểu MAME
+    // (core mới không ăn, để ở MAME); UNKNOWN = không đủ chứng cứ (để yên).
     enum class ArcadeCompat { UNKNOWN, FBNEO_OK, MAME_ONLY };
     ArcadeCompat detectArcadeCompat(const std::string& zipPath);
 

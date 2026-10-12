@@ -64,7 +64,7 @@ void UIManager::renderFileExplorer() {
         drawRect(px + 8, y, 4, rowH - 6, {59, 130, 246, 255}, true);
       }
       const auto &e = entries[(size_t)idx];
-      // Icon can giua doc trong row (rowH-6=42, icon 32 -> offset 5)
+      // Icon căn giữa dọc trong row (rowH-6=42, icon 32 -> offset 5)
       drawGridIcon(e.isDir ? "FOLDER.png" : "FILES.png", px + 16, y + 5, 32,
                    32);
       std::string badge;

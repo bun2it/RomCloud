@@ -1,7 +1,7 @@
 #pragma once
 // RomCloud ImageCache — LRU cache dung chung cho moi SDL_Texture*.
 // Gom: m_gridIconCache / m_systemIconCache / m_buttonIconCache (UiRenderer + UIManager),
-// m_ytThumbnails (YouTube), CoverManager::m_cache ve 1 co che duy nhat.
+// m_ytThumbnails (YouTube), CoverManager::m_cache về 1 cơ chế duy nhất.
 // Header-only per MODULE_IMPLEMENTATION_PLAN P2-2. Khong phu thuoc UIManager.
 #include <SDL2/SDL.h>
 
@@ -27,7 +27,7 @@ public:
     size_t size() const { return m_items.size(); }
     bool empty() const { return m_items.empty(); }
 
-    // Lay texture, cap nhat lastUsed. Tra nullptr neu khong co.
+    // Lấy texture, cập nhật lastUsed. Trả nullptr nếu không có.
     SDL_Texture* get(const std::string& key, int* outW = nullptr, int* outH = nullptr) {
         auto it = m_items.find(key);
         if (it == m_items.end() || !it->second.tex) return nullptr;
@@ -42,7 +42,7 @@ public:
         return it != m_items.end() && it->second.tex != nullptr;
     }
 
-    // Chen / thay the. Tu destroy texture cu trung key, tu trim khi qua max.
+    // Chèn / thay thế. Tự destroy texture cũ trùng key, tự trim khi quá max.
     void put(const std::string& key, SDL_Texture* tex, int w = 0, int h = 0) {
         if (key.empty() || !tex) return;
         auto it = m_items.find(key);
@@ -55,8 +55,8 @@ public:
         trim();
     }
 
-    // Giu lai cac key trong keep, xoa + destroy phan con lai.
-    // Tra so item da xoa (dung cho prune thumbnail vuot 24).
+    // Giữ lại các key trong keep, xóa + destroy phần còn lại.
+    // Trả số item đã xóa (dùng cho prune thumbnail vượt 24).
     size_t retainOnly(const std::unordered_set<std::string>& keep) {
         size_t removed = 0;
         for (auto it = m_items.begin(); it != m_items.end();) {
