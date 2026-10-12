@@ -250,7 +250,7 @@ bool UIManager::handleFolderPickerInput() {
     return false;
 }
 
-// --- Action dùng chung Y/X/MENU và popup menu ---
+// Action dùng chung Y/X/MENU và popup menu
 
 bool UIManager::handleExpMenuInput() {
     InputManager& input = InputManager::instance();

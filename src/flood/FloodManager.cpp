@@ -103,7 +103,7 @@ bool FloodManager::load() {
     return !m_pts.empty();
 }
 
-// ---- Live: mưa (Open-Meteo, tọa độ HCMC cố định) + triều (TideManager) ----
+// Live: mưa (Open-Meteo, tọa độ HCMC cố định) + triều (TideManager)
 
 std::string FloodManager::liveCachePath() const {
     return AppConfig::instance().getDataDir() + "/flood_live.json";

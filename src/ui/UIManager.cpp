@@ -1735,7 +1735,7 @@ void UIManager::update() {
     }
 
     if (m_settingsTab == 0) {
-      // ─── Tab 0: CẤU HÌNH (9 rows: 0..8) ─────────────────────────────
+      // Tab 0: CẤU HÌNH (9 rows: 0..8)
       const int totalRows = 9;
       if (input.isButtonJustPressed(Button::UP)) {
         if (m_selectedSettingsRow > 0) {
@@ -1815,7 +1815,7 @@ void UIManager::update() {
         }
       }
     } else if (m_settingsTab == 1) {
-      // ─── Tab 1: CÀI ĐẶT (7 rows: 0..6) ──────────────────────────────
+      // Tab 1: CÀI ĐẶT (7 rows: 0..6)
       const int totalRows = 7;
       if (input.isButtonJustPressed(Button::UP)) {
         if (m_selectedSettingsRow > 0) {
@@ -1937,7 +1937,7 @@ void UIManager::update() {
         }
       }
     } else if (m_settingsTab == 2) {
-      // ─── Tab 2: CẬP NHẬT: route A/B theo UpdateState ─────────────────
+      // Tab 2: CẬP NHẬT: route A/B theo UpdateState
       auto prog = UpdateManager::instance().getProgress();
       if (prog.state == UpdateState::UPDATE_AVAILABLE) {
         if (input.isButtonJustPressed(Button::A)) {
@@ -1997,10 +1997,10 @@ void UIManager::update() {
         }
       }
     } else if (m_settingsTab == 3) {
-      // ─── Tab 3: WI-FI (quét + nối mạng + portal) ──────────────────────
+      // Tab 3: WI-FI (quét + nối mạng + portal)
       handleWifiTabInput();
     } else if (m_settingsTab == 4 || m_settingsTab == 5) {
-      // ─── Tab 4/5: GIỚI THIỆU / HỆ THỐNG (từ INFO) ─────────────────────
+      // Tab 4/5: GIỚI THIỆU / HỆ THỐNG (từ INFO)
       int infoTab = (m_settingsTab == 4) ? 0 : 1;
       if (infoTab == 0 && m_lastInfoTab != 0) {
         m_aboutAutoScrollY = 0.0f;
@@ -2017,7 +2017,7 @@ void UIManager::update() {
       }
     }
 
-    // ─── B (chung) về MENU + reset toàn bộ state về tab CẤU HÌNH ─────────
+    // B (chung) về MENU + reset toàn bộ state về tab CẤU HÌNH
     // (bỏ qua khi modal nhập SSID/pass đang mở để B làm Hủy modal).
     if (input.isButtonJustPressed(Button::B) && !m_wifiModalOpen) {
       setState(UIState::MENU);
@@ -2289,7 +2289,7 @@ void UIManager::update() {
       break; // Đang phát, không xử lý list navigation
     }
 
-    // ------- Build filtered channel list -------
+    // Build filtered channel list
     std::vector<IPTVChannel> allChannels;
     if (m_iptvShowFavoritesOnly) {
       allChannels = IPTVManager::instance().getFavoriteChannels();
@@ -2353,9 +2353,7 @@ void UIManager::update() {
         m_iptvScrollOffset = m_selectedIPTVChannelIndex;
     }
 
-    // ==============================================================
     // SDL browser binh thuong (mpv blocking loop xu ly playback)
-    // ==============================================================
     if (input.isButtonJustPressed(Button::UP)) {
       if (channelCount > 0) {
         if (m_selectedIPTVChannelIndex > 0) {
@@ -3311,7 +3309,6 @@ void UIManager::update() {
 
   // ===========================================================\r\n        //
   // LocalSend P2P states
-  // ===========================================================
   case UIState::LOCALSEND_HOME: {
     auto devices = LocalSendManager::instance().knownDevices();
     int devCount = (int)devices.size();
@@ -3852,7 +3849,7 @@ void UIManager::renderHeader() {
 }
 
 void UIManager::renderSearchState() {
-  // ─── Left panel: keyboard + query bar (Borderless) ───
+  // Left panel: keyboard + query bar (Borderless)
   int panelW = 430;
   int panelX = 24;
   int panelY = 74;
@@ -3887,10 +3884,10 @@ void UIManager::renderSearchState() {
                              SDL_Color{0, 180, 255, 255}, sActs, true, true, 2);
   }
 
-  // ─── Divider line ───
+  // Divider line
   drawRect(476, 64, 1, 651, {38, 48, 64, 255}, true);
 
-  // ─── Right panel: results (Borderless) ───
+  // Right panel: results (Borderless)
   int rPanelX = 496;
   int rPanelW = 1024 - rPanelX - 24;
   int rPanelY = panelY;
@@ -5090,7 +5087,7 @@ void UIManager::renderDisclaimerState() {
             {75, 85, 99, 255}, {255, 255, 255, 255});
 }
 
-// ─── Settings Helpers: Cache Cleaner & Wi-Fi Diagnostics ──────────────
+// Settings Helpers: Cache Cleaner & Wi-Fi Diagnostics
 static uint64_t getDirSize(const std::string &path) {
   uint64_t total = 0;
   DIR *d = opendir(path.c_str());
@@ -5245,7 +5242,7 @@ void UIManager::runWifiDiagnostics() {
 }
 
 void UIManager::renderSettingsState() {
-  // ─── Background + Header chuẩn (giống IPTV/YouTube/Explorer/GameCast) ───
+  // Background + Header chuẩn (giống IPTV/YouTube/Explorer/GameCast)
   // P4: bỏ custom sub-header strip cũ (Y=64..112 + line) để đồng bộ giao
   // diện hệ thống. drawAppHeader tự render: FOOTER_BG bar + separator line +
   // title (ACCENT_CYAN) + cum status Wi-Fi/pin/clock bên phải.
@@ -5283,7 +5280,7 @@ void UIManager::renderSettingsState() {
              m_settingsTab == 5, m_fontSmall);
   }
 
-  // ─── Tab 2 (CẬP NHẬT): render OTA body (đã bỏ header/footer nội bộ) ────
+  // Tab 2 (CẬP NHẬT): render OTA body (đã bỏ header/footer nội bộ)
   if (m_settingsTab == 2) {
     renderOTAUpdateState();
     auto prog = UpdateManager::instance().getProgress();
@@ -5325,13 +5322,13 @@ void UIManager::renderSettingsState() {
     return;
   }
 
-  // ─── Tab 3 (WI-FI): quét + nối mạng + portal ──────────────────────────
+  // Tab 3 (WI-FI): quét + nối mạng + portal
   if (m_settingsTab == 3) {
     renderWifiTab();
     return;
   }
 
-  // ─── Tab 4/5 (GIỚI THIỆU / HỆ THỐNG, từ INFO) ─────────────────────────
+  // Tab 4/5 (GIỚI THIỆU / HỆ THỐNG, từ INFO)
   if (m_settingsTab == 4) {
     renderAboutTab(124);
     drawAppFooter({{UiTheme::PadBtn::B, "Lùi"},
@@ -5358,9 +5355,7 @@ void UIManager::renderSettingsState() {
   std::vector<SettingItem> items;
 
   if (m_settingsTab == 0) {
-    // ════════════════════════════════════════════════════════════════════════
     // TAB 0: CẤU HÌNH (8 mục cấu hình hệ thống & cloud)
-    // ════════════════════════════════════════════════════════════════════════
     std::string email = AuthManager::instance().getUserEmail();
     std::string folderId = DatabaseManager::instance().getSetting(
         "drive_folder_id", UiStrings::SETTING_NOT_CONFIGURED);
@@ -5445,9 +5440,7 @@ void UIManager::renderSettingsState() {
          castRunning ? UiTheme::ACCENT_RED : SDL_Color{21, 94, 117, 255},
          SDL_Color{255, 255, 255, 255}});
   } else {
-    // ════════════════════════════════════════════════════════════════════════
     // TAB 1: CÀI ĐẶT (5 mục tiện ích hệ thống & bảo trì)
-    // ════════════════════════════════════════════════════════════════════════
     items.reserve(5);
 
     // 0: Dọn dẹp bộ nhớ đệm
@@ -5838,7 +5831,7 @@ void UIManager::renderSystemTab() {
 }
 
 void UIManager::renderDiagnosticsState() {
-  // ─── Background + Header chuẩn (giống Settings/IPTV/YouTube/Explorer) ───
+  // Background + Header chuẩn (giống Settings/IPTV/YouTube/Explorer)
   // Bỏ custom sub-header strip cũ (Y=64..112 + line + title thủ công) để
   // đồng bộ giao diện hệ thống. drawAppHeader tự render: FOOTER_BG bar (Y=0..64) +
   // separator line + title ACCENT_CYAN + cum status Wi-Fi/pin/clock bên phải.
@@ -5940,7 +5933,6 @@ std::vector<std::string> UIManager::wrapAboutText(const std::string &text,
 }
 
 void UIManager::renderAboutTab(int contentTop) {
-  // ════════════════════════════════════════════════════════════════════════
   // LAYOUT: 2 CỘT ĐỀU (bám theo contentTop để không đè tab pill Y=72..104)
   //   Mỗi col W=480 (1024 - 24 - 24 margin - 16 gap = 960 → /2)
   //   Col 1 (trái, X=24) — 1 CARD duy nhất, full height (contentTop..715):
@@ -5951,7 +5943,6 @@ void UIManager::renderAboutTab(int contentTop) {
   //     (changelog "Tính năng mới" đã move về OTA page trong Settings tab)
   //   Col 2 (phải, X=520) — full content height (contentTop..715):
   //     THƯ NGỎ letter với auto-scroll
-  // ════════════════════════════════════════════════════════════════════════
   const int col1X = 24;
   const int col1W = 480;
   const int col2X = 24 + col1W + 16;   // = 520 (16px gap giữa 2 col)
@@ -5964,11 +5955,11 @@ void UIManager::renderAboutTab(int contentTop) {
 
   auto otaInfo = UpdateManager::instance().getLatestInfo();
 
-  // ─── Col 1: Single card (version + QR donate) ───
+  // Col 1: Single card (version + QR donate)
   drawRoundedRect(col1X, col1Y, col1W, col1H, cardR, {22, 28, 38, 255}, true);
   drawRoundedBorder(col1X, col1Y, col1W, col1H, cardR, {51, 65, 85, 255}, 1);
 
-  // ── Top section: Version + author + date + divider ──
+  // Top section: Version + author + date + divider
   const int col1PadL = 16, col1PadR = 16;
   int y = col1Y + 16;
   std::string verText = std::string("RomCloud v") + APP_VERSION;
@@ -6082,11 +6073,11 @@ void UIManager::renderAboutTab(int contentTop) {
   // Line 2 (mờ hơn — instruction)
   ly = renderBullet(UiStrings::ABOUT_DONATE_LINE2, ly, {100, 115, 135, 255});
 
-  // ─── Col 2: THƯ NGỎ card với auto-scroll ───
+  // Col 2: THƯ NGỎ card với auto-scroll
   drawRoundedRect(col2X, col2Y, col2W, col2H, cardR, {22, 28, 38, 255}, true);
   drawRoundedBorder(col2X, col2Y, col2W, col2H, cardR, {51, 65, 85, 255}, 1);
 
-  // ─── "THƯ NGỎ" cell: auto-scroll ───
+  // "THƯ NGỎ" cell: auto-scroll
   // Tốc độ 22 px/sec ~ đọc vừa phải. Khi chạm đáy + hold ~4 dòng → loop về top.
   static constexpr float kAboutScrollPxPerSec = 22.0f;
   static constexpr int kAboutEndHoldLines = 4;
@@ -6108,7 +6099,7 @@ void UIManager::renderAboutTab(int contentTop) {
       "Chúc các bạn có những trải nghiệm thật vui vẻ!",
   };
 
-  // ─── Layout THƯ NGỎ card: FIX OVERLAP với title ───
+  // Layout THƯ NGỎ card: FIX OVERLAP với title
   // Old: padT=8, titleH = textHeight(fontMedium) + 4, divider textAreaY-4,
   //      scroll start textAreaY → gap chỉ 4px, scroll lên có thể đè title.
   // New: padT=14, divider cách title 4px (titleH là textHeight),
@@ -6147,7 +6138,7 @@ void UIManager::renderAboutTab(int contentTop) {
            true);
 
   if (textAreaH >= lineH * 2) {
-    // ─── Auto-scroll state ───
+    // Auto-scroll state
     uint32_t now = SDL_GetTicks();
     if (m_aboutLastTickMs == 0)
       m_aboutLastTickMs = now; // first frame sau entry → dt = 0
@@ -6191,7 +6182,7 @@ void UIManager::renderAboutTab(int contentTop) {
 }
 
 void UIManager::renderReverseSyncState() {
-  // ─── Borderless Full-Width Sub-Header ───
+  // Borderless Full-Width Sub-Header
   drawRect(0, 64, 1024, 48, UiTheme::CARD_SOLID, true);
   drawRect(0, 111, 1024, 1, {38, 48, 64, 255}, true);
   drawText(UiStrings::REVERSE_SYNC_TITLE, 36, 78, {168, 85, 247, 255},
@@ -6351,7 +6342,7 @@ void UIManager::renderUploadOverlay() {
 }
 
 void UIManager::renderOTAUpdateState() {
-  // ─── P5: body-only render (không vẽ header/footer) ─────────────────────
+  // P5: body-only render (không vẽ header/footer)
   // Được gọi từ renderSettingsState() khi tab=1 (CẬP NHẬT). Header đã có ở
   // parent (drawAppHeader "CÀI ĐẶT"), tab pills đã có (Y=72..104), footer
   // do parent lo (drawAppFooter "Đồng ý/Lùi/Chuyển tab").
@@ -6612,7 +6603,7 @@ void UIManager::renderOTAUpdateState() {
 }
 
 void UIManager::renderOTAChangelogState() {
-  // ─── P6: Full changelog sub-page từ Cập nhật tab (Y → open) ────────
+  // P6: Full changelog sub-page từ Cập nhật tab (Y → open)
   // Render full-page (không modal). Header riêng "Cập nhật - Tính năng mới"
   // + sub "vX.Y.Z • date". Card chiếm full content area. Changelog được wrap
   // paragraph-aware (split bằng \n trước, wrap từng đoạn). Nếu dài hơn card →
@@ -6627,7 +6618,7 @@ void UIManager::renderOTAChangelogState() {
         sub.empty() ? info.releaseDate : std::string(" • ") + info.releaseDate;
   drawAppHeader(UiStrings::OTA_CHANGELOG_HEADER, sub);
 
-  // ─── Card full content area ───
+  // Card full content area
   int cardX = 24;
   int cardW = 1024 - 48;        // = 976
   int cardY = 124;              // sau header (no tabs ở sub-page)
@@ -6637,7 +6628,7 @@ void UIManager::renderOTAChangelogState() {
   drawRoundedBorder(cardX, cardY, cardW, cardH, UiTheme::RADIUS_CARD,
                     {51, 65, 85, 255}, 1);
 
-  // ─── Header section trong card: version title + date + divider ───
+  // Header section trong card: version title + date + divider
   const int padL = 28, padR = 28, padT = 22;
   int textW = cardW - padL - padR; // = 920
   int y = cardY + padT;
@@ -6655,7 +6646,7 @@ void UIManager::renderOTAChangelogState() {
   drawRect(cardX + padL, y, textW, 1, {51, 65, 85, 100}, true);
   y += 1 + 16;
 
-  // ─── Body: changelog feed từ release, trống thì để trống ───
+  // Body: changelog feed từ release, trống thì để trống
   std::string body = info.changelog;
 
   // Split body thành paragraphs (split bằng \n, bỏ qua dòng rỗng).
@@ -6722,7 +6713,7 @@ void UIManager::renderOTAChangelogState() {
   }
   SDL_RenderSetClipRect(m_renderer, nullptr);
 
-  // ─── Scroll indicator (góc phải-dưới card, chỉ khi content overflow) ───
+  // Scroll indicator (góc phải-dưới card, chỉ khi content overflow)
   if (totalLines > visibleLines) {
     int scrollBarX = cardX + cardW - 6;
     int scrollBarY = contentTopY + 4;
@@ -6739,14 +6730,12 @@ void UIManager::renderOTAChangelogState() {
     drawRect(scrollBarX, thumbY, 2, thumbH, {0, 180, 216, 255}, true);
   }
 
-  // ─── Footer ───
+  // Footer
   drawAppFooter({{UiTheme::PadBtn::B, "Quay lại"}});
 }
 
-// ---------------------------------------------------------------------------
 // renderIPTVPlaylistSelectState
 // Man hinh chon playlist khi co nhieu file .m3u
-// ---------------------------------------------------------------------------
 void UIManager::renderIPTVPlaylistSelectState() {
   drawRect(0, 0, UiTheme::APP_W, UiTheme::HEADER_H, UiTheme::FOOTER_BG, true);
   drawRect(0, UiTheme::HEADER_H - 1, UiTheme::APP_W, 1, UiTheme::FOOTER_LINE,
@@ -6920,7 +6909,7 @@ void UIManager::renderIPTVState() {
   // Nen toan man hinh
   drawRect(0, UI_TOP, 1024, UI_H, {14, 18, 26, 255}, true);
 
-  // ─── Row 1: Header chuẩn chung + Logo TV + status bar (Wi-Fi, Pin, Giờ) ───
+  // Row 1: Header chuẩn chung + Logo TV + status bar (Wi-Fi, Pin, Giờ)
   drawRect(0, 0, UiTheme::APP_W, UiTheme::HEADER_H, UiTheme::FOOTER_BG, true);
   drawRect(0, UiTheme::HEADER_H - 1, UiTheme::APP_W, 1, UiTheme::FOOTER_LINE,
            true);
@@ -6966,9 +6955,7 @@ void UIManager::renderIPTVState() {
   }
   int headerBottom = 64;
 
-  // -----------------------------------------------------------------------
   // Build filtered channel list (dong bo voi input handler)
-  // -----------------------------------------------------------------------
   std::vector<IPTVChannel> allChannels;
   if (m_iptvShowFavoritesOnly) {
     allChannels = IPTVManager::instance().getFavoriteChannels();
@@ -7032,9 +7019,7 @@ void UIManager::renderIPTVState() {
       m_iptvScrollOffset = m_selectedIPTVChannelIndex;
   }
 
-  // -----------------------------------------------------------------------
   // Group filter bar (nam ngay duoi header)
-  // -----------------------------------------------------------------------
   const int GROUP_BAR_Y = headerBottom;
   const int GROUP_BAR_H = UiTheme::GROUP_BAR_H;
   drawRect(0, GROUP_BAR_Y, 1024, GROUP_BAR_H, {20, 26, 38, 255}, true);
@@ -7111,9 +7096,7 @@ void UIManager::renderIPTVState() {
     }
   }
 
-  // -----------------------------------------------------------------------
   // Channel list
-  // -----------------------------------------------------------------------
   const int LIST_TOP = GROUP_BAR_Y + GROUP_BAR_H + 2;
   const int LIST_BOTTOM = UiTheme::FOOTER_Y;
   const int LIST_H = LIST_BOTTOM - LIST_TOP;
@@ -7250,9 +7233,7 @@ void UIManager::renderIPTVState() {
     }
   }
 
-  // -----------------------------------------------------------------------
   // Footer (ve qua drawAppFooter — tu ve nen + chong tran)
-  // -----------------------------------------------------------------------
   if (m_iptvShowFavoritesOnly) {
     drawAppFooter({{UiTheme::PadBtn::A, "Xem"},
                    {UiTheme::PadBtn::B, "Lùi"},
@@ -7272,7 +7253,7 @@ void UIManager::renderIPTVState() {
 void UIManager::renderIPTVSearchState() {
   drawAppBackground();
 
-  // ─── Row 1: Header (Header chuẩn chung + logo TV + status bar) ───
+  // Row 1: Header (Header chuẩn chung + logo TV + status bar)
   drawRect(0, 0, UiTheme::APP_W, UiTheme::HEADER_H, UiTheme::FOOTER_BG, true);
   drawRect(0, UiTheme::HEADER_H - 1, UiTheme::APP_W, 1, UiTheme::FOOTER_LINE,
            true);
@@ -7308,7 +7289,7 @@ void UIManager::renderIPTVSearchState() {
   int inW = 932;
   int inH = 58;
 
-  // ─── Row 2: Input Field Box ───
+  // Row 2: Input Field Box
   std::string bgInputPath = AppConfig::instance().getAssetsDir() +
                             "/stock_keyboard/bg-search-input.png";
   SDL_Texture *bgInputTex =
@@ -7336,7 +7317,7 @@ void UIManager::renderIPTVSearchState() {
   drawText(displayQuery, inX + 24, inY + (inH - textHeight(m_fontLarge)) / 2,
            qColor, m_fontLarge, false);
 
-  // ─── Row 3 / Middle: Channel Results List (Y = 144..440) ───
+  // Row 3 / Middle: Channel Results List (Y = 144..440)
   if (m_iptvVk.query.empty()) {
     drawText("Nhập chữ cái trên bàn phím để tìm kiếm kênh.", 512, 230,
              {148, 163, 184, 255}, m_fontMedium, true);
@@ -7441,7 +7422,7 @@ void UIManager::renderIPTVSearchState() {
   // Divider line above keyboard
   drawRect(46, 444, 932, 1, {20, 48, 64, 180}, true);
 
-  // ─── Bottom: Compact Virtual Keyboard (Y = 452..706) ───
+  // Bottom: Compact Virtual Keyboard (Y = 452..706)
   const char *iActs[5] = {nullptr, nullptr, nullptr, nullptr, nullptr};
   {
     static std::string i0, i1, i2, i3, i4;
@@ -7463,7 +7444,7 @@ void UIManager::renderIPTVSearchState() {
                              SDL_Color{0, 180, 255, 255}, iActs, true, true, 2);
   }
 
-  // ─── Bottom Bar chuẩn: drawAppFooter ───
+  // Bottom Bar chuẩn: drawAppFooter
   if (m_iptvVk.inResults) {
     drawAppFooter({{UiTheme::PadBtn::A, "Xem"},
                    {UiTheme::PadBtn::B, "Bàn phím"},
@@ -8306,9 +8287,7 @@ void UIManager::clearThumbnailCache() {
 #endif
 }
 
-// =====================================================================
 // P0-2: Thumbnail decode worker thread
-// =====================================================================
 void UIManager::startThumbWorker() {
   if (m_thumbWorkerStarted.exchange(true))
     return;
@@ -8659,9 +8638,7 @@ wrapUtf8TwoLines(const std::string &text, size_t maxCharsPerLine) {
   return {trimUtf8(l1), trimUtf8(l2)};
 }
 
-// ============================================================================
 // CHUẨN HOÁ LAYOUT THUMBNAIL VIDEO YOUTUBE
-// ----------------------------------------------------------------------------
 // Layout duy nhất áp dụng cho MỌI màn có thumbnail video:
 //   ┌───────────────────────────────────────┐
 //   │                                       │
@@ -8671,7 +8648,6 @@ wrapUtf8TwoLines(const std::string &text, size_t maxCharsPerLine) {
 //   Dòng 1: Tên video                      (canh trái, TEXT_MAIN)
 //   Dòng 2: 12:34 - 1.2M lượt xem          (canh trái, TEXT_SUB)
 // Spacing gọn: lineStep = textHeight(font) + 2, infoY = thumbY + thumbH + 4.
-// ============================================================================
 
 void UIManager::drawYtStandardThumb(int tx, int ty, int tw, int th,
                                     const std::string &vid, bool selected,
@@ -8742,10 +8718,10 @@ void UIManager::drawYtStandardMeta(int x, int y, int maxW, int lineStep,
 void UIManager::renderYouTubeSearchState() {
   loadYouTubeHistory();
 
-  // ─── TrimUI Stock OS Ambient Teal Theme ───
+  // TrimUI Stock OS Ambient Teal Theme
   drawAppBackground();
 
-  // ─── Row 1: Header (Header chuẩn chung + logo YouTube + status bar) ───
+  // Row 1: Header (Header chuẩn chung + logo YouTube + status bar)
   drawRect(0, 0, UiTheme::APP_W, UiTheme::HEADER_H, UiTheme::FOOTER_BG, true);
   drawRect(0, UiTheme::HEADER_H - 1, UiTheme::APP_W, 1, UiTheme::FOOTER_LINE,
            true);
@@ -8775,7 +8751,7 @@ void UIManager::renderYouTubeSearchState() {
   }
   drawHeaderStatus();
 
-  // ─── Row 2: Input Field Box (Y = 74, H = 58) ───
+  // Row 2: Input Field Box (Y = 74, H = 58)
   int inX = 46;
   int inY = 74;
   int inW = 932;
@@ -8807,7 +8783,7 @@ void UIManager::renderYouTubeSearchState() {
   drawText(dispQ, inX + 24, inY + (inH - textHeight(m_fontLarge)) / 2, qCol,
            m_fontLarge, false);
 
-  // ─── Row 3 & Row 4: Search History Pills ───
+  // Row 3 & Row 4: Search History Pills
   std::vector<YtHistoryPill> r3Pills, r4Pills;
   getYouTubeHistoryPills(r3Pills, r4Pills);
 
@@ -8880,7 +8856,7 @@ void UIManager::renderYouTubeSearchState() {
         SDL_Color{0, 180, 255, 255}, ytActs, true, true, 2);
   }
 
-  // ─── Bottom Bar chuẩn: drawAppFooter tự vẽ nền (B = Thoát) ───
+  // Bottom Bar chuẩn: drawAppFooter tự vẽ nền (B = Thoát)
   if (m_ytSearchFocus == 1) {
     drawAppFooter({{UiTheme::PadBtn::A, "Tìm"},
                    {UiTheme::PadBtn::UPDOWN, "Bàn phím"},
@@ -9013,7 +8989,6 @@ void UIManager::renderYouTubeResultsState() {
     }
 
     // ─── P0-3: CHANNEL row riêng (avatar tròn + tên kênh + sub/video count)
-    // ───
     if (isChannelRow) {
       // Avatar placeholder (hình tròn) bên trái, không có thumb
       int avatarSize = 70;
@@ -9154,11 +9129,9 @@ void UIManager::renderYouTubeResultsState() {
   }
 }
 
-// =============================================================
 // LocalSend render functions
-// =============================================================
 void UIManager::renderLocalSendHome() {
-  // ===== Background + Header chuẩn app =====
+  // Background + Header chuẩn app
   drawAppBackground();
   std::string myIp = LocalSendManager::instance().ownIp();
   if (myIp.empty() || myIp == "0.0.0.0")
@@ -9172,7 +9145,7 @@ void UIManager::renderLocalSendHome() {
     drawText(ipTxt, ipX, ipY, UiTheme::TEXT_DIM, m_fontSmall, false);
   }
 
-  // ===== Layout: sidebar trái (chế độ) + content phải =====
+  // Layout: sidebar trái (chế độ) + content phải
   // Sidebar bg card-style (CARD_SOLID), thấp hơn header, cao hơn footer.
   int sbW = 284;
   int sbX = 0;
@@ -9210,11 +9183,11 @@ void UIManager::renderLocalSendHome() {
   drawText("LAN-only • HTTP/HTTPS", sbW / 2, sbY + sbH - 28,
            UiTheme::TEXT_FAINT, m_fontSmall, true);
 
-  // ===== Content phải =====
+  // Content phải
   int cx = sbW + 30;
   int cw = 1024 - cx - 24;
   if (m_localSendMode == 1) {
-    // ===== RECEIVE: panel trạng thái lắng nghe =====
+    // RECEIVE: panel trạng thái lắng nghe
     drawText("Receive", cx, sbY + 10, UiTheme::ACCENT_CYAN, m_fontLarge, false);
     int stY = sbY + 64;
     drawRoundedRect(cx, stY, cw, 140, UiTheme::RADIUS_MODAL,
@@ -9232,7 +9205,7 @@ void UIManager::renderLocalSendHome() {
     drawText("Mở LocalSend trên máy khác và gử file tới thiết bị này.", cx + 24,
              stY + 96, UiTheme::TEXT_SUB, m_fontSmall, false);
   } else {
-    // ===== SEND: Nearby devices (A vào thẳng picker ROM) =====
+    // SEND: Nearby devices (A vào thẳng picker ROM)
     drawText("Nearby devices", cx, sbY + 10, UiTheme::ACCENT_CYAN, m_fontLarge,
              false);
     int ny = sbY + 64;
@@ -9818,7 +9791,7 @@ void UIManager::renderLsAppsList(int dlgX, int dlgY, int dlgW, int dlgH) {
 }
 
 void UIManager::renderGameCastState() {
-  // ─── Background + Header chuẩn (giống IPTV/YouTube/Explorer) ───
+  // Background + Header chuẩn (giống IPTV/YouTube/Explorer)
   // P4: bỏ custom sub-header strip cũ (Y=64..112) để đồng bộ với các app
   // khác. Cụm status bên phải (Wi-Fi/pin/clock) tự động render bởi
   // drawAppHeader() → khớp IPTV, YouTube, Explorer, Settings.
@@ -9834,7 +9807,7 @@ void UIManager::renderGameCastState() {
   bool running = CastManager::instance().isRunning();
   bool isHd = CastManager::instance().isHdMode();
 
-  // ─── Layout 2 rows × 1 column (P4: chuẩn hóa theo app_conventions) ───
+  // Layout 2 rows × 1 column (P4: chuẩn hóa theo app_conventions)
   // Row 1: trạng thái stream + độ phân giải + IP badge góc phải
   // Row 2: nguyên cụm kết nối TV cũ (QR + URL + stats + steps)
   const int rowX = 24;
@@ -9845,7 +9818,7 @@ void UIManager::renderGameCastState() {
   const int row2Y = row1Y + row1H + rowGap; // 236
   const int row2H = 706 - row2Y;            // 470 (còn 9px đệm cuối)
 
-  // ─── Row 1: Status + Resolution (1 cell, 2 dòng chính) ───────────
+  // Row 1: Status + Resolution (1 cell, 2 dòng chính)
   drawRoundedRect(rowX, row1Y, rowW, row1H, UiTheme::RADIUS_MODAL,
                   {18, 24, 34, 255}, true);
   drawRoundedBorder(rowX, row1Y, rowW, row1H, UiTheme::RADIUS_MODAL,
@@ -9888,7 +9861,7 @@ void UIManager::renderGameCastState() {
   int rightX = rowX;
   int cardY = row2Y;
 
-  // ─── Row 2: Kết nối TV & Laptop (1 cell, nguyên cụm bên phải cũ) ──
+  // Row 2: Kết nối TV & Laptop (1 cell, nguyên cụm bên phải cũ)
   // P4: thay Card 1 (left status) + Card 2 (right QR) cũ bằng 1 cell full
   // width chứa toàn bộ nội dung kết nối TV. Bỏ "Tính năng & Điểm nổi
   // bật" + 5 bullets + btnCard (chứa button hints duplicate với footer).
@@ -10078,9 +10051,7 @@ void UIManager::rebuildYtItems() {
   }
 }
 
-// ============================================================================
 // P0-6: YOUTUBE_HOME helpers — load/save/toggle view mode
-// ============================================================================
 
 void UIManager::loadYouTubeViewMode() {
   std::string v = DatabaseManager::instance().getSetting("yt_view_mode", "row");
@@ -10116,7 +10087,7 @@ void UIManager::openYouTubeHomeModal() {
 }
 
 void UIManager::renderYouTubeHomeState() {
-  // ─── Background + logo ─────────────────────────────────────────────
+  // Background + logo
   drawAppBackground();
   {
     std::string ytLogoPath =
@@ -10153,7 +10124,7 @@ void UIManager::renderYouTubeHomeState() {
   drawText("P0.6", UiTheme::APP_W - 50, 70, UiTheme::TEXT_FAINT, m_fontSmall,
            true);
 
-  // ─── Zone 0: Search input field ─────────────────────────────────
+  // Zone 0: Search input field
   int inX = 36;
   int inY = 74;
   int inW = 952;
@@ -10187,7 +10158,7 @@ void UIManager::renderYouTubeHomeState() {
   drawText(dispQ, inX + 20, inY + (inH - textHeight(m_fontLarge)) / 2, qCol,
            m_fontLarge, false);
 
-  // ─── Zone 1: Pills / Tags area ──────────────────────────────────
+  // Zone 1: Pills / Tags area
   const int tagBoxX = 36;
   const int tagBoxY = 136;
   const int tagBoxW = 952;
@@ -10264,7 +10235,7 @@ void UIManager::renderYouTubeHomeState() {
              true);
   }
 
-  // ─── Zone 2: Content (results / thumbnails) area ────────────────
+  // Zone 2: Content (results / thumbnails) area
   const int contentTop = 204;
   const int contentH = 711 - contentTop;
   int totalResults = static_cast<int>(m_ytSearchResults.size());

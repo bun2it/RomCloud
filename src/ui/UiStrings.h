@@ -5,12 +5,10 @@
 namespace RomCloud {
 namespace UiStrings {
 
-// ============================================================================
 // CẤU HÌNH GIAO DIỆN — ROMCLOUD CHO TRIMUI BRICK PRO
 // Chỉnh sửa chuỗi văn bản tại đây và biên dịch lại.
-// ============================================================================
 
-// --- 1. TIÊU ĐỀ CHUNG & HEADER ---
+// 1. TIÊU ĐỀ CHUNG & HEADER
 extern const char *APP_TITLE;
 extern const char *APP_SUBTITLE;
 extern const char *SYSTEM_SELECT_TITLE;
@@ -23,7 +21,7 @@ extern const char *HEADER_DOWNLOAD;
 extern const char *HEADER_DIAG;
 extern const char *HEADER_OTA;
 
-// --- 2. MENU CHÍNH (MAIN MENU) ---
+// 2. MENU CHÍNH (MAIN MENU)
 extern const char *MENU_PLAY;
 extern const char *MENU_IPTV;
 extern const char *MENU_SYNC;
@@ -34,13 +32,13 @@ extern const char *MENU_SETTINGS;
 extern const char *MENU_DIAG;
 extern const char *MENU_EXIT;
 
-// --- IPTV STRINGS ---
+// IPTV STRINGS
 extern const char *IPTV_TITLE;
 extern const char *IPTV_NO_CHANNELS;
 extern const char *IPTV_LOADING;
 extern const char *IPTV_NOW_PLAYING;
 
-// --- 3. THANH ĐIỀU KHIỂN & NÚT BẤM ---
+// 3. THANH ĐIỀU KHIỂN & NÚT BẤM
 extern const char *FOOTER_ENTER_SYSTEM;
 extern const char *FOOTER_MAIN_MENU;
 extern const char *FOOTER_SYNC_DRIVE;
@@ -79,7 +77,7 @@ extern const char *BTN_DOWNLOAD;
 extern const char *BTN_CANCEL_ACTION;
 extern const char *BTN_BACK_MAIN_MENU_HINT;
 
-// --- 4. MÀN HÌNH CHỌN HỆ MÁY ---
+// 4. MÀN HÌNH CHỌN HỆ MÁY
 extern const char *SYS_SELECT_TITLE;
 extern const char *SYS_SELECT_SYSTEMS_LABEL;
 extern const char *SYS_SELECT_GAMES_LOCAL;
@@ -88,14 +86,14 @@ extern const char *SYS_SELECT_SDCARD_PREFIX;
 extern const char *SYS_SELECT_FOLDER_PREFIX;
 extern const char *SYS_SELECT_EXT_PREFIX;
 
-// --- 5. MÀN HÌNH TÌM KIẾM ---
+// 5. MÀN HÌNH TÌM KIẾM
 extern const char *SEARCH_PROMPT_MIN_CHARS;
 extern const char *SEARCH_NO_RESULTS;
 extern const char *SEARCH_RESULTS_SUFFIX;
 extern const char *SEARCH_NAV_UP_HINT;
 extern const char *SEARCH_NAV_DOWN_HINT;
 
-// --- 6. DANH SÁCH GAME & CHI TIẾT GAME ---
+// 6. DANH SÁCH GAME & CHI TIẾT GAME
 extern const char *GAME_LIST_EMPTY;
 extern const char *GAME_FILTER_HINT;
 extern const char *FILTER_TAG_ALL;
@@ -129,7 +127,7 @@ extern const char *QUEUE_REMAINING_SUFFIX;
 extern const char *QUEUE_DOWNLOADING_EMPTY;
 extern const char *QUEUE_WAITING_PREFIX;
 
-// --- 7. HỘP THOẠI XÓA ROM ---
+// 7. HỘP THOẠI XÓA ROM
 extern const char *DELETE_TITLE;
 extern const char *DELETE_DESC;
 extern const char *DELETE_CLOUD_SAFE;
@@ -140,7 +138,7 @@ extern const char *DIALOG_DELETE_FILE_LABEL;
 extern const char *DIALOG_DELETE_PROMPT;
 extern const char *DIALOG_DELETE_SAFE_HINT;
 
-// --- 8. TUYÊN BỐ BẢN QUYỀN ---
+// 8. TUYÊN BỐ BẢN QUYỀN
 extern const char *DISCLAIMER_TITLE;
 extern const char *DISCLAIMER_SUBTITLE;
 extern const char *DISCLAIMER_SEC1_TITLE;
@@ -156,7 +154,7 @@ extern const char *DISCLAIMER_SEC3_LINE3;
 extern const char *DISCLAIMER_AGREE;
 extern const char *DISCLAIMER_DECLINE;
 
-// --- 9. CÀI ĐẶT HỆ THỐNG ---
+// 9. CÀI ĐẶT HỆ THỐNG
 extern const char *SETTING_DRIVE_STATUS;
 extern const char *SETTING_CONNECTED;
 extern const char *SETTING_DISCONNECTED;
@@ -177,7 +175,7 @@ extern const char *SETTING_ORGANIZE_ROMS;
 extern const char *SETTING_ORGANIZE_ROMS_DESC;
 extern const char *SETTING_ORGANIZE_ROMS_BTN;
 
-// --- 10. KẾT NỐI QUA WEB ---
+// 10. KẾT NỐI QUA WEB
 extern const char *WEB_CONNECT_TITLE;
 extern const char *WEB_CONNECT_GUIDE_TITLE;
 extern const char *WEB_CONNECT_STEP1;
@@ -191,7 +189,7 @@ extern const char *WEB_CONNECT_ACCOUNT_PREFIX;
 extern const char *WEB_CONNECT_READY;
 extern const char *WEB_CONNECT_START_BTN;
 
-// --- 11. ĐỒNG BỘ GOOGLE DRIVE ---
+// 11. ĐỒNG BỘ GOOGLE DRIVE
 extern const char *SYNC_TITLE;
 extern const char *SYNC_CONNECTING;
 extern const char *SYNC_SCANNING;
@@ -207,7 +205,7 @@ extern const char *SYNC_NEW_PREFIX;
 extern const char *SYNC_UPDATED_PREFIX;
 extern const char *SYNC_CANCEL_BTN;
 
-// --- 11B. REVERSE SYNC (UPLOAD) ---
+// 11B. REVERSE SYNC (UPLOAD)
 extern const char *REVERSE_SYNC_TITLE;
 extern const char *REVERSE_SYNC_PREPARING;
 extern const char *REVERSE_SYNC_UPLOADING;
@@ -224,7 +222,7 @@ extern const char *REVERSE_SYNC_CANCEL_BTN;
 extern const char *REVERSE_SYNC_GAMES_FOUND;
 extern const char *REVERSE_SYNC_GAMES_SUF;
 
-// --- 12. TIẾN TRÌNH TẢI ROM ---
+// 12. TIẾN TRÌNH TẢI ROM
 extern const char *DL_SYS_PREFIX;
 extern const char *DL_FILE_PREFIX;
 extern const char *DL_CONNECTING;
@@ -234,7 +232,7 @@ extern const char *DL_REMAINING_QUEUE_PREFIX;
 extern const char *DL_REMAINING_QUEUE_SUFFIX;
 extern const char *DL_CANCEL_BTN;
 
-// --- 13. THÔNG TIN HỆ THỐNG ---
+// 13. THÔNG TIN HỆ THỐNG
 extern const char *DIAG_HW_DEVICE;
 extern const char *DIAG_CPU_ARCH;
 extern const char *DIAG_OS_KERNEL;
@@ -255,7 +253,7 @@ extern const char *DIAG_VAL_64BIT;
 extern const char *DIAG_VAL_HW_ACCEL;
 extern const char *DIAG_VAL_SCHEMA_PREFIX;
 
-// --- 14. CẬP NHẬT OTA ---
+// 14. CẬP NHẬT OTA
 extern const char *OTA_TITLE;
 extern const char *OTA_CHECKING;
 extern const char *OTA_DEV_CURRENT_VER;
@@ -279,7 +277,7 @@ extern const char *OTA_RCWEB_BTN;
 extern const char *OTA_RCWEB_NOT_INSTALLED;
 extern const char *TOAST_RCWEB_BUSY;
 
-// --- 15. TOAST MESSAGES ---
+// 15. TOAST MESSAGES
 extern const char *TOAST_ADDED_TO_QUEUE;
 extern const char *TOAST_REMOVED_FROM_QUEUE;
 extern const char *TOAST_DOWNLOAD_STOPPED;
@@ -290,13 +288,13 @@ extern const char *TOAST_DELETED_SUCCESS;
 extern const char *TOAST_LOGOUT_SUCCESS;
 extern const char *TOAST_OTA_CANCELLED;
 
-// --- 16. MULTI-SELECT MODE ---
+// 16. MULTI-SELECT MODE
 extern const char *MULTI_SELECT_ENABLED;
 extern const char *MULTI_SELECT_DISABLED;
 extern const char *MULTI_SELECT_HINT;
 extern const char *MULTI_SELECT_COUNT;
 
-// --- 16B. MENU SUBTITLE ---
+// 16B. MENU SUBTITLE
 extern const char *MENU_SUB_PLAY;
 extern const char *MENU_SUB_SYNC;
 extern const char *MENU_SUB_REVERSE_SYNC;
@@ -306,12 +304,12 @@ extern const char *MENU_SUB_SETTINGS;
 extern const char *MENU_SUB_DIAG;
 extern const char *MENU_SUB_EXIT;
 
-// --- 16C. SEARCH ---
+// 16C. SEARCH
 extern const char *SEARCH_BADGE_LOCAL;
 extern const char *SEARCH_BADGE_CLOUD;
 extern const char *SEARCH_PROMPT_INPUT;
 
-// --- 17. TOAST (EXTRA) ---
+// 17. TOAST (EXTRA)
 extern const char *TOAST_NEW_OTA_PREFIX;
 extern const char *TOAST_SYNCING_DRIVE;
 extern const char *TOAST_SCANNING_SD;
@@ -321,11 +319,11 @@ extern const char *TOAST_SYNC_CANCELLED;
 extern const char *TOAST_GOOGLE_LOGIN_SUCCESS;
 extern const char *TOAST_CONNECT_PERSONAL_DRIVE;
 
-// --- 17B. BACKUP ---
+// 17B. BACKUP
 extern const char *BACKUP_SUCCESS;
 extern const char *BACKUP_FAILED;
 
-// --- 18. BACKUP & RESTORE ---
+// 18. BACKUP & RESTORE
 extern const char *BACKUP_TITLE;
 extern const char *BACKUP_EXPORT_BTN;
 extern const char *BACKUP_IMPORT_BTN;
@@ -337,7 +335,7 @@ extern const char *BACKUP_RESTORE_SUCCESS;
 extern const char *BACKUP_RESTORE_FAILED;
 extern const char *BACKUP_NO_FILE;
 
-// --- 19. DASHBOARD ---
+// 19. DASHBOARD
 extern const char *DASH_TITLE;
 extern const char *DASH_DEVICE_LABEL;
 extern const char *DASH_DEVICE_VAL;
@@ -351,7 +349,7 @@ extern const char *DASH_PORTAL_LABEL;
 extern const char *DASH_VERSION_LABEL;
 extern const char *DASH_NEW_VERSION_BADGE;
 
-// --- 20. GAME DETAIL ---
+// 20. GAME DETAIL
 extern const char *GAME_LOCATION_SD_PREFIX;
 extern const char *GAME_LOCATION_DRIVE;
 extern const char *GAME_DOWNLOADING_PREFIX;
@@ -359,15 +357,15 @@ extern const char *GAME_QUEUE_DOWNLOADING;
 extern const char *GAME_QUEUE_WAITING;
 extern const char *GAME_QUEUE_REMAINING;
 
-// --- 21. DIALOG ---
+// 21. DIALOG
 extern const char *DIALOG_DELETE_FILE_PREFIX;
 
-// --- 22. BATCH DELETE ---
+// 22. BATCH DELETE
 extern const char *MULTI_BATCH_DELETE_TITLE;
 extern const char *MULTI_BATCH_DELETE_SAFE;
 extern const char *MULTI_BATCH_DELETE_CONFIRM;
 
-// --- 23. OTA (EXTRA) ---
+// 23. OTA (EXTRA)
 extern const char *OTA_WAITING;
 extern const char *OTA_MSG_UP_TO_DATE;
 extern const char *OTA_NO_NEW_UPDATE;
@@ -386,28 +384,28 @@ extern const char *OTA_ERR_NETWORK;
 extern const char *OTA_BTNS_RETRY_BACK;
 extern const char *OTA_VIEW_FULL_HINT;
 
-// --- 24. SETTINGS ---
+// 24. SETTINGS
 extern const char *BACKUP_EXPORT_DESC;
 extern const char *BACKUP_IMPORT_DESC;
 
-// --- ABOUT ---
+// ABOUT
 extern const char *ABOUT_AUTHOR;
 extern const char *ABOUT_DONATE_LINE1;
 extern const char *ABOUT_DONATE_LINE2;
 extern const char *ABOUT_LETTER_TITLE;
 extern const char *ABOUT_NOTES_FALLBACK;
 
-// --- DIAG ---
+// DIAG
 extern const char *DIAG_DEVICE_ID_LABEL;
 
-// --- INFO TAB ---
+// INFO TAB
 extern const char *INFO_TAB_ABOUT;
 extern const char *INFO_TAB_SYSTEM;
 
-// --- OTA ---
+// OTA
 extern const char *OTA_CHANGELOG_HEADER;
 
-// --- SETTINGS TAB ---
+// SETTINGS TAB
 extern const char *SETTINGS_TAB_CONFIG;
 extern const char *SETTINGS_TAB_PREFS;
 extern const char *SETTINGS_TAB_UPDATE;

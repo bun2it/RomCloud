@@ -25,7 +25,7 @@ extern char** environ;
 namespace RomCloud {
 
 namespace {
-// ── WEBTRACE: vết từng bước của phiên RC-Web (nằm trong debug.log) ──
+// WEBTRACE: vết từng bước của phiên RC-Web (nằm trong debug.log)
 // Mã bước: B = bridge (file này), L = launch.sh trên máy (rc-web.log),
 // J = electron main (rc-web.log). Mốc +ms tính từ lúc start() bắt đầu,
 // để đối chiếu 2 file log theo thời gian tuyệt đối của Logger.
@@ -48,7 +48,7 @@ void traceWarn(const char* step, const std::string& msg) {
                  std::to_string(traceMs()) + "ms) " + msg);
 }
 
-// ── Nhường/lấy lại DRM master quanh phiên weston ─────────────────────
+// Nhường/lấy lại DRM master quanh phiên weston
 // RomCloud (SDL/KMSDRM) giữ DRM master nên weston drm-backend không
 // modeset đè lên được: nó vẫn render nhưng output nằm dưới frame của
 // RomCloud (cảm giác freeze ở UI RomCloud). Chạy root nên weston có
@@ -121,7 +121,7 @@ ChromeBridge::~ChromeBridge() {
     stop();
 }
 
-// ── Tìm gói trình duyệt của chính RomCloud ───────────────────────────
+// Tìm gói trình duyệt của chính RomCloud
 // Bố cục khi đã ráp (chrome/fetch-rc-web.sh) và đẩy lên máy:
 //   Apps/RomCloud/rc-web/launch.sh         (script của ta, có quyền X)
 //   Apps/RomCloud/rc-web/electron/electron (Electron từ electronjs.org)
@@ -406,7 +406,7 @@ bool ChromeBridge::stop() {
     return true;
 }
 
-// ── CDP qua socket trần (không phụ thuộc curl trên máy) ─────────────
+// CDP qua socket trần (không phụ thuộc curl trên máy)
 static int cdpHttp(const std::string& request) {
     int fd = socket(AF_INET, SOCK_STREAM, 0);
     if (fd < 0) return -1;

@@ -336,7 +336,7 @@ void UIManager::renderWeather() {
     return;
   }
 
-  // ---- Cột trái: thời tiết gọn + 4 ngày + lịch ----
+  // Cột trái: thời tiết gọn + 4 ngày + lịch
   // Focus khối Lịch = sáng cả card trái (rule card focus).
   const int lx = 24, lw = 560;
   drawRoundedRect(lx, contentTop, lw, contentH, UiTheme::RADIUS_CARD,
@@ -562,7 +562,7 @@ void UIManager::renderWeather() {
     }
   }
 
-  // ---- Cột phải: SẮP TỚI trên, LỊCH ĐỒNG BỘ dưới (2 khối bằng nhau) ----
+  // Cột phải: SẮP TỚI trên, LỊCH ĐỒNG BỘ dưới (2 khối bằng nhau)
   const int rx = 600, rw = 1024 - 24 - 600; // 400
   const int topH = (contentH - 12) / 2;
   const int botTop = contentTop + topH + 12;

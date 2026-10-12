@@ -1,10 +1,8 @@
 #pragma once
-// ============================================================================
 // RomCloud CalManager — lịch phone đẩy qua WebServer, Brick lưu lại.
 // Nguồn: link ICS đăng ký (iCloud/Google "secret address") tự refresh,
 // paste text .ics, thêm tay. Parse VEVENT + RRULE cơ bản (DAILY/WEEKLY/
 // MONTHLY/YEARLY + COUNT/UNTIL). Lưu SQLite (cal_sources, cal_events).
-// ============================================================================
 #include <string>
 #include <vector>
 #include <cstdint>

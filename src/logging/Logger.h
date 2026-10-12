@@ -94,10 +94,8 @@ private:
     bool m_initialized = false;
 };
 
-// =============================================================================
 // Macros tien dung: tu dong capture __FILE__, __LINE__, __func__.
 // Dung:  RC_LOG_INFO(IPTV, "Channel switch: " + std::to_string(idx));
-// =============================================================================
 #define RC_LOG_DBG(cat, msg) \
     ::RomCloud::Logger::debug(::RomCloud::LogCategory::cat, msg, \
                              __FILE__, __LINE__, __func__)

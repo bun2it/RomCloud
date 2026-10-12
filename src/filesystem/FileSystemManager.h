@@ -45,7 +45,7 @@ public:
     // `dirsOnly` = true nếu chỉ cần sub-folders (vd cho LocalSend Apps tab).
     std::vector<DirEntryInfo> listDirectory(const std::string& path, bool dirsOnly = false);
 
-    // ---- FileOps (MODULE plan P1-2): thuần filesystem, không UI/thread ----
+    // FileOps (MODULE plan P1-2): thuần filesystem, không UI/thread
     // Đổi tên file/folder. Trả false nếu đích đã tồn tại hoặc lỗi.
     bool renamePath(const std::string& from, const std::string& to);
     // Xóa đệ quy file hoặc folder. prog có thể nullptr (chạy đồng bộ, không báo tiến trình).

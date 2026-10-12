@@ -10,7 +10,7 @@ void UIManager::renderExplorerKeyboardFor(FileExplorer& ex) {
     VkState& vk = ex.keyboard();
     bool isCreate = ex.creatingFolder();
 
-    // ─── Row 1: Header (Standard 64px) ───
+    // Row 1: Header (Standard 64px)
     drawRect(0, 0, UiTheme::APP_W, UiTheme::HEADER_H, UiTheme::FOOTER_BG, true);
     drawRect(0, UiTheme::HEADER_H - 1, UiTheme::APP_W, 1, UiTheme::FOOTER_LINE, true);
     drawGridIcon("FOLDER.png", 24, 12, 40, 40);
@@ -19,7 +19,7 @@ void UIManager::renderExplorerKeyboardFor(FileExplorer& ex) {
              UiTheme::ACCENT_CYAN, m_fontLarge, false);
     drawHeaderStatus();
 
-    // ─── Row 2: Input Field Box (Y = 74, H = 58) ───
+    // Row 2: Input Field Box (Y = 74, H = 58)
     int inX = 46;
     int inY = 74;
     int inW = 932;
@@ -50,7 +50,7 @@ void UIManager::renderExplorerKeyboardFor(FileExplorer& ex) {
     drawText(dispQ, inX + 24, inY + (inH - textHeight(m_fontLarge)) / 2, qCol,
              m_fontLarge, false);
 
-    // ─── Row 3: Current Directory Location (Y = 150) ───
+    // Row 3: Current Directory Location (Y = 150)
     drawText("VỊ TRÍ THƯ MỤC", inX, 150, UiTheme::TEXT_SUB, m_fontSmall, false);
     std::string pathShown = truncateToWidth(ex.currentPath(), m_fontMedium, inW);
     drawText(pathShown, inX, 186, UiTheme::TEXT_MAIN, m_fontMedium, false);
@@ -58,7 +58,7 @@ void UIManager::renderExplorerKeyboardFor(FileExplorer& ex) {
     // Divider line above keyboard
     drawRect(46, 444, 932, 1, {20, 48, 64, 180}, true);
 
-    // ─── Bottom: Compact Virtual Keyboard (Y = 452..706) ───
+    // Bottom: Compact Virtual Keyboard (Y = 452..706)
     static std::string s0, s1, s2, s3, s4;
     s0 = vk.shift ? "ABC" : "abc";
     s1 = vk.symbolMode ? "123" : "ABC";
@@ -71,7 +71,7 @@ void UIManager::renderExplorerKeyboardFor(FileExplorer& ex) {
                              SDL_Color{0, 180, 255, 255},
                              exActs, true, true, 1);
 
-    // ─── Bottom Bar: drawAppFooter tự vẽ nền (B = Hủy) ───
+    // Bottom Bar: drawAppFooter tự vẽ nền (B = Hủy)
     // R1 = ABC/123 giong stock; SELECT = Telex (nhan hien trang thai).
     std::string telexLbl = vk.telexMode ? "Telex: Bật" : "Telex: Tắt";
     drawAppFooter({{UiTheme::PadBtn::A, "Nhập"},

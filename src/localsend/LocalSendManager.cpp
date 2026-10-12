@@ -46,9 +46,7 @@ static inline void closeSocket(int fd) {
 #endif
 }
 
-// =============================================================
 // Singleton
-// =============================================================
 LocalSendManager &LocalSendManager::instance() {
   static LocalSendManager inst;
   return inst;
@@ -56,9 +54,7 @@ LocalSendManager &LocalSendManager::instance() {
 
 LocalSendManager::~LocalSendManager() { stop(); }
 
-// =============================================================
 // Lifecycle
-// =============================================================
 bool LocalSendManager::start() {
   if (m_running.exchange(true))
     return true; // already running
@@ -140,16 +136,12 @@ void LocalSendManager::stop() {
   Logger::info("LocalSend: stopped");
 }
 
-// =============================================================
 // Fingerprint persistence
-// =============================================================
 // Note: thực ra getOrCreateLocalSendFingerprint là method của AppConfig (xem
 // bên dưới). Placeholder ở đây, implementation thực tế trong
 // LocalSendManager.cpp tiếp theo.
 
-// =============================================================
 // LsJson: parse JSON thủ công (không dùng lib)
-// =============================================================
 namespace LsJson {
 
 bool getString(const std::string &json, const std::string &key,
@@ -302,9 +294,7 @@ std::string escape(const std::string &s) {
 
 } // namespace LsJson
 
-// =============================================================
 // LsUtil: helper chung
-// =============================================================
 namespace LsUtil {
 
 int64_t nowMs() {
@@ -452,9 +442,7 @@ uint64_t sdFreeBytes(const std::string &path) {
 
 } // namespace LsUtil
 
-// =============================================================
 // UDP Discovery
-// =============================================================
 bool LocalSendManager::setupUdpSocket() {
   m_udpFd = socket(AF_INET, SOCK_DGRAM, 0);
   if (m_udpFd < 0) {
@@ -662,9 +650,7 @@ void LocalSendManager::clearKnownDevices() {
   m_knownDevices.clear();
 }
 
-// =============================================================
 // buildDeviceInfoJson - dùng cho announce và /info response
-// =============================================================
 namespace { // anonymous namespace cho helper
 std::string DeviceInfoJson(const LocalSendManager &self, bool announce) {
   std::ostringstream ss;
@@ -687,9 +673,7 @@ std::string LocalSendManager::buildDeviceInfoJson(bool announce) const {
   return DeviceInfoJson(*this, announce);
 }
 
-// =============================================================
 // TCP Transfer Setup
-// =============================================================
 bool LocalSendManager::setupTcpSocket() {
   m_tcpFd = socket(AF_INET, SOCK_STREAM, 0);
   if (m_tcpFd < 0) {
@@ -790,9 +774,7 @@ void LocalSendManager::discoveryLoop() {
   }
 }
 
-// =============================================================
 // HTTP Request/Response (raw socket, không dùng lib)
-// =============================================================
 static std::string readLine(int fd) {
   std::string line;
   char c;
@@ -979,9 +961,7 @@ void LocalSendManager::sendEmptyResponse(int fd, int statusCode) {
   sendJsonResponse(fd, statusCode, "{}");
 }
 
-// =============================================================
 // HTTP Routing
-// =============================================================
 bool LocalSendManager::handleHttpClient(int fd) {
   std::string method, path, body;
   std::map<std::string, std::string> headers;
@@ -1065,9 +1045,7 @@ void LocalSendManager::handleRegister(int fd, const std::string &body) {
   sendJsonResponse(fd, 200, buildDeviceInfoJson(false));
 }
 
-// =============================================================
 // prepare-upload (spec §4.1)
-// =============================================================
 bool LocalSendManager::handlePrepareUpload(int fd, const std::string &body,
                                            const std::string &fromIp) {
   LsUploadRequest req;
@@ -1210,9 +1188,7 @@ bool LocalSendManager::handlePrepareUpload(int fd, const std::string &body,
   return false; // HOLD clientFd, do not close or reply yet!
 }
 
-// =============================================================
 // upload (spec §4.2) - streaming write binary
-// =============================================================
 void LocalSendManager::handleFileUpload(
     int fd, const std::string &query,
     const std::map<std::string, std::string> &headers,
@@ -1534,9 +1510,7 @@ void LocalSendManager::handleCancel(int fd, const std::string &query) {
   sendJsonResponse(fd, 200, "{\"cancelled\":true}");
 }
 
-// =============================================================
 // approve/reject từ UI
-// =============================================================
 void LocalSendManager::approveUpload(const std::string &sessionId) {
   std::string defaultPath;
   {
@@ -1675,9 +1649,7 @@ void LocalSendManager::pruneStalePrepares() {
   }
 }
 
-// =============================================================
 // Callback setters
-// =============================================================
 void LocalSendManager::setOnUserPrompt(
     std::function<void(const LsUploadRequest &)> cb) {
   std::lock_guard<std::mutex> lock(m_cbMutex);
@@ -1694,9 +1666,7 @@ void LocalSendManager::setOnComplete(
   m_onComplete = cb;
 }
 
-// =============================================================
 // Target folder picker
-// =============================================================
 void LocalSendManager::setTargetFolder(const std::string &folder) {
   std::lock_guard<std::mutex> lock(m_targetMutex);
   m_targetFolder = folder;
@@ -1789,13 +1759,11 @@ LocalSendManager::setPendingTargetFolder(const std::string &sessionId,
   return "";
 }
 
-// =============================================================
 // Path Resolution: 3-tier
 //   1. Pending target folder (user chọn trong UI)
 //   2. relativePath từ sender (RomCloud-to-RomCloud)
 //   3. fileName có '/' (encode)
 //   4. Heuristic extension mapping (fallback cho Flutter client)
-// =============================================================
 std::string LocalSendManager::resolveTargetPath(const LsFileMeta &file) {
   std::string base = LsUtil::basenameOf(file.fileName);
   if (base.empty())
@@ -1884,9 +1852,7 @@ std::string LocalSendManager::resolveTargetPath(const LsFileMeta &file) {
   return target;
 }
 
-// =============================================================
 // Heuristic mapping extension -> folder (fallback)
-// =============================================================
 std::string LocalSendManager::heuristicMap(const std::string &fileName) {
   std::string base = LsUtil::basenameOf(fileName);
   if (base.empty())
@@ -1951,10 +1917,8 @@ std::string LocalSendManager::heuristicMap(const std::string &fileName) {
   return "/mnt/SDCARD/Inbox/" + base;
 }
 
-// =============================================================
 // Post-process: extract zip + organize + rescan
 // Chạy detached thread (không block HTTP response).
-// =============================================================
 void LocalSendManager::postProcessUpload(const LsUploadRequest &req) {
   if (req.state != LsUploadRequest::DONE)
     return;
@@ -2034,9 +1998,7 @@ void LocalSendManager::postProcessUpload(const LsUploadRequest &req) {
   Logger::info("LocalSend: postProcess DONE");
 }
 
-// =============================================================
 // HTTP Client (sender side) - uses libcurl for HTTP and HTTPS support
-// =============================================================
 
 bool LocalSendManager::httpPostJson(const std::string &protocol,
                                     const std::string &ip, int port,
@@ -2215,9 +2177,7 @@ bool LocalSendManager::httpPostBinary(const std::string &protocol,
   return false;
 }
 
-// =============================================================
 // Sender API - gửi file sang TrimUI khác (RomCloud-to-RomCloud)
-// =============================================================
 std::string LocalSendManager::sendFile(const std::string &absPath,
                                        const LsDeviceInfo &target) {
   LsFileMeta meta;

@@ -304,9 +304,7 @@ void UIManager::renderClockFullscreen() {
     drawText(m_clkFsMsg, 512, 712, {150, 150, 160, 255}, m_fontSmall, true);
 }
 
-// ============================================================
 // Style 3: QlockTwo tiếng Việt - Full 4:3
-// ============================================================
 void UIManager::renderQlockTwoStyle(struct tm* lt) {
     // Ma trận ký tự 15 hàng x 12 cột: mỗi ô đúng 1 chữ cái, chữ căn giữa
     // ô nên thẳng hàng dọc. Hàng 0 luôn sáng "BÂY GIỜ LÀ". Từ không bao giờ
@@ -571,7 +569,7 @@ void UIManager::renderClock(
   }
   drawRect(lx + 16, wY + cellH - 1, lw - 32, 1, {30, 41, 59, 255}, true);
 
-  // ---- Cột phải: báo thức + pomodoro (rect từ clkBlockRect: 1 nguồn) ----
+  // Cột phải: báo thức + pomodoro (rect từ clkBlockRect: 1 nguồn)
   const int rx = 520, rw = 480;
   auto alarms = ClockStore::instance().alarms();
   int _bx, _by, _bw, listH;

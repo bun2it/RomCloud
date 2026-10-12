@@ -19,7 +19,7 @@
 
 namespace RomCloud {
 
-// === OTA hardening helpers (USER_ISSUES_TODO #34) ===========================
+// OTA hardening helpers (USER_ISSUES_TODO #34)
 //
 // Symptom: zip tải về ~23s xong, unzip trả exit != 0 → fail mặc dù zip hợp
 // lệ. Nguyên nhân gốc:
@@ -94,9 +94,7 @@ bool UpdateManager::init() {
 
 void UpdateManager::shutdown() { cancelUpdate(); }
 
-// ============================================================================
 // VERSION COMPARISON
-// ============================================================================
 
 bool UpdateManager::isVersionNewer(const std::string &remote,
                                    const std::string &current) {
@@ -135,9 +133,7 @@ bool UpdateManager::isVersionNewer(const std::string &remote,
   return false;
 }
 
-// ============================================================================
 // CHECK FOR UPDATES
-// ============================================================================
 
 bool UpdateManager::checkForUpdatesSync(UpdateInfo &outInfo) {
   Logger::info("Checking for OTA updates...");
@@ -408,9 +404,7 @@ void UpdateManager::checkForUpdatesAsync(
   }).detach();
 }
 
-// ============================================================================
 // DEPENDENCY CHECKING
-// ============================================================================
 
 std::vector<DependencyInfo> UpdateManager::getMissingDependencies() {
   std::vector<DependencyInfo> missing;
@@ -543,9 +537,7 @@ bool UpdateManager::checkAndInstallDependencies() {
   return true;
 }
 
-// ============================================================================
 // DOWNLOAD HELPERS
-// ============================================================================
 
 bool UpdateManager::downloadFile(const std::string& url, const std::string& destPath, uint64_t* outSize, bool trackProgress) {
   CURL* curl = curl_easy_init();
@@ -660,9 +652,7 @@ bool UpdateManager::installOsBundle(const std::string& zipPath, const std::strin
   return true;
 }
 
-// ============================================================================
 // PROGRESS TRACKING
-// ============================================================================
 
 UpdateProgress UpdateManager::getProgress() const {
   std::lock_guard<std::mutex> lock(m_mutex);
@@ -710,9 +700,7 @@ int UpdateManager::xferCallback(void *clientp, int64_t dltotal, int64_t dlnow,
   return 0;
 }
 
-// ============================================================================
 // UPDATE START
-// ============================================================================
 
 bool UpdateManager::startUpdate(const UpdateInfo &info) {
   if (m_isRunning) {
@@ -746,9 +734,7 @@ void UpdateManager::cancelUpdate() {
   m_isRunning = false;
 }
 
-// ============================================================================
 // DOWNLOAD WORKER
-// ============================================================================
 
 bool UpdateManager::repairIfBroken() {
   std::string appRoot = AppConfig::instance().getAppRoot();
@@ -932,7 +918,7 @@ void UpdateManager::runDownloadWorker(UpdateInfo info) {
   notifyRepairDone(true);
 }
 
-// === installFullZip ========================================================
+// installFullZip
 
 // Bung full-zip đè lên appRoot, GIỮ dữ liệu user (data/config/iptv).
 // Zip layout: Apps/RomCloud/... → bung qua thư mục tạm rồi copy vào,
@@ -1100,9 +1086,7 @@ bool UpdateManager::downloadAndInstallDependencies(const UpdateInfo& info) {
   return success;
 }
 
-// ============================================================================
 // RC-WEB OTA (gói trình duyệt riêng, ~500M bung ra / ~200M zip)
-// ============================================================================
 
 // Đọc version RC-Web đã cài (rc-web/version.txt do fetch-rc-web.sh hoặc
 // package-rc-web.sh ghi). Trống = chưa từng cài qua gói có version.

@@ -26,7 +26,7 @@ public:
               TTF_Font* large, const std::string& assetsDir);
     void unbind();  // giai phong cache texture
 
-    // ---- primitive co ban ----
+    // primitive co ban
     void drawText(const std::string& text, int x, int y, SDL_Color color,
                   TTF_Font* font, bool centered = false);
     // Vẽ nội dung số của 1 thẻ lật, căn giữa trong rect (x,y,w,h).
@@ -57,7 +57,7 @@ public:
     static int buttonIconWidth(const std::string& button, int size);
     void drawGridIcon(const std::string& iconFile, int x, int y, int w, int h);
 
-    // ---- do chu ----
+    // do chu
     int textHeight(TTF_Font* font);
     int textWidth(const std::string& text, TTF_Font* font);
     std::string truncateToWidth(const std::string& text, TTF_Font* font, int maxPx);
@@ -67,7 +67,7 @@ public:
     int buttonWidth(const std::string& label, TTF_Font* font = nullptr);
     int badgeDualWidth(const std::string& label1, const std::string& label2, int h);
 
-    // ---- widget ----
+    // widget
     void drawPill(int x, int y, int w, int h, const std::string& text,
                   bool active, TTF_Font* font = nullptr);
     int textYCentered(int y, int h, TTF_Font* font);
@@ -91,7 +91,7 @@ public:
                                  SDL_Color color, TTF_Font* font,
                                  int iconSize = 26, int gap = 6);
 
-    // ---- theme helpers ----
+    // theme helpers
     void drawAppBackground();
     void drawFocusRow(int x, int y, int w, int h);
     void drawAppHeader(const std::string& title, const std::string& sub = "");
@@ -100,7 +100,7 @@ public:
     void drawAppFooter(const std::vector<UiTheme::FooterHint>& hints);
     void beginModalDim();
 
-    // ---- virtual keyboard chung (P0-2: gom 6 ban phim ve tay) ----
+    // virtual keyboard chung (P0-2: gom 6 ban phim ve tay)
     // Ve 4 hang phim QWERTY (VirtualKeyboard::lower/upperRows, symbolMode -> symbolRows) + hang action 5 o.
     // actionLabels: 5 nhan (vd {"abc","ABC","Cách","Xóa","Tìm"} — o 0/1 chi fallback khi withIcons=false); withIcons: ve icon nut L1/R1/X/Y/START.
     // actionStride: 1 = col 0..4 (Explorer/LsFolder/VirtualKeyboard::move), 2 = col 0..9 kieu YT/TT cu (col/2).

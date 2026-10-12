@@ -1,6 +1,4 @@
-// ============================================================================
 // SearchInputModal — implementation (P0-6)
-// ============================================================================
 #include "SearchInputModal.h"
 #include "UiRenderer.h"
 #include "UiTheme.h"
@@ -18,7 +16,7 @@ static std::string truncateFor(UiRenderer& r, const std::string& s,
     return r.truncateToWidth(s, f, maxPx);
 }
 
-// ─── Title strip ────────────────────────────────────────────────────────
+// Title strip
 void SearchInputModal::renderTitle(const Config& cfg) {
     std::string title = cfg.title ? cfg.title : "";
     if (cfg.vk) title += cfg.vk->telexMode ? " • TELEX" : " • US";
@@ -34,7 +32,7 @@ void SearchInputModal::renderTitle(const Config& cfg) {
     }
 }
 
-// ─── History list (vertical → PILL NGANG) ──────────────────────────────
+// History list (vertical → PILL NGANG)
 void SearchInputModal::renderHistoryList(const Config& cfg) {
     const int pillY = cfg.dividerY;
     const int pillH = 40;
@@ -96,7 +94,7 @@ void SearchInputModal::renderHistoryList(const Config& cfg) {
     }
 }
 
-// ─── Keyboard ──────────────────────────────────────────────────────────
+// Keyboard
 void SearchInputModal::renderKeyboard(const Config& cfg) {
     if (!cfg.ui || !cfg.vk) return;
     cfg.ui->drawVirtualKeyboard(*cfg.vk, cfg.modalX, cfg.keypadY,
@@ -105,7 +103,7 @@ void SearchInputModal::renderKeyboard(const Config& cfg) {
                                 true, true, cfg.actionStride);
 }
 
-// ─── render (top-level) ────────────────────────────────────────────────
+// render (top-level)
 void SearchInputModal::render(const Config& cfg) {
     if (!cfg.ui) return;
     cfg.ui->beginModalDim();
@@ -116,7 +114,7 @@ void SearchInputModal::render(const Config& cfg) {
     renderKeyboard(cfg);
 }
 
-// ─── handleInput ───────────────────────────────────────────────────────
+// handleInput
 SearchInputModal::Result SearchInputModal::handleInput(
     const Config& cfg, bool aPressed, bool bPressed, bool startPressed,
     bool upPressed, bool downPressed, bool leftPressed, bool rightPressed,

@@ -408,9 +408,7 @@ std::vector<MisplacedRomRecord> RomOrganizer::organizeDirectory(const std::strin
     return results;
 }
 
-// ---------------------------------------------------------------------------
 // Chuan hoa ten folder he may
-// ---------------------------------------------------------------------------
 
 static std::string normalizeFolderKey(const std::string& name) {
     std::string out;
@@ -522,9 +520,7 @@ int RomOrganizer::normalizeSystemFolders(const std::string& romsBaseDir) {
     return changed;
 }
 
-// ---------------------------------------------------------------------------
 // Sap xep de quy folder la (file ROM nam rac trong folder khong phai he may)
-// ---------------------------------------------------------------------------
 
 int RomOrganizer::organizeUnknownDirRecursive(
     const std::string& sourceDir, const std::string& baseDir,
@@ -599,9 +595,7 @@ int RomOrganizer::organizeUnknownDirRecursive(
     return moved;
 }
 
-// ---------------------------------------------------------------------------
 // Lam tron 1 lan: chuan hoa folder -> sap xep file la -> dua file lac cho ve
-// ---------------------------------------------------------------------------
 
 OrganizeSummary RomOrganizer::organizeAll(const std::string& romsBaseDir) {
     {

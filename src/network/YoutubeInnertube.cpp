@@ -479,7 +479,7 @@ std::vector<std::string> YoutubeInnertube::trending(const std::string& categoryI
     return out;
 }
 
-// --- Resolve stream qua player API (ANDROID client cho ti le OK cao) ---
+// Resolve stream qua player API (ANDROID client cho ti le OK cao)
 static const char* kPlayerUrl =
     "https://www.youtube.com/youtubei/v1/player?key="
     "AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8&prettyPrint=false";

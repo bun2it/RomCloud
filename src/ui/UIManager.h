@@ -625,7 +625,7 @@ private:
   void renderYouTubeHomeContentRow(int contentTop, int /*contentH*/);
   void renderYouTubeHomeContentGrid(int contentTop, int contentH);
   void renderYouTubeHomeChannelLayout(int contentTop, int contentH);
-  // ── Chuẩn hoá layout video (áp dụng cho MỌI màn có thumbnail) ──────
+  // Chuẩn hoá layout video (áp dụng cho MỌI màn có thumbnail)
   // 1) drawYtStandardThumb: chỉ vẽ ẢNH thumbnail thuần (không banner, không
   //    pill duration). Fallback nền tối khi ảnh chưa decode xong.
   //    scaledThumb=true chỉ dùng cho màn Results (RenderCopy bằng toạ độ
@@ -852,7 +852,7 @@ private:
   void drawInlineHintsCentered(const std::string &text, int centerX, int y,
                                SDL_Color color, TTF_Font *font,
                                int iconSize = 26, int gap = 6);
-  // ---- UiTheme helpers (Design Tokens, khong doi logic nghiep vu) ----
+  // UiTheme helpers (Design Tokens, khong doi logic nghiep vu)
   void drawAppBackground();
   void drawFocusRow(int x, int y, int w, int h);
   // Ô highlight chọn: FOCUS_BG_SOFT (trong suốt 25%) + blend cục bộ.

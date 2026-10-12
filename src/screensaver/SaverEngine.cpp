@@ -223,9 +223,7 @@ bool SaverEngine::handleInput(int button) {
     return true;
 }
 
-// ---------------------------------------------------------------------------
 // P1: Starfield
-// ---------------------------------------------------------------------------
 
 void SaverEngine::starfieldInit() {
     for (int i = 0; i < STAR_COUNT; i++) {
@@ -313,9 +311,7 @@ void SaverEngine::starfieldRender() {
     SDL_RenderCopy(m_renderer, m_fbTexture, nullptr, nullptr);
 }
 
-// ---------------------------------------------------------------------------
 // P2-Tai: Matrix rain (thay Fire)
-// ---------------------------------------------------------------------------
 
 void SaverEngine::matrixFreeGlyphs() {
     for (int i = 0; i < MATRIX_GLYPHS; i++) {
@@ -449,9 +445,7 @@ void SaverEngine::matrixRender() {
     }
 }
 
-// ---------------------------------------------------------------------------
 // P3: Picture frame
-// ---------------------------------------------------------------------------
 
 // Quét 1 thư mục, nạp các file jpg/jpeg/png vào m_allPhotos (và
 // m_photos nếu không bị ẩn). Thư mục không có thì bỏ qua.
@@ -583,7 +577,7 @@ SDL_Texture* SaverEngine::takePreloadedTexture(const std::string& path) {
     return tex;
 }
 
-// ── Thumbnail cho lưới chọn ảnh ─────────────────────────────────────
+// Thumbnail cho lưới chọn ảnh
 // Thread nền giải mã ảnh nhỏ (208x156), main thread tạo texture khi
 // vẽ lưới — cùng quy ước worker thumbnail của UIManager.
 void SaverEngine::ensureThumbWorker() {
@@ -1443,9 +1437,7 @@ void SaverEngine::applyTransition(uint32_t* out, uint32_t* oldFb, uint32_t* newF
     }
 }
 
-// ---------------------------------------------------------------------------
 // P3: Settings menu
-// ---------------------------------------------------------------------------
 
 int SaverEngine::getTextWidth(const char* text, TTF_Font* customFont) {
     TTF_Font* font = customFont ? customFont : m_font;

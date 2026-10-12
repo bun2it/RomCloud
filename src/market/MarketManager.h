@@ -1,11 +1,9 @@
 #pragma once
-// ============================================================================
 // RomCloud MarketManager — giá thị trường live (free, không key):
 // - Xăng/dầu: VietFuel (vùng 1/2, fallback checkgia vùng 1)
 // - Vàng: vang.today SJC + DOJI HN/HCM theo miền
 // - USD: checkgia Vietcombank
 // Vùng giá theo tỉnh đã chọn ở mục Thời tiết (mặc định Hà Nội).
-// ============================================================================
 #include <string>
 #include <vector>
 #include <cstdint>

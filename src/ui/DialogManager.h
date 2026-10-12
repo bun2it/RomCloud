@@ -77,7 +77,7 @@ public:
         toast.show(m, c, ms);
     }
 
-    // ---- Render overlays (port 1:1 tu UIManager) ----
+    // Render overlays (port 1:1 tu UIManager)
     void renderToast(UiRenderer& ui, TTF_Font* fSmall);
     void renderConfirm(UiRenderer& ui, TTF_Font* fSmall, TTF_Font* fMedium, TTF_Font* fLarge);
     void renderProgress(UiRenderer& ui, TTF_Font* fSmall, TTF_Font* fLarge);

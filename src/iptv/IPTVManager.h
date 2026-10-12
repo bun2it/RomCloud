@@ -9,9 +9,7 @@
 
 namespace RomCloud {
 
-// ---------------------------------------------------------------------------
 // PlaylistItem — mot kenh trong mot playlist doc lap
-// ---------------------------------------------------------------------------
 struct PlaylistItem {
     std::string name;
     std::string url;
@@ -20,9 +18,7 @@ struct PlaylistItem {
     bool isFavorite = false;
 };
 
-// ---------------------------------------------------------------------------
 // Playlist — dai dien cho mot file .m3u doc lap
-// ---------------------------------------------------------------------------
 struct Playlist {
     std::string id;           // slug (e.g. "vietnam")
     std::string name;         // Ten hien thi (e.g. "Viet Nam")
@@ -71,9 +67,7 @@ struct Playlist {
     }
 };
 
-// ---------------------------------------------------------------------------
 // IPTVChannel — backward-compat alias, gop thong tin nguon vao channel
-// ---------------------------------------------------------------------------
 struct IPTVChannel {
     std::string name;
     std::string url;
@@ -95,9 +89,7 @@ struct IPTVChannel {
     }
 };
 
-// ---------------------------------------------------------------------------
 // IPTVSource — thong tin meta cua nguon (dung trong Settings UI)
-// ---------------------------------------------------------------------------
 struct IPTVSource {
     std::string name;
     std::string filename;
@@ -128,15 +120,11 @@ class IPTVManager {
 public:
     static IPTVManager& instance();
 
-    // -----------------------------------------------------------------------
     // Loading
-    // -----------------------------------------------------------------------
     bool loadPlaylists(const std::string& directory = "");
     const std::string& getIptvDir() const { return m_iptvDir; }
 
-    // -----------------------------------------------------------------------
     // Multi-Playlist API (MOI)
-    // -----------------------------------------------------------------------
     const std::vector<Playlist>& getPlaylists() const { return m_playlists; }
     const Playlist* getPlaylist(size_t index) const {
         return index < m_playlists.size() ? &m_playlists[index] : nullptr;
@@ -148,14 +136,10 @@ public:
     }
     size_t playlistCount() const { return m_playlists.size(); }
 
-    // -----------------------------------------------------------------------
     // Backward-compat: flat channel list gop tu tat ca playlists
-    // -----------------------------------------------------------------------
     const std::vector<IPTVChannel>& getChannels() const { return m_channels; }
 
-    // -----------------------------------------------------------------------
     // Sources management (Settings UI)
-    // -----------------------------------------------------------------------
     std::vector<IPTVSource> getSources() const { return m_sources; }
     bool addSourceFromUrl(const std::string& url, const std::string& customName,
                           std::string& outError, std::string& outFilename,
@@ -163,27 +147,21 @@ public:
     bool addSourceFromFile(const std::string& filename, const std::string& customName);
     bool deleteSource(const std::string& filename, std::string& outError);
 
-    // -----------------------------------------------------------------------
     // Favorites
-    // -----------------------------------------------------------------------
     bool isFavorite(const std::string& channelName) const;
     void toggleFavorite(const std::string& channelName);
     void loadFavorites();
     void saveFavorites();
     std::vector<IPTVChannel> getFavoriteChannels() const;
 
-    // -----------------------------------------------------------------------
     // Global search (cross-playlist)
-    // -----------------------------------------------------------------------
     std::vector<IPTVChannel> search(const std::string& query) const;
 
     // Deprecated helpers (giu de UIManager hien tai khong loi)
     std::vector<IPTVChannel> getChannelsByGroup(const std::string& group) const;
     std::vector<std::string> getGroups() const;
 
-    // -----------------------------------------------------------------------
     // Auto-refresh (cho playlist duoc add qua URL)
-    // -----------------------------------------------------------------------
     // Refresh mot playlist cu the bang cach tai lai tu URL nguon
     bool refreshPlaylistFromUrl(const std::string& filename, std::string& outError);
     // Check va tu dong refresh tat ca URL-playlist bi stale (goi luc startup)
@@ -195,9 +173,7 @@ public:
     // Lay danh sach filename cua cac URL playlist can refresh
     std::vector<std::string> getStalePlaylistFiles() const;
 
-    // -----------------------------------------------------------------------
     // OTA Update Playlist (tai playlist M3U moi nhat tu xa)
-    // -----------------------------------------------------------------------
     bool updateOtaPlaylist(std::string& outMessage);
 
     IPTVChannel* getChannel(size_t index);
@@ -260,9 +236,7 @@ private:
     IPTVManager(const IPTVManager&) = delete;
     IPTVManager& operator=(const IPTVManager&) = delete;
 
-    // -----------------------------------------------------------------------
     // Parsing internals
-    // -----------------------------------------------------------------------
     // Phan tich mot file .m3u thanh mot Playlist object doc lap
     bool parseM3UIntoPlaylist(const std::string& filepath, Playlist& out);
 
@@ -279,15 +253,13 @@ private:
     // Rebuild flat m_channels & m_groups tu m_playlists (sau moi lan load)
     void rebuildFlatChannelList();
 
-    // -----------------------------------------------------------------------
     // Data
-    // -----------------------------------------------------------------------
     std::string m_iptvDir;
 
-    // === MULTI-PLAYLIST (MOI): moi file .m3u = mot Playlist doc lap ===
+    // MULTI-PLAYLIST (MOI): moi file .m3u = mot Playlist doc lap
     std::vector<Playlist> m_playlists;
 
-    // === BACKWARD-COMPAT: flat list gop (rebuild tu m_playlists) ===
+    // BACKWARD-COMPAT: flat list gop (rebuild tu m_playlists)
     std::vector<IPTVChannel> m_channels;
     std::unordered_map<std::string, std::vector<size_t>> m_groups;
 

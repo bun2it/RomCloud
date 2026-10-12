@@ -177,7 +177,7 @@ bool IPTVManager::loadPlaylists(const std::string& directory) {
         }
         if (slug.empty()) slug = "pl" + std::to_string(loaded);
 
-        // --- Parse vao Playlist object doc lap ---
+        // Parse vao Playlist object doc lap
         Playlist pl;
         pl.id         = slug;
         pl.name       = sourceName;
@@ -214,10 +214,8 @@ bool IPTVManager::loadPlaylists(const std::string& directory) {
 }
 
 
-// ---------------------------------------------------------------------------
 // parseM3UIntoPlaylist — Parse file .m3u vao mot Playlist doc lap
 // Khong cham vao m_channels hay m_groups toan cuc
-// ---------------------------------------------------------------------------
 bool IPTVManager::parseM3UIntoPlaylist(const std::string& filepath, Playlist& out) {
     std::ifstream file(filepath);
     if (!file.is_open()) {
@@ -266,10 +264,8 @@ bool IPTVManager::parseM3UIntoPlaylist(const std::string& filepath, Playlist& ou
     return true;
 }
 
-// ---------------------------------------------------------------------------
 // rebuildFlatChannelList — Gop toan bo m_playlists thanh m_channels
 // (backward-compat cho UIManager hien tai)
-// ---------------------------------------------------------------------------
 void IPTVManager::rebuildFlatChannelList() {
     m_channels.clear();
     m_groups.clear();
@@ -286,9 +282,7 @@ void IPTVManager::rebuildFlatChannelList() {
                  " channels from " + std::to_string(m_playlists.size()) + " playlists");
 }
 
-// ---------------------------------------------------------------------------
 // parseM3UFile — Backward-compat: delegate sang parseM3UIntoPlaylist
-// ---------------------------------------------------------------------------
 bool IPTVManager::parseM3UFile(const std::string& filepath, const std::string& sourceName,
                                 const std::string& filename, size_t* outChannelCount) {
     Playlist tmp;
@@ -721,10 +715,8 @@ IPTVChannel* IPTVManager::getChannel(size_t index) {
     return nullptr;
 }
 
-// ---------------------------------------------------------------------------
 // refreshPlaylistFromUrl
 // Tai lai noi dung tu URL nguon, ghi de file .m3u, cap nhat lastRefreshed
-// ---------------------------------------------------------------------------
 bool IPTVManager::refreshPlaylistFromUrl(const std::string& filename, std::string& outError) {
     outError.clear();
     auto it = m_sourcesMeta.find(filename);
@@ -809,10 +801,8 @@ bool IPTVManager::refreshPlaylistFromUrl(const std::string& filename, std::strin
     return true;
 }
 
-// ---------------------------------------------------------------------------
 // updateOtaPlaylist
 // Tự động kiểm tra manifest và cập nhật Live M3U Playlist từ xa qua OTA
-// ---------------------------------------------------------------------------
 bool IPTVManager::updateOtaPlaylist(std::string& outMessage) {
     outMessage.clear();
     std::string defaultManifestUrl = "https://raw.githubusercontent.com/bun2it/RomCloud/main/iptv/iptv_manifest.json";
@@ -920,11 +910,9 @@ bool IPTVManager::updateOtaPlaylist(std::string& outMessage) {
 }
 
 
-// ---------------------------------------------------------------------------
 // checkAndAutoRefresh
 // Goi sau loadPlaylists() luc startup, tu dong tai lai cac playlist stale
 // Tra ve so playlist da duoc refresh
-// ---------------------------------------------------------------------------
 int IPTVManager::checkAndAutoRefresh() {
     int refreshed = 0;
     std::vector<std::string> staleFiles;
@@ -953,9 +941,7 @@ int IPTVManager::checkAndAutoRefresh() {
     return refreshed;
 }
 
-// ---------------------------------------------------------------------------
 // setRefreshInterval
-// ---------------------------------------------------------------------------
 void IPTVManager::setRefreshInterval(const std::string& filename, int hours) {
     auto it = m_sourcesMeta.find(filename);
     if (it != m_sourcesMeta.end()) {
@@ -966,9 +952,7 @@ void IPTVManager::setRefreshInterval(const std::string& filename, int hours) {
     }
 }
 
-// ---------------------------------------------------------------------------
 // getLastRefreshedStr
-// ---------------------------------------------------------------------------
 std::string IPTVManager::getLastRefreshedStr(const std::string& filename) const {
     auto it = m_sourcesMeta.find(filename);
     if (it != m_sourcesMeta.end()) {
@@ -977,9 +961,7 @@ std::string IPTVManager::getLastRefreshedStr(const std::string& filename) const 
     return "Không rõ";
 }
 
-// ---------------------------------------------------------------------------
 // getStalePlaylistFiles
-// ---------------------------------------------------------------------------
 std::vector<std::string> IPTVManager::getStalePlaylistFiles() const {
     std::vector<std::string> result;
     for (const auto& pair : m_sourcesMeta) {
@@ -1295,11 +1277,9 @@ static std::string escapeJsonString(const std::string& input) {
 
 // (removed) sendMpvIpcOverSocket — uy thac MpvPlayer::sendCmd.
 
-// ─────────────────────────────────────────────
 // IPTV Non-Blocking Playback
 // mpv runs fullscreen in its own window on top of the screen,
 // SDL UI continues to render channel list in the bottom ~360px region.
-// ─────────────────────────────────────────────
 
 bool IPTVManager::isMpvPlaying() const {
     return MpvPlayer::instance().isPlaying();
@@ -1356,14 +1336,12 @@ static void iptvDbg(const std::string& msg) {
     RC_LOG_INFO(IPTV, msg);
 }
 
-// ---------------------------------------------------------------------------
 // YouTube OSD 3 vùng (giống app YouTube) — CHỈ UI, không đụng phát/search.
 // Top bar (overlay id 1): tên video + chất lượng.
 // Bottom bar (overlay id 2): thanh tiến trình + giờ + gợi ý nút.
 // Giữa màn hình tái dùng showOverlayIcon/show-text có sẵn.
 // Icon tương lai (aspect/cc/speed/quality) chỉ cần thêm file png,
 // không sửa logic.
-// ---------------------------------------------------------------------------
 static TTF_Font* ytOsdFont(const std::string& appRoot, int px, TTF_Font* &slot) {
     if (slot) return slot;
     if (TTF_Init() == -1) return nullptr;
@@ -2270,7 +2248,7 @@ void IPTVManager::showYouTubeOSD(bool extendExpire) {
     double dur = ytDuration();
     double cached = ytCacheAhead();
 
-    // --- Top bar 1024x64 (co mo ta: 1024x96): tên video + chất lượng ---
+    // Top bar 1024x64 (co mo ta: 1024x96): tên video + chất lượng
     {
         const int CW = 1024;
         int CH = 64;
@@ -2310,7 +2288,7 @@ void IPTVManager::showYouTubeOSD(bool extendExpire) {
         sendMpvIpcCommand(cmd);
     }
 
-    // --- Bottom bar 1024x120 @y=648: tiến trình + giờ + gợi ý nút ---
+    // Bottom bar 1024x120 @y=648: tiến trình + giờ + gợi ý nút
     {
         const int CW = 1024, CH = 120, OY = 648, STRIDE = CW * 4;
         std::vector<uint8_t> cv(STRIDE * CH, 0);

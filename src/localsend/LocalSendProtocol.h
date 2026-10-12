@@ -16,7 +16,7 @@
 
 namespace RomCloud {
 
-// ----- Protocol constants (spec §1) -----------------------------------
+// Protocol constants (spec §1)
 namespace LocalSendProto {
 constexpr int kPort = 53317;
 constexpr const char* kMulticastAddr = "224.0.0.167";
@@ -31,7 +31,7 @@ constexpr int kDiscoveryRecvTimeoutMs = 500;
 constexpr int kUploadApprovalTimeoutSec = 60;
 } // namespace LocalSendProto
 
-// ----- Device info (spec §3.1 announce) -------------------------------
+// Device info (spec §3.1 announce)
 struct LsDeviceInfo {
     std::string alias;
     std::string version;
@@ -46,7 +46,7 @@ struct LsDeviceInfo {
     int64_t lastSeenMs = 0;
 };
 
-// ----- File metadata (spec §4.1 prepare-upload) -----------------------
+// File metadata (spec §4.1 prepare-upload)
 struct LsFileMeta {
     std::string id;
     std::string fileName;
@@ -55,7 +55,7 @@ struct LsFileMeta {
     std::string fileType;
     std::string sha256;
     std::string preview;
-    // ----- MỞ RỘNG RomCloud: nếu file là 1 game trong DB ------------
+    // MỞ RỘNG RomCloud: nếu file là 1 game trong DB
     // Cho phép sender truyền kèm metadata game (title, system, cover path)
     // → receiver render dialog duyệt với cover art + tên game đẹp.
     int64_t  gameId      = 0;
@@ -66,7 +66,7 @@ struct LsFileMeta {
     std::string coverPath;    // absolute path tới cover PNG/JPG trên sender
 };
 
-// ----- 1 request upload (pending state trong RAM) ---------------------
+// 1 request upload (pending state trong RAM)
 // Lưu ý: KHÔNG dùng std::atomic ở đây vì struct phải copy được
 // (vector::push_back, lambda capture). Truy cập từ nhiều thread dùng mutex
 // ở LocalSendManager (m_pendingMutex, m_sendMutex).
@@ -93,7 +93,7 @@ struct LsUploadRequest {
     int64_t lastUpdateMs = 0;
 };
 
-// ----- 1 request gửi file (sender side) ------------------------------
+// 1 request gửi file (sender side)
 struct LsSendProgress {
     std::string sessionId;
     std::string toAlias;
@@ -114,7 +114,7 @@ struct LsSendProgress {
     std::string errorMessage;
 };
 
-// ----- Helper JSON thủ công (không dùng lib) -------------------------
+// Helper JSON thủ công (không dùng lib)
 namespace LsJson {
 
 bool getString(const std::string& json, const std::string& key, std::string& out);
@@ -125,7 +125,7 @@ std::string escape(const std::string& s);
 
 } // namespace LsJson
 
-// ----- Helper chung ----------------------------------------------------
+// Helper chung
 namespace LsUtil {
 
 std::string makeUuid();

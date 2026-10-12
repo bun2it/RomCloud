@@ -5645,7 +5645,7 @@ void WebServer::handleClient(int clientFd) {
                         "\r\nConnection: close\r\n\r\n" + json;
       send(clientFd, res.c_str(), res.length(), 0);
     }
-  // ---------------- Ảnh screensaver (Picture frame) ----------------
+  // Ảnh screensaver (Picture frame)
   } else if (method == "GET" && path == "/api/saver/photos") {
     std::string photoDir = AppConfig::instance().getAppRoot() + "/screensaver/photos";
     FileSystemManager::instance().createDirectoryRecursive(photoDir);
@@ -5847,7 +5847,7 @@ void WebServer::handleClient(int clientFd) {
                       std::to_string(json.length()) +
                       "\r\nConnection: close\r\n\r\n" + json;
     send(clientFd, res.c_str(), res.length(), 0);
-  // ---------------- Lịch phone (CalManager) ----------------
+  // Lịch phone (CalManager)
   } else if (method == "GET" && path == "/api/cal/sources") {
     CalManager::instance().ensureTables();
     std::string json = "{\"sources\":[";

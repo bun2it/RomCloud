@@ -151,7 +151,7 @@ void ClockStore::saveWorldCities(const std::vector<WorldCity>& v) {
     DatabaseManager::instance().setSetting("clock_cities", out.str());
 }
 
-// ---- Beep: phat file WAV qua aplay ----
+// Beep: phat file WAV qua aplay
 // (SDL ALSA underrun trien mien tren driver audiocodec cua Brick:
 // device mo OK, callback chay nhung appl_ptr dung yen -> cam.
 // aplay da verify keu ro nen dung tien trinh ngoai, loop toi khi stop.)
@@ -285,7 +285,7 @@ void ensureAlarmVolume() {
 #endif
 }
 
-// ---- Rung motor: gpio227 enable + voltage 3.3V, nhịp 0.6s/0.4s ----
+// Rung motor: gpio227 enable + voltage 3.3V, nhịp 0.6s/0.4s
 static std::atomic<int> s_vibLeft{0};
 static std::atomic<bool> s_vibStop{false};
 static std::atomic<bool> s_vibLoop{false};

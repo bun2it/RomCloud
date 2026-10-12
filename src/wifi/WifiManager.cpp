@@ -315,7 +315,7 @@ bool WifiManager::reconnectBlocking() {
     return true;
 }
 
-// ---- Captive portal ----
+// Captive portal
 
 static std::string tagTitle(const std::string& html) {
     size_t p = html.find("<title>");
@@ -351,7 +351,7 @@ PortalInfo WifiManager::checkPortal() {
 }
 
 
-// ---- Portal multi-step: form model ----
+// Portal multi-step: form model
 
 struct PortalField {
     std::string name;

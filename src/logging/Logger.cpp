@@ -18,9 +18,7 @@
 
 namespace RomCloud {
 
-// =============================================================================
 // Free helpers
-// =============================================================================
 static std::string getKernelRelease() {
     struct utsname u;
     if (uname(&u) == 0) return u.release;
@@ -47,9 +45,7 @@ static std::string getLocalIp() {
     return ip;
 }
 
-// =============================================================================
 // Logger impl
-// =============================================================================
 Logger& Logger::instance() {
     static Logger instance;
     return instance;
@@ -176,9 +172,7 @@ void Logger::info (const std::string& msg) { instance().log(LogLevel::INFO,  Log
 void Logger::warn (const std::string& msg) { instance().log(LogLevel::WARNING, LogCategory::CORE, msg); }
 void Logger::error(const std::string& msg) { instance().log(LogLevel::LOG_ERROR, LogCategory::CORE, msg); }
 
-// =============================================================================
 // Helpers impl
-// =============================================================================
 std::string Logger::formatTimestamp() const {
     auto now = std::chrono::system_clock::now();
     auto ms  = std::chrono::duration_cast<std::chrono::milliseconds>(

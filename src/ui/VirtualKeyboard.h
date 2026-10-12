@@ -1,5 +1,4 @@
 #pragma once
-// ============================================================================
 // RomCloud VirtualKeyboard — logic ban phim ao QWERTY dung chung, khong SDL.
 // UIManager / FileExplorer chi giu 1 VkState moi o nhap lieu thay vi 5 bo
 // m_*KbRow/Col/Shift roi rac. Render van do UIManager dam nhiem (doi UiRenderer
@@ -10,7 +9,6 @@
 //   R1: toggle Bo chu (ABC/123: chu <-> so & ky tu dac biet)
 //   SELECT: toggle Telex (TELEX/US) | START: OK
 // Layout: 4 hang phim (10 cot) + 1 hang action (5 o: Shift/ABC-Cach/Xoa/Xong/Huy)
-// ============================================================================
 #include <string>
 
 #include "TelexHelper.h"

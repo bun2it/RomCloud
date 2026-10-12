@@ -1,9 +1,7 @@
 #pragma once
-// ============================================================================
 // RomCloud BackgroundTask — worker thread chuẩn cho mọi tác vụ nặng.
 // Header-only. UI poll progress() mỗi frame để vẽ progress bar, không block.
 // Dùng chung cho: FileExplorer copy/paste, Download, OTA, DriveSync, thumbnail.
-// ============================================================================
 #include <atomic>
 #include <cstdint>
 #include <exception>

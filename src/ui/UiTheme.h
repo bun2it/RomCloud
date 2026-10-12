@@ -1,19 +1,17 @@
 #pragma once
-// ============================================================================
 // RomCloud Design Tokens — 10-Foot Leanback / Modern Dark Dashboard
 // Single Source of Truth cho toàn app (màu, bo góc, geometry, footer, font).
 // Logic nghiệp vụ không đổi — chỉ theme/layout dùng các token này.
-// ============================================================================
 #include <SDL2/SDL.h>
 
 namespace RomCloud {
 namespace UiTheme {
 
-// ---- App geometry (Brick 1024x768) ----
+// App geometry (Brick 1024x768)
 inline constexpr int APP_W = 1024;
 inline constexpr int APP_H = 768;
 
-// ---- Global palette ----
+// Global palette
 inline constexpr SDL_Color BG_APP      = {11, 19, 30, 255};   // #0B131E
 inline constexpr SDL_Color CARD_BG     = {15, 23, 42, 200};   // panel alpha ~200
 inline constexpr SDL_Color CARD_SOLID  = {15, 23, 42, 255};   // khi cần nền đặc
@@ -44,7 +42,7 @@ inline constexpr int RADIUS_ROW  = 10;
 inline constexpr int RADIUS_BTN  = 10;
 inline constexpr int RADIUS_MODAL = 16;
 
-// ---- Pill / chip chuẩn mềm mại (phương án A: full-round h/2) ----
+// Pill / chip chuẩn mềm mại (phương án A: full-round h/2)
 inline constexpr int PILL_H = 30;
 inline constexpr int PILL_PAD_X = 16;
 inline constexpr int PILL_GAP = 8;
@@ -58,7 +56,7 @@ inline constexpr SDL_Color PILL_BORDER    = {51, 65, 85, 255};
 inline constexpr SDL_Color PILL_TEXT_DIM  = {160, 175, 195, 255};
 inline constexpr int GROUP_BAR_H = 44;
 
-// ---- Header / footer ----
+// Header / footer
 inline constexpr int HEADER_H = 64;
 inline constexpr int SUB_H    = 48;
 inline constexpr int FOOTER_Y = 715;
@@ -69,17 +67,17 @@ inline constexpr int FOOTER_ICON = 26;
 inline constexpr int FOOTER_GAP  = 8;
 inline constexpr int FOOTER_HINT_GAP = 28;
 
-// ---- Layout A: Master-Detail 65/35 trên 1024 ----
+// Layout A: Master-Detail 65/35 trên 1024
 inline constexpr int LIST_W   = 666;
 inline constexpr int DETAIL_X = 700;
 inline constexpr int DETAIL_W = 300;
-// ---- Layout B: form 1 cột căn giữa ----
+// Layout B: form 1 cột căn giữa
 inline constexpr int FORM_W = 680;
 
-// ---- Font chính ----
+// Font chính
 inline const char *FONT_MAIN = "NotoSans-Regular.ttf";
 
-// ---- Footer component ----
+// Footer component
 enum class PadBtn { A, B, X, Y, START, SELECT, MENU, DPAD, L1, R1, L1R1, L2, R2, PLAY, UPDOWN, AB, NONE };
 struct FooterHint {
     PadBtn btn = PadBtn::NONE;

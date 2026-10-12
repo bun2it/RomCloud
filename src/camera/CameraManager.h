@@ -1,9 +1,7 @@
 #pragma once
-// ============================================================================
 // RomCloud CameraManager — camera giao thông (ảnh snapshot refresh).
 // Data: assets/traffic_cams.json [{n:name, c:code, u:image_base}].
 // Ảnh: curl + &t=timestamp về /tmp, UI tự refresh theo chu kỳ.
-// ============================================================================
 #include <string>
 #include <vector>
 #include <unordered_set>

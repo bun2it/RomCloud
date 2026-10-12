@@ -1,10 +1,8 @@
 #pragma once
-// ============================================================================
 // RomCloud ArchiveEngine — bung .zip/.rar/.7z trong File Explorer.
 // Backend: bin/7zzs kèm theo app (static aarch64, không cần libc hệ thống),
 // fallback `unzip` của máy cho .zip. Header-only (kiểu BackgroundTask).
 // Chạy trong FileExplorer::m_task → progress dialog + hủy có sẵn.
-// ============================================================================
 #include <cctype>
 #include <cstdint>
 #include <cstdio>

@@ -27,7 +27,7 @@ const HEADER_H = 58;   // header kiểu RomCloud (trong dải 106px trên)
 const URLBAR_H = 48;   // thanh URL kiểu RomCloud (pill 36)
 const FOOTER_H = 48;   // footer kiểu RomCloud
 
-// ── Trace ────────────────────────────────────────────────────────────
+// Trace
 const T0 = Date.now();
 function TR(step, msg) {
   console.log('[WEBTRACE] ' + step + ' +' + (Date.now() - T0) +
@@ -217,7 +217,7 @@ function verifyMobile(wc) {
   }, 1500);
 }
 
-// ── Vỏ trình duyệt (khung RomCloud + web ở giữa) ───────────────────
+// Vỏ trình duyệt (khung RomCloud + web ở giữa)
 // Tai chốt tọa độ (gốc dưới-trái): web từ (0,48) cao 614 tới (0,662),
 // bề ngang trọn 1024. Quy ra gốc trên-trái: header 0..58, thanh URL
 // 58..106, web 106..720, footer 720..768. Header/URL/footer vẽ kiểu
@@ -434,7 +434,7 @@ function updateShell(loading) {
   page.webContents.executeJavaScript(js).catch(() => {});
 }
 
-// ── Lịch sử địa chỉ / tìm kiếm ─────────────────────────────────────
+// Lịch sử địa chỉ / tìm kiếm
 // Lưu ở userData (conf/profile trên thẻ SD) nên qua phiên vẫn còn.
 // Hiện thành hàng chip trên đầu bàn phím ảo khi sửa địa chỉ.
 function historyPath() {
@@ -461,7 +461,7 @@ function pushHistory(q, url) {
   saveHistory();
 }
 
-// ── Bàn phím ảo (lớp phủ trong vỏ, ghim đáy màn hình) ─────────────
+// Bàn phím ảo (lớp phủ trong vỏ, ghim đáy màn hình)
 // D-pad di chuyển ô sáng, A (Enter) = bấm phím, X = xóa hết text,
 // Y (F3) = xóa lùi.
 // Đang sửa địa chỉ thì chữ vào ô URL; bình thường chữ vào trang.
@@ -550,7 +550,7 @@ function kbRoute(key) {
     JSON.stringify(key) + ')');
 }
 
-// ── Con trỏ chuột (SELECT bật/tắt) ─────────────────────────────────
+// Con trỏ chuột (SELECT bật/tắt)
 // Cần gạt rê con trỏ THẬT của weston để nhìn. D-pad = di chuyển
 // highlight giữa các link/nút trong trang, A = kích hoạt phần tử đang
 // sáng (focus + click qua JS, miễn nhiễm tọa độ/scale). Rớt về click
@@ -658,7 +658,7 @@ function ptrRoute(key) {
     .catch((e) => TRW('J42', 'A lỗi: ' + e));
 }
 
-// ── Sửa địa chỉ bằng START ─────────────────────────────────────────
+// Sửa địa chỉ bằng START
 // START (F6 qua gptokeyb) lần 1: thanh URL thành ô nhập + mở bàn phím
 // ảo, chữ gõ dồn vào ô địa chỉ. START lần nữa (hoặc phím XONG trên
 // bàn phím ảo): tải địa chỉ vừa gõ + lưu vào lịch sử.
@@ -1206,7 +1206,7 @@ async function createShell() {
 // buildShellHtml và setKb/kbRoute ở trên. Các kênh ipcMain kb-* của
 // cửa sổ bàn phím riêng ngày trước đã gỡ cùng cửa sổ đó.)
 
-// ── Chặn quảng cáo/tracker cho nhẹ CPU ────────────────────────────
+// Chặn quảng cáo/tracker cho nhẹ CPU
 // Mỗi khung quảng cáo là 1 tiến trình render riêng + cả đống JS nền;
 // cắt từ gốc thì trang mở nhanh hơn và máy đỡ bị ghì (load từng đo
 // 3.5–5 khi mở trang tin). Chỉ chặn tên miền quảng cáo/tracker đã
@@ -1234,7 +1234,7 @@ function isAdUrl(u) {
   }
   return /adsbygoogle|\/pagead\/|\/gampad\/|prebid/.test(u);
 }
-// ── Chặn tải dữ liệu video ở tầng mạng ───────────────────────────
+// Chặn tải dữ liệu video ở tầng mạng
 // Thumbnail dạng video là thủ phạm ngốn CPU lớn nhất trên trang tin:
 // chỉ 'pause' trong trang thì dữ liệu vẫn tải về và giải mã ngầm.
 // Cắt ngay từ request -> không tải, không giải mã; trang chỉ hiện

@@ -11,17 +11,13 @@
 
 namespace RomCloud {
 
-// ============================================================================
 // OS-SPECIFIC PATH CONFIGURATIONS
-// ============================================================================
 // Based on official documentation from:
 // - Stock PS: /mnt/SDCARD/Roms, /mnt/SDCARD/Imgs
 // - NextUI: https://nextui.loveretro.games/docs/
 // - SpruceOS: https://github.com/spruceUI/spruceOS/
 
-// ============================================================================
 // APP CONFIG
-// ============================================================================
 
 AppConfig &AppConfig::instance() {
   static AppConfig instance;
@@ -183,9 +179,7 @@ std::string AppConfig::getImgsDir() const {
   return m_sdRoot + "/Imgs";
 }
 
-// ============================================================================
 // SETTINGS PERSISTENCE
-// ============================================================================
 
 void AppConfig::loadSettings() {
   std::string path = getConfigDir() + "/os_config.json";
@@ -252,9 +246,7 @@ void AppConfig::saveSettings() const {
   file.close();
 }
 
-// ============================================================================
 // LocalSend P2P
-// ============================================================================
 // LocalSend-style random alias (giống app gốc: Adjective + Fruit),
 // sinh 1 lần rồi persist vào /mnt/SDCARD/.romcloud/localsend_alias.
 std::string AppConfig::getLocalSendAlias() const {

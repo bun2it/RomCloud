@@ -1,10 +1,8 @@
 #pragma once
-// ============================================================================
 // RomCloud WatchManager — theo dõi crypto + chứng khoán VN (free, không key):
 // - Crypto: CoinGecko simple/price (batch) + market_chart 30 ngày.
 // - Cổ phiếu VN: VNDirect dchart history (resolution=D, giá nghìn đồng).
 // Tối đa 4 mã (lưới 2x2), lưu DB "watch_symbols" (CSV in hoa).
-// ============================================================================
 #include <string>
 #include <vector>
 #include <mutex>

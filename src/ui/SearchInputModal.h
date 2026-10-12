@@ -1,5 +1,4 @@
 #pragma once
-// ============================================================================
 // SearchInputModal — reusable search-input popup (P0-6).
 //
 // Pops up over ANY screen that has a search input. Shows:
@@ -18,7 +17,6 @@
 //   Y=180..472: Keyboard (4 rows × 52px + action 52px, gaps 8px)
 //   Y=472..715: dim (empty) — modal floats top, footer drawn by caller
 //   Modal dim full screen (header stays visible via beginModalDim).
-// ============================================================================
 
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_ttf.h>

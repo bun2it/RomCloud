@@ -54,7 +54,7 @@ void DownloadManager::resetProgress() {
     m_progress.state = DownloadState::IDLE;
 }
 
-// ---- Queue Management ----
+// Queue Management
 
 bool DownloadManager::addToQueue(const GameRecord& game, const SystemRecord& sys) {
     std::lock_guard<std::mutex> lock(m_mutex);
@@ -409,7 +409,7 @@ void DownloadManager::runDownloadWorker() {
         return;
     }
 
-    // --- Google Drive virus-scan confirmation page detection ---
+    // Google Drive virus-scan confirmation page detection
     // If Drive returns a small HTML page (< 64KB) with a confirm token,
     // we must re-download using the confirm=t URL parameter.
     {
@@ -513,9 +513,9 @@ void DownloadManager::runDownloadWorker() {
             }
         }
     }
-    // --- end virus scan bypass ---
+    // end virus scan bypass
 
-    // --- Post-download validation: reject HTML error pages saved as ROM ---
+    // Post-download validation: reject HTML error pages saved as ROM
     {
         struct stat vst;
         if (stat(m_tempFilePath.c_str(), &vst) == 0 && vst.st_size > 0) {
@@ -548,7 +548,7 @@ void DownloadManager::runDownloadWorker() {
             }
         }
     }
-    // --- end validation ---
+    // end validation
 
     if (res != CURLE_OK || httpCode != 200) {
         FileSystemManager::instance().removeFile(m_tempFilePath);

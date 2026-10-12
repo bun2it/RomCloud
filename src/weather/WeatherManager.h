@@ -1,10 +1,8 @@
 #pragma once
-// ============================================================================
 // RomCloud WeatherManager — thời tiết Open-Meteo (miễn phí, không key) +
 // chọn phường/xã VN (2 cấp, offline) + lịch tháng (thuần C++, offline).
 // Icon thời tiết: PNG user bổ sung sau (assets/weather_icons/<code>.png),
 // chưa có thì vẽ hình khối.
-// ============================================================================
 #include <string>
 #include <vector>
 

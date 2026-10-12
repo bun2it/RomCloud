@@ -41,7 +41,7 @@ public:
 
   bool isRunning() const { return m_running; }
 
-  // ----- Fingerprint (persist qua các lần khởi động) --------------
+  // Fingerprint (persist qua các lần khởi động)
   const std::string &fingerprint() const { return m_selfFingerprint; }
   const std::string &alias() const { return m_selfAlias; }
   const std::string &ownIp() const { return m_ownIp; }
@@ -50,7 +50,7 @@ public:
   // ----- Build JSON announce/info (public cho helper anon namespace) -
   std::string buildDeviceInfoJson(bool announce) const;
 
-  // ----- Known devices (cho UI danh sách) -------------------------
+  // Known devices (cho UI danh sách)
   std::vector<LsDeviceInfo> knownDevices(); // copy, thread-safe
   void clearKnownDevices();
   // Quét chủ động: burst multicast + dọn thiết bị cũ (gọi khi vào màn Send /
@@ -58,7 +58,7 @@ public:
   void refreshDiscovery();
   void pruneStaleDevices(int64_t maxAgeMs = 20000);
 
-  // ----- Target folder picker (ưu tiên 1 trong path resolution) ---
+  // Target folder picker (ưu tiên 1 trong path resolution)
   void setTargetFolder(const std::string &folder); // "Roms/GBA/" hoặc "" = auto
   std::string currentTargetFolder() const;
   // Override đích cho 1 pending cụ thể (dialog incoming chọn tay).
@@ -67,7 +67,7 @@ public:
   std::string setPendingTargetFolder(const std::string &sessionId,
                                      const std::string &folderRel);
 
-  // ----- Pending upload requests ----------------------------------
+  // Pending upload requests
   // UI subscribe: callback khi có request mới → render modal A/B.
   void setOnUserPrompt(std::function<void(const LsUploadRequest &)> cb);
   // UI subscribe: callback khi có progress update (~mỗi 500ms).
@@ -81,7 +81,7 @@ public:
   void rejectUpload(const std::string &sessionId);
   void pruneStalePrepares();
 
-  // ----- Sender API (RomCloud TrimUI gửi file sang TrimUI khác) -----
+  // Sender API (RomCloud TrimUI gửi file sang TrimUI khác)
   // Gửi 1 file. absPath phải nằm trong /mnt/SDCARD/.
   // Trả về sessionId (rỗng nếu lỗi).
   std::string sendFile(const std::string &absPath, const LsDeviceInfo &target);
@@ -104,7 +104,7 @@ public:
   // Xóa các tác vụ đã xong hoặc lỗi khỏi danh sách progress
   void clearFinishedTasks();
 
-  // ----- Internal: HTTP routing -----------------------------------
+  // Internal: HTTP routing
   // Được gọi từ TransferLoop thread (private thread). Mỗi accept → spawn 1
   // detached thread. Trả về true nếu caller cần đóng clientFd ngay.
   bool handleHttpClient(int clientFd);
@@ -161,7 +161,7 @@ private:
                       const std::string &path, const std::string &filePath,
                       LsSendProgress &prog);
 
-  // ----- State -----------------------------------------------------
+  // State
   std::atomic<bool> m_running{false};
   std::thread m_discoveryThread;
   std::thread m_transferThread;

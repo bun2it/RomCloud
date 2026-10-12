@@ -1,6 +1,4 @@
-// ==========================================================================
 // RomCloud IPTV Curator - Frontend Reactive Controller with Built-in HLS Player
-// ==========================================================================
 
 let allChannels = [];
 let filteredChannels = [];
@@ -1409,9 +1407,7 @@ async function publishAndCommitToGitHub() {
   }
 }
 
-// ==========================================================================
 // 15. MultiView Grid Wall Controller (2x2, 4x2, 4x4 Viewports)
-// ==========================================================================
 let currentGridLayout = "2x2";
 let gridSlots = [];
 let cachedChannelOptionsHtml = "";
