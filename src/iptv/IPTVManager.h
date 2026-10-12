@@ -183,9 +183,6 @@ public:
     void clearPingCache();
     void prefetchPings(const std::vector<std::string> &urls);
 
-    // Create default playlist
-    void createDefaultPlaylist(const std::string& filepath);
-
     // Media player check & auto installation
     bool isMediaPlayerInstalled() const;
     bool ensureMediaPlayerAvailable();

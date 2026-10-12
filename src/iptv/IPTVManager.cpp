@@ -81,11 +81,32 @@ IPTVManager::IPTVManager() {
     Logger::info("IPTVManager: Initializing from " + m_iptvDir);
     loadPlaylists(m_iptvDir);
 
-    // If no playlist exists, create default playlist
-    if (m_channels.empty()) {
-        Logger::info("No playlists found, creating default playlist...");
-        createDefaultPlaylist(m_iptvDir + "/default.m3u");
-        loadPlaylists(m_iptvDir);
+    // Chi giu playlist OTA (live.m3u): xoa default.m3u cu neu con sot
+    // (may doi tu ban cu sang). Khong tao playlist mac dinh nua.
+    {
+        std::string legacyDefault = m_iptvDir + "/default.m3u";
+        struct stat stLegacy;
+        if (stat(legacyDefault.c_str(), &stLegacy) == 0) {
+            unlink(legacyDefault.c_str());
+            Logger::info("IPTVManager: da xoa playlist mac dinh cu");
+            loadPlaylists(m_iptvDir);
+        }
+    }
+
+    // Neu chua co live.m3u (may moi / chua OTA bao gio): tai nen,
+    // khong block startup.
+    {
+        struct stat stLive;
+        if (stat((m_iptvDir + "/live.m3u").c_str(), &stLive) != 0) {
+            std::thread([]() {
+                std::string msg;
+                if (IPTVManager::instance().updateOtaPlaylist(msg)) {
+                    Logger::info("IPTVManager: tu tai live.m3u lan dau: " + msg);
+                } else {
+                    Logger::warn("IPTVManager: chua tai duoc live.m3u: " + msg);
+                }
+            }).detach();
+        }
     }
 
     // Tu dong refresh cac playlist URL bi stale (khong block startup neu loi mang)
@@ -147,6 +168,9 @@ bool IPTVManager::loadPlaylists(const std::string& directory) {
 
     int loaded = 0;
     for (const auto& filename : playlistFiles) {
+        // Bo playlist mac dinh cu (chi giu OTA + playlist user tu them).
+        if (filename == "default.m3u")
+            continue;
         std::string path = dirPath + "/" + filename;
 
         // Xac dinh ten hien thi cho playlist nay
@@ -155,8 +179,7 @@ bool IPTVManager::loadPlaylists(const std::string& directory) {
         if (it != m_sourcesMeta.end() && !it->second.name.empty()) {
             sourceName = it->second.name;
         } else {
-            if (filename == "default.m3u")      sourceName = "Mặc định";
-            else if (filename == "vietnam.m3u") sourceName = "Việt Nam";
+            if (filename == "vietnam.m3u")      sourceName = "Việt Nam";
             else {
                 sourceName = filename;
                 size_t dot = sourceName.rfind('.');
@@ -2548,55 +2571,6 @@ bool IPTVManager::stop() {
 #endif
 
     return true;
-}
-
-void IPTVManager::createDefaultPlaylist(const std::string& filepath) {
-    std::ofstream file(filepath);
-    if (!file.is_open()) {
-        Logger::error("Cannot create default playlist: " + filepath);
-        return;
-    }
-
-    file << "#EXTM3U\n"
-         << "#EXTINF:-1 tvg-id=\"CanThoTV.vn@SD\" tvg-name=\"Cần Thơ TV\" group-title=\"Miền Tây\",Cần Thơ TV (HD)\n"
-         << "https://live.canthotv.vn/live/tv/chunklist.m3u8\n"
-         << "#EXTINF:-1 tvg-id=\"CanThoTV2.vn@SD\" tvg-name=\"Cần Thơ TV 2\" group-title=\"Miền Tây\",Cần Thơ TV 2 (HD)\n"
-         << "https://live.canthotv.vn/cs2/live.stream/playlist.m3u8\n"
-         << "#EXTINF:-1 tvg-id=\"DongNaiTV1.vn@SD\" tvg-name=\"Đồng Nai 1\" group-title=\"Đông Nam Bộ\",Đồng Nai 1 (HD)\n"
-         << "https://vtvgolive-ott3.vtvdigital.vn/live/dongnai1tv/chunklist_2.m3u8\n"
-         << "#EXTINF:-1 tvg-id=\"DongNaiTV2.vn@SD\" tvg-name=\"Đồng Nai 2\" group-title=\"Đông Nam Bộ\",Đồng Nai 2 (HD)\n"
-         << "https://vtvgolive-ott3.vtvdigital.vn/live/dongnai2tv/chunklist_2.m3u8\n"
-         << "#EXTINF:-1 tvg-id=\"DongNaiTV3.vn@SD\" tvg-name=\"Đồng Nai 3\" group-title=\"Đông Nam Bộ\",Đồng Nai 3 (720p)\n"
-         << "https://dethich.pw/dongnai3/index.m3u8\n"
-         << "#EXTINF:-1 tvg-id=\"AnNinhTV.vn@HD\" tvg-name=\"An Ninh TV\" group-title=\"Thời Sự\",An Ninh TV HD (1080p)\n"
-         << "https://liveh12.vtvprime.vn/hls/ANNINHTV/index.m3u8\n"
-         << "#EXTINF:-1 tvg-id=\"CaoBangTV.vn@SD\" tvg-name=\"Cao Bằng TV\" group-title=\"Miền Bắc\",Cao Bằng TV (HD)\n"
-         << "https://stream.thingnet.vn/live/smil:CRTV.smil/chunklist.m3u8\n"
-         << "#EXTINF:-1 tvg-id=\"DienBienTV.vn@SD\" tvg-name=\"Điện Biên TV\" group-title=\"Miền Bắc\",Điện Biên TV (1080p)\n"
-         << "https://stream.langsontv.vn/live/2855dfeccb7f49a41a2b0441b3bfeda413c/playlist.m3u8\n"
-         << "#EXTINF:-1 tvg-id=\"HaTinhTV.vn@SD\" tvg-name=\"Hà Tĩnh TV\" group-title=\"Miền Trung\",Hà Tĩnh TV (720p)\n"
-         << "https://cohauw9bgpvod.vcdn.cloud/httv1/index.m3u8\n"
-         << "#EXTINF:-1 tvg-id=\"HTV1.vn@SD\" tvg-name=\"HTV1\" group-title=\"HTV TP.HCM\",HTV1 (720p)\n"
-         << "https://dethich.pw/htv1/index.m3u8\n"
-         << "#EXTINF:-1 tvg-id=\"HTV2.vn@SD\" tvg-name=\"HTV2\" group-title=\"HTV TP.HCM\",HTV2 Vie Channel (720p)\n"
-         << "https://dethich.pw/htv2/index.m3u8\n"
-         << "#EXTINF:-1 tvg-id=\"HTV3.vn@SD\" tvg-name=\"HTV3\" group-title=\"HTV TP.HCM\",HTV3 DreamsTV (720p)\n"
-         << "https://dethich.pw/htv3/index.m3u8\n"
-         << "#EXTINF:-1 tvg-id=\"HTV7.vn@SD\" tvg-name=\"HTV7\" group-title=\"HTV TP.HCM\",HTV7 (720p)\n"
-         << "https://dethich.pw/htv7/index.m3u8\n"
-         << "#EXTINF:-1 tvg-id=\"HTV9.vn@SD\" tvg-name=\"HTV9\" group-title=\"HTV TP.HCM\",HTV9 (720p)\n"
-         << "https://dethich.pw/htv9/index.m3u8\n"
-         << "#EXTINF:-1 tvg-id=\"HTVSports.vn@SD\" tvg-name=\"HTV Thể Thao\" group-title=\"Thể Thao\",HTV Thể Thao (HD)\n"
-         << "https://dethich.pw/htvthethao/index.m3u8\n"
-         << "#EXTINF:-1 tvg-id=\"DongThapTV.vn@SD\" tvg-name=\"Đồng Tháp TV\" group-title=\"Miền Tây\",Đồng Tháp TV (720p)\n"
-         << "https://liveh34.vtvprime.vn/hls/DONGTHAPTV/index.m3u8\n"
-         << "#EXTINF:-1 tvg-id=\"BBB\" tvg-name=\"Big Buck Bunny\" group-title=\"Phim & Test\",Big Buck Bunny (1080p 60fps)\n"
-         << "https://test-streams.mux.dev/outcasts/index.m3u8\n"
-         << "#EXTINF:-1 tvg-id=\"TOS\" tvg-name=\"Tears of Steel\" group-title=\"Phim & Test\",Tears of Steel (1080p FHD)\n"
-         << "https://bitdash-a.akamaihd.net/content/sintel/hls/playlist.m3u8\n";
-
-    file.close();
-    Logger::info("Created default playlist: " + filepath);
 }
 
 static std::mutex s_pingMutex;
