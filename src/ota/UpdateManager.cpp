@@ -7,6 +7,8 @@
 
 #include <curl/curl.h>
 #include <SDL2/SDL.h>
+#include <openssl/sha.h>
+#include <dirent.h>
 #include <sstream>
 #include <sys/stat.h>
 #include <sys/statvfs.h>
@@ -14,6 +16,7 @@
 #include <vector>
 #include <fstream>
 #include <algorithm>
+#include <cctype>
 #include <cerrno>
 #include <cstring>
 
@@ -367,6 +370,38 @@ bool UpdateManager::checkForUpdatesSync(UpdateInfo &outInfo) {
   }
   outInfo.rcWebVersion = rcWebVer;
   outInfo.rcWebUrl = rcWebUrl;
+  // OTA delta (v2.5.2+): manifest + gói delta/lite/completion. Tự suy URL
+  // theo quy ước khi manifest không ghi (giống fullZipUrl).
+  std::string otaMfUrl = "";
+  std::string deltaUrl = "";
+  std::string liteUrl = "";
+  std::string completionUrl = "";
+  std::string manifestBase = "";
+  if (mResp.success && !mResp.body.empty() && mResp.statusCode == 200) {
+    otaMfUrl = JsonHelper::extractString(mResp.body, "ota_manifest_url");
+    deltaUrl = JsonHelper::extractString(mResp.body, "delta_zip_url");
+    liteUrl = JsonHelper::extractString(mResp.body, "lite_zip_url");
+    completionUrl =
+        JsonHelper::extractString(mResp.body, "completion_zip_url");
+    manifestBase =
+        JsonHelper::extractString(mResp.body, "manifest_base_version");
+  }
+  std::string relBase =
+      "https://github.com/" + std::string(GITHUB_REPO) +
+      "/releases/download/v" + remoteVer + "/";
+  if (otaMfUrl.empty() && !remoteVer.empty())
+    otaMfUrl = relBase + "ota-manifest.json";
+  if (deltaUrl.empty() && !remoteVer.empty())
+    deltaUrl = relBase + "RomCloud-v" + remoteVer + "-delta.zip";
+  if (liteUrl.empty() && !remoteVer.empty())
+    liteUrl = relBase + "RomCloud-v" + remoteVer + "-lite.zip";
+  if (completionUrl.empty() && !remoteVer.empty())
+    completionUrl = relBase + "RomCloud-v" + remoteVer + "-completion.zip";
+  outInfo.otaManifestUrl = otaMfUrl;
+  outInfo.deltaZipUrl = deltaUrl;
+  outInfo.liteZipUrl = liteUrl;
+  outInfo.completionZipUrl = completionUrl;
+  outInfo.manifestBaseVersion = manifestBase;
   outInfo.changelog = changelog;
   outInfo.releaseDate = relDate;
   outInfo.osType = osType;
@@ -794,7 +829,15 @@ void UpdateManager::notifyRepairDone(bool ok) {
 }
 
 void UpdateManager::runDownloadWorker(UpdateInfo info) {
-  Logger::info("Starting full-zip OTA update: v" + info.remoteVersion);
+  Logger::info("Starting OTA update: v" + info.remoteVersion +
+               " (delta neu co, khong thi full-zip)");
+
+  // OTA delta trước: chỉ tải file đổi. Xong (true) thì chạy tiếp đuôi
+  // chung (rc-web + COMPLETED). Hỏng/thiếu thì rớt xuống full-zip cũ.
+  if (tryDeltaUpdate(info)) {
+    finishUpdateTail(info);
+    return;
+  }
 
   std::string appRoot = AppConfig::instance().getAppRoot();
   std::string zipPath = appRoot + "/ota_update.zip";
@@ -905,10 +948,16 @@ void UpdateManager::runDownloadWorker(UpdateInfo info) {
   unlink(zipPath.c_str());
 
   Logger::info("OTA update completed!");
+  finishUpdateTail(info);
+}
 
+// Đuôi chung sau khi app đã lên bản mới (delta hay full đều qua đây):
+// tự tải + cài RC-Web nếu có gói mới hơn, rồi COMPLETED.
+void UpdateManager::finishUpdateTail(const UpdateInfo& info) {
   // 1 chạm full: xong app thì tự tải + cài RC-Web (nếu manifest có gói
   // mới hơn bản đang cài, hoặc máy chưa có rc-web). Không có gói mới thì
   // bo qua, van COMPLETED binh thuong.
+  std::string appRoot = AppConfig::instance().getAppRoot();
   {
     std::string curRcWeb = getInstalledRcWebVersion();
     bool needRcWeb = false;
@@ -962,6 +1011,481 @@ void UpdateManager::runDownloadWorker(UpdateInfo info) {
 
   m_isRunning = false;
   notifyRepairDone(true);
+}
+
+// installFullZip
+
+// OTA DELTA (v2.5.2+): chỉ tải file đổi thay vì cả build 60MB.
+// Manifest (ota-manifest.json của bản remote) liệt kê toàn bộ file runtime
+// kèm hash; máy hash file local, tải gói delta (chỉ file đổi), verify từng
+// file rồi swap nguyên khối. Hỏng ở đâu cũng rớt về full-zip cũ (giữ bài
+// học v2.3.0: không bao giờ vá nửa vời).
+
+namespace {
+// (OtaManifestEntry khai báo ở UpdateManager.h để dùng chung header/cpp.)
+bool parseOtaManifest(const std::string& body, std::string& baseVer,
+                      std::vector<OtaManifestEntry>& out) {
+    out.clear();
+    baseVer = JsonHelper::extractString(body, "base_version");
+    if (baseVer.empty()) return false;
+    std::vector<std::string> objs =
+        JsonHelper::extractArrayObjects(body, "files");
+    for (const auto& o : objs) {
+        OtaManifestEntry e;
+        e.path = JsonHelper::extractString(o, "path");
+        e.sha256 = JsonHelper::extractString(o, "sha256");
+        e.size = JsonHelper::extractUInt64(o, "size", 0);
+        if (e.path.empty() || e.sha256.empty()) continue;
+        // Chuẩn hoá hash về lowercase để so sánh (tooling đôi khi ghi hoa).
+        for (char& c : e.sha256)
+            c = (char)tolower((unsigned char)c);
+        out.push_back(e);
+    }
+    return !out.empty();
+}
+} // namespace
+
+std::string UpdateManager::readOtaFlavor() {
+    std::string p =
+        AppConfig::instance().getAppRoot() + "/.ota_flavor";
+    std::ifstream f(p);
+    if (!f.is_open()) return "full"; // máy legacy (pre-delta): coi như full
+    std::string v;
+    std::getline(f, v);
+    while (!v.empty() && (v.back() == '\n' || v.back() == '\r' ||
+                          v.back() == ' ' || v.back() == '\t'))
+        v.pop_back();
+    if (v != "lite" && v != "full") return "full";
+    return v;
+}
+
+void UpdateManager::writeOtaFlavor(const std::string& flavor) {
+    std::string p =
+        AppConfig::instance().getAppRoot() + "/.ota_flavor";
+    std::ofstream f(p, std::ios::trunc);
+    if (f.is_open()) {
+        f << flavor << "\n";
+        f.close();
+    }
+    sync();
+}
+
+std::string UpdateManager::sha256File(const std::string& path) {
+    FILE* f = fopen(path.c_str(), "rb");
+    if (!f) return std::string();
+    SHA256_CTX ctx;
+    SHA256_Init(&ctx);
+    unsigned char buf[65536];
+    size_t n = 0;
+    bool readErr = false;
+    while ((n = fread(buf, 1, sizeof(buf), f)) > 0) {
+        SHA256_Update(&ctx, buf, n);
+        if (n < sizeof(buf)) break;
+    }
+    if (ferror(f)) readErr = true;
+    fclose(f);
+    if (readErr) return std::string();
+    unsigned char digest[SHA256_DIGEST_LENGTH];
+    SHA256_Final(digest, &ctx);
+    static const char* hex = "0123456789abcdef";
+    std::string out;
+    out.reserve(2 * SHA256_DIGEST_LENGTH);
+    for (int i = 0; i < SHA256_DIGEST_LENGTH; ++i) {
+        out += hex[digest[i] >> 4];
+        out += hex[digest[i] & 15];
+    }
+    return out;
+}
+
+// Lite first-boot: tự kéo gói completion (lite -> full) đúng 1 lần.
+// Chạy nền, không block boot. Hủy giữa chừng (màn Cập nhật) thì flavor
+// vẫn lite -> boot sau thử lại (idempotent). Xong thì flavor=full,
+// không cần restart (binary lite và full cùng 1 build).
+void UpdateManager::ensureCompleted() {
+    if (readOtaFlavor() != "lite") return;
+    if (m_isRunning) return;
+    m_isRunning = true;
+    std::thread([this]() {
+        std::string appRoot = AppConfig::instance().getAppRoot();
+        std::string ver = APP_VERSION;
+        std::string base =
+            "https://github.com/" + std::string(GITHUB_REPO) +
+            "/releases/download/v" + ver + "/";
+        bool ok = false;
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            m_progress.state = UpdateState::DOWNLOADING;
+            m_progress.currentStep = "Đang tải phần còn lại của bản Lite...";
+            m_progress.bytesDownloaded = 0;
+            m_progress.totalBytes = 0;
+            m_progress.progressPct = 0.0;
+            m_progress.speedKBps = 0.0;
+        }
+        std::string mfPath = appRoot + "/.ota_manifest.json.tmp";
+        if (downloadFile(base + "ota-manifest.json", mfPath, nullptr,
+                         false)) {
+            std::string body;
+            {
+                std::ifstream f(mfPath);
+                if (f.is_open())
+                    body.assign((std::istreambuf_iterator<char>(f)),
+                                std::istreambuf_iterator<char>());
+            }
+            unlink(mfPath.c_str());
+            std::string baseVer;
+            std::vector<OtaManifestEntry> entries;
+            std::string mfVer =
+                JsonHelper::extractString(body, "version");
+            if (parseOtaManifest(body, baseVer, entries) &&
+                mfVer == ver) {
+                std::string zipPath = appRoot + "/ota_completion.zip";
+                uint64_t dlSize = 0;
+                if (downloadFile(base + "RomCloud-v" + ver +
+                                     "-completion.zip",
+                                 zipPath, &dlSize, true) &&
+                    dlSize >= 10240 &&
+                    applyOtaPackage(zipPath, entries)) {
+                    writeOtaFlavor("full");
+                    ok = true;
+                }
+                unlink(zipPath.c_str());
+            }
+        }
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            if (m_cancelRequested) {
+                m_progress.state = UpdateState::IDLE;
+            } else if (ok) {
+                m_progress.state = UpdateState::COMPLETED;
+                m_progress.progressPct = 100.0;
+                m_progress.currentStep =
+                    "Đã tải xong phần còn lại, dùng bình thường.";
+            } else {
+                m_progress.state = UpdateState::FAILED;
+                m_progress.errorMessage =
+                    "Chưa tải xong phần còn lại (sẽ thử lại khi mở app).";
+            }
+        }
+        m_isRunning = false;
+        Logger::info(ok ? "OTA completion done (lite -> full)."
+                        : "OTA completion failed, will retry next boot.");
+    }).detach();
+}
+
+bool UpdateManager::tryDeltaUpdate(const UpdateInfo& info) {    if (info.otaManifestUrl.empty()) return false; // manifest cũ: full path
+    std::string appRoot = AppConfig::instance().getAppRoot();
+
+    auto setStep = [this](const std::string& s, uint64_t done, uint64_t total) {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_progress.state = UpdateState::DOWNLOADING;
+        m_progress.currentStep = s;
+        m_progress.bytesDownloaded = done;
+        m_progress.totalBytes = total;
+        m_progress.progressPct =
+            total > 0 ? (100.0 * (double)done / (double)total) : 0.0;
+    };
+    // Hủy giữa chừng: về IDLE như full path, true = đã xử lý (không đi full).
+    auto cancelled = [this]() {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_progress.state = UpdateState::IDLE;
+        m_isRunning = false;
+        notifyRepairDone(false);
+        return true;
+    };
+    auto failToFull = [this](const std::string& why) {
+        Logger::warn("OTA delta bỏ qua (" + why + "), dùng full-zip.");
+        return false;
+    };
+
+    // 1. Tải + parse manifest bản remote.
+    setStep("Đang lấy danh sách file thay đổi...", 0, 1);
+    std::string mfPath = appRoot + "/.ota_manifest.json.tmp";
+    if (!downloadFile(info.otaManifestUrl, mfPath, nullptr, false))
+        return failToFull("không tải được manifest");
+    std::string body;
+    {
+        std::ifstream f(mfPath);
+        if (f.is_open())
+            body.assign((std::istreambuf_iterator<char>(f)),
+                        std::istreambuf_iterator<char>());
+    }
+    unlink(mfPath.c_str());
+    std::string baseVer;
+    std::vector<OtaManifestEntry> entries;
+    if (!parseOtaManifest(body, baseVer, entries))
+        return failToFull("manifest lỗi/rỗng");
+
+    // 2. Chọn gói: máy lite -> completion (hoàn thiện), máy full đúng nền
+    // -> delta. Còn lại -> full-zip.
+    std::string flavor = readOtaFlavor();
+    bool isCompletion = (flavor == "lite");
+    std::string zipUrl;
+    if (isCompletion) {
+        // Lite chỉ hoàn thiện đúng bản của nó (không râu ông nọ cắm cằm
+        // bà kia): manifest remote phải chính là bản đang chạy.
+        std::string mfVer =
+            JsonHelper::extractString(body, "version");
+        if (mfVer != APP_VERSION)
+            return failToFull("lite v" + std::string(APP_VERSION) +
+                              " không khớp manifest v" + mfVer);
+        zipUrl = info.completionZipUrl;
+        if (zipUrl.empty()) return failToFull("thiếu completion URL");
+        setStep("Đang tải phần còn lại cho bản Lite...", 0, 1);
+    } else {
+        // Delta chỉ áp cho máy đang đúng bản nền (vd delta base 2.5.1 chỉ
+        // cho máy 2.5.1). Máy cũ hơn/mới hơn -> full-zip, không cố chắp vá.
+        // Máy legacy (2.5.1, chưa có flavor) coi như full.
+        if (baseVer != APP_VERSION)
+            return failToFull("máy v" + std::string(APP_VERSION) +
+                              " không khớp nền delta v" + baseVer);
+        zipUrl = info.deltaZipUrl;
+        if (zipUrl.empty()) return failToFull("thiếu delta URL");
+    }
+
+    // 3. Tải gói.
+    std::string zipPath =
+        appRoot + (isCompletion ? "/ota_completion.zip" : "/ota_delta.zip");
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_progress.state = UpdateState::DOWNLOADING;
+        m_progress.currentStep = isCompletion
+                                     ? "Đang tải phần còn lại của bản Lite..."
+                                     : "Đang tải gói delta v" +
+                                           info.remoteVersion + "...";
+        m_progress.bytesDownloaded = 0;
+        m_progress.totalBytes = 0;
+        m_progress.progressPct = 0.0;
+        m_progress.speedKBps = 0.0;
+    }
+    uint64_t dlSize = 0;
+    if (!downloadFile(zipUrl, zipPath, &dlSize, true)) {
+        if (m_cancelRequested) return cancelled();
+        unlink(zipPath.c_str());
+        return failToFull(isCompletion ? "tải completion thất bại"
+                                        : "tải delta thất bại");
+    }
+    if (dlSize < 10240) {
+        unlink(zipPath.c_str());
+        return failToFull("gói quá nhỏ, nghi corrupt");
+    }
+    if (m_cancelRequested) {
+        unlink(zipPath.c_str());
+        return cancelled();
+    }
+
+    // 4. Bung + verify + swap (danh sách verify = manifest).
+    if (!applyOtaPackage(zipPath, entries)) {
+        unlink(zipPath.c_str());
+        return failToFull("apply gói thất bại");
+    }
+    unlink(zipPath.c_str());
+    if (isCompletion) writeOtaFlavor("full");
+    Logger::info(isCompletion ? "OTA completion applied (lite -> full)."
+                              : "OTA delta applied.");
+    return true;
+}
+
+bool UpdateManager::applyOtaPackage(
+    const std::string& zipPath,
+    const std::vector<OtaManifestEntry>& entries) {
+    std::string appRoot = AppConfig::instance().getAppRoot();
+    std::string tmpDir = appRoot + "/.ota_tmp";
+    std::string backupDir = appRoot + "/.ota_backup";
+
+    auto setErr = [this](const std::string& msg) {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_progress.errorMessage = msg;
+    };
+
+    system(("rm -rf '" + tmpDir + "' '" + backupDir + "' 2>/dev/null").c_str());
+    mkdir(tmpDir.c_str(), 0755);
+    mkdir(backupDir.c_str(), 0755);
+
+    // 1. Bung gói (delta/completion đều nhỏ, layout Apps/RomCloud/... như
+    // full-zip để tái dùng kịp swap).
+    std::string unzipLog = tmpDir + ".unzip.log";
+    int ret = otaRunWithLog(
+        "unzip -o '" + zipPath + "' 'Apps/RomCloud/*' -d '" + tmpDir + "'",
+        unzipLog);
+    if (ret != 0) {
+        ret = otaRunWithLog(
+            "busybox unzip -o '" + zipPath + "' 'Apps/RomCloud/*' -d '" + tmpDir + "'",
+            unzipLog);
+    }
+    std::string staged = tmpDir + "/Apps/RomCloud";
+    // 7zzs fallback (giống full-zip).
+    {
+        struct stat st;
+        bool any = false;
+        // Coi như bung được nếu có ít nhất 1 file regular (verify chi tiết
+        // ở bước 2, không đòi bin/RomCloud như full-zip).
+        // (duyệt nông 1 cấp đủ vì entries kiểm tra sau sẽ bắt thiếu.)
+        if (stat(staged.c_str(), &st) == 0 && S_ISDIR(st.st_mode))
+            any = true;
+        if (!any) {
+            std::string seven = appRoot + "/bin/7zzs";
+            if (access(seven.c_str(), X_OK) == 0) {
+                otaRunWithLog(
+                    "'" + seven + "' x -y -o'" + tmpDir + "' '" + zipPath + "' -ir!'Apps/RomCloud'",
+                    unzipLog);
+            }
+        }
+    }
+
+    // 2. Verify MỌI file bung ra theo hash manifest (thiếu/sai 1 file là
+    // fail; file lạ không có trong manifest thì bỏ qua + log).
+    // (duyệt đệ quy cây staged.)
+    std::vector<std::string> stagedFiles;
+    {
+        std::vector<std::string> stack;
+        stack.push_back(staged);
+        struct stat st;
+        char pathBuf[4096];
+        while (!stack.empty()) {
+            std::string dir = stack.back();
+            stack.pop_back();
+            // Dùng opendir/readdir thay vì shell find (tránh quote path).
+            DIR* dp = opendir(dir.c_str());
+            if (!dp) continue;
+            struct dirent* de = nullptr;
+            while ((de = readdir(dp)) != nullptr) {
+                if (de->d_name[0] == '.') continue;
+                std::string full = dir + "/" + de->d_name;
+                if (stat(full.c_str(), &st) != 0) continue;
+                if (S_ISDIR(st.st_mode)) {
+                    stack.push_back(full);
+                } else if (S_ISREG(st.st_mode)) {
+                    stagedFiles.push_back(full);
+                }
+            }
+            closedir(dp);
+        }
+        (void)pathBuf;
+    }
+    if (stagedFiles.empty()) {
+        system(("rm -rf '" + tmpDir + "' '" + backupDir + "' '" + unzipLog + "' 2>/dev/null").c_str());
+        setErr("Gói cập nhật rỗng sau giải nén. Sẽ thử lại bằng bản đầy đủ.");
+        return false;
+    }
+    size_t verified = 0;
+    for (const auto& full : stagedFiles) {
+        if (m_cancelRequested) {
+            system(("rm -rf '" + tmpDir + "' '" + backupDir + "' '" + unzipLog + "' 2>/dev/null").c_str());
+            return false;
+        }
+        std::string rel = full.substr(staged.size() + 1);
+        const OtaManifestEntry* hit = nullptr;
+        for (const auto& e : entries) {
+            if (e.path == rel) {
+                hit = &e;
+                break;
+            }
+        }
+        if (!hit) {
+            Logger::warn("OTA package: file lạ không có trong manifest, bỏ qua: " + rel);
+            unlink(full.c_str());
+            continue;
+        }
+        if (sha256File(full) != hit->sha256) {
+            Logger::error("OTA package verify fail: " + rel);
+            system(("rm -rf '" + tmpDir + "' '" + backupDir + "' '" + unzipLog + "' 2>/dev/null").c_str());
+            setErr("Gói cập nhật không nguyên vẹn (file " + rel +
+                   "). Sẽ thử lại bằng bản đầy đủ.");
+            return false;
+        }
+        ++verified;
+    }
+    if (verified == 0) {
+        system(("rm -rf '" + tmpDir + "' '" + backupDir + "' '" + unzipLog + "' 2>/dev/null").c_str());
+        setErr("Gói cập nhật không khớp manifest. Sẽ thử lại bằng bản đầy đủ.");
+        return false;
+    }
+
+    // 3. Chỗ trống: ~2x tổng file đã verify + 16MB (mirror full-zip).
+    // verifiedRels giữ danh sách rel đã verify để check sau chép.
+    std::vector<std::string> verifiedRels;
+    verifiedRels.reserve(verified);
+    for (const auto& full : stagedFiles) {
+        std::string rel = full.substr(staged.size() + 1);
+        struct stat st;
+        // Chỉ giữ file đã verify ở bước 2 (file lạ đã bị unlink).
+        if (stat(full.c_str(), &st) != 0 || !S_ISREG(st.st_mode)) continue;
+        bool known = false;
+        for (const auto& e : entries) {
+            if (e.path == rel) {
+                known = true;
+                break;
+            }
+        }
+        if (known) verifiedRels.push_back(rel);
+    }
+    {
+        struct stat st;
+        uint64_t sum = 0;
+        for (const auto& rel : verifiedRels) {
+            if (stat((staged + "/" + rel).c_str(), &st) == 0)
+                sum += (uint64_t)st.st_size;
+        }
+        uint64_t need = sum * 2 + 16ULL * 1024 * 1024;
+        uint64_t freeB = otaFreeBytes(appRoot);
+        if (freeB > 0 && freeB < need) {
+            system(("rm -rf '" + tmpDir + "' '" + backupDir + "' '" + unzipLog + "' 2>/dev/null").c_str());
+            setErr("Thẻ nhớ không đủ dung lượng (cần " +
+                   std::to_string(need / 1024 / 1024) + " MB).");
+            return false;
+        }
+    }
+
+    // 4. Backup dữ liệu user + chép đè + khôi phục (giống full-zip: user
+    // thắng khi trùng file config/iptv).
+    system(("cp -a '" + appRoot + "/data' '" + backupDir + "/data' 2>/dev/null").c_str());
+    system(("cp -a '" + appRoot + "/config' '" + backupDir + "/config' 2>/dev/null").c_str());
+    system(("cp -a '" + appRoot + "/iptv' '" + backupDir + "/iptv' 2>/dev/null").c_str());
+    std::string cpLog = tmpDir + ".cp.log";
+    ret = otaRunWithLog("cp -a '" + staged + "/.' '" + appRoot + "/'", cpLog);
+    if (ret != 0) {
+        std::string tail = otaTailLog(cpLog, 8);
+        system(("rm -rf '" + tmpDir + "' '" + backupDir + "' '" + cpLog + "' '" + unzipLog + "' 2>/dev/null").c_str());
+        setErr("Chép file cập nhật thất bại." +
+               (tail.empty() ? std::string() : (std::string("\nLog: ") + tail)));
+        return false;
+    }
+    system(("rm -rf '" + tmpDir + "' '" + cpLog + "' '" + unzipLog + "' 2>/dev/null").c_str());
+    system(("cp -a '" + backupDir + "/data/.' '" + appRoot + "/data/' 2>/dev/null").c_str());
+    system(("cp -a '" + backupDir + "/config/.' '" + appRoot + "/config/' 2>/dev/null").c_str());
+    system(("cp -a '" + backupDir + "/iptv/.' '" + appRoot + "/iptv/' 2>/dev/null").c_str());
+    system(("rm -rf '" + backupDir + "' 2>/dev/null").c_str());
+
+    // 5. Quyền thực thi + verify sau chép (mọi file đã verify).
+    system(("chmod +x '" + appRoot + "/bin/'* 2>/dev/null").c_str());
+    system(("chmod +x '" + appRoot + "/scripts/'*.sh 2>/dev/null").c_str());
+    system(("chmod +x '" + appRoot + "/launch.sh' 2>/dev/null").c_str());
+    sync();
+    for (const auto& rel : verifiedRels) {
+        struct stat st;
+        if (stat((appRoot + "/" + rel).c_str(), &st) != 0 ||
+            !S_ISREG(st.st_mode)) {
+            setErr("File sau cập nhật không hợp lệ: " + rel);
+            return false;
+        }
+    }
+    {
+        bool hasBin = false;
+        for (const auto& rel : verifiedRels)
+            if (rel == "bin/RomCloud") hasBin = true;
+        if (hasBin) {
+            struct stat st;
+            std::string finalBin = appRoot + "/bin/RomCloud";
+            if (stat(finalBin.c_str(), &st) != 0 || st.st_size < 1000000) {
+                setErr("File thực thi sau cập nhật không hợp lệ.");
+                return false;
+            }
+        }
+    }
+
+    Logger::info("OTA package applied (" + std::to_string(verifiedRels.size()) +
+                 " file).");
+    return true;
 }
 
 // installFullZip

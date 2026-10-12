@@ -11,7 +11,7 @@
 //   open/claim/handshake lại trên cùng handle (không cần gesture mới).
 // Tem version hiện ở footer để nhìn là biết đang chạy bản mới hay cache cũ.
 // Mỗi lần sửa file này thì đổi chuỗi dưới (ngày + commit ngắn).
-var INSTALL_JS_VER = "2026-10-12/usb-fix4";
+var INSTALL_JS_VER = "2026-10-12/ota-lite";
 var APP_INSTALL = {
   romcloud: {
     label: "RomCloud",
@@ -262,7 +262,25 @@ async function doInstall() {
     log("Đang hỏi bản mới nhất...");
     var rel = await (await fetch("https://api.github.com/repos/" + CFG.repo + "/releases/latest")).json();
     // Chỉ lấy gói app, loại gói RC-Web để không tải nhầm (giữ chung cho cả BrickDrop).
-    var asset = (rel.assets || []).filter(function (a) { return /\.zip$/.test(a.name) && !/^rc-web-/i.test(a.name); })[0];
+    // RomCloud: ưu tiên bản Lite nhẹ (~8MB) để đẩy nhanh/cáp yếu; app tự
+    // hoàn thiện phần còn lại khi mở lần đầu (có WiFi). Release cũ chưa có
+    // lite thì rớt về full như trước.
+    var zips = (rel.assets || []).filter(function (a) { return /\.zip$/.test(a.name) && !/^rc-web-/i.test(a.name); });
+    var asset = null;
+    if (APP_KEY === "romcloud") {
+      var i;
+      for (i = 0; i < zips.length; i++) {
+        if (/^RomCloud-v.*-lite\.zip$/.test(zips[i].name)) { asset = zips[i]; break; }
+      }
+      if (!asset) {
+        for (i = 0; i < zips.length; i++) {
+          if (/^RomCloud-v.*\.zip$/.test(zips[i].name) && !/-lite\.zip$/.test(zips[i].name)) { asset = zips[i]; break; }
+        }
+      }
+      if (!asset) asset = zips[0];
+    } else {
+      asset = zips[0];
+    }
     if (!asset) throw new Error("Không thấy file zip trong release " + rel.tag_name);
     log("Bản mới nhất: " + rel.tag_name + " (" + asset.name + ")", "ok");
     setProgress(5, "Đã kết nối — tải " + asset.name);
@@ -331,6 +349,9 @@ async function doInstall() {
       }
     }
     log("XONG! Rút cáp, mở " + CFG.label + " trên máy và dùng.", "ok");
+    if (APP_KEY === "romcloud" && /-lite\.zip$/.test(asset.name)) {
+      log("Đã cài bản Lite nhẹ — mở app lần đầu (có WiFi) để máy tự tải nốt phần còn lại.", "ok");
+    }
     devInfo.innerHTML = "<b>DONE ✔</b>";
     setProgress(100, "Hoàn tất 100%");
     return true;

@@ -214,6 +214,10 @@ bool UIManager::init(SDL_Window *window, SDL_Renderer *renderer) {
         }
       });
 
+  // Bản Lite first-boot: tự kéo gói completion (lite -> full) nền,
+  // không block boot (xem UpdateManager::ensureCompleted).
+  UpdateManager::instance().ensureCompleted();
+
   // Tự vá xong → báo + tự khởi động lại để nhận binary mới.
   UpdateManager::instance().setOnRepairCompleted([this](bool ok) {
     if (ok) {
@@ -2087,6 +2091,22 @@ void UIManager::update() {
     } else if (m_settingsTab == 2) {
       // Tab 2: CẬP NHẬT: route A/B theo UpdateState
       auto prog = UpdateManager::instance().getProgress();
+      // START: ép tìm bản mới (gọi thẳng check mạng, không chờ check nền).
+      // Chỉ ở trạng thái rảnh — không đụng khi đang tải/cài/chờ restart.
+      // Chặn bấm dồn 5s để không đẻ thread check chồng nhau.
+      if (input.isButtonJustPressed(Button::START) &&
+          (prog.state == UpdateState::IDLE ||
+           prog.state == UpdateState::UPDATE_AVAILABLE ||
+           prog.state == UpdateState::UP_TO_DATE ||
+           prog.state == UpdateState::FAILED)) {
+        static uint32_t s_otaForceMs = 0;
+        uint32_t nowOt = SDL_GetTicks();
+        if (nowOt - s_otaForceMs >= 5000) {
+          s_otaForceMs = nowOt;
+          showToast("Đang kiểm tra bản mới...", {0, 180, 216, 255}, 2000);
+          UpdateManager::instance().checkForUpdatesAsync();
+        }
+      }
       if (prog.state == UpdateState::UPDATE_AVAILABLE) {
         if (input.isButtonJustPressed(Button::A)) {
           UpdateManager::instance().startUpdate(
@@ -5533,21 +5553,25 @@ void UIManager::renderSettingsState() {
                        {UiTheme::PadBtn::X, "Trình duyệt"},
                        {UiTheme::PadBtn::Y, "Tính năng mới"},
                        {UiTheme::PadBtn::B, "Lùi"},
+                       {UiTheme::PadBtn::START, "Tìm bản mới"},
                        {UiTheme::PadBtn::L1R1, "Chuyển tab"}});
       } else {
         drawAppFooter({{UiTheme::PadBtn::A, "Tải"},
                        {UiTheme::PadBtn::Y, "Tính năng mới"},
                        {UiTheme::PadBtn::B, "Lùi"},
+                       {UiTheme::PadBtn::START, "Tìm bản mới"},
                        {UiTheme::PadBtn::L1R1, "Chuyển tab"}});
       }
     } else if (showXHInt) {
       drawAppFooter({{UiTheme::PadBtn::A, "Đồng ý"},
                      {UiTheme::PadBtn::X, "Trình duyệt"},
                      {UiTheme::PadBtn::B, "Lùi"},
+                     {UiTheme::PadBtn::START, "Tìm bản mới"},
                      {UiTheme::PadBtn::L1R1, "Chuyển tab"}});
     } else {
       drawAppFooter({{UiTheme::PadBtn::A, "Đồng ý"},
                      {UiTheme::PadBtn::B, "Lùi"},
+                     {UiTheme::PadBtn::START, "Tìm bản mới"},
                      {UiTheme::PadBtn::L1R1, "Chuyển tab"}});
     }
     return;

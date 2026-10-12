@@ -4,6 +4,8 @@
 #include <atomic>
 #include <mutex>
 #include <functional>
+#include <vector>
+#include <utility>
 
 namespace RomCloud {
 
@@ -37,6 +39,12 @@ struct UpdateInfo {
     std::string osBundleUrl;      // OS-specific dependencies
     std::string rcWebUrl;         // RC-Web browser package (rc-web-<ver>.zip)
     std::string rcWebVersion;     // Remote RC-Web version (date-based, e.g. 20261011)
+    // OTA delta (v2.5.2+): chỉ tải file đổi thay vì cả build.
+    std::string otaManifestUrl;   // ota-manifest.json của bản remote
+    std::string manifestBaseVersion; // delta này build trên nền bản nào
+    std::string deltaZipUrl;      // RomCloud-vX-delta.zip (file đổi)
+    std::string liteZipUrl;       // RomCloud-vX-lite.zip (cho máy mới)
+    std::string completionZipUrl; // gói hoàn thiện lite -> full
     std::string changelog;
     std::string releaseDate;
     uint64_t sizeBytes = 0;
@@ -44,8 +52,14 @@ struct UpdateInfo {
     std::string targetOs;         // ALL, or specific OS (STOCK_PS, NEXTUI, SPRUCE_OS)
 };
 
-struct UpdateProgress {
-    UpdateState state = UpdateState::IDLE;
+// 1 entry ota-manifest.json: path tương đối appRoot (vd "bin/RomCloud").
+struct OtaManifestEntry {
+    std::string path;
+    std::string sha256;
+    uint64_t size = 0;
+};
+
+struct UpdateProgress {    UpdateState state = UpdateState::IDLE;
     uint64_t bytesDownloaded = 0;
     uint64_t totalBytes = 0;
     double progressPct = 0.0;
@@ -87,6 +101,9 @@ public:
     // OTA binary-only đời cũ) thì tự tải full-zip bản hiện tại và cài.
     // Trả về true nếu đã bắt đầu quá trình vá.
     bool repairIfBroken();
+    // Lite first-boot: tự kéo gói completion (lite -> full) 1 lần, nền,
+    // không block boot. Xong thì flavor=full (không cần restart).
+    void ensureCompleted();
     void setOnRepairCompleted(std::function<void(bool)> cb) {
       m_onRepairCompleted = std::move(cb);
     }
@@ -118,6 +135,16 @@ private:
 
     void runDownloadWorker(UpdateInfo info);
     bool installFullZip(const std::string& zipPath);
+    // OTA delta: tải manifest + delta/completion zip, verify từng file theo
+    // hash rồi swap nguyên khối. Hỏng ở đâu cũng rớt về full-zip cũ.
+    // Trả true khi đã xong (caller chạy tiếp đuôi rc-web + COMPLETED).
+    bool tryDeltaUpdate(const UpdateInfo& info);
+    bool applyOtaPackage(const std::string& zipPath,
+                         const std::vector<OtaManifestEntry>& entries);
+    void finishUpdateTail(const UpdateInfo& info);
+    static std::string sha256File(const std::string& path);
+    static std::string readOtaFlavor();
+    static void writeOtaFlavor(const std::string& flavor);
     void runRcWebWorker(UpdateInfo info);
     bool installRcWebZip(const std::string& zipPath);
     void notifyRepairDone(bool ok);

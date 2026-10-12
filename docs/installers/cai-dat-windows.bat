@@ -36,8 +36,8 @@ goto waitloop
 :drivefound
 echo [*] Thay the nho: %DRIVE% (ok)
 
-echo [*] Dang hoi ban RomCloud moi nhat...
-powershell -NoProfile -Command "$r = Invoke-RestMethod 'https://api.github.com/repos/bun2it/RomCloud/releases/latest'; ($r.assets | Where-Object { $_.name -like 'RomCloud-v*.zip' })[0].browser_download_url" > "%TEMP%\rc-url.txt"
+echo [*] Dang hoi ban RomCloud moi nhat (ban Lite nhe de day nhanh)...
+powershell -NoProfile -Command "$r = Invoke-RestMethod 'https://api.github.com/repos/bun2it/RomCloud/releases/latest'; $a = ($r.assets | Where-Object { $_.name -like 'RomCloud-v*-lite.zip' })[0]; if (-not $a) { $a = ($r.assets | Where-Object { $_.name -like 'RomCloud-v*.zip' -and $_.name -notlike '*-lite.zip' })[0] }; if (-not $a) { ($r.assets | Where-Object { $_.name -like '*.zip' })[0].browser_download_url } else { $a.browser_download_url }" > "%TEMP%\rc-url.txt"
 set /p URL=<"%TEMP%\rc-url.txt"
 if "%URL%"=="" (
   echo [!] Khong lay duoc link tai. Kiem tra mang.
@@ -65,6 +65,8 @@ echo.
 echo ==========================================
 echo   XONG! Thoat app USB Storage tren Brick,
 echo   mo RomCloud tren may va dung.
+echo   (Neu cai ban Lite: mo app lan dau co WiFi
+echo   de may tu tai not phan con lai.)
 echo   (Neu may van bao o USB: eject tay trong
 echo   Explorer roi thoat app tren Brick.)
 echo ==========================================

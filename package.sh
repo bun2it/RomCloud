@@ -136,8 +136,7 @@ cd "$SCRIPT_DIR"
 if [ -f bin/mpv ]; then
     cp bin/mpv "$STAGING_DIR/Apps/RomCloud/bin/"
     chmod +x "$STAGING_DIR/Apps/RomCloud/bin/mpv"
-fi
-if [ -f bin/yt-dlp-glibc ]; then
+fiif [ -f bin/yt-dlp-glibc ]; then
     cp bin/yt-dlp-glibc "$STAGING_DIR/Apps/RomCloud/bin/"
     chmod +x "$STAGING_DIR/Apps/RomCloud/bin/yt-dlp-glibc"
 fi
@@ -145,10 +144,23 @@ if [ -d lib ]; then
     cp -P lib/*.so* "$STAGING_DIR/Apps/RomCloud/lib/" 2>/dev/null || true
 fi
 
+# Flavor marker cho OTA delta (máy Lite đọc để tự kéo completion).
+echo "full" > "$STAGING_DIR/Apps/RomCloud/.ota_flavor"
 cd "$STAGING_DIR"
 make_zip "$DIST_DIR/$ZIP_NAME" Apps
 
 cd "$SCRIPT_DIR"
+
+# OTA lite/delta/completion (chỉ khi OTA_RELEASE=1, cần ota-manifest.json
+# baseline trong repo). Không đụng luồng package thường.
+if [ "$OTA_RELEASE" = "1" ]; then
+    if [ -f "$SCRIPT_DIR/ota-manifest.json" ]; then
+        python3 "$SCRIPT_DIR/tools/mkota.py" release "$STAGING_DIR" "$VERSION" \
+            "$SCRIPT_DIR/ota-manifest.json" "$DIST_DIR"
+    else
+        echo "WARNING: thieu ota-manifest.json baseline, bo qua goi delta/lite." >&2
+    fi
+fi
 rm -rf "$STAGING_DIR"
 
 echo "=== Release Package Created Successfully (single zip) ==="
