@@ -11,7 +11,7 @@
 //   open/claim/handshake lại trên cùng handle (không cần gesture mới).
 // Tem version hiện ở footer để nhìn là biết đang chạy bản mới hay cache cũ.
 // Mỗi lần sửa file này thì đổi chuỗi dưới (ngày + commit ngắn).
-var INSTALL_JS_VER = "2026-10-12/1nut-bar";
+var INSTALL_JS_VER = "2026-10-12/usb-fix4";
 var APP_INSTALL = {
   romcloud: {
     label: "RomCloud",
@@ -144,28 +144,15 @@ async function tryConnect(device, attempt) {
     try { if (device.opened) await device.close(); } catch (e) {}
     await device.open();
     webusb = new Adb.WebUSB.Transport(device);
-    // Cho gadget USB ổn định sau open (Brick qua hub hay trả
-    // "state change in progress" nếu handshake ngay).
-    await sleep(400);
+    // Cho gadget USB ổn định sau open/claim (Brick hay trả
+    // "state change in progress" nếu handshake ngay). KHÔNG handshake
+    // lại giữa chừng: gọi select/claim lần 2 trên thiết bị đang dở dang
+    // làm sunxi rớt USB luôn — thất bại thì để vòng ngoài mở sạch lại.
+    await sleep(800);
     log("Đang kết nối adb (duyệt Cho phép trên máy nếu hỏi)...");
-    try {
-      adb = await webusb.connectAdb("host::", function () {
-        log("Hãy bấm Cho phép / OK trên màn hình máy Brick.");
-      });
-    } catch (e2) {
-      // Race open/claim -> handshake: chờ 1s rồi handshake lại trên cùng
-      // transport, không mở lại từ đầu.
-      var m2 = (e2 && e2.message ? e2.message : String(e2));
-      if (/state change|device state/i.test(m2)) {
-        log("Cổng chưa ổn định, chờ 1s thử handshake lại...");
-        await sleep(1000);
-        adb = await webusb.connectAdb("host::", function () {
-          log("Hãy bấm Cho phép / OK trên màn hình máy Brick.");
-        });
-      } else {
-        throw e2;
-      }
-    }
+    adb = await webusb.connectAdb("host::", function () {
+      log("Hãy bấm Cho phép / OK trên màn hình máy Brick.");
+    });
     var model = "?";
     try { model = (await shell("getprop ro.product.model")).trim() || "?"; } catch (e) {}
     devInfo.innerHTML = "Đã kết nối: <b>" + model.replace(/</g, "&lt;") + "</b>";
