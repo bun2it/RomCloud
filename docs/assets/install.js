@@ -11,7 +11,7 @@
 //   open/claim/handshake lại trên cùng handle (không cần gesture mới).
 // Tem version hiện ở footer để nhìn là biết đang chạy bản mới hay cache cũ.
 // Mỗi lần sửa file này thì đổi chuỗi dưới (ngày + commit ngắn).
-var INSTALL_JS_VER = "2026-10-12/oneclick2";
+var INSTALL_JS_VER = "2026-10-12/1nut-bar";
 var APP_INSTALL = {
   romcloud: {
     label: "RomCloud",
@@ -59,7 +59,6 @@ async function closeStale() {
 
 var logEl = document.getElementById("log");
 var btnConn = document.getElementById("btnConn");
-var btnInstall = document.getElementById("btnInstall");
 var devInfo = document.getElementById("devInfo");
 
 function log(msg, cls) {
@@ -74,6 +73,44 @@ async function shell(cmd) {
   var stream = await adb.shell(cmd);
   var out = await stream.receive();
   return (out || "").toString();
+}
+
+// Thanh tiến trình tổng (0-100%): kết nối 5% -> tải zip 30% -> đẩy 70%
+// -> bung 78% -> RC-Web (nếu có) 96% -> xong 100%.
+function setProgress(pct, text) {
+  var w = document.getElementById("progWrap");
+  var f = document.getElementById("progFill");
+  var t = document.getElementById("progText");
+  if (w) w.style.display = "block";
+  if (f) f.style.width = Math.max(0, Math.min(100, pct)) + "%";
+  if (t && text !== undefined) t.textContent = text;
+}
+
+function resetProgress() {
+  setProgress(0, "Bắt đầu...");
+}
+
+// Tải file có báo % (đọc stream). Không đo được dung lượng thì tải
+// thường (vẫn xong, chỉ không có % chi tiết).
+async function fetchBlobProgress(url, onp) {
+  var resp = await fetch(url);
+  if (!resp.ok) throw new Error("HTTP " + resp.status);
+  var total = +(resp.headers.get("Content-Length") || 0);
+  if (!resp.body || !resp.body.getReader || !total) {
+    var b0 = await resp.blob();
+    if (onp) onp(b0.size, total);
+    return b0;
+  }
+  var reader = resp.body.getReader();
+  var chunks = [], got = 0;
+  for (;;) {
+    var r = await reader.read();
+    if (r.done) break;
+    chunks.push(r.value);
+    got += r.value.length;
+    if (onp) onp(got, total);
+  }
+  return new Blob(chunks);
 }
 
 // Cập nhật chữ theo app đang cài.
@@ -133,7 +170,6 @@ async function tryConnect(device, attempt) {
     try { model = (await shell("getprop ro.product.model")).trim() || "?"; } catch (e) {}
     devInfo.innerHTML = "Đã kết nối: <b>" + model.replace(/</g, "&lt;") + "</b>";
     log("Đã kết nối máy: " + model, "ok");
-    btnInstall.disabled = false;
     return true;
   } catch (e) {
     var msg = (e && e.message ? e.message : String(e));
@@ -220,17 +256,21 @@ btnConn.onclick = async function () {
     return;
   }
   if (!ok) {
-    log("Đã tự thử 3 lần không được. Cổng USB đang bị phần mềm khác giữ (adb/driver trên laptop) — Terminal chạy: adb kill-server, rút cáp cắm lại rồi bấm Kết nối.", "err");
+    log("Đã tự thử 3 lần không được. Cổng USB đang bị phần mềm khác giữ (adb/driver trên laptop) — Terminal chạy: adb kill-server, rút cáp cắm lại rồi bấm nút Cài đặt lại.", "err");
     await closeStale();
     btnConn.disabled = false;
+    return;
   }
-  // Thành công: giữ btnConn disabled như cũ, handle sống để cài tiếp.
+  // 1 nút làm hết: kết nối xong là cài luôn, không chờ bấm thêm.
+  await doInstall();
+  btnConn.disabled = false;
 };
 
-btnInstall.onclick = async function () {
-  if (!adb) return;
-  btnInstall.disabled = true;
+// Cài đặt sau khi đã có adb (gọi 1 lần từ nút duy nhất). Trả true/false.
+async function doInstall() {
+  if (!adb) return false;
   try {
+    resetProgress();
     // 1. Release mới nhất
     log("Đang hỏi bản mới nhất...");
     var rel = await (await fetch("https://api.github.com/repos/" + CFG.repo + "/releases/latest")).json();
@@ -238,27 +278,37 @@ btnInstall.onclick = async function () {
     var asset = (rel.assets || []).filter(function (a) { return /\.zip$/.test(a.name) && !/^rc-web-/i.test(a.name); })[0];
     if (!asset) throw new Error("Không thấy file zip trong release " + rel.tag_name);
     log("Bản mới nhất: " + rel.tag_name + " (" + asset.name + ")", "ok");
+    setProgress(5, "Đã kết nối — tải " + asset.name);
 
-    // 2. Tải zip
+    // 2. Tải zip (có %)
     log("Đang tải zip (chờ chút)...");
-    var blob = await (await fetch(asset.browser_download_url)).blob();
+    var blob = await fetchBlobProgress(asset.browser_download_url, function (got, total) {
+      var p = total > 0 ? (5 + got * 25 / total) : 15;
+      setProgress(p, "Đang tải: " + (got / 1048576).toFixed(1) + "MB" +
+        (total > 0 ? " / " + (total / 1048576).toFixed(1) + "MB" : ""));
+    });
     log("Đã tải: " + (blob.size / 1048576).toFixed(1) + "MB", "ok");
 
-    // 3. Đẩy lên thẻ nhớ
+    // 3. Đẩy lên thẻ nhớ (có %)
     var remoteZip = "/mnt/SDCARD/" + CFG.zipName;
     log("Đang đẩy lên thẻ nhớ...");
     var sync = await adb.sync();
     await sync.push(blob, remoteZip, 420, function (sent, total) {
+      var p = 30 + (total > 0 ? sent * 40 / total : 20);
       devInfo.innerHTML = "Đang đẩy: <b>" + Math.floor(sent * 100 / total) + "%</b>";
+      setProgress(p, "Đang đẩy lên thẻ: " + Math.floor(sent * 100 / total) + "%");
     });
     await sync.quit();
     log("Đã đẩy xong.", "ok");
 
     // 4. Bung + quyền + dọn
     log("Đang bung ra Apps/...");
+    setProgress(72, "Đang bung ra Apps/...");
     var unzip = await shell("cd /mnt/SDCARD && unzip -o -q " + CFG.zipName + " && echo UNZIP_OK");
     if (unzip.indexOf("UNZIP_OK") < 0) throw new Error("Bung zip lỗi, còn thiếu unzip trên máy?");
+    setProgress(75, "Đang cấp quyền...");
     await shell("chmod +x " + CFG.chmod.map(function (p) { return "/mnt/SDCARD/" + p; }).join(" ") + "; sync; echo DONE");
+    setProgress(78, "Đang kiểm tra...");
     var check = await shell("ls /mnt/SDCARD/" + CFG.verify + " && rm -f " + remoteZip + " && echo INSTALLED");
     if (check.indexOf("INSTALLED") < 0) throw new Error("Kiểm tra sau cài thất bại.");
 
@@ -270,15 +320,21 @@ btnInstall.onclick = async function () {
         log("Release này chưa có gói RC-Web, bỏ qua (web sẽ báo chưa cài).");
       } else {
         log("Thấy gói RC-Web (" + rcAsset.name + "), đang tải...");
-        var rcBlob = await (await fetch(rcAsset.browser_download_url)).blob();
+        var rcBlob = await fetchBlobProgress(rcAsset.browser_download_url, function (got, total) {
+          var p = total > 0 ? (78 + got * 6 / total) : 81;
+          setProgress(p, "Đang tải RC-Web: " + (got / 1048576).toFixed(1) + "MB");
+        });
         log("Đã tải RC-Web: " + (rcBlob.size / 1048576).toFixed(1) + "MB", "ok");
         log("Đang đẩy RC-Web lên thẻ nhớ (lâu hơn)...");
         var sync2 = await adb.sync();
         await sync2.push(rcBlob, "/mnt/SDCARD/rcweb.zip", 420, function (sent, total) {
+          var p = 84 + (total > 0 ? sent * 12 / total : 6);
           devInfo.innerHTML = "Đang đẩy RC-Web: <b>" + Math.floor(sent * 100 / total) + "%</b>";
+          setProgress(p, "Đang đẩy RC-Web: " + Math.floor(sent * 100 / total) + "%");
         });
         await sync2.quit();
         log("Đang bung RC-Web...");
+        setProgress(96, "Đang bung RC-Web...");
         var rcUnzip = await shell("mkdir -p /mnt/SDCARD/Apps/RomCloud/rc-web && cd /mnt/SDCARD/Apps/RomCloud/rc-web && unzip -o -q /mnt/SDCARD/rcweb.zip && echo RCWEB_OK");
         if (rcUnzip.indexOf("RCWEB_OK") < 0) throw new Error("Bung gói RC-Web lỗi.");
         await shell("chmod +x /mnt/SDCARD/Apps/RomCloud/rc-web/launch.sh /mnt/SDCARD/Apps/RomCloud/rc-web/electron/electron /mnt/SDCARD/Apps/RomCloud/rc-web/bin/gptokeyb2 /mnt/SDCARD/Apps/RomCloud/rc-web/weston/bin/weston /mnt/SDCARD/Apps/RomCloud/rc-web/weston/bin/seatd /mnt/SDCARD/Apps/RomCloud/rc-web/weston/bin/xkbcomp 2>/dev/null; sync; echo DONE");
@@ -289,8 +345,10 @@ btnInstall.onclick = async function () {
     }
     log("XONG! Rút cáp, mở " + CFG.label + " trên máy và dùng.", "ok");
     devInfo.innerHTML = "<b>DONE ✔</b>";
+    setProgress(100, "Hoàn tất 100%");
+    return true;
   } catch (e) {
     log("LỖI: " + (e && e.message ? e.message : e), "err");
-    btnInstall.disabled = false;
+    return false;
   }
-};
+}
