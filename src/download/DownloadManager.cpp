@@ -308,7 +308,7 @@ void DownloadManager::runDownloadWorker() {
         if (dl.empty()) {
             std::lock_guard<std::mutex> lock(m_mutex);
             m_progress.state = DownloadState::FAILED;
-            m_progress.errorMessage = "Không lấy được link tải OneDrive (HTTP " + std::to_string(meta.statusCode) + "). Hay dong bo lai.";
+            m_progress.errorMessage = "Không lấy được link tải OneDrive (HTTP " + std::to_string(meta.statusCode) + "). Hãy đồng bộ lại.";
             Logger::error(m_progress.errorMessage);
             m_isRunning = false;
             return;
