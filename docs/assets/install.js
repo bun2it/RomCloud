@@ -11,7 +11,7 @@
 //   open/claim/handshake lại trên cùng handle (không cần gesture mới).
 // Tem version hiện ở footer để nhìn là biết đang chạy bản mới hay cache cũ.
 // Mỗi lần sửa file này thì đổi chuỗi dưới (ngày + commit ngắn).
-var INSTALL_JS_VER = "2026-10-12/usb-fix2";
+var INSTALL_JS_VER = "2026-10-12/usb-fix3";
 var APP_INSTALL = {
   romcloud: {
     label: "RomCloud",
@@ -100,8 +100,9 @@ async function shell(cmd) {
 async function tryConnect(device, attempt) {
   try {
     if (attempt > 1) {
+      // KHÔNG gọi device.reset(): trên gadget sunxi của Brick, reset làm
+      // máy rớt khỏi USB luôn (lần sau open báo disconnected).
       log("Thử lại claim/kết nối lần " + attempt + "/3 (giữ nguyên máy đã chọn)...");
-      try { await device.reset(); } catch (e) {} // gỡ trạng thái kẹt, nếu được
     }
     try { if (device.opened) await device.close(); } catch (e) {}
     await device.open();
