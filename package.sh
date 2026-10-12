@@ -77,6 +77,8 @@ cp assets/fonts/gluqlo.ttf "$STAGING_DIR/Apps/RomCloud/assets/fonts/"
 # Chuong bao thuc (ClockStore beepStart qua aplay)
 cp assets/sounds/alarm.wav "$STAGING_DIR/Apps/RomCloud/assets/sounds/"
 cp assets/vn_wards.json "$STAGING_DIR/Apps/RomCloud/assets/" 2>/dev/null || true
+cp assets/hcm_outline.json "$STAGING_DIR/Apps/RomCloud/assets/" 2>/dev/null || true
+cp assets/icon.png "$STAGING_DIR/Apps/RomCloud/assets/" 2>/dev/null || true
 cp assets/traffic_cams.json "$STAGING_DIR/Apps/RomCloud/assets/" 2>/dev/null || true
 cp assets/flood_points.json "$STAGING_DIR/Apps/RomCloud/assets/" 2>/dev/null || true
 # Bang tra MD5/CRC32 -> he may cho tinh nang Sap xep ROM (sinh boi
@@ -105,6 +107,7 @@ if [ -d config ]; then
 fi
 cp -f iptv/*.m3u iptv/*.m3u8 "$STAGING_DIR/Apps/RomCloud/iptv/" 2>/dev/null || true
 cp -f iptv/sources.txt "$STAGING_DIR/Apps/RomCloud/iptv/" 2>/dev/null || true
+cp -f iptv/iptv_manifest.json "$STAGING_DIR/Apps/RomCloud/iptv/" 2>/dev/null || true
 
 # Ensure execution permissions
 chmod +x "$STAGING_DIR/Apps/RomCloud/launch.sh" "$STAGING_DIR/Apps/RomCloud/bin/RomCloud"

@@ -906,6 +906,52 @@ void UpdateManager::runDownloadWorker(UpdateInfo info) {
 
   Logger::info("OTA update completed!");
 
+  // 1 cham full: xong app thi tu tai + cai RC-Web (neu manifest co goi
+  // moi hon ban dang cai, hoac may chua co rc-web). Khong co goi moi thi
+  // bo qua, van COMPLETED binh thuong.
+  {
+    std::string curRcWeb = getInstalledRcWebVersion();
+    bool needRcWeb = false;
+    if (!info.rcWebUrl.empty() && !info.rcWebVersion.empty()) {
+      if (curRcWeb.empty() || isVersionNewer(info.rcWebVersion, curRcWeb))
+        needRcWeb = true;
+    }
+    if (needRcWeb && !m_cancelRequested) {
+      {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_progress.state = UpdateState::DOWNLOADING;
+        m_progress.currentStep = "Đang tải trình duyệt RC-Web bản " +
+                                 info.rcWebVersion + "...";
+        m_progress.bytesDownloaded = 0;
+        m_progress.totalBytes = 0;
+        m_progress.progressPct = 0.0;
+        m_progress.speedKBps = 0.0;
+      }
+      std::string rcZipPath = appRoot + "/rcweb_update.zip";
+      uint64_t rcSize = 0;
+      bool rcOk = downloadFile(info.rcWebUrl, rcZipPath, &rcSize, true);
+      if (rcOk && rcSize >= 50000000ULL) {
+        uint64_t rcNeed = rcSize + 600ULL * 1024 * 1024;
+        uint64_t rcFree = otaFreeBytes(appRoot);
+        if ((rcFree == 0 || rcFree >= rcNeed) && installRcWebZip(rcZipPath)) {
+          Logger::info("OTA full: RC-Web installed too");
+        } else {
+          Logger::warn("OTA full: bo qua RC-Web (thieu cho hoac loi giai nen)");
+        }
+      } else {
+        Logger::warn("OTA full: khong tai duoc RC-Web");
+      }
+      unlink(rcZipPath.c_str());
+      if (m_cancelRequested) {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_progress.state = UpdateState::IDLE;
+        m_isRunning = false;
+        notifyRepairDone(false);
+        return;
+      }
+    }
+  }
+
 
   {
     std::lock_guard<std::mutex> lock(m_mutex);

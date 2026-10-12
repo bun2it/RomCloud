@@ -1,15 +1,15 @@
 {
-  "version": "2.4.1",
-  "release_date": "2026-10-05",
+  "version": "2.5.0",
+  "release_date": "2026-10-12",
   "target_os": "ALL",
   "icon_url": "https://raw.githubusercontent.com/bun2it/RomCloud/main/icon.png",
-  "full_zip_url": "https://github.com/bun2it/RomCloud/releases/download/v2.4.1/RomCloud-v2.4.1.zip",
+  "full_zip_url": "https://github.com/bun2it/RomCloud/releases/download/v2.5.0/RomCloud-v2.5.0.zip",
   "rc_web_version": "20261011",
-  "rc_web_url": "https://github.com/bun2it/RomCloud/releases/download/v2.4.1/rc-web-20261011.zip",
+  "rc_web_url": "https://github.com/bun2it/RomCloud/releases/download/v2.5.0/rc-web-20261011.zip",
   "os_versions": {
-    "STOCK_PS": "2.4.1",
-    "NEXTUI": "2.4.1",
-    "SPRUCE_OS": "2.4.1"
+    "STOCK_PS": "2.5.0",
+    "NEXTUI": "2.5.0",
+    "SPRUCE_OS": "2.5.0"
   },
-  "changelog": "Sửa lỗi, tối ưu hiệu năng. Thêm chức năng xem biểu đồ thị trường crypto, chứng khoán."
+  "changelog": "Đăng nhập Google Drive cá nhân: lưu và đồng bộ 2 chiều với Drive của bạn. Tự động, an toàn, mở lúc nào cũng được.\nTự xếp ROM đúng hệ máy: app quét file ROM và đối chiếu với danh sách hơn 40.000 ROM để tự xếp đúng thư mục, đúng hệ emu, bạn không phải phân loại hay đoán nữa, độ chính xác 99%.\nTrình duyệt web đầy đủ: lướt web như trên điện thoại: đa tab, đa nhiệm, mượt mà.\nKênh IPTV nâng cấp: tự động tìm nguồn kênh tốt nhất. Nhiều kênh hơn, xem ổn định hơn.\nTìm kiếm & phát Youtube video nhanh hơn: 2 engine tìm thông minh, gợi ý chuẩn, tải nhanh, ít giật lag.\nScreensaver đa dạng: nhiều mẫu đẹp, hiện thông tin hữu ích, tùy chỉnh theo ý thích.\nTinh chỉnh hiệu năng: khởi động nhanh hơn, nhẹ máy hơn, tiết kiệm pin hơn."
 }

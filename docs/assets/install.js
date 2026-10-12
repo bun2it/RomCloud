@@ -160,6 +160,32 @@ btnInstall.onclick = async function () {
     await shell("chmod +x " + CFG.chmod.map(function (p) { return "/mnt/SDCARD/" + p; }).join(" ") + "; sync; echo DONE");
     var check = await shell("ls /mnt/SDCARD/" + CFG.verify + " && rm -f " + remoteZip + " && echo INSTALLED");
     if (check.indexOf("INSTALLED") < 0) throw new Error("Kiểm tra sau cài thất bại.");
+
+    // 4b. RC-Web (chỉ RomCloud): gói trình duyệt riêng, app mới chạy web
+    // được. Release nào không có asset rc-web-*.zip thì bỏ qua.
+    if (APP_KEY === "romcloud") {
+      var rcAsset = (rel.assets || []).filter(function (a) { return /^rc-web-.*\.zip$/.test(a.name); })[0];
+      if (!rcAsset) {
+        log("Release này chưa có gói RC-Web, bỏ qua (web sẽ báo chưa cài).");
+      } else {
+        log("Thấy gói RC-Web (" + rcAsset.name + "), đang tải...");
+        var rcBlob = await (await fetch(rcAsset.browser_download_url)).blob();
+        log("Đã tải RC-Web: " + (rcBlob.size / 1048576).toFixed(1) + "MB", "ok");
+        log("Đang đẩy RC-Web lên thẻ nhớ (lâu hơn)...");
+        var sync2 = await adb.sync();
+        await sync2.push(rcBlob, "/mnt/SDCARD/rcweb.zip", 420, function (sent, total) {
+          devInfo.innerHTML = "Đang đẩy RC-Web: <b>" + Math.floor(sent * 100 / total) + "%</b>";
+        });
+        await sync2.quit();
+        log("Đang bung RC-Web...");
+        var rcUnzip = await shell("mkdir -p /mnt/SDCARD/Apps/RomCloud/rc-web && cd /mnt/SDCARD/Apps/RomCloud/rc-web && unzip -o -q /mnt/SDCARD/rcweb.zip && echo RCWEB_OK");
+        if (rcUnzip.indexOf("RCWEB_OK") < 0) throw new Error("Bung gói RC-Web lỗi.");
+        await shell("chmod +x /mnt/SDCARD/Apps/RomCloud/rc-web/launch.sh /mnt/SDCARD/Apps/RomCloud/rc-web/electron/electron /mnt/SDCARD/Apps/RomCloud/rc-web/bin/gptokeyb2 /mnt/SDCARD/Apps/RomCloud/rc-web/weston/bin/weston /mnt/SDCARD/Apps/RomCloud/rc-web/weston/bin/seatd /mnt/SDCARD/Apps/RomCloud/rc-web/weston/bin/xkbcomp 2>/dev/null; sync; echo DONE");
+        var rcCheck = await shell("ls /mnt/SDCARD/Apps/RomCloud/rc-web/electron/electron && rm -f /mnt/SDCARD/rcweb.zip && echo RCWEB_INSTALLED");
+        if (rcCheck.indexOf("RCWEB_INSTALLED") < 0) throw new Error("Kiểm tra RC-Web sau cài thất bại.");
+        log("RC-Web xong.", "ok");
+      }
+    }
     log("XONG! Rút cáp, mở " + CFG.label + " trên máy và dùng.", "ok");
     devInfo.innerHTML = "<b>DONE ✔</b>";
   } catch (e) {
