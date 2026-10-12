@@ -11,7 +11,7 @@
 //   open/claim/handshake lại trên cùng handle (không cần gesture mới).
 // Tem version hiện ở footer để nhìn là biết đang chạy bản mới hay cache cũ.
 // Mỗi lần sửa file này thì đổi chuỗi dưới (ngày + commit ngắn).
-var INSTALL_JS_VER = "2026-10-12/oneclick1";
+var INSTALL_JS_VER = "2026-10-12/oneclick2";
 var APP_INSTALL = {
   romcloud: {
     label: "RomCloud",
@@ -214,7 +214,7 @@ btnConn.onclick = async function () {
     ok = false; // gesture: tryConnect đã log, dừng vòng thử
   }
   if (gone) {
-    log("Dừng ở đây: máy không còn trên USB. Đổi cáp data khác, cắm thẳng vào Mac (bỏ hub), chắc chắn Brick không reboot giữa chừng, rồi bấm Kết nối.", "err");
+    log("Dừng ở đây: máy không còn trên USB (kiểu cũ). NHƯNG nếu Brick đang mở app USB Storage thì đây là BÌNH THƯỜNG: đổi mode USB làm handle cũ chết — cứ dùng luôn đường chép file (.bat/.command), không cần WebUSB. Muốn dùng WebUSB thì thoát app USB Storage trên Brick rồi bấm Kết nối (chọn lại máy). Ngược lại (không mở gì): đổi cáp data khác, cắm thẳng vào Mac (bỏ hub), rồi bấm Kết nối.", "err");
     await closeStale();
     btnConn.disabled = false;
     return;
