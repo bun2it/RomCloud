@@ -1,3 +1,4 @@
 # RomCloud IPTV Sources Metadata
 # filename|name|type|url|lastRefreshed|refreshIntervalHours
+live.m3u|live|file||0|24
 default.m3u|Kênh Mặc Định|file||0|24

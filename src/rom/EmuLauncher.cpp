@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <cstring>
 #include <fcntl.h>
+#include <fstream>
 #include <signal.h>
 #include <spawn.h>
 #include <string>
@@ -17,6 +18,35 @@
 extern char** environ;
 
 namespace RomCloud {
+
+namespace {
+// Đọc script mặc định của Stock MainUI từ Emus/<CODE>/config.json
+// field "launch" (chuẩn vàng, verified qua adb). Chỉ chấp nhận basename
+// *.sh, từ chối path traversal ("/", "\\", ".."). Trả "" khi không đọc
+// được / không hợp lệ để caller fallback launch.sh.
+std::string stockDefaultLaunch(const std::string& emuDir) {
+    std::ifstream f(emuDir + "/config.json");
+    if (!f.is_open()) return "";
+    std::string content((std::istreambuf_iterator<char>(f)),
+                        std::istreambuf_iterator<char>());
+    size_t pos = content.find("\"launch\"");
+    if (pos == std::string::npos) return "";
+    pos = content.find(':', pos + 8);
+    if (pos == std::string::npos) return "";
+    size_t q1 = content.find('"', pos + 1);
+    if (q1 == std::string::npos) return "";
+    size_t q2 = content.find('"', q1 + 1);
+    if (q2 == std::string::npos || q2 <= q1 + 1) return "";
+    std::string name = content.substr(q1 + 1, q2 - q1 - 1);
+    if (name.size() < 4 || name.compare(name.size() - 3, 3, ".sh") != 0)
+        return "";
+    if (name.find('/') != std::string::npos ||
+        name.find('\\') != std::string::npos ||
+        name.find("..") != std::string::npos)
+        return "";
+    return name;
+}
+} // namespace
 
 EmuLauncher& EmuLauncher::instance() {
     static EmuLauncher inst;
@@ -32,14 +62,28 @@ bool EmuLauncher::findLauncher(const std::string& systemCode,
     std::string sdRoot = AppConfig::instance().getSdRoot();
     if (sdRoot.empty()) sdRoot = "/mnt/SDCARD";
     // Mã hệ trong DB trùng tên thư mục Emus (GBA->Emus/GBA, FC->Emus/FC).
-    const std::string cands[] = {
-        sdRoot + "/Emus/" + systemCode + "/launch.sh",
-    };
-    for (const auto& p : cands) {
+    // Khớp 100% Stock: script mặc định lấy từ config.json field "launch"
+    // (CPS3->launch_fbneo.sh, FBNEO->launch_performance.sh,
+    //  PPSSPP->launch_performance_vulkan.sh,
+    //  SS->launch_yabasanshiro_standalone.sh), fallback launch.sh.
+    // Từ chối mọi traversal ("..", "/") để config lạ không thoát khỏi Emu.
+    if (systemCode.empty() || systemCode.find('/') != std::string::npos ||
+        systemCode.find('\\') != std::string::npos ||
+        systemCode.find("..") != std::string::npos)
+        return false;
+    std::string emuDir = sdRoot + "/Emus/" + systemCode;
+    std::string def = stockDefaultLaunch(emuDir);
+    if (!def.empty()) {
+        std::string p = emuDir + "/" + def;
         if (access(p.c_str(), X_OK) == 0) {
             outScript = p;
             return true;
         }
+    }
+    std::string fallback = emuDir + "/launch.sh";
+    if (access(fallback.c_str(), X_OK) == 0) {
+        outScript = fallback;
+        return true;
     }
     return false;
 }

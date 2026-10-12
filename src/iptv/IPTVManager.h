@@ -197,9 +197,14 @@ public:
     bool switchYouTubeQuality(const std::string& videoId, const std::string& targetQuality);
     // Chuyển luồng đã có URL (không resolve): dùng cho auto-upgrade.
     bool switchYouTubeStream(const std::string& videoId, const std::string& newUrl, const std::string& targetQuality);
-    // URL 720p resolve ngầm (UIManager ghi vào khi xong); loop lấy 1 lần.
-    void setUpgradeUrl(const std::string& videoId, const std::string& url);
-    bool takeUpgradeUrl(const std::string& videoId, std::string& out);
+    // URL YouTube resolve ngầm để tự lên nét (vid + quality + url, có
+    // mutex). Kèm key "vid|quality" đang resolve dở để SELECT spam không
+    // đẻ thread trùng.
+    void setUpgradeUrl(const std::string& videoId, const std::string& quality,
+                       const std::string& url);
+    bool takeUpgradeUrl(const std::string& videoId, std::string& outUrl,
+                        std::string& outQuality);
+    void clearUpgrade(const std::string& videoId);
     void showOverlayIcon(const std::string& iconName, uint32_t durationMs = 1400);
     bool sendMpvIpcCommand(const std::string& cmd, std::string* response = nullptr, const std::string& sockPath = "");
     bool isYouTubePlaying() const { return m_isPlaying && m_currentChannel == "YouTube"; }
@@ -308,9 +313,12 @@ private:
     std::string m_prefetchKey;
     std::string m_prefetchUrl;
     std::mutex m_prefetchMutex;
-    // URL 720p YouTube resolve ngầm để tự lên nét (vid + url, có mutex).
+    // URL YouTube resolve ngầm để tự lên nét (vid + quality + url, có
+    // mutex) + key "vid|quality" đang resolve dở (chống spam thread).
     std::string m_ytUpgradeVid;
+    std::string m_ytUpgradeQuality;
     std::string m_ytUpgradeUrl;
+    std::string m_ytUpgradingKey;
     std::mutex m_ytUpgradeMtx;
     // Prefetch 720p: nạp ngầm trong lúc 360 vẫn phát, đủ đệm mới nhảy index.
     std::string m_ytPreVid;

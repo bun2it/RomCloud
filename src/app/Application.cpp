@@ -75,6 +75,10 @@ Application &Application::instance() {
 void Application::requestExit() { m_running = false; }
 
 bool Application::initSDL() {
+  // Nhan nut bam ca khi mpv/emulator dang giu man hinh (RomCloud mat
+  // focus SDL): khong co hint nay, SDL loc bo joystick events luc app
+  // o background -> B/MENU khong thoat duoc video dang phat (freeze).
+  SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
   if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER | SDL_INIT_JOYSTICK |
                SDL_INIT_EVENTS | SDL_INIT_AUDIO) < 0) {
     Logger::error(std::string("SDL_Init failed: ") + SDL_GetError());

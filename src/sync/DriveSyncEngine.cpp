@@ -2,6 +2,7 @@
 #include "../network/HttpClient.h"
 #include "../network/JsonHelper.h"
 #include "../auth/AuthManager.h"
+#include "../rom/RomTitle.h"
 #include "OneDriveSync.h"
 #include "../logging/Logger.h"
 #include <algorithm>
@@ -89,34 +90,9 @@ bool DriveSyncEngine::startSync() {
 }
 
 std::string DriveSyncEngine::normalizeTitle(const std::string& filename) {
-    std::string base = filename;
-    size_t lastDot = base.find_last_of('.');
-    if (lastDot != std::string::npos) {
-        base = base.substr(0, lastDot);
-    }
-
-    // Strip dump tags like (USA), [!], (v1.0), etc.
-    std::string cleaned;
-    bool inParen = false, inBracket = false;
-    for (char c : base) {
-        if (c == '(') inParen = true;
-        else if (c == ')') { inParen = false; continue; }
-        else if (c == '[') inBracket = true;
-        else if (c == ']') { inBracket = false; continue; }
-        else if (!inParen && !inBracket) {
-            cleaned += c;
-        }
-    }
-
-    // Trim trailing whitespace and dashes
-    while (!cleaned.empty() && (cleaned.back() == ' ' || cleaned.back() == '-' || cleaned.back() == '_')) {
-        cleaned.pop_back();
-    }
-    while (!cleaned.empty() && (cleaned.front() == ' ' || cleaned.front() == '-' || cleaned.front() == '_')) {
-        cleaned.erase(0, 1);
-    }
-
-    return cleaned.empty() ? filename : cleaned;
+    // Thuật toán chuẩn dùng chung với quét thẻ (RomTitle.h) để title
+    // trong DB nhất quán giữa 2 nguồn.
+    return cleanDisplayTitle(filename);
 }
 
 std::string DriveSyncEngine::findRomCloudRootFolder(const std::string& token) {

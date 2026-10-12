@@ -165,7 +165,20 @@ bool MpvPlayer::showText(const std::string& text, int ms,
 bool MpvPlayer::pollExited() {
     if (m_pid <= 0) return true;
     int status = 0;
-    if (waitpid(m_pid, &status, WNOHANG) != 0) { m_pid = -1; return true; }
+    if (waitpid(m_pid, &status, WNOHANG) != 0) {
+        // Ghi ly do chet de chan doan chet tuc thi (exit code / signal).
+        if (WIFEXITED(status)) {
+            Logger::warn("MpvPlayer: mpv exit code " +
+                         std::to_string(WEXITSTATUS(status)));
+        } else if (WIFSIGNALED(status)) {
+            Logger::warn("MpvPlayer: mpv killed by signal " +
+                         std::to_string(WTERMSIG(status)));
+        } else {
+            Logger::warn("MpvPlayer: mpv reaped (raw status " +
+                         std::to_string(status) + ")");
+        }
+        m_pid = -1; return true;
+    }
     if (m_overlayExpireMs && SDL_GetTicks() >= m_overlayExpireMs) {
         sendCmd("{\"command\":[\"overlay-remove\",0]}");
         m_overlayExpireMs = 0;
@@ -231,6 +244,10 @@ bool MpvPlayer::play(const std::string& url,
     if (access(font.c_str(), R_OK) == 0) args.push_back("--osd-font=" + font);
     std::string ic = appRoot + "/config/input.conf";
     if (access(ic.c_str(), R_OK) == 0) args.push_back("--input-conf=" + ic);
+    // Log noi bo cua mpv (giu ca khi --terminal=no nuot het loi ra
+    // terminal): file rieng de forward ve debug.log khi chan doan chet
+    // tuc thi. Khong dung de dieu khien, chi doc.
+    args.push_back("--log-file=" + actualLogFile + ".mpvlog");
     for (auto& e : extraArgs) args.push_back(e);
     std::vector<char*> cA;
     for (auto& a : args) cA.push_back(const_cast<char*>(a.c_str()));
@@ -269,30 +286,55 @@ bool MpvPlayer::stop() {
     return true;
 }
 
+// Cắt chuỗi theo byte nhưng bảo toàn ranh giới UTF-8 (lùi qua continuation
+// byte nếu rớt giữa codepoint). Tránh log forward ra debug bị ký tự
+// rác/khung vuông khi mpv in codec/locale.
+static std::string truncateUtf8Bytes(const std::string& s, size_t maxBytes,
+                                     const std::string& suffix) {
+    if (s.size() <= maxBytes) return s;
+    size_t cut = maxBytes;
+    while (cut > 0 && (static_cast<unsigned char>(s[cut]) & 0xC0) == 0x80)
+        --cut; // back up over UTF-8 continuation bytes
+    return s.substr(0, cut) + suffix;
+}
+
+// Doc file log, chỉ forward N dòng CUỐI vao debug.log (mpv verbose có
+// thể hàng nghìn dòng -> dump hết trên UI thread gây đứng hình lúc
+// thoát video). Cat ngan moi dong de log gon.
+static void forwardLogTail(const std::string& path, const char* tag,
+                           size_t maxLines) {
+    std::ifstream f(path);
+    if (!f.is_open()) return;
+    std::string line;
+    std::deque<std::string> tail;
+    while (std::getline(f, line)) {
+        if (line.empty()) continue;
+        // Trim trailing CR
+        while (!line.empty() && (line.back() == '\r' || line.back() == '\n')) line.pop_back();
+        if (line.empty()) continue;
+        if (line.size() > 240)
+            line = truncateUtf8Bytes(line, 237, "...");
+        tail.push_back(line);
+        if (tail.size() > maxLines) tail.pop_front();
+    }
+    f.close();
+    int n = 0;
+    for (auto& t : tail)
+        RC_LOG_INFO(MPV, std::string("[") + tag +
+                         std::to_string(++n) + "] " + t);
+}
+
 // Doc file stderr cua mpv, chỉ forward 60 dòng CUỐI vao debug.log (mpv
 // verbose có thể hàng nghìn dòng -> dump hết trên UI thread gây đứng hình
 // lúc thoát video). Sau do unlink file de /tmp khong bi day.
 void MpvPlayer::forwardMpvLogToDebug() {
     if (m_lastLogPath.empty()) return;
-    std::ifstream f(m_lastLogPath);
-    if (f.is_open()) {
-        std::string line;
-        std::deque<std::string> tail;
-        while (std::getline(f, line)) {
-            if (line.empty()) continue;
-            // Trim trailing CR
-            while (!line.empty() && (line.back() == '\r' || line.back() == '\n')) line.pop_back();
-            if (line.empty()) continue;
-            if (line.size() > 240) line = line.substr(0, 237) + "...";
-            tail.push_back(line);
-            if (tail.size() > 60) tail.pop_front();
-        }
-        f.close();
-        int n = 0;
-        for (auto& t : tail)
-            RC_LOG_INFO(MPV, "[" + std::to_string(++n) + "] " + t);
-    }
+    forwardLogTail(m_lastLogPath, "", 60);
     unlink(m_lastLogPath.c_str());
+    // Log noi bo --log-file (giu ca khi --terminal=no): lay 40 dong cuoi.
+    std::string full = m_lastLogPath + ".mpvlog";
+    forwardLogTail(full, "mpvlog:", 40);
+    unlink(full.c_str());
     m_lastLogPath.clear();
 }
 #else

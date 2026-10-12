@@ -231,6 +231,14 @@ bool UIManager::init(SDL_Window *window, SDL_Renderer *renderer) {
   // user đang ở state nào (Game List, IPTV, Settings...).
   LocalSendManager::instance().setOnUserPrompt([this](
                                                    const LsUploadRequest &req) {
+    if (m_currentState == UIState::GAME_PLAYING) {
+      // Đang chơi: emulator giữ fb0, không cướp màn hình hiện hộp nhận
+      // file. Từ chối nhanh để sender khỏi treo 60s, báo lại khi về list.
+      LocalSendManager::instance().rejectUpload(req.sessionId);
+      showToast("Đang chơi game, đã từ chối nhận file", {245, 158, 11, 255},
+                3000);
+      return;
+    }
     m_localSendCurrentPrompt = req;
     m_localSendPendingSessionId = req.sessionId;
     m_localSendIncomingMode = 0;
@@ -426,6 +434,7 @@ void UIManager::setState(UIState state) {
         ", cached=" + std::to_string(m_ytAllCachedResults.size()) + ")");
     loadYouTubeHistory();
     loadYouTubeViewMode();
+    loadYouTubeQuality();
     loadYouTubeWatched();
     m_ytWatchedIndex = 0;
     // Giu vi tri (danh muc/trang/focus): chi khoi tao lan dau tien vao
@@ -839,24 +848,74 @@ void UIManager::update() {
   // Check if YouTube video stream resolution finished
   // Mô tả về sau resolve: đẩy vào OSD đang phát cùng video.
   if (m_ytDescReady.exchange(false)) {
-    IPTVManager::instance().setYtDesc(m_ytPendingVideoDesc);
-    m_ytPendingVideoDesc.clear();
+    std::string desc;
+    {
+      std::lock_guard<std::mutex> plk(s_ytPendingMutex);
+      desc = std::move(m_ytPendingVideoDesc);
+      m_ytPendingVideoDesc.clear();
+    }
+    if (!desc.empty())
+      IPTVManager::instance().setYtDesc(desc);
   }
   if (m_ytVideoReady.exchange(false)) {
     m_ytIsLoadingVideo = false;
-    if (!m_ytPendingStreamUrl.empty()) {
-      std::string url = m_ytPendingStreamUrl;
-      std::string vid = m_ytPendingVideoId;
-      std::string vtitle = m_ytPendingVideoTitle;
-      std::string vdesc = m_ytPendingVideoDesc;
-      std::string vq = m_ytPendingQuality.empty() ? "720" : m_ytPendingQuality;
-      m_ytPendingStreamUrl.clear();
-      m_ytPendingVideoId.clear();
-      m_ytPendingVideoTitle.clear();
-      m_ytPendingVideoDesc.clear();
-      m_ytPendingQuality.clear();
-      m_ytPlayingVideoId = vid;
-      IPTVManager::instance().playYouTubeVideo(vid, url, vq, vtitle, vdesc);
+    std::string url, vid, vtitle, vdesc, vq;
+    bool ready = false;
+    {
+      std::lock_guard<std::mutex> plk(s_ytPendingMutex);
+      if (!m_ytPendingStreamUrl.empty()) {
+        url = std::move(m_ytPendingStreamUrl);
+        vid = std::move(m_ytPendingVideoId);
+        vtitle = std::move(m_ytPendingVideoTitle);
+        vdesc = std::move(m_ytPendingVideoDesc);
+        vq = m_ytPendingQuality.empty() ? m_ytDefaultQuality
+                                        : m_ytPendingQuality;
+        m_ytPendingStreamUrl.clear();
+        m_ytPendingVideoId.clear();
+        m_ytPendingVideoTitle.clear();
+        m_ytPendingVideoDesc.clear();
+        m_ytPendingQuality.clear();
+        m_ytPlayingVideoId = vid;
+        ready = true;
+      }
+    }
+    if (ready) {
+      // Đo tuổi thọ phiên phát để phát hiện chết tức thì (mpv sập /
+      // link hỏng): playYouTubeVideo block tới khi thoát, <5s coi như
+      // instant-fail. Static vì up-next ở dưới cần biết kết quả.
+      static int s_consecInstantFail = 0;
+      static bool s_lastPlayInstant = false;
+      // Phát 1 lần, trả về true nếu sống >=5s.
+      auto playOnce = [&](const std::string &u) -> bool {
+        if (u.empty())
+          return false;
+        // Vẽ 1 frame "đang tải" trước khi block: mpv đệm hình (màn đen
+        // vài giây, nhất là 720p) thì user vẫn thấy thông báo, khỏi sốt
+        // ruột. Khung hình này nằm lại trên fb0 cho tới khi mpv lên hình.
+        showToast("Đang tải video " + vq + "p...", UiTheme::ACCENT_CYAN,
+                  4000);
+        render();
+        uint32_t t0 = SDL_GetTicks();
+        IPTVManager::instance().playYouTubeVideo(vid, u, vq, vtitle, vdesc);
+        return (SDL_GetTicks() - t0 >= 5000);
+      };
+      bool lived = playOnce(url);
+      if (!lived) {
+        // Chết tức thì: URL Innertube có thể bị YouTube chặn 403 hàng
+        // loạt (verified) — thử lại ĐÚNG 1 lần bằng yt-dlp, bỏ qua cache
+        // + fast path (cache sẽ bị ghi đè nếu ra link mới).
+        showToast("Link nhanh lỗi, đang thử link dự phòng...",
+                  {250, 204, 21, 255}, 10000);
+        render();
+        std::string alt = resolveYouTubeStreamUrl(vid, vq, true);
+        if (!alt.empty() && alt != url)
+          lived = playOnce(alt);
+      }
+      s_lastPlayInstant = !lived;
+      if (s_lastPlayInstant)
+        ++s_consecInstantFail;
+      else
+        s_consecInstantFail = 0;
       setState(UIState::YOUTUBE_RESULTS);
       // Tự phát tiếp (up next): ưu tiên video CÙNG KÊNH với video vừa
       // xem (quét xuôi tìm uploader giống nhau), không có thì lấy mục kế
@@ -923,13 +982,63 @@ void UIManager::update() {
                 0, m_ytSearchResults[curIdx + 1].find('|'));
           }
         }
-        if (!nextId.empty()) {
+        if (!nextId.empty() && !s_lastPlayInstant) {
           showToast("Tự phát tiếp...", {0, 180, 216, 255}, 2000);
           playYouTubeVideo(nextId);
+        } else if (s_lastPlayInstant) {
+          // Video vừa rồi chết tức thì: KHÔNG auto (tránh loop tới
+          // freeze), báo rõ để user bấm A thử lại.
+          if (s_consecInstantFail >= 3) {
+            s_consecInstantFail = 0;
+            showToast("Video lỗi liên tiếp, đã dừng tự phát (bấm A thử lại)",
+                      {239, 68, 68, 255}, 4000);
+          } else {
+            showToast("Không phát được video (bấm A thử lại)",
+                      {239, 68, 68, 255}, 3000);
+          }
         }
       }
     } else {
       showToast("Không thể lấy link phát video", {239, 68, 68, 255}, 3000);
+    }
+  }
+
+  // YouTube: tải trước URL đúng chất lượng mặc định của video đang
+  // focus lúc rảnh để bấm A phát ngay (tránh chặn UI ~10s khi cache
+  // miss). preload guarded sẵn (cache-hit/busy thì xong ngay); chống
+  // resolve lặp cho video hỏng bằng nhịp 60s.
+  if ((m_currentState == UIState::YOUTUBE_RESULTS ||
+       m_currentState == UIState::YOUTUBE_HOME) &&
+      !m_ytIsSearching && !m_ytIsLoadingVideo &&
+      !MpvPlayer::instance().isPlaying()) {
+    std::string focusId;
+    if (m_currentState == UIState::YOUTUBE_RESULTS) {
+      if (m_ytSearchSelectedIndex >= 0 &&
+          m_ytSearchSelectedIndex < static_cast<int>(m_ytItems.size())) {
+        const auto &it = m_ytItems[m_ytSearchSelectedIndex];
+        if (it.type == YtItem::Type::Video)
+          focusId = it.id;
+      }
+    } else {
+      if (m_ytHomeContentSelected >= 0 &&
+          m_ytHomeContentSelected <
+              static_cast<int>(m_ytSearchResults.size())) {
+        const std::string &row = m_ytSearchResults[m_ytHomeContentSelected];
+        if (row.rfind("CHANNEL|", 0) != 0) {
+          size_t p = row.find('|');
+          focusId = (p == std::string::npos) ? row : row.substr(0, p);
+        }
+      }
+    }
+    if (!focusId.empty()) {
+      static std::string s_preId;
+      static uint32_t s_preMs = 0;
+      uint32_t nowPre = SDL_GetTicks();
+      if (focusId != s_preId || nowPre - s_preMs >= 60000) {
+        s_preId = focusId;
+        s_preMs = nowPre;
+        preloadYouTubeStreamUrl(focusId);
+      }
     }
   }
 
@@ -940,8 +1049,9 @@ void UIManager::update() {
     if (nowMs - m_ytLoadToastMs >= 5000) {
       m_ytLoadToastMs = nowMs;
       int secs = (int)((nowMs - m_ytLoadStartMs) / 1000);
+      // Duration 6s > chu kỳ 5s để không hở khung hình (chớp tắt).
       showToast("Đang tải video... " + std::to_string(secs) + "s",
-                UiTheme::ACCENT_CYAN, 4500);
+                UiTheme::ACCENT_CYAN, 6000);
     }
   }
 
@@ -1051,15 +1161,10 @@ void UIManager::update() {
         }
         m_selectedPlaylistIndex = 0;
         m_playlistScrollOffset = 0;
-        // Nếu có nhiều hơn 1 playlist -> hiện màn hình chọn playlist
-        // Nếu chỉ có 1 (hoặc 0) -> vào thẳng danh sách kênh
-        if (IPTVManager::instance().playlistCount() > 1) {
-          setState(UIState::IPTV_PLAYLIST_SELECT);
-        } else {
-          m_selectedIPTVChannelIndex = 0;
-          m_iptvScrollOffset = 0;
-          setState(UIState::IPTV_LIST);
-        }
+        // Trang home của IPTV luôn là màn chọn playlist (kể cả chỉ có 1
+        // playlist như live.m3u mặc định) để nút Y "Cập nhật OTA" luôn
+        // tới được — không đi tắt vào thẳng danh sách kênh.
+        setState(UIState::IPTV_PLAYLIST_SELECT);
       } else if (selectedId == "youtube") {
         VirtualKeyboard::reset(m_ytVk, true);
         m_ytVk.charset = 1;
@@ -1071,8 +1176,14 @@ void UIManager::update() {
         m_ytSearchFinished = false;
         m_ytIsLoadingVideo = false;
         m_ytVideoReady = false;
-        m_ytPendingStreamUrl.clear();
-        m_ytPendingQuality.clear();
+        {
+          std::lock_guard<std::mutex> plk(s_ytPendingMutex);
+          m_ytPendingStreamUrl.clear();
+          m_ytPendingVideoId.clear();
+          m_ytPendingVideoTitle.clear();
+          m_ytPendingVideoDesc.clear();
+          m_ytPendingQuality.clear();
+        }
         setState(UIState::YOUTUBE_HOME);
       } else if (selectedId == "localsend") {
         LocalSendManager::instance().start();
@@ -2501,7 +2612,9 @@ void UIManager::update() {
         m_selectedIPTVChannelIndex = 0;
         m_iptvScrollOffset = 0;
         showToast("Đang hiển thị tất cả kênh", {0, 180, 216, 255}, 1500);
-      } else if (IPTVManager::instance().playlistCount() > 1) {
+      } else if (IPTVManager::instance().playlistCount() >= 1) {
+        // Về trang home playlist (kể cả chỉ có 1 playlist) — B lùi 1 cấp
+        // về đúng nơi đã vào, thay vì nhảy về MENU.
         m_selectedPlaylistIndex = std::max(0, m_activePlaylistIndex);
         setState(UIState::IPTV_PLAYLIST_SELECT);
       } else {
@@ -3016,6 +3129,9 @@ void UIManager::update() {
     } else if (input.isButtonJustPressed(Button::Y)) {
       // Y = view mode toggle (alt to L1/R1 in row mode)
       toggleYouTubeViewMode();
+    } else if (input.isButtonJustPressed(Button::SELECT)) {
+      // SELECT = chất lượng phát mặc định 360p ⇄ 720p (lưu ngay).
+      toggleYouTubeQuality();
     } else if (input.isButtonJustPressed(Button::B)) {
       if (m_ytInChannelView) {
         // Thoát khỏi trang video của kênh, quay lại Channel Card Layout
@@ -3182,8 +3298,12 @@ void UIManager::update() {
     if (m_ytIsLoadingVideo) {
       if (input.isButtonJustPressed(Button::B)) {
         m_ytIsLoadingVideo = false;
+        std::lock_guard<std::mutex> plk(s_ytPendingMutex);
         m_ytPendingStreamUrl.clear();
         m_ytPendingVideoId.clear();
+        m_ytPendingVideoTitle.clear();
+        m_ytPendingVideoDesc.clear();
+        m_ytPendingQuality.clear();
       }
       break; // Ignore other input while resolving video stream
     }
@@ -3479,8 +3599,11 @@ void UIManager::update() {
   }
 
   case UIState::GAME_PLAYING: {
-    // Emulator giữ màn hình: thoát game (tự thoát) thì về list,
-    // B cưỡng chế dừng.
+    // Emulator giữ toàn màn hình theo stock flow: thoát duy nhất bằng
+    // cách của emulator (menu/hotkey của nó) rồi tiến trình tự thoát.
+    // RomCloud KHÔNG vẽ gì (render skip) và KHÔNG bắt phím nào — kể cả
+    // B: B vừa là nút game, vừa giết emu giữa frame gây xung đột fb0.
+    // Chỉ poll exit rồi về list.
     auto &emu = EmuLauncher::instance();
     if (emu.pollExited() || !emu.isRunning()) {
       // Chết tức thì (<3s, exit lỗi): gần chắc core/libretro hỏng
@@ -3495,10 +3618,6 @@ void UIManager::update() {
       }
       goBack();
       break;
-    }
-    if (input.isButtonJustPressed(Button::B)) {
-      emu.stop();
-      goBack();
     }
     break;
   }
@@ -6841,7 +6960,7 @@ void UIManager::renderOTAChangelogState() {
 }
 
 // renderIPTVPlaylistSelectState
-// Màn hình chọn playlist khi có nhiều file .m3u
+// Trang home của IPTV: màn hình chọn playlist (kể cả chỉ có 1 như live.m3u)
 void UIManager::renderIPTVPlaylistSelectState() {
   drawRect(0, 0, UiTheme::APP_W, UiTheme::HEADER_H, UiTheme::FOOTER_BG, true);
   drawRect(0, UiTheme::HEADER_H - 1, UiTheme::APP_W, 1, UiTheme::FOOTER_LINE,
@@ -8015,6 +8134,43 @@ static std::string formatViews(const std::string &raw) {
 }
 
 static std::mutex s_ytStreamMutex;
+std::mutex UIManager::s_ytPendingMutex;
+
+// LRU put cho m_ytStreamUrlCache. Gọi dưới s_ytStreamMutex. Nếu key
+// tồn tại → cập nhật value + chuyển xuống cuối (mới nhất). Nếu mới
+// → thêm + nếu vượt cap thì evict front (cũ nhất).
+static void lruPutStream(std::unordered_map<std::string, std::string>& m,
+                         std::list<std::string>& order, size_t cap,
+                         const std::string& key, const std::string& value) {
+  auto it = m.find(key);
+  if (it != m.end()) {
+    it->second = value;
+    order.remove(key);
+    order.push_back(key);
+    return;
+  }
+  m.emplace(key, value);
+  order.push_back(key);
+  if (order.size() > cap) {
+    const std::string& oldest = order.front();
+    m.erase(oldest);
+    order.pop_front();
+  }
+}
+
+// LRU get: trả về value nếu có, đồng thời đánh dấu "vừa dùng" (move
+// xuống cuối order list) để lần sau không bị evict sớm.
+static bool lruGetStream(std::unordered_map<std::string, std::string>& m,
+                         std::list<std::string>& order, const std::string& key,
+                         std::string& out) {
+  auto it = m.find(key);
+  if (it == m.end())
+    return false;
+  out = it->second;
+  order.remove(key);
+  order.push_back(key);
+  return true;
+}
 
 void UIManager::loadYouTubeHistory() {
   if (!m_ytSearchHistory.empty())
@@ -8270,17 +8426,19 @@ std::vector<std::string> UIManager::runYouTubeSearch(const std::string &query,
 }
 
 std::string UIManager::resolveYouTubeStreamUrl(const std::string &videoId,
-                                               const std::string &quality) {
+                                               const std::string &quality,
+                                               bool forceYtdlp) {
   if (videoId.empty())
     return "";
   std::string key = videoId + "|" + quality;
 
-  {
+  if (!forceYtdlp) {
     std::lock_guard<std::mutex> lock(s_ytStreamMutex);
-    auto it = m_ytStreamUrlCache.find(key);
-    if (it != m_ytStreamUrlCache.end() && !it->second.empty()) {
+    std::string hit;
+    if (lruGetStream(m_ytStreamUrlCache, m_ytStreamUrlOrder, key, hit) &&
+        !hit.empty()) {
       Logger::info("[YouTube] Using cached stream URL for: " + key);
-      return it->second;
+      return hit;
     }
   }
 
@@ -8301,16 +8459,21 @@ std::string UIManager::resolveYouTubeStreamUrl(const std::string &videoId,
   // 360p android (~2s, progressive sẵn audio) phát nhanh; 720p DASH nét
   // hơn cho auto-upgrade / SELECT (resolve ngầm, không chặn phát).
   // Player API trước (~1s): có URL trực tiếp thì dùng ngay, không thì
-  // rớt xuống yt-dlp cũ (DASH/cipher).
-  {
+  // rớt xuống yt-dlp cũ (DASH/cipher). forceYtdlp (thử lại sau chết tức
+  // thì): bỏ qua cache + fast path vì URL Innertube có thể bị YouTube
+  // chặn 403 hàng loạt.
+  if (!forceYtdlp) {
     std::string q = quality.empty() ? "720" : quality;
     std::string direct = YoutubeInnertube::resolveStream(videoId, q);
     if (!direct.empty()) {
       std::lock_guard<std::mutex> lock(s_ytStreamMutex);
-      m_ytStreamUrlCache[key] = direct;
+      lruPutStream(m_ytStreamUrlCache, m_ytStreamUrlOrder,
+                   kYtStreamCacheMax, key, direct);
       Logger::info("[YouTube] Resolved via player API (fast path)");
       return direct;
     }
+  } else {
+    Logger::info("[YouTube] Force yt-dlp resolve (bo qua fast path)");
   }
   std::string cmd = "\"" + scriptPath + "\" url \"" + videoId + "\" " +
                     (quality.empty() ? "720" : quality) + " 2>/dev/null";
@@ -8347,7 +8510,8 @@ std::string UIManager::resolveYouTubeStreamUrl(const std::string &videoId,
 
   if (!streamUrl.empty()) {
     std::lock_guard<std::mutex> lock(s_ytStreamMutex);
-    m_ytStreamUrlCache[key] = streamUrl;
+    lruPutStream(m_ytStreamUrlCache, m_ytStreamUrlOrder,
+                 kYtStreamCacheMax, key, streamUrl);
   }
   return streamUrl;
 }
@@ -8357,10 +8521,10 @@ std::string UIManager::cachedStreamUrl(const std::string &videoId,
   if (videoId.empty() || quality.empty())
     return "";
   std::lock_guard<std::mutex> lock(s_ytStreamMutex);
-  auto it = m_ytStreamUrlCache.find(videoId + "|" + quality);
-  if (it != m_ytStreamUrlCache.end())
-    return it->second;
-  return "";
+  std::string out;
+  lruGetStream(m_ytStreamUrlCache, m_ytStreamUrlOrder,
+               videoId + "|" + quality, out);
+  return out;
 }
 
 void UIManager::cacheStreamUrl(const std::string &videoId,
@@ -8369,19 +8533,22 @@ void UIManager::cacheStreamUrl(const std::string &videoId,
   if (videoId.empty() || quality.empty() || url.empty())
     return;
   std::lock_guard<std::mutex> lock(s_ytStreamMutex);
-  m_ytStreamUrlCache[videoId + "|" + quality] = url;
+  lruPutStream(m_ytStreamUrlCache, m_ytStreamUrlOrder, kYtStreamCacheMax,
+               videoId + "|" + quality, url);
 }
 
 void UIManager::preloadYouTubeStreamUrl(const std::string &videoId) {
-  if (videoId.empty() || m_resolveTask.isRunning())
-    return; // đang resolve dở: run() sẽ join block UI nên bỏ qua
+  if (videoId.empty() || m_preloadTask.isRunning())
+    return; // đang preload dở thì bỏ qua (task riêng, không join A-press)
   {
     std::lock_guard<std::mutex> lock(s_ytStreamMutex);
-    if (m_ytStreamUrlCache.find(videoId + "|720") != m_ytStreamUrlCache.end())
+    std::string hit;
+    if (lruGetStream(m_ytStreamUrlCache, m_ytStreamUrlOrder,
+                     videoId + "|" + m_ytDefaultQuality, hit))
       return;
   }
-  m_resolveTask.run([this, videoId](TaskProgress &) {
-    resolveYouTubeStreamUrl(videoId, "720");
+  m_preloadTask.run([this, videoId](TaskProgress &) {
+    resolveYouTubeStreamUrl(videoId, m_ytDefaultQuality);
   });
 }
 
@@ -8611,45 +8778,62 @@ void UIManager::playYouTubeVideo(const std::string &videoId) {
     if (!videoTitle.empty())
       break;
   }
-  m_ytPendingVideoTitle = videoTitle;
+  {
+    std::lock_guard<std::mutex> plk(s_ytPendingMutex);
+    m_ytPendingVideoTitle = videoTitle;
+  }
   // Luu Xem lai (id|title|uploader) de gợi y khong can login.
   saveYouTubeWatched(videoId, videoTitle, videoUploader);
 
-  // Cache: force 720p, chỉ dùng bản 720 đã resolve.
-  std::string hit = cachedStreamUrl(videoId, "720");
-  std::string hitQ = "720";
+  // Cache: ưu tiên bản đúng chất lượng mặc định đã resolve.
+  std::string hit = cachedStreamUrl(videoId, m_ytDefaultQuality);
+  std::string hitQ = m_ytDefaultQuality;
   if (!hit.empty()) {
-    m_ytPendingVideoId = videoId;
-    m_ytPendingStreamUrl = hit;
-    m_ytPendingQuality = hitQ;
+    {
+      std::lock_guard<std::mutex> plk(s_ytPendingMutex);
+      m_ytPendingVideoId = videoId;
+      m_ytPendingStreamUrl = hit;
+      m_ytPendingQuality = hitQ;
+    }
     m_ytVideoReady = true;
     return;
   }
 
   m_ytIsLoadingVideo = true;
   m_ytVideoReady = false;
-  m_ytPendingStreamUrl.clear();
-  m_ytPendingVideoId = videoId;
-  m_ytPendingQuality = "720"; // mặc định 720, rớt mới xuống 360
+  {
+    std::lock_guard<std::mutex> plk(s_ytPendingMutex);
+    m_ytPendingStreamUrl.clear();
+    m_ytPendingVideoId = videoId;
+    m_ytPendingQuality = m_ytDefaultQuality; // theo setting SELECT ở HOME
+  }
   m_ytLoadStartMs = SDL_GetTicks();
   m_ytLoadToastMs = 0; // update() toast ngay frame tới
-  showToast("Đang tải video...", UiTheme::ACCENT_CYAN, 4000);
+  showToast("Đang tải video...", UiTheme::ACCENT_CYAN, 6000);
 
   m_resolveTask.run([this, videoId](TaskProgress &) {
-    // Force 720p: chỉ resolve 720, thất bại thì báo lỗi (không rớt 360).
-    std::string streamUrl = resolveYouTubeStreamUrl(videoId, "720");
-    std::string q = "720";
-    m_ytPendingQuality = q;
-    m_ytPendingStreamUrl = streamUrl;
+    // Resolve đúng chất lượng mặc định, thất bại thì báo lỗi.
+    std::string streamUrl = resolveYouTubeStreamUrl(videoId, m_ytDefaultQuality);
+    std::string q = m_ytDefaultQuality;
+    {
+      std::lock_guard<std::mutex> plk(s_ytPendingMutex);
+      m_ytPendingQuality = q;
+      m_ytPendingStreamUrl = streamUrl;
+    }
     // Mô tả chạy thread riêng song song (không +1s vào resolve).
     // Về sau thì update() đẩy vào OSD đang phát.
     std::thread([this, videoId]() {
       std::string desc = YoutubeInnertube::videoDescription(videoId);
       // Chỉ nhận nếu user vẫn đang xem đúng video đó (tránh nhầm sang B).
-      if (!desc.empty() && m_ytPlayingVideoId == videoId) {
-        m_ytPendingVideoDesc = desc;
-        m_ytDescReady = true;
+      bool accept = false;
+      {
+        std::lock_guard<std::mutex> plk(s_ytPendingMutex);
+        accept = !desc.empty() && m_ytPlayingVideoId == videoId;
+        if (accept)
+          m_ytPendingVideoDesc = desc;
       }
+      if (accept)
+        m_ytDescReady = true;
     }).detach();
     m_ytVideoReady = true;
   });
@@ -10179,6 +10363,26 @@ void UIManager::saveYouTubeViewMode() {
                                          m_ytViewMode ? "grid" : "row");
 }
 
+void UIManager::loadYouTubeQuality() {
+  std::string q = DatabaseManager::instance().getSetting("yt_quality", "720");
+  m_ytDefaultQuality = (q == "360") ? "360" : "720";
+}
+
+void UIManager::saveYouTubeQuality() {
+  DatabaseManager::instance().setSetting("yt_quality", m_ytDefaultQuality);
+}
+
+// SELECT ở HOME: đổi chất lượng mặc định 360p (nhanh, Innertube) ⇄ 720p
+// (nét, yt-dlp tải ~10s). Đánh đổi công khai, lưu ngay.
+void UIManager::toggleYouTubeQuality() {
+  m_ytDefaultQuality = (m_ytDefaultQuality == "360") ? "720" : "360";
+  saveYouTubeQuality();
+  showToast(m_ytDefaultQuality == "360"
+                ? "Mặc định: 360p (nhanh, phát ngay)"
+                : "Mặc định: 720p (nét, tải ~10s)",
+            UiTheme::ACCENT_GREEN, 2000);
+}
+
 void UIManager::toggleYouTubeViewMode() {
   m_ytViewMode = !m_ytViewMode;
   saveYouTubeViewMode();
@@ -10446,28 +10650,34 @@ void UIManager::renderYouTubeHomeState() {
     }
   }
 
-  // Footer (4 hàng: 0=search, 1=tag, 2=hàng 3, 3=hàng 4)
+  // Footer (4 hàng: 0=search, 1=tag, 2=hàng 3, 3=hàng 4). SELECT = chất
+  // lượng phát mặc định, nhãn hiện giá trị hiện tại để toggle.
+  const char *qHint = (m_ytDefaultQuality == "360") ? "360p" : "720p";
   if (m_ytHomeRow == 0) {
     drawAppFooter({{UiTheme::PadBtn::A, "Tìm kiếm"},
                    {UiTheme::PadBtn::B, "Thoát"},
                    {UiTheme::PadBtn::UPDOWN, "Đổi hàng"},
+                   {UiTheme::PadBtn::SELECT, qHint},
                    {UiTheme::PadBtn::START, "Tìm nhanh"}});
   } else if (m_ytHomeRow == 1) {
     drawAppFooter({{UiTheme::PadBtn::A, "Danh mục"},
                    {UiTheme::PadBtn::B, "Thoát"},
                    {UiTheme::PadBtn::DPAD, "Chọn mục"},
+                   {UiTheme::PadBtn::SELECT, qHint},
                    {UiTheme::PadBtn::START, "Tìm kiếm"}});
   } else if (m_ytHomeRow == 2) {
     if (m_ytMatchedChannel.matched && !m_ytInChannelView) {
       drawAppFooter({{UiTheme::PadBtn::A, "Xem kênh"},
                      {UiTheme::PadBtn::B, "Thoát"},
                      {UiTheme::PadBtn::Y, "Kiểu xem"},
+                     {UiTheme::PadBtn::SELECT, qHint},
                      {UiTheme::PadBtn::START, "Tìm kiếm"}});
     } else {
       drawAppFooter(
           {{UiTheme::PadBtn::A, "Phát"},
            {UiTheme::PadBtn::B, m_ytInChannelView ? "Quay lại" : "Thoát"},
            {UiTheme::PadBtn::Y, "Kiểu xem"},
+           {UiTheme::PadBtn::SELECT, qHint},
            {UiTheme::PadBtn::START, "Tìm kiếm"},
            {UiTheme::PadBtn::L1R1, "Trang"}});
     }
@@ -10476,6 +10686,7 @@ void UIManager::renderYouTubeHomeState() {
         {{UiTheme::PadBtn::A, "Phát"},
          {UiTheme::PadBtn::B, m_ytInChannelView ? "Quay lại" : "Thoát"},
          {UiTheme::PadBtn::Y, "Kiểu xem"},
+         {UiTheme::PadBtn::SELECT, qHint},
          {UiTheme::PadBtn::START, "Tìm kiếm"},
          {UiTheme::PadBtn::L1R1, "Trang"}});
   }

@@ -586,7 +586,10 @@ std::string YoutubeInnertube::resolveStream(const std::string& videoId,
             if (ql.size() > 1 && ql.back() == 'p')
                 height = atoi(ql.c_str());
         }
-        if (height <= 0 || height > limit) continue;
+        // CHI nhan dung do phan giai yeu cau (itag22 cho 720, itag18 cho
+        // 360): nhan thap hon la user thay mo du OSD ghi 720 (bug report).
+        // Thieu -> "" de xuong yt-dlp.
+        if (height != limit) continue;
         bool avc = blk.find("avc1") != std::string::npos;
         // Ưu tiên: cao nhất trong giới hạn, avc trước.
         if (height > best.height ||
@@ -597,71 +600,12 @@ std::string YoutubeInnertube::resolveStream(const std::string& videoId,
     }
     } // if (fp != npos): live khong co formats[]
 
+    // CHI lay progressive truc tiep (itag 18/22): URL adaptive truc tiep
+    // cua client ANDROID bi googlevideo 403 hang loat (verified tren may
+    // that) — khong tra ve nua. Thieu progressive phu hop -> "" de xuong
+    // yt-dlp (client VISIONOS, URL song).
     if (best.itag < 0) {
-        Logger::info("[Innertube] khong co progressive truc tiep");
-    }
-    // Adaptive (video-only + audio) nếu cao hơn progressive tốt nhất.
-    // VD quality=720: progressive chỉ có itag18 (360p) -> phải lấy
-    // adaptive 720p kéo về, không thì mãi mãi chỉ được 360p.
-    if (limit >= 360) {
-        size_t ap = j.find("\"adaptiveFormats\":[", ps);
-        if (ap != std::string::npos) {
-            size_t aEnd = ap + 400000;
-            if (aEnd > j.size()) aEnd = j.size();
-            Cand bv{-1, -1, "", false};
-            std::string ba;
-            size_t p2 = ap;
-            while (p2 < aEnd) {
-                size_t ob = j.find('{', p2);
-                if (ob == std::string::npos || ob > aEnd) break;
-                size_t q = ob + 1, depth = 1;
-                bool inS = false, esc = false;
-                while (q < j.size() && depth > 0) {
-                    char c = j[q];
-                    if (esc) esc = false;
-                    else if (c == '\\') esc = true;
-                    else if (c == '"') inS = !inS;
-                    else if (!inS && c == '{') ++depth;
-                    else if (!inS && c == '}') --depth;
-                    ++q;
-                }
-                std::string blk = j.substr(ob, q - ob);
-                p2 = q;
-                size_t up = blk.find("\"url\":\"");
-                if (up == std::string::npos) continue;
-                std::string u = readJsonString(blk, up + 7).first;
-                if (u.empty()) continue;
-                bool isAudio = blk.find("\"audioQuality\"") !=
-                                   std::string::npos ||
-                               blk.find("audio/mp4") != std::string::npos ||
-                               blk.find("audio/webm") != std::string::npos;
-                if (isAudio) {
-                    if (ba.empty())
-                        ba = u;
-                    continue;
-                }
-                int h = findInt(blk, "height", 0, blk.size());
-                if (h <= 0 || h > limit) continue;
-                bool avc = blk.find("avc1") != std::string::npos;
-                // Bỏ 60fps trên máy yếu (720p60 nặng gấp đôi, để yt-dlp
-                // lo; chi lay <=30fps).
-                if (h >= 720 && blk.find("\"fps\":60") != std::string::npos)
-                    continue;
-                if (h > bv.height ||
-                    (h == bv.height && avc && !bv.avc)) {
-                    int it = findInt(blk, "itag", 0, blk.size());
-                    bv = {it, h, u, avc};
-                }
-            }
-            if (bv.itag >= 0 && !ba.empty() && bv.height > best.height) {
-                Logger::info("[Innertube] resolve adaptive " +
-                             std::to_string(bv.height) + "p + audio truc tiep");
-                return bv.url + "|" + ba;
-            }
-        }
-    }
-    if (best.itag < 0) {
-        Logger::info("[Innertube] khong co URL truc tiep -> "
+        Logger::info("[Innertube] khong co progressive truc tiep -> "
                      "fallback yt-dlp");
         return std::string();
     }

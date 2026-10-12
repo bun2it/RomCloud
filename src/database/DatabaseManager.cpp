@@ -950,8 +950,25 @@ bool DatabaseManager::updateGameLocalState(int64_t gameId, GameState state, cons
     return false;
 }
 
-bool DatabaseManager::updateGameMetadata(int64_t gameId, const std::string& description, const std::string& releaseYear, const std::string& developer, const std::string& genre, const std::string& coverPath) {
+bool DatabaseManager::updateGameTitle(int64_t gameId, const std::string& title) {
     std::lock_guard<std::recursive_mutex> lock(m_mutex);
+    if (!m_db || title.empty()) return false;
+
+    std::string now = getCurrentTimestamp();
+    const char* sql = "UPDATE games SET title = ?, updated_at = ? WHERE id = ?;";
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
+        sqlite3_bind_text(stmt, 1, title.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(stmt, 2, now.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int64(stmt, 3, gameId);
+        sqlite3_step(stmt);
+        sqlite3_finalize(stmt);
+        return true;
+    }
+    return false;
+}
+
+bool DatabaseManager::updateGameMetadata(int64_t gameId, const std::string& description, const std::string& releaseYear, const std::string& developer, const std::string& genre, const std::string& coverPath) {    std::lock_guard<std::recursive_mutex> lock(m_mutex);
     if (!m_db) return false;
 
     std::string now = getCurrentTimestamp();

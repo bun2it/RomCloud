@@ -75,16 +75,21 @@ void InputManager::mapKeyboardKey(SDL_Keycode key, bool isDown) {
         case SDLK_x:      btn = Button::X; break;
         case SDLK_y:      btn = Button::Y; break;
         case SDLK_q:
+        case SDLK_LSHIFT:
         case SDLK_PAGEUP: btn = Button::L1; break;
         case SDLK_e:
+        case SDLK_RSHIFT:
         case SDLK_PAGEDOWN: btn = Button::R1; break;
         case SDLK_1:
         case SDLK_z:      btn = Button::L2; break;
         case SDLK_2:
         case SDLK_c:      btn = Button::R2; break;
-        case SDLK_TAB:    btn = Button::SELECT; break;
-        case SDLK_F1:     btn = Button::START; break;
-        case SDLK_HOME:   btn = Button::MENU; break;
+        case SDLK_TAB:
+        case SDLK_PERIOD: btn = Button::SELECT; break;
+        case SDLK_F1:
+        case SDLK_SLASH:  btn = Button::START; break;
+        case SDLK_HOME:
+        case SDLK_COMMA:  btn = Button::MENU; break;
         case SDLK_p:      btn = Button::PLAY; break;
         default: break;
     }

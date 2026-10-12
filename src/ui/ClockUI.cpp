@@ -895,6 +895,12 @@ static void stopAlert() {
 }
 
 void UIManager::pollClock() {
+  // Đang chơi: emulator giữ máy theo stock flow — không cướp màn hình
+  // (CLOCK_ALARM) cũng không cướp âm thanh (beep/rung) bằng báo thức /
+  // pomodoro / nhắc sự kiện. Phút báo thức trôi qua lúc đang chơi thì
+  // bỏ lỡ, giống stock vốn không có báo thức.
+  if (m_currentState == UIState::GAME_PLAYING)
+    return;
   uint32_t nowMs = SDL_GetTicks();
   if (nowMs - m_lastClockPoll < 5000)
     return;

@@ -76,6 +76,7 @@ public:
 
     bool upsertGame(const GameRecord& game, int64_t* outInsertedId = nullptr);
     bool updateGameLocalState(int64_t gameId, GameState state, const std::string& localPath = "");
+    bool updateGameTitle(int64_t gameId, const std::string& title);
     bool updateGameMetadata(int64_t gameId, const std::string& description, const std::string& releaseYear, const std::string& developer, const std::string& genre, const std::string& coverPath = "");
     bool moveGameToSystem(int64_t gameId, int newSystemId, const std::string& newLocalPath, const std::string& newCoverPath = "");
     bool markGameDeletedLocally(int64_t gameId);

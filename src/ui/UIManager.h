@@ -22,6 +22,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <deque>
+#include <list>
 #include <mutex>
 #include <queue>
 #include <set>
@@ -68,7 +69,7 @@ enum class UIState {
   CLOCK_ALARM,   // Modal báo thức kêu (briefing)
   GAME_CAST,     // GameCast TV & Laptop streaming
   CHROME,        // Chromium nhúng (viewport stream + map nút)
-  GAME_PLAYING,  // Emulator giữ màn hình (không vẽ, B thoát)
+  GAME_PLAYING,  // Emulator giữ màn hình (không vẽ, không bắt phím)
   SCREENSAVER,   // P0: Screensaver (starfield/fire/clock/picture)
   EXIT_REQUESTED
 };
@@ -551,6 +552,10 @@ private:
   std::string m_ytPlayingVideoId; // video dang phat (doi chieu desc)
   std::atomic<bool> m_ytDescReady{false}; // desc ve sau resolve
   std::string m_ytPendingQuality; // "720" mặc định, "360" nếu 720 rớt mới dùng
+  // Bảo vệ các pending strings khỏi race worker (resolve/desc) vs UI.
+  // Atomic flag (VideoReady/DescReady) chỉ chặn "new-data" event, không bảo
+  // vệ bản thân string — cần mutex riêng cho nội dung.
+  static std::mutex s_ytPendingMutex;
   std::vector<std::string> m_ytSearchHistory;
   // Xem lại: video đã xem (id|title|uploader), tối đa 10, mới nhất trước.
   struct YtWatched { std::string id; std::string title; std::string uploader; };
@@ -591,6 +596,10 @@ private:
   // cards/page). m_ytHasSearched: true after first category auto-feed search
   // has results.
   bool m_ytViewMode = false; // false = row, true = grid
+  // Chất lượng phát mặc định ("360" nhanh/Innertube itag18, "720" nét/
+  // yt-dlp ~10s). Đổi bằng SELECT ở HOME, lưu setting, dùng cho mọi lần
+  // bấm A (HOME + RESULTS + xem lại).
+  std::string m_ytDefaultQuality = "720";
   int m_ytHomeContentSelected = 0;
   int m_ytHomeContentScrollOffset = 0;
   int m_ytHomePage = 1;
@@ -621,6 +630,9 @@ private:
   void showWatchedVideos();
   void suggestFromHistory();
   void toggleYouTubeViewMode();
+  void loadYouTubeQuality();
+  void saveYouTubeQuality();
+  void toggleYouTubeQuality();
   void renderYouTubeHomeState();
   void renderYouTubeHomeContentRow(int contentTop, int /*contentH*/);
   void renderYouTubeHomeContentGrid(int contentTop, int contentH);
@@ -763,7 +775,14 @@ private:
 
   // YouTube integration
   bool m_ytTelexMode = true;
-  std::unordered_map<std::string, std::string> m_ytStreamUrlCache; // key vid|quality
+  // LRU bounded: giữ tối đa kYtStreamCacheMax entry (key = vid|quality).
+  // order: front = cũ nhất, back = mới nhất. Khi insert quá cap → evict
+  // front. Bảo vệ khỏi phình vô hạn khi user xem nhiều video khác nhau
+  // trong 1 phiên (URL ~300 byte, video ~5MB dữ liệu ngoài nhưng cache
+  // thuần URL thì cũng chiếm RAM).
+  static constexpr size_t kYtStreamCacheMax = 64;
+  std::unordered_map<std::string, std::string> m_ytStreamUrlCache;
+  std::list<std::string> m_ytStreamUrlOrder;
   std::vector<std::string> runYouTubeSearch(const std::string &query,
                                             int page = 1);
   // Lấy dòng kết quả thô (innertube trước, yt-dlp fallback): dùng chung cho
@@ -906,6 +925,8 @@ private:
   std::vector<std::string> m_ytPendingSearchResults;
   std::atomic<bool> m_ytSearchDataReady{false};
   BackgroundTask m_resolveTask;
+  BackgroundTask m_preloadTask; // riêng cho preload lúc duyệt: tránh join
+                                // block UI khi bấm A đúng lúc preload chạy
   BackgroundTask m_thumbTask;
   std::atomic<bool> m_needLibraryRefresh{false};
   bool isIndexing() const { return m_indexTask.isRunning(); }
@@ -948,7 +969,8 @@ public:
   void cacheStreamUrl(const std::string &videoId, const std::string &quality,
                       const std::string &url);
   std::string resolveYouTubeStreamUrl(const std::string &videoId,
-                                      const std::string &quality = "720");
+                                      const std::string &quality = "720",
+                                      bool forceYtdlp = false);
 };
 
 } // namespace RomCloud

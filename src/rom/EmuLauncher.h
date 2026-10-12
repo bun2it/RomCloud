@@ -1,9 +1,19 @@
 #pragma once
 // EmuLauncher — chạy emulator stock của TrimUI cho game local, giống
-// cách MainUI làm: fork Emus/<CODE>/launch.sh "<rom>" (script này tự
-// dựng cpufreq + gọi RetroArch core tương ứng), supervise qua waitpid.
+// cách MainUI làm: fork Emus/<CODE>/<launch-mặc-định> "<rom>" (script này
+// tự dựng cpufreq + gọi RetroArch core / binary standalone tương ứng),
+// supervise qua waitpid. "Chuẩn vàng" StockOS (verified qua adb):
+//   - câu lệnh: HOME=<...> <binary> [-v] [$NET_PARAM] -L <core> "<rom>"
+//     nằm TRONG script, RomCloud chỉ gọi script + truyền path ROM.
+//   - script mặc định đọc từ Emus/<CODE>/config.json field "launch"
+//     (vd CPS3->launch_fbneo.sh, FBNEO->launch_performance.sh,
+//      PPSSPP->launch_performance_vulkan.sh, SS->launch_yabasanshiro_standalone.sh).
+//   - ROM ở /mnt/SDCARD/Roms/<DIR>, save RetroArch ở
+//     RetroArch/.retroarch/{saves,states}, standalone tự giữ dưới HOME
+//     của nó. RomCloud KHÔNG đụng vào các path này.
 // Trong lúc chơi emulator giữ toàn màn hình, RomCloud không vẽ gì
-// (state GAME_PLAYING) và chỉ giữ nút B để thoát.
+// (state GAME_PLAYING) và không bắt phím nào — thoát duy nhất bằng
+// stock flow của emulator (menu/hotkey của nó rồi tự thoát).
 #include <atomic>
 #include <chrono>
 #include <string>

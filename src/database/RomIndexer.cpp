@@ -2,6 +2,7 @@
 #include "../filesystem/FileSystemManager.h"
 #include "../logging/Logger.h"
 #include "../rom/RomOrganizer.h"
+#include "../rom/RomTitle.h"
 
 #include <dirent.h>
 #include <sys/stat.h>
@@ -111,11 +112,23 @@ ScanProgress RomIndexer::scanSystem(const SystemRecord& system, const std::strin
                 db.updateGameLocalState(existing.id, GameState::LOCAL, fullPath);
                 progress.filesUpdated++;
             }
+            // Migrate một lần các title kiểu cũ (nguyên stem filename,
+            // còn tag dump) sang tên hiển thị sạch. Chỉ đổi khi title
+            // hiện tại đúng bằng giá trị auto cũ (hoặc rỗng) để không
+            // chạm title đã chuẩn (VD từ Drive sync — cùng thuật toán
+            // nên đã khớp, điều kiện dưới tự loại).
+            std::string legacyAuto = isFolderGame ? fname : cleanTitleFromFilename(fname);
+            std::string proper = cleanDisplayTitle(fname);
+            if (existing.title != proper &&
+                (existing.title.empty() || existing.title == legacyAuto)) {
+                db.updateGameTitle(existing.id, proper);
+                progress.filesUpdated++;
+            }
         } else {
             GameRecord newGame;
             newGame.systemId = system.id;
             newGame.filename = fname;
-            newGame.title = isFolderGame ? fname : cleanTitleFromFilename(fname);
+            newGame.title = cleanDisplayTitle(fname);
             newGame.sizeBytes = entrySize;
             newGame.localPath = fullPath;
             newGame.localState = GameState::LOCAL;

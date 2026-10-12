@@ -1331,26 +1331,34 @@ void IPTVManager::showOverlayIcon(const std::string& iconName, uint32_t duration
     m_overlayExpireTime = SDL_GetTicks() + durationMs;
 }
 
-static std::string fetchYouTubeStreamUrl(const std::string& videoId, const std::string& quality) {
-    if (videoId.empty()) return "";
-    // Dùng chung resolve của UIManager: đủ cả 2 URL video|audio cho DASH
-    // (bản cũ chỉ lấy dòng đầu = video-only nên lên 720p là mất tiếng) +
-    // cache theo chất lượng để chuyển tức thì.
-    return UIManager::instance().resolveYouTubeStreamUrl(videoId, quality);
-}
-
-void IPTVManager::setUpgradeUrl(const std::string& videoId, const std::string& url) {
+void IPTVManager::setUpgradeUrl(const std::string& videoId, const std::string& quality, const std::string& url) {
     std::lock_guard<std::mutex> lk(m_ytUpgradeMtx);
     m_ytUpgradeVid = videoId;
+    m_ytUpgradeQuality = quality;
     m_ytUpgradeUrl = url;
 }
 
-bool IPTVManager::takeUpgradeUrl(const std::string& videoId, std::string& out) {
+bool IPTVManager::takeUpgradeUrl(const std::string& videoId, std::string& outUrl, std::string& outQuality) {
     std::lock_guard<std::mutex> lk(m_ytUpgradeMtx);
     if (m_ytUpgradeVid != videoId || m_ytUpgradeUrl.empty()) return false;
-    out = m_ytUpgradeUrl;
+    outUrl = m_ytUpgradeUrl;
+    outQuality = m_ytUpgradeQuality;
     m_ytUpgradeUrl.clear(); // lấy 1 lần
+    if (m_ytUpgradingKey == videoId + "|" + m_ytUpgradeQuality)
+        m_ytUpgradingKey.clear();
     return true;
+}
+
+void IPTVManager::clearUpgrade(const std::string& videoId) {
+    std::lock_guard<std::mutex> lk(m_ytUpgradeMtx);
+    if (m_ytUpgradeVid == videoId) {
+        m_ytUpgradeUrl.clear();
+        m_ytUpgradeQuality.clear();
+    }
+    if (m_ytUpgradingKey.compare(0, videoId.size(), videoId) == 0 &&
+        m_ytUpgradingKey.size() > videoId.size() &&
+        m_ytUpgradingKey[videoId.size()] == '|')
+        m_ytUpgradingKey.clear();
 }
 
 // iptvDbg: ghi qua Logger chuẩn (gộp vào debug.log chính với category IPTV).
@@ -2144,13 +2152,34 @@ bool IPTVManager::playChannel(const IPTVChannel& channel, size_t initialIndex, c
 bool IPTVManager::switchYouTubeQuality(const std::string& videoId, const std::string& targetQuality) {
     if (!m_isPlaying || !MpvPlayer::instance().isPlaying()) return false;
 
-    // Resolve new stream URL (ưu tiên cache từ auto-upgrade ngầm)
-    std::string newUrl = fetchYouTubeStreamUrl(videoId, targetQuality);
-    if (newUrl.empty()) {
-        sendMpvIpcCommand("{\"command\":[\"show-text\",\"Không thể lấy luồng " + targetQuality + "p\",3000]}");
-        return false;
+    // Cache hit (preload đã hâm / vừa resolve): đổi ngay, không block.
+    std::string newUrl = UIManager::instance().cachedStreamUrl(videoId, targetQuality);
+    if (!newUrl.empty())
+        return switchYouTubeStream(videoId, newUrl, targetQuality);
+    // Cache miss: resolve nền rồi tự switch khi xong — KHÔNG block control
+    // loop (resolve yt-dlp ~10s+ trên UI thread = freeze ngay như report).
+    std::string key = videoId + "|" + targetQuality;
+    {
+        std::lock_guard<std::mutex> lk(m_ytUpgradeMtx);
+        if (m_ytUpgradingKey == key) return false; // đang tải, OSD đã báo
+        m_ytUpgradingKey = key;
     }
-    return switchYouTubeStream(videoId, newUrl, targetQuality);
+    sendMpvIpcCommand("{\"command\":[\"show-text\",\"Đang tải " + targetQuality + "p...\",4000]}");
+    std::thread([this, videoId, targetQuality, key] {
+        std::string u = UIManager::instance().resolveYouTubeStreamUrl(videoId, targetQuality);
+        std::lock_guard<std::mutex> lk(m_ytUpgradeMtx);
+        if (m_ytUpgradingKey != key) return; // user đã đổi ý (key mới hơn)
+        if (!u.empty()) {
+            m_ytUpgradeVid = videoId;
+            m_ytUpgradeQuality = targetQuality;
+            m_ytUpgradeUrl = u;
+        } else {
+            m_ytUpgradingKey.clear();
+            // Báo qua OSD (IPTVManager không có toast): user biết mà bấm lại.
+            sendMpvIpcCommand("{\"command\":[\"show-text\",\"Không lấy được luồng " + targetQuality + "p\",3000]}");
+        }
+    }).detach();
+    return false; // chưa switch — loop sẽ tự switch khi có url (không đổi label ở caller)
 }
 
 bool IPTVManager::switchYouTubeStream(const std::string& videoId, const std::string& newUrl, const std::string& targetQuality) {
@@ -2434,6 +2463,17 @@ bool IPTVManager::playYouTubeVideo(const std::string& videoId, const std::string
 
         while (m_isPlaying && MpvPlayer::instance().isPlaying()) {
             if (MpvPlayer::instance().pollExited()) break;
+
+            // Nâng chất lượng ngầm xong (SELECT resolve nền / preload):
+            // tự switch, không cần bấm lại.
+            {
+                std::string upgUrl, upgQ;
+                if (takeUpgradeUrl(videoId, upgUrl, upgQ) && !upgUrl.empty()) {
+                    currentQuality = upgQ;
+                    m_ytQuality = upgQ;
+                    switchYouTubeStream(videoId, upgUrl, upgQ);
+                }
+            }
 
             if (m_overlayExpireTime > 0 && SDL_GetTicks() >= m_overlayExpireTime) {
                 sendMpvIpcCommand("{\"command\":[\"overlay-remove\",0]}");
