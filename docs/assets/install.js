@@ -11,7 +11,7 @@
 //   open/claim/handshake lại trên cùng handle (không cần gesture mới).
 // Tem version hiện ở footer để nhìn là biết đang chạy bản mới hay cache cũ.
 // Mỗi lần sửa file này thì đổi chuỗi dưới (ngày + commit ngắn).
-var INSTALL_JS_VER = "2026-10-12/usb-fix3";
+var INSTALL_JS_VER = "2026-10-12/oneclick1";
 var APP_INSTALL = {
   romcloud: {
     label: "RomCloud",
@@ -20,7 +20,7 @@ var APP_INSTALL = {
     chmod: ["Apps/RomCloud/launch.sh", "Apps/RomCloud/bin/RomCloud", "Apps/RomCloud/bin/gamecast_d"],
     verify: "Apps/RomCloud/bin/RomCloud",
     fallbackWin: "installers/cai-dat-windows.bat",
-    fallbackMac: "installers/cai-dat-mac.command"
+    fallbackMac: "installers/cai-dat-mac.zip"
   },
   brickdrop: {
     label: "BrickDrop",
@@ -234,7 +234,8 @@ btnInstall.onclick = async function () {
     // 1. Release mới nhất
     log("Đang hỏi bản mới nhất...");
     var rel = await (await fetch("https://api.github.com/repos/" + CFG.repo + "/releases/latest")).json();
-    var asset = (rel.assets || []).filter(function (a) { return /\.zip$/.test(a.name); })[0];
+    // Chỉ lấy gói app, loại gói RC-Web để không tải nhầm (giữ chung cho cả BrickDrop).
+    var asset = (rel.assets || []).filter(function (a) { return /\.zip$/.test(a.name) && !/^rc-web-/i.test(a.name); })[0];
     if (!asset) throw new Error("Không thấy file zip trong release " + rel.tag_name);
     log("Bản mới nhất: " + rel.tag_name + " (" + asset.name + ")", "ok");
 

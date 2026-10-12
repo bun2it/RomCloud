@@ -101,8 +101,9 @@ install_pending_ota() {
 # Check and install any pending OTA update before starting
 install_pending_ota
 
-# Ensure binary is executable
-chmod +x ./bin/RomCloud 2>/dev/null
+# Ensure binaries are executable (files copied via USB storage / OTA /
+# adb push may arrive without +x; exFAT has no Unix permissions).
+chmod +x ./bin/* 2>/dev/null
 
 # Execution loop supporting in-app restart after OTA update (exit code 42).
 # (Chrome chạy nhúng trong app — fork/wait trong ChromeBridge, không exit.)

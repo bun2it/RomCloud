@@ -29,14 +29,14 @@
   <div id="log">[nhật ký]<br>Mở trang bằng Chrome/Edge để dùng WebUSB.<br></div>
   <p style="font-size:13px;color:var(--dim)">Nếu báo lỗi cổng USB: eject ổ đĩa Brick nếu đang hiện trên máy, tắt adb khác đang chạy, tải lại trang rồi bấm 1 lần duy nhất.</p>
 
-  <h3 style="margin-top:28px">Cách dự phòng: tải file về máy</h3>
-  <p style="font-size:13px;color:var(--dim)">Khi web ở trên không dùng được. Tải 1 file theo hệ điều hành rồi double-click, nó tự làm hết.</p>
+  <h3 style="margin-top:28px">Cách dự phòng: chép qua USB Storage (không cần driver)</h3>
+  <p style="font-size:13px;color:var(--dim)">Khi web ở trên không dùng được. Trên Brick mở app <b>USB Storage</b> trước, rồi tải 1 file dưới về double-click — nó tự tải bản mới, bung vào thẻ, eject an toàn. Xong thì thoát app USB Storage trên Brick.</p>
   <p style="text-align:center">
     <a class="btn ghost" id="dlWin" href="installers/cai-dat-windows.bat" download>🪟 BẢN WINDOWS</a>
     <span style="display:inline-block;width:12px"></span>
-    <a class="btn ghost" id="dlMac" href="installers/cai-dat-mac.command" download>🍎 BẢN MAC</a>
+    <a class="btn ghost" id="dlMac" href="installers/cai-dat-mac.zip" download>🍎 BẢN MAC</a>
   </p>
-  <p style="font-size:13px;color:var(--dim)">Windows lần đầu cần driver USB 1 lần: mở <a href="https://zadig.akeo.ie">zadig.akeo.ie</a>, chọn thiết bị Android/TrimUI → Install WinUSB. Mac mở file .command lần đầu: chuột phải → Open.</p>
+  <p style="font-size:13px;color:var(--dim)">Mac: bung file zip rồi double-click file .command bên trong (lần đầu: chuột phải → Open). Windows chạy thẳng file .bat. Không cần Zadig/driver cho đường này (Zadig chỉ cần nếu dùng adb/WebUSB).</p>
 
   <footer><a id="homeLink2" href="./">← Trang chủ</a> <span id="jsVer" style="color:var(--dim);font-size:11px;margin-left:12px"></span></footer>
 </div>
