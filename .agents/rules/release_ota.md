@@ -18,11 +18,15 @@ Mọi agent làm release BẮT BUỘC tuân thủ các quy tắc dưới đây.
   KÈM release khi `rc_web_version` trong `version.json` đổi. Đây là gói
   trình duyệt riêng cho OTA thủ công (màn Cập nhật → X), không nằm trong
   full-zip app. Không đổi rc-web thì không upload asset này.
-- **Ngoại lệ duy nhất (đã duyệt cho v2.3.2):** asset binary cầu `RomCloud`
-  kèm `binary_url` trong `version.json`, để máy đời cũ (code OTA chỉ biết
-  tải binary) bước qua được rồi tự vá full-zip khi boot
-  (`UpdateManager::repairIfBroken`). Từ version sau cầu này thì quay lại
-  1 zip, không duy trì.
+- **Ngoại lệ OTA delta (đã duyệt, từ 2.5.2):** mỗi release được kèm thêm
+  `RomCloud-vX.Y.Z-lite.zip`, `RomCloud-vX.Y.Z-delta.zip`,
+  `RomCloud-vX.Y.Z-completion.zip`, `ota-manifest.json` (do `package.sh`
+  + `tools/mkota.py` sinh ra từ cùng 1 staging). Đây là 1 cơ chế, không
+  phải gói tùy chọn — không tính vào giới hạn 1 zip: full-zip vẫn bắt
+  buộc (cài mới + fallback khi delta hỏng + cầu di trú cho máy cũ).
+  Máy chỉ áp delta khi verify hash từng file xong, hỏng là rớt về
+  full-zip (giữ bài học v2.3.0: không bao giờ vá nửa vời).
+- **Ngoại lệ duy nhất (đã duyệt cho v2.3.2, đã xong):** asset binary cầu `RomCloud`
 - `dist/` local cũng chỉ giữ zip của version hiện tại, xóa các zip version
   cũ để tránh upload nhầm.
 
