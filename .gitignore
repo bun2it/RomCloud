@@ -27,3 +27,6 @@ dat/
 assets/md5systems.dat
 assets/fbneosets.dat
 screen_shot.png
+
+node_modules/
+*.bak
