@@ -43,7 +43,9 @@ SNAP() {
 TR L00 "launch.sh bắt đầu, thư mục=$RC_DIR"
 uname -a 2>/dev/null
 SNAP "vừa vào launcher"
-set -x
+# set -x chi khi debug (RC_WEB_DEBUG=1): han che fork + ghi log tren
+# the cham, bot vai giay boot. Mac dinh chi ghi dong trace.
+if [ "$DEBUG" = 1 ]; then set -x; fi
 
 WROOT="$RC_DIR/weston"
 WLIB="$WROOT/lib/aarch64-linux-gnu"
@@ -93,14 +95,20 @@ cleanup() {
 }
 trap 'cleanup; exit 0' TERM INT
 
-# Dọn phiên cũ nếu còn sót (thoát bất thường lần trước).
-killall -0 electron 2>/dev/null && TR L01 "còn electron cũ sót lại -> kill"
-killall -9 electron 2>/dev/null
-killall -9 gptokeyb2 2>/dev/null
-killall -9 weston 2>/dev/null
-killall -9 Xwayland 2>/dev/null
-sleep 1
-TR L01 "đã dọn tiến trình sót của phiên trước (nếu có)"
+# Dọn phiên cũ nếu còn sót (thoát bất thường lần trước). Sach thi bo
+# qua killall + sleep de tiet kiem ~2.5s boot.
+if killall -0 electron 2>/dev/null || killall -0 weston 2>/dev/null || \
+   killall -0 gptokeyb2 2>/dev/null || killall -0 Xwayland 2>/dev/null; then
+  TR L01 "còn tiến trình cũ sót lại -> kill"
+  killall -9 electron 2>/dev/null
+  killall -9 gptokeyb2 2>/dev/null
+  killall -9 weston 2>/dev/null
+  killall -9 Xwayland 2>/dev/null
+  sleep 1
+  TR L01 "đã dọn tiến trình sót của phiên trước"
+else
+  TR L01 "không có tiến trình sót, bỏ qua dọn"
+fi
 
 # Stock OS: giữ MainUI đứng yên để nhường màn hình cho weston.
 if [ -x /usr/trimui/bin/MainUI ] || [ -x /mnt/SDCARD/System/MainUI ]; then
@@ -246,9 +254,10 @@ if [ -x "$RC_DIR/bin/gptokeyb2" ]; then
   TR L05F "gptokeyb2 đã chạy (trước weston), pid=$! (mapping browser.gptk)"
   if [ -n "$UDEVADM" ]; then
     "$UDEVADM" trigger --action=change --subsystem-match=input 2>/dev/null
-    "$UDEVADM" settle --timeout=2 2>/dev/null
+    # Bo settle --timeout=2: weston khoi dong ~4s sau, udev kip ap rule.
+    # Tiet kiem ~2s boot; thiet bi den muon thi weston nhan qua hot-plug.
   fi
-  TR L05G "da kich change + settle udev input: UDEVADM=$UDEVADM"
+  TR L05G "da kich change udev input (khong settle): UDEVADM=$UDEVADM"
   sleep 0.3
 else
   TR L05F "CẢNH BÁO: thiếu bin/gptokeyb2 -> tay cầm không điều khiển được"
@@ -320,9 +329,9 @@ TR L08 "bỏ qua Xwayland — Electron chạy Wayland native"
 # hot-plug, đường mà các phiên trước đã thấy nó phản ứng.
 if [ -n "$UDEVADM" ]; then
   "$UDEVADM" trigger --action=add --subsystem-match=input 2>/dev/null
-  "$UDEVADM" settle --timeout=2 2>/dev/null
+  # Bo settle (ly do nhu L05G): weston da len, hot-plug xu ly tiep.
 fi
-TR L08B "da phat lai add + settle input sau khi weston len"
+TR L08B "da phat lai add input sau khi weston len (khong settle)"
 SNAP "weston đã lên"
 
 # ── Electron tiền cảnh (phiên kết thúc khi tiến trình này thoát) ────
