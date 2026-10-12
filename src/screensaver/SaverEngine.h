@@ -6,6 +6,11 @@
 #include <vector>
 #include <functional>
 #include <cstdint>
+#include <thread>
+#include <map>
+#include <deque>
+#include <mutex>
+#include <condition_variable>
 
 struct SDL_Renderer;
 struct SDL_Texture;
@@ -106,6 +111,14 @@ private:
     SDL_Surface* m_photoNextSurf = nullptr; // surface ảnh kế
     uint32_t* m_photoPixels = nullptr;   // pixels 480x360 của ảnh hiện tại
     uint32_t* m_photoNextPixels = nullptr; // pixels 480x360 của ảnh kế
+    // P4: giải mã trước ảnh kế trong thread nền (chỉ IMG_Load + scale,
+    // không đụng renderer — cùng quy ước worker thumbnail của UIManager)
+    // để lúc chuyển ảnh không phải chờ giải mã ảnh gốc lớn.
+    SDL_Surface* m_preloadSurf = nullptr;  // surface ảnh kế đã scale
+    std::string m_preloadPath;             // đường dẫn của preload
+    std::thread m_preloadThread;
+    // Tai 2026-10-10: START hiện/ẩn footer gợi ý khi xem ảnh
+    bool m_footerVisible = true;
     float m_photoTimer = 0;              // đếm thời gian hiện ảnh
     float m_photoDuration = 10.0f;       // giây mỗi ảnh (setting)
     bool m_photoShuffle = true;
@@ -122,7 +135,12 @@ private:
     void photoUpdate(float dt);
     void photoRender();
     void scanPhotos();
+    void scanPhotoDir(const std::string& dirPath);
     bool loadPhoto(const std::string& path, SDL_Texture** outTex);
+    SDL_Surface* loadPhotoSurface(const std::string& path, int maxW, int maxH);
+    void kickPreloadNext();
+    void joinPreload();
+    SDL_Texture* takePreloadedTexture(const std::string& path);
     uint32_t* textureToPixels(SDL_Texture* tex);
     void nextPhoto();
     void prevPhoto();
@@ -140,6 +158,23 @@ private:
     bool m_photoListOpen = false;
     int m_photoListSel = 0;
     int m_photoListScroll = 0;
+    // Lưới thumbnail chọn ảnh: giải mã nhỏ ở thread nền, main thread
+    // tạo texture khi vẽ (giới hạn số texture giữ trong bộ nhớ đệm).
+    static const int THUMB_MAX = 48;
+    std::map<std::string, SDL_Texture*> m_thumbTex;
+    std::vector<std::string> m_thumbOrder;
+    std::deque<std::string> m_thumbQueue;
+    std::vector<std::pair<std::string, SDL_Surface*>> m_thumbReady;
+    std::thread m_thumbThread;
+    std::mutex m_thumbMutex;
+    std::condition_variable m_thumbCv;
+    bool m_thumbStop = false;
+    bool m_thumbStarted = false;
+    void ensureThumbWorker();
+    void stopThumbWorker();
+    void pumpThumbs();
+    SDL_Texture* getThumb(const std::string& path);
+    void freeThumbs();
     void toggleSettings();
     void settingsInput(int button);
     void drawText(const char* text, int x, int y, uint8_t r, uint8_t g, uint8_t b, bool centered = false, TTF_Font* customFont = nullptr);

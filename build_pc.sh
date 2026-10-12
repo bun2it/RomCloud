@@ -82,6 +82,7 @@ $CXX_CMD -std=c++17 -O2 -Wall -Wextra \
     src/ui/ExplorerRender.cpp \
     src/ui/ExplorerRenderKb.cpp \
     src/network/HttpClient.cpp \
+    src/network/YoutubeInnertube.cpp \
     src/network/WebServer.cpp \
     src/auth/AuthManager.cpp \
     src/sync/DriveSyncEngine.cpp \
@@ -103,6 +104,8 @@ $CXX_CMD -std=c++17 -O2 -Wall -Wextra \
     src/backup/BackupManager.cpp \
     src/rom/RomDetector.cpp \
     src/rom/RomOrganizer.cpp \
+    src/rom/Md5SystemDb.cpp \
+    src/rom/FbneoCompatDb.cpp \
     src/rom/EmuLauncher.cpp \
     src/localsend/LocalSendManager.cpp \
     src/cast/CastManager.cpp \

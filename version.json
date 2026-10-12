@@ -4,6 +4,8 @@
   "target_os": "ALL",
   "icon_url": "https://raw.githubusercontent.com/bun2it/RomCloud/main/icon.png",
   "full_zip_url": "https://github.com/bun2it/RomCloud/releases/download/v2.4.1/RomCloud-v2.4.1.zip",
+  "rc_web_version": "20261011",
+  "rc_web_url": "https://github.com/bun2it/RomCloud/releases/download/v2.4.1/rc-web-20261011.zip",
   "os_versions": {
     "STOCK_PS": "2.4.1",
     "NEXTUI": "2.4.1",

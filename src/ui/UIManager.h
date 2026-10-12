@@ -547,8 +547,19 @@ private:
   std::string m_ytPendingStreamUrl;
   std::string m_ytPendingVideoId;
   std::string m_ytPendingVideoTitle; // tiêu đề cho OSD top bar (UI-only)
+  std::string m_ytPendingVideoDesc; // mô tả cho OSD (UI-only)
+  std::string m_ytPlayingVideoId; // video dang phat (doi chieu desc)
+  std::atomic<bool> m_ytDescReady{false}; // desc ve sau resolve
   std::string m_ytPendingQuality; // "720" mặc định, "360" nếu 720 rớt mới dùng
   std::vector<std::string> m_ytSearchHistory;
+  // Xem lai: video da xem (id|title|uploader), toi da 10, moi nhat truoc.
+  struct YtWatched { std::string id; std::string title; std::string uploader; };
+  std::vector<YtWatched> m_ytWatched;
+  int m_ytWatchedIndex = 0;
+  void loadYouTubeWatched();
+  void saveYouTubeWatched(const std::string& id, const std::string& title,
+                           const std::string& uploader);
+  void persistYouTubeWatched();
   int m_ytSelectedTagIndex = 0;
   bool m_ytFocusInTags = false;
   int m_ytSearchFocus = 2; // 1 = History pills, 2 = Virtual keyboard
@@ -560,22 +571,26 @@ private:
   // khi user chọn pill (không cần input). Empty feedQuery = dùng user input
   // (pill chỉ đóng vai trò category filter trên top of user query).
   struct Category {
-    const char *id;        // "all", "music", ...
-    const char *label;     // "Tất cả", "Âm nhạc", ...
-    const char *feedQuery; // auto-feed query khi pick pill (e.g. "nhạc việt")
+    const char *id;     // "music", "live", "watched", ...
+    const char *label;  // "Âm nhạc", "Trực tiếp", ...
+    // Hanh dong khi pick pill:
+    //  "feed:<cat>"  -> trending (feed: = tat ca)
+    //  "live:<query>" -> live hien tai (params EgJAAQ==)
+    //  "search:<query>" -> tim thuong
+    //  "latest:" -> moi tai len (search sap xep theo ngay)
+    //  "watched:" -> video da xem (local, khong mang)
+    //  "suggest:" -> de xuat theo kenh hay xem (RSS, khong login)
+    const char *action;
   };
-  static const std::array<Category, 9> kYtCategories;
+  static const std::array<Category, 10> kYtCategories;
   int m_ytSelectedCategory = 0;
   int m_ytCategoryScrollOffset = 0; // horizontal scroll offset (px)
 
   // P0-6: YouTube HOME state (search input + pills + content)
-  // m_ytSearchModalOpen: when true, render SearchInputModal over HOME.
   // m_ytViewMode: false = row list (5 rows/page), true = grid 3x2 (6
   // cards/page). m_ytHasSearched: true after first category auto-feed search
   // has results.
-  bool m_ytSearchModalOpen = false;
   bool m_ytViewMode = false; // false = row, true = grid
-  bool m_ytHomeHasResults = false;
   int m_ytHomeContentSelected = 0;
   int m_ytHomeContentScrollOffset = 0;
   int m_ytHomePage = 1;
@@ -586,17 +601,25 @@ private:
   struct YtMatchedChannel {
     bool matched = false;
     std::string name;
+    std::string channelId; // UC... de lay video kenh
     std::string subscribers;
     std::string videoCount;
     std::string avatarUrl;
   };
   YtMatchedChannel m_ytMatchedChannel;
   bool m_ytInChannelView = false;
+  // Video kenh dang tai nen (thread fetch -> UI nhan).
+  std::vector<std::string> m_ytChannelPending;
+  std::atomic<bool> m_ytChannelReady{false};
   std::vector<std::string> m_ytChannelAllVideos;
-  SearchInputModal::Config m_ytHomeModalCfg;
   void openYouTubeHomeModal();
-  void closeYouTubeHomeModal();
-  void runYouTubeHomeSearch(const std::string &query);
+  void runYouTubeHomeSearch(const std::string &query,
+                              const std::string &params = "");
+  // Chay tag home theo action (feed/live/search/latest/watched/suggest).
+  void runTagAction(int index);
+  // Hien video da xem (local). De xuat theo kenh hay xem (RSS, khong login).
+  void showWatchedVideos();
+  void suggestFromHistory();
   void toggleYouTubeViewMode();
   void renderYouTubeHomeState();
   void renderYouTubeHomeContentRow(int contentTop, int /*contentH*/);
@@ -611,11 +634,10 @@ private:
                            const std::string &vid, bool selected,
                            bool scaledThumb);
   // 2) drawYtStandardMeta: dòng 1 = tên video (TEXT_MAIN), dòng 2 =
-  //    "duration - lượt xem" (TEXT_SUB), cả hai canh trái. lineStep do
-  //    caller tính để vừa khối info.
+  //    "ten kenh - duration - lượt xem" gop 1 hang neu showChannel,
+  //    khong thi "duration - lượt xem" (TEXT_SUB).
   void drawYtStandardMeta(int x, int y, int maxW, int lineStep,
-                          const YtItem &item);
-  std::string currentCategoryFeedQuery() const;
+                          const YtItem &item, bool showChannel = false);
   void loadYouTubeViewMode();
   void saveYouTubeViewMode();
   void renderYouTubeHomeModalOverlay();
@@ -744,6 +766,14 @@ private:
   std::unordered_map<std::string, std::string> m_ytStreamUrlCache; // key vid|quality
   std::vector<std::string> runYouTubeSearch(const std::string &query,
                                             int page = 1);
+  // Lay dong ket qua tho (innertube truoc, yt-dlp fallback): dung chung cho
+  // moi duong search de khoi lap lai escape/cmd/popen. params innertube
+  // tuy chon (VD: "EgJAAQ==" loc live, "EgIIAg==" sap xep theo ngay).
+  static std::vector<std::string> fetchSearchLines(const std::string &query,
+                                                   int maxResults,
+                                                   const std::string &appRoot,
+                                                   const std::string &params = "");
+  std::string m_ytLastSearchParams; // params kem theo query (live/date)
   void preloadYouTubeStreamUrl(const std::string &videoId);
   void triggerYouTubeSearch();
   void playYouTubeVideo(const std::string &videoId);

@@ -13,6 +13,11 @@ Mọi agent làm release BẮT BUỘC tuân thủ các quy tắc dưới đây.
 - **CẤM** upload thêm: `RomCloud-Lite-Installer.zip`, `mpv_bundle.zip`,
   `bundle-*.zip`, `RomCloud-Install-To-Apps.zip`, hay bất kỳ file linh tinh
   nào khác — trừ khi user yêu cầu rõ ràng.
+- **Ngoại lệ RC-Web (đã duyệt):** asset `rc-web-<rc_web_version>.zip`
+  (~200M, do `package-rc-web.sh` sinh ra từ `~/Downloads/rc-web`) được upload
+  KÈM release khi `rc_web_version` trong `version.json` đổi. Đây là gói
+  trình duyệt riêng cho OTA thủ công (màn Cập nhật → X), không nằm trong
+  full-zip app. Không đổi rc-web thì không upload asset này.
 - **Ngoại lệ duy nhất (đã duyệt cho v2.3.2):** asset binary cầu `RomCloud`
   kèm `binary_url` trong `version.json`, để máy đời cũ (code OTA chỉ biết
   tải binary) bước qua được rồi tự vá full-zip khi boot

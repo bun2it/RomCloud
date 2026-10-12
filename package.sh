@@ -79,6 +79,10 @@ cp assets/sounds/alarm.wav "$STAGING_DIR/Apps/RomCloud/assets/sounds/"
 cp assets/vn_wards.json "$STAGING_DIR/Apps/RomCloud/assets/" 2>/dev/null || true
 cp assets/traffic_cams.json "$STAGING_DIR/Apps/RomCloud/assets/" 2>/dev/null || true
 cp assets/flood_points.json "$STAGING_DIR/Apps/RomCloud/assets/" 2>/dev/null || true
+# Bang tra MD5/CRC32 -> he may cho tinh nang Sap xep ROM (sinh boi
+# tools/gen_md5db.py --download); thieu thi vong 2 tu bo qua
+cp assets/md5systems.dat "$STAGING_DIR/Apps/RomCloud/assets/" 2>/dev/null || true
+cp assets/fbneosets.dat "$STAGING_DIR/Apps/RomCloud/assets/" 2>/dev/null || true
 mkdir -p "$STAGING_DIR/Apps/RomCloud/assets/weather_icons"
 cp assets/weather_icons/*.png "$STAGING_DIR/Apps/RomCloud/assets/weather_icons/" 2>/dev/null || true
 cp -r assets/stock_keyboard/* "$STAGING_DIR/Apps/RomCloud/assets/stock_keyboard/"

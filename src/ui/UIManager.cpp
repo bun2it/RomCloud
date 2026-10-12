@@ -11,6 +11,7 @@
 #include "../download/DownloadManager.h"
 #include "../filesystem/FileSystemManager.h"
 #include "../rom/EmuLauncher.h"
+#include "../rom/RomOrganizer.h"
 #include "../input/InputManager.h"
 #include "../iptv/IPTVManager.h"
 #include "../localsend/LocalSendManager.h"
@@ -18,6 +19,7 @@
 #include "../logging/Logger.h"
 #include "../media/MpvPlayer.h"
 #include "../network/HttpClient.h"
+#include "../network/YoutubeInnertube.h"
 #include "../network/JsonHelper.h"
 #include "../network/WebServer.h"
 #include "../ota/UpdateManager.h"
@@ -57,17 +59,18 @@ UIManager &UIManager::instance() {
   return instance;
 }
 
-// P0-6: feedQuery - Sử dụng feed chuẩn từ YouTube Data API (chart=mostPopular)
-const std::array<UIManager::Category, 9> UIManager::kYtCategories = {{
-    {"all", "Thịnh hành", "feed:"},
+// Tag home: tron bo theo yeu cau (feed + search + local, khong login).
+const std::array<UIManager::Category, 10> UIManager::kYtCategories = {{
     {"music", "Âm nhạc", "feed:10"},
     {"gaming", "Trò chơi", "feed:20"},
-    {"sports", "Thể thao", "feed:17"},
-    {"news", "Tin tức", "feed:25"},
-    {"film", "Phim ảnh", "feed:1"},
-    {"lifestyle", "Đời sống", "feed:26"},
-    {"comedy", "Hài hước", "feed:23"},
-    {"tech", "Công nghệ", "feed:28"},
+    {"live", "Trực tiếp", "live:trực tiếp"},
+    {"cooking", "Nấu ăn", "search:nấu ăn"},
+    {"farm", "Nông nghiệp", "search:nông nghiệp"},
+    {"travel", "Điểm đến du lịch", "search:du lịch"},
+    {"football", "Bóng đá", "search:bóng đá"},
+    {"latest", "Mới tải lên gần đây", "latest:"},
+    {"watched", "Đã xem", "watched:"},
+    {"suggest", "Đề xuất mới", "suggest:"},
 }};
 
 // FNV-1a 64-bit hash → 16 hex chars. Dùng cho avatar channel key/path
@@ -423,24 +426,27 @@ void UIManager::setState(UIState state) {
         ", cached=" + std::to_string(m_ytAllCachedResults.size()) + ")");
     loadYouTubeHistory();
     loadYouTubeViewMode();
-    m_ytSearchModalOpen = false;
-    m_ytSelectedCategory = 0;
-    m_ytCategoryScrollOffset = 0;
-    m_ytHomeContentSelected = 0;
-    m_ytHomeContentScrollOffset = 0;
-    m_ytHomePage = 1;
-    m_ytHomeFocus = 1; // start on tag pills
-    m_ytHomeLoadedThisEnter = false;
+    loadYouTubeWatched();
+    m_ytWatchedIndex = 0;
+    // Giu vi tri (danh muc/trang/focus): chi khoi tao lan dau tien vao
+    // HOME ke tu luc mo app, cac lan quay lai sau giu nguyen de user tiep
+    // tuc cho dang xem do.
+    if (!m_ytHomeLoadedThisEnter) {
+      m_ytSelectedCategory = 0;
+      m_ytCategoryScrollOffset = 0;
+      m_ytHomeContentSelected = 0;
+      m_ytHomeContentScrollOffset = 0;
+      m_ytHomePage = 1;
+      m_ytHomeFocus = 1; // start on tag pills
+      m_ytHomeLoadedThisEnter = true;
+    }
     // Auto-feed first time HOME entered (no cached results). Khi user đã
     // search 1 query rồi thì khi quay lại HOME (từ RESULTS) giữ nguyên cache
     // và query → user thấy lại content vừa search, không bị clobber.
     if (m_ytAllCachedResults.empty()) {
-      const char *fq = kYtCategories[0].feedQuery;
-      if (fq && fq[0] != '\0') {
-        m_ytVk.query.clear();
-        m_ytKeyboardQuery.clear();
-        runYouTubeHomeSearch(fq);
-      }
+      m_ytVk.query.clear();
+      m_ytKeyboardQuery.clear();
+      runTagAction(0);
     }
     m_ytHomeLoadedThisEnter = true;
   } else if (state == UIState::CLOUD_LOGIN) {
@@ -800,20 +806,124 @@ void UIManager::update() {
     showToast("Tìm kiếm bị kẹt, thử lại", {245, 158, 11, 255}, 2500);
   }
 
+  // Video kenh fetch nen xong -> nap vao trang channel view (UI thread).
+  // Chi nhan khi user van o trang kenh (khong thi drop, tranh tron).
+  if (m_ytChannelReady.exchange(false)) {
+    if (!m_ytInChannelView) {
+      m_ytChannelPending.clear();
+    } else {
+      m_ytChannelAllVideos = std::move(m_ytChannelPending);
+    }
+    m_ytChannelPending.clear();
+    if (m_ytInChannelView) {
+      m_ytAllCachedResults = m_ytChannelAllVideos;
+      int count = std::min<int>(
+          6, static_cast<int>(m_ytAllCachedResults.size()));
+      m_ytSearchResults.assign(m_ytAllCachedResults.begin(),
+                               m_ytAllCachedResults.begin() + count);
+      m_ytHomePage = 1;
+      m_ytHomeContentSelected = 0;
+      m_ytHomeCol = 0;
+      rebuildYtItems();
+      if (count == 0)
+        showToast("Kênh chưa có video nào tải được", {245, 158, 11, 255},
+                  2500);
+    }
+  }
+
   // Check if YouTube video stream resolution finished
-  if (m_ytVideoReady.exchange(false)) {
-    m_ytIsLoadingVideo = false;
+  // Mo ta ve sau resolve: day vao OSD dang phat cung video.
+  if (m_ytDescReady.exchange(false)) {
+    IPTVManager::instance().setYtDesc(m_ytPendingVideoDesc);
+    m_ytPendingVideoDesc.clear();
+  }
+  if (m_ytVideoReady.exchange(false)) {    m_ytIsLoadingVideo = false;
     if (!m_ytPendingStreamUrl.empty()) {
       std::string url = m_ytPendingStreamUrl;
       std::string vid = m_ytPendingVideoId;
       std::string vtitle = m_ytPendingVideoTitle;
+      std::string vdesc = m_ytPendingVideoDesc;
       std::string vq = m_ytPendingQuality.empty() ? "720" : m_ytPendingQuality;
       m_ytPendingStreamUrl.clear();
       m_ytPendingVideoId.clear();
       m_ytPendingVideoTitle.clear();
+      m_ytPendingVideoDesc.clear();
       m_ytPendingQuality.clear();
-      IPTVManager::instance().playYouTubeVideo(vid, url, vq, vtitle);
+      m_ytPlayingVideoId = vid;
+      IPTVManager::instance().playYouTubeVideo(vid, url, vq, vtitle, vdesc);
       setState(UIState::YOUTUBE_RESULTS);
+      // Tu phat tiep (up next): uu tien video CUNG KENH voi video vua
+      // xem (quet xuoi tim uploader giong nhau), khong co thi lay muc ke
+      // tiep. Khong loop, bo qua hang kenh.
+      if (IPTVManager::instance().ytNaturalEnd()) {
+        std::string curUp;
+        size_t curIdx = 0;
+        bool foundCur = false;
+        for (size_t i = 0; i < m_ytSearchResults.size(); ++i) {
+          std::string cur = m_ytSearchResults[i].substr(
+              0, m_ytSearchResults[i].find('|'));
+          if (cur == vid) {
+            foundCur = true;
+            curIdx = i;
+            // Uploader o cot 4: id|title|dur|uploader|views
+            size_t p1 = m_ytSearchResults[i].find('|');
+            size_t p2 = (p1 == std::string::npos)
+                            ? std::string::npos
+                            : m_ytSearchResults[i].find('|', p1 + 1);
+            size_t p3 = (p2 == std::string::npos)
+                            ? std::string::npos
+                            : m_ytSearchResults[i].find('|', p2 + 1);
+            size_t p4 = (p3 == std::string::npos)
+                            ? std::string::npos
+                            : m_ytSearchResults[i].find('|', p3 + 1);
+            if (p3 != std::string::npos) {
+              curUp = (p4 == std::string::npos)
+                          ? m_ytSearchResults[i].substr(p3 + 1)
+                          : m_ytSearchResults[i].substr(p3 + 1, p4 - p3 - 1);
+            }
+            break;
+          }
+        }
+        std::string nextId;
+        if (foundCur) {
+          // Vong 1: cung kenh.
+          for (size_t i = curIdx + 1; i < m_ytSearchResults.size(); ++i) {
+            const std::string& row = m_ytSearchResults[i];
+            if (row.rfind("CHANNEL|", 0) == 0)
+              continue;
+            if (!curUp.empty()) {
+              size_t q1 = row.find('|');
+              size_t q2 = (q1 == std::string::npos)
+                              ? std::string::npos
+                              : row.find('|', q1 + 1);
+              size_t q3 = (q2 == std::string::npos)
+                              ? std::string::npos
+                              : row.find('|', q2 + 1);
+              std::string up =
+                  (q3 == std::string::npos) ? "" : row.substr(q3 + 1);
+              size_t q4 = up.find('|');
+              if (q4 != std::string::npos)
+                up = up.substr(0, q4);
+              if (up != curUp)
+                continue;
+            }
+            nextId = row.substr(0, row.find('|'));
+            break;
+          }
+          // Vong 2: muc ke tiep — CHI khi khong o trang kenh (trang kenh
+          // khong bao gio lan kenh khac; het video cung kenh thi dung).
+          if (nextId.empty() && !m_ytInChannelView &&
+              curIdx + 1 < m_ytSearchResults.size() &&
+              m_ytSearchResults[curIdx + 1].rfind("CHANNEL|", 0) != 0) {
+            nextId = m_ytSearchResults[curIdx + 1].substr(
+                0, m_ytSearchResults[curIdx + 1].find('|'));
+          }
+        }
+        if (!nextId.empty()) {
+          showToast("Tự phát tiếp...", {0, 180, 216, 255}, 2000);
+          playYouTubeVideo(nextId);
+        }
+      }
     } else {
       showToast("Không thể lấy link phát video", {239, 68, 68, 255}, 3000);
     }
@@ -1042,6 +1152,29 @@ void UIManager::update() {
         setState(UIState::GAME_LIST);
       } else if (input.isButtonJustPressed(Button::Y)) {
         triggerManualSync();
+      } else if (input.isButtonJustPressed(Button::START) &&
+                 m_libraryTab == LibraryTab::SDCARD) {
+        // Sửa ROM lạc trong folder hệ đang chọn (không cần vào trong).
+        if (RomOrganizer::instance().isBusy()) {
+          showToast("Đang sắp xếp, vui lòng chờ...", {245, 158, 11, 255},
+                    2000);
+        } else {
+          SystemRecord sel = m_cachedSystems[m_selectedSystemIndex];
+          showToast("Đang kiểm tra ROM lạc trong " + sel.name + "...",
+                    {0, 180, 216, 255}, 60000);
+          std::thread([this, sel]() {
+            auto fixed = RomOrganizer::instance().fixSystemFolder(sel.code);
+            refreshSystems();
+            int n = 0;
+            for (const auto& it : fixed) {
+              if (it.fixed) ++n;
+            }
+            std::string msg = (n > 0)
+                ? ("Đã sửa " + std::to_string(n) + " ROM lạc chỗ.")
+                : "Không phát hiện ROM lạc trong thư mục này.";
+            showToast(msg, {34, 197, 94, 255}, 4000);
+          }).detach();
+        }
       }
     }
     if (input.isButtonJustPressed(Button::B)) {
@@ -1078,8 +1211,34 @@ void UIManager::update() {
       break;
     }
 
-    // 3. Phím START: Mở tìm kiếm (luôn hoạt động)
+    // 3. Phím START: tab Thẻ nhớ = Sửa ROM trong folder hệ hiện tại
+    // (chỉ có nghĩa trên thẻ); tab Drive = Mở tìm kiếm (như cũ).
     if (input.isButtonJustPressed(Button::START)) {
+      if (m_libraryTab == LibraryTab::SDCARD && !m_multiSelectMode) {
+        if (RomOrganizer::instance().isBusy()) {
+          showToast("Đang sắp xếp, vui lòng chờ...", {245, 158, 11, 255},
+                    2000);
+        } else {
+          std::string sysCode = m_activeSystem.code;
+          std::string sysName = m_activeSystem.name;
+          showToast("Đang kiểm tra ROM lạc trong " + sysName + "...",
+                    {0, 180, 216, 255}, 60000);
+          std::thread([this, sysCode]() {
+            auto fixed = RomOrganizer::instance().fixSystemFolder(sysCode);
+            refreshSystems();
+            refreshGames();
+            int n = 0;
+            for (const auto& it : fixed) {
+              if (it.fixed) ++n;
+            }
+            std::string msg = (n > 0)
+                ? ("Đã sửa " + std::to_string(n) + " ROM lạc chỗ.")
+                : "Không phát hiện ROM lạc trong thư mục này.";
+            showToast(msg, {34, 197, 94, 255}, 4000);
+          }).detach();
+        }
+        break;
+      }
       VirtualKeyboard::reset(m_searchVk, true);
       m_searchVk.charset = 1;
       m_searchVk.maxLen = 30;
@@ -1656,8 +1815,8 @@ void UIManager::update() {
         }
       }
     } else if (m_settingsTab == 1) {
-      // ─── Tab 1: CÀI ĐẶT (6 rows: 0..5) ──────────────────────────────
-      const int totalRows = 6;
+      // ─── Tab 1: CÀI ĐẶT (7 rows: 0..6) ──────────────────────────────
+      const int totalRows = 7;
       if (input.isButtonJustPressed(Button::UP)) {
         if (m_selectedSettingsRow > 0) {
           m_selectedSettingsRow--;
@@ -1748,6 +1907,33 @@ void UIManager::update() {
           runWifiDiagnostics();
           showToast("Đang kiểm tra kết nối mạng Wi-Fi...", {0, 180, 255, 255},
                     2000);
+        } else if (m_selectedSettingsRow == 6) {
+          // Sắp xếp ROM (chạy nền): dò ROM trong thư mục Roms, xếp đúng hệ
+          // máy theo đuôi file (vòng 1) + MD5/CRC32 (vòng 2), sửa tên folder.
+          if (RomOrganizer::instance().isBusy()) {
+            showToast("Đang sắp xếp, vui lòng chờ...", {245, 158, 11, 255},
+                      2000);
+          } else {
+            showToast("Đang quét và sắp xếp ROM...", {0, 180, 216, 255},
+                      60000);
+            std::thread([this]() {
+              OrganizeSummary s = RomOrganizer::instance().organizeAll();
+              refreshSystems();
+              refreshGames();
+              std::string msg = "Đã sắp xếp xong: ";
+              msg += std::to_string(s.foldersRenamed) + " thư mục, ";
+              msg += std::to_string(s.filesMoved) + " file đã chuyển";
+              if (s.filesSkipped > 0) {
+                msg += " (" + std::to_string(s.filesSkipped) +
+                       " file không nhận diện được)";
+              }
+              if (!s.errors.empty()) {
+                msg += " — có " + std::to_string(s.errors.size()) + " lỗi";
+                Logger::warn("Sap xep ROM co loi: " + s.errors.front());
+              }
+              showToast(msg, {34, 197, 94, 255}, 5000);
+            }).detach();
+          }
         }
       }
     } else if (m_settingsTab == 2) {
@@ -1761,6 +1947,17 @@ void UIManager::update() {
           // P6: mở sub-page full changelog
           m_otaChangelogScrollLine = 0;
           setState(UIState::OTA_CHANGELOG);
+        } else if (input.isButtonJustPressed(Button::X)) {
+          // RC-Web: gói trình duyệt riêng (~200M zip). Dừng phiên web
+          // trước để swap thư mục an toàn.
+          if (UpdateManager::instance().isRcWebUpdateAvailable()) {
+            auto& bridge = ChromeBridge::instance();
+            if (bridge.isRunning())
+              bridge.stop();
+            if (!UpdateManager::instance().startRcWebUpdate()) {
+              showToast(UiStrings::TOAST_RCWEB_BUSY, {245, 158, 11, 255});
+            }
+          }
         }
       } else if (prog.state == UpdateState::UP_TO_DATE ||
                  prog.state == UpdateState::FAILED) {
@@ -1774,6 +1971,18 @@ void UIManager::update() {
           // Mở sub-page full changelog ngay cả khi đã là bản mới nhất
           m_otaChangelogScrollLine = 0;
           setState(UIState::OTA_CHANGELOG);
+        } else if (input.isButtonJustPressed(Button::X) &&
+                   (prog.state == UpdateState::UP_TO_DATE ||
+                    prog.state == UpdateState::FAILED)) {
+          // RC-Web: như nhánh UPDATE_AVAILABLE (dừng phiên web + tải).
+          if (UpdateManager::instance().isRcWebUpdateAvailable()) {
+            auto& bridge = ChromeBridge::instance();
+            if (bridge.isRunning())
+              bridge.stop();
+            if (!UpdateManager::instance().startRcWebUpdate()) {
+              showToast(UiStrings::TOAST_RCWEB_BUSY, {245, 158, 11, 255});
+            }
+          }
         }
       } else if (prog.state == UpdateState::DOWNLOADING ||
                  prog.state == UpdateState::DOWNLOADING_DEPS ||
@@ -2481,39 +2690,17 @@ void UIManager::update() {
     if (m_ytIsSearching)
       break;
 
-    // Modal mở → xử lý modal input
-    if (m_ytSearchModalOpen) {
-      // Read input flags locally to keep modal handler pure
-      bool a = input.isButtonRepeat(Button::A);
-      bool b = input.isButtonJustPressed(Button::B);
-      bool s = input.isButtonJustPressed(Button::START);
-      bool u = input.isButtonJustPressed(Button::UP);
-      bool d = input.isButtonJustPressed(Button::DOWN);
-      bool l = input.isButtonJustPressed(Button::LEFT);
-      bool r = input.isButtonJustPressed(Button::RIGHT);
-      bool x = input.isButtonRepeat(Button::X);
-      bool y = input.isButtonRepeat(Button::Y);
-      bool l1 = input.isButtonJustPressed(Button::L1);
-      bool r1 = input.isButtonJustPressed(Button::R1);
-      bool sel = input.isButtonJustPressed(Button::SELECT);
-      auto res = SearchInputModal::handleInput(m_ytHomeModalCfg, a, b, s, u, d,
-                                               l, r, x, y, l1, r1, sel);
-      if (res == SearchInputModal::Result::Commit) {
-        m_ytSearchModalOpen = false;
-        std::string q = m_ytVk.query;
-        if (!q.empty()) {
-          m_ytKeyboardQuery = q;
-          m_ytLastSearchQuery = q;
-          saveYouTubeHistory(q);
-          runYouTubeHomeSearch(q);
-        }
-      } else if (res == SearchInputModal::Result::Cancel) {
-        m_ytSearchModalOpen = false;
-      }
-      break;
-    }
-
     int totalResults = static_cast<int>(m_ytSearchResults.size());
+    // Che do Xem lai: chua co ket qua nhung co video da xem -> hang 2
+    // thanh danh sach Xem lai (len/xuong doi index, A phat lai).
+    bool watchMode = (totalResults == 0 && !m_ytIsSearching &&
+                      !m_ytWatched.empty());
+    int watchCount =
+        std::min<int>(5, static_cast<int>(m_ytWatched.size()));
+    // Che do list doc (Y): hang 2 la danh sach doc duy nhat, dieu huong
+    // theo index, khong theo cot. Channel card giu nguyen.
+    bool listMode = (!m_ytViewMode && totalResults > 0 &&
+                     !(m_ytMatchedChannel.matched && !m_ytInChannelView));
     if (input.isButtonJustPressed(Button::L1)) {
       if (m_ytHomePage > 1) {
         m_ytHomePage--;
@@ -2526,6 +2713,15 @@ void UIManager::update() {
           m_ytHomeContentSelected = 0;
           m_ytHomeCol = 0;
           rebuildYtItems();
+          std::vector<std::string> vids;
+          for (const auto &item : m_ytSearchResults) {
+            if (item.rfind("CHANNEL|", 0) == 0)
+              continue;
+            size_t p = item.find('|');
+            if (p != std::string::npos)
+              vids.push_back(item.substr(0, p));
+          }
+          startThumbnailDownloads(vids);
         }
       }
     } else if (input.isButtonJustPressed(Button::R1)) {
@@ -2542,6 +2738,15 @@ void UIManager::update() {
         m_ytHomeContentSelected = 0;
         m_ytHomeCol = 0;
         rebuildYtItems();
+        std::vector<std::string> vids;
+        for (const auto &item : m_ytSearchResults) {
+          if (item.rfind("CHANNEL|", 0) == 0)
+            continue;
+          size_t p = item.find('|');
+          if (p != std::string::npos)
+            vids.push_back(item.substr(0, p));
+        }
+        startThumbnailDownloads(vids);
       } else {
         showToast(m_ytInChannelView ? "Đã đến trang cuối (2/2)"
                                     : "Đã đến trang cuối",
@@ -2553,7 +2758,9 @@ void UIManager::update() {
         if (--m_ytSelectedCategory < 0)
           m_ytSelectedCategory = static_cast<int>(kYtCategories.size()) - 1;
       } else if (m_ytHomeRow == 2) {
-        if (m_ytMatchedChannel.matched && !m_ytInChannelView) {
+        if (listMode) {
+          // List doc: trai/phai khong dung.
+        } else if (m_ytMatchedChannel.matched && !m_ytInChannelView) {
           // Hàng 2 (Channel Card): 2 cột (0: Logo tròn, 1: Thông tin kênh)
           if (m_ytHomeCol > 0)
             m_ytHomeCol--;
@@ -2565,13 +2772,17 @@ void UIManager::update() {
           }
         }
       } else if (m_ytHomeRow == 3) {
-        // Hàng 3 (Thumbnail hàng 2 / hoặc 3 video mới nhất của kênh)
-        if (m_ytHomeCol > 0) {
-          m_ytHomeCol--;
-          m_ytHomeContentSelected =
-              (m_ytMatchedChannel.matched && !m_ytInChannelView)
-                  ? m_ytHomeCol
-                  : (3 + m_ytHomeCol);
+        if (listMode) {
+          // List doc: chi co 1 danh sach o hang 2, hang 3 khong dung.
+        } else {
+          // Hàng 3 (Thumbnail hàng 2 / hoặc 3 video mới nhất của kênh)
+          if (m_ytHomeCol > 0) {
+            m_ytHomeCol--;
+            m_ytHomeContentSelected =
+                (m_ytMatchedChannel.matched && !m_ytInChannelView)
+                    ? m_ytHomeCol
+                    : (3 + m_ytHomeCol);
+          }
         }
       }
     } else if (input.isButtonJustPressed(Button::RIGHT)) {
@@ -2580,7 +2791,9 @@ void UIManager::update() {
         m_ytSelectedCategory =
             (m_ytSelectedCategory + 1) % kYtCategories.size();
       } else if (m_ytHomeRow == 2) {
-        if (m_ytMatchedChannel.matched && !m_ytInChannelView) {
+        if (listMode) {
+          // List doc: trai/phai khong dung.
+        } else if (m_ytMatchedChannel.matched && !m_ytInChannelView) {
           // Hàng 2 (Channel Card): 2 cột (0: Logo, 1: Info)
           if (m_ytHomeCol < 1)
             m_ytHomeCol++;
@@ -2592,15 +2805,19 @@ void UIManager::update() {
           }
         }
       } else if (m_ytHomeRow == 3) {
-        int rowCount = (m_ytMatchedChannel.matched && !m_ytInChannelView)
-                           ? std::min(3, totalResults)
-                           : std::max(0, totalResults - 3);
+        if (listMode) {
+          // List doc: chi co 1 danh sach o hang 2.
+        } else {
+          int rowCount = (m_ytMatchedChannel.matched && !m_ytInChannelView)
+                             ? std::min(3, totalResults)
+                             : std::max(0, totalResults - 3);
         if (m_ytHomeCol + 1 < rowCount) {
           m_ytHomeCol++;
           m_ytHomeContentSelected =
               (m_ytMatchedChannel.matched && !m_ytInChannelView)
                   ? m_ytHomeCol
                   : (3 + m_ytHomeCol);
+        }
         }
       }
     } else if (input.isButtonJustPressed(Button::UP)) {
@@ -2609,9 +2826,27 @@ void UIManager::update() {
         m_ytHomeRow = 0;
         m_ytHomeFocus = 0;
       } else if (m_ytHomeRow == 2) {
-        // Hàng 2 -> UP lên Hàng 1 (Tag)
-        m_ytHomeRow = 1;
-        m_ytHomeFocus = 1;
+        if (listMode) {
+          // List doc: UP di chuyen index, het dau thi ve Hang 1.
+          if (m_ytHomeContentSelected > 0) {
+            --m_ytHomeContentSelected;
+          } else {
+            m_ytHomeRow = 1;
+            m_ytHomeFocus = 1;
+          }
+        } else if (watchMode) {
+          // Xem lai: UP di chuyen index, het dau thi ve Hang 1.
+          if (m_ytWatchedIndex > 0) {
+            --m_ytWatchedIndex;
+          } else {
+            m_ytHomeRow = 1;
+            m_ytHomeFocus = 1;
+          }
+        } else {
+          // Hàng 2 -> UP lên Hàng 1 (Tag)
+          m_ytHomeRow = 1;
+          m_ytHomeFocus = 1;
+        }
       } else if (m_ytHomeRow == 3) {
         // Hàng 3 -> UP lên Hàng 2
         m_ytHomeRow = 2;
@@ -2632,11 +2867,14 @@ void UIManager::update() {
         m_ytHomeFocus = 1;
       } else if (m_ytHomeRow == 1 &&
                  (totalResults > 0 ||
-                  (m_ytMatchedChannel.matched && !m_ytInChannelView))) {
+                  (m_ytMatchedChannel.matched && !m_ytInChannelView) ||
+                  watchMode)) {
         // Hàng 1 (Tag) -> DOWN xuống Hàng 2
         m_ytHomeRow = 2;
         m_ytHomeFocus = 2;
-        if (m_ytMatchedChannel.matched && !m_ytInChannelView) {
+        if (watchMode && totalResults == 0) {
+          m_ytWatchedIndex = 0;
+        } else if (m_ytMatchedChannel.matched && !m_ytInChannelView) {
           m_ytHomeCol = std::min(m_ytHomeCol, 1);
         } else {
           int row1Count = std::min(3, totalResults);
@@ -2644,8 +2882,17 @@ void UIManager::update() {
           m_ytHomeContentSelected = m_ytHomeCol;
         }
       } else if (m_ytHomeRow == 2) {
-        if (m_ytMatchedChannel.matched && !m_ytInChannelView &&
-            totalResults > 0) {
+        if (listMode) {
+          // List doc: DOWN di chuyen index (toi da muc 5 hien duoc).
+          int listMax = std::min(5, totalResults) - 1;
+          if (m_ytHomeContentSelected < listMax)
+            ++m_ytHomeContentSelected;
+        } else if (watchMode && totalResults == 0) {
+          // Xem lai: DOWN di chuyen index (khong xuong hang 3).
+          if (m_ytWatchedIndex + 1 < watchCount)
+            ++m_ytWatchedIndex;
+        } else if (m_ytMatchedChannel.matched && !m_ytInChannelView &&
+                   totalResults > 0) {
           // Hàng 2 (Channel) -> DOWN xuống Hàng 3 (3 video mới nhất của kênh)
           m_ytHomeRow = 3;
           m_ytHomeFocus = 2;
@@ -2666,37 +2913,55 @@ void UIManager::update() {
         // Hàng 0: Search box → mở modal nhập
         openYouTubeHomeModal();
       } else if (m_ytHomeRow == 1) {
-        // Hàng 1: Pill → fire feed search
-        const char *fq = kYtCategories[m_ytSelectedCategory].feedQuery;
-        if (fq && fq[0] != '\0') {
-          m_ytKeyboardQuery.clear();
-          m_ytVk.query.clear();
-          m_ytLastSearchQuery = fq;
-          runYouTubeHomeSearch(fq);
-        } else {
-          openYouTubeHomeModal();
-        }
+        // Hàng 1: Pill → chay action cua tag (feed/live/search/latest/
+        // watched/suggest, khong login).
+        runTagAction(m_ytSelectedCategory);
       } else if (m_ytHomeRow == 2) {
         if (m_ytMatchedChannel.matched && !m_ytInChannelView) {
-          // Bấm A ở Logo kênh (Cột 0) hoặc Cột 1:
-          // Chuyển sang trang load các video mới nhất (3 cột 2 hàng, 6
-          // thumbnails video, chuẩn bị 12 video cho 2 trang)
+          // Bấm A ở Logo kênh / Info: vao trang video MOI NHAT cua kenh
+          // (fetch nen theo channelId, khong dung lai ket qua search tron).
           m_ytInChannelView = true;
           m_ytHomePage = 1;
           m_ytHomeRow = 2;
           m_ytHomeCol = 0;
           m_ytHomeContentSelected = 0;
-          m_ytAllCachedResults = m_ytChannelAllVideos;
-          int count =
-              std::min<int>(6, static_cast<int>(m_ytAllCachedResults.size()));
-          m_ytSearchResults.assign(m_ytAllCachedResults.begin(),
-                                   m_ytAllCachedResults.begin() + count);
+          m_ytChannelAllVideos.clear();
+          m_ytSearchResults.clear();
+          // Xoa ca cache search tron cu: R1/L1 phan trang trong trang
+          // kenh chi duoc doc tu video kenh (consumer nap lai).
+          m_ytAllCachedResults.clear();
           rebuildYtItems();
+          std::string cid = m_ytMatchedChannel.channelId;
+          Logger::info(std::string("[YouTube] Vao trang kenh '") +
+                       m_ytMatchedChannel.name + "' cid='" + cid + "'");
+          if (!cid.empty()) {
+            showToast("Video mới nhất của " + m_ytMatchedChannel.name,
+                      {0, 180, 216, 255}, 2500);
+            std::thread([this, cid]() {
+              auto vids = runYouTubeSearch("channel:" + cid, 1);
+              m_ytChannelPending = std::move(vids);
+              m_ytChannelReady = true;
+            }).detach();
+          } else {
+            // Khong co id kenh: dung tam ket qua search hien tai.
+            Logger::warn("[YouTube] Vao trang kenh KHONG co cid, dung ket qua tron");
+            m_ytAllCachedResults = m_ytChannelAllVideos;
+            int count = std::min<int>(
+                6, static_cast<int>(m_ytAllCachedResults.size()));
+            m_ytSearchResults.assign(m_ytAllCachedResults.begin(),
+                                     m_ytAllCachedResults.begin() + count);
+            rebuildYtItems();
+          }
         } else if (totalResults > 0 && m_ytHomeContentSelected >= 0 &&
                    m_ytHomeContentSelected < totalResults) {
           std::string selected = m_ytSearchResults[m_ytHomeContentSelected];
           std::string videoId = selected.substr(0, selected.find('|'));
           playYouTubeVideo(videoId);
+        } else if (watchMode && totalResults == 0 &&
+                   m_ytWatchedIndex >= 0 &&
+                   m_ytWatchedIndex < watchCount) {
+          // Xem lai: A phat lai video da xem.
+          playYouTubeVideo(m_ytWatched[m_ytWatchedIndex].id);
         }
       } else if (m_ytHomeRow == 3 && totalResults > 0) {
         int selIdx = (!m_ytInChannelView && m_ytMatchedChannel.matched)
@@ -2729,9 +2994,8 @@ void UIManager::update() {
                                  m_ytChannelAllVideos.begin() + end);
         rebuildYtItems();
       } else if (m_ytLastSearchQuery.rfind("channel:", 0) == 0) {
-        const char *fq = kYtCategories[m_ytSelectedCategory].feedQuery;
-        std::string target = (fq && fq[0] != '\0') ? fq : "feed:all";
-        runYouTubeHomeSearch(target);
+        // Ve tag hien tai (giua Bkênh thi B ve card, day la duong search).
+        runTagAction(m_ytSelectedCategory);
       } else {
         setState(UIState::MENU);
       }
@@ -2961,31 +3225,19 @@ void UIManager::update() {
           std::string appRoot = AppConfig::instance().getAppRoot();
           if (appRoot.empty())
             appRoot = "/mnt/SDCARD/Apps/RomCloud";
-          // P0-3: Pagination cũng dùng Python smart_search để consistent
-          std::string escapedQuery;
-          for (char c : query) {
-            if (c == '"' || c == '\\' || c == '$' || c == '`')
-              escapedQuery += '\\';
-            escapedQuery += c;
-          }
           int maxResults = std::min(targetPage * 6, 50);
-          std::string cmd = "/mnt/SDCARD/System/bin/python3 \"" + appRoot +
-                            "/scripts/youtube_search.py\" smart \"" +
-                            escapedQuery + "\" " + std::to_string(maxResults) +
-                            " 2>/tmp/yt_search_err.log";
-          FILE *pipe = popen(cmd.c_str(), "r");
+          // Lay dong tho qua helper chung (innertube + fallback).
+          std::vector<std::string> rawLines =
+              fetchSearchLines(query, maxResults, appRoot);
           std::vector<std::string> moreResults;
-          if (pipe) {
-            char buffer[2048];
-            while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
-              std::string line(buffer);
-              while (!line.empty() &&
-                     (line.back() == '\n' || line.back() == '\r'))
-                line.pop_back();
-              if (line.empty())
-                continue;
-              if (line.find("ERROR:") == 0 || line.find("WARNING:") == 0)
-                continue;
+          for (std::string line : rawLines) {
+            while (!line.empty() &&
+                   (line.back() == '\n' || line.back() == '\r'))
+              line.pop_back();
+            if (line.empty())
+              continue;
+            if (line.find("ERROR:") == 0 || line.find("WARNING:") == 0)
+              continue;
               int pipeCount = std::count(line.begin(), line.end(), '|');
               if (line.compare(0, 8, "CHANNEL|") == 0) {
                 if (pipeCount >= 4)
@@ -2993,9 +3245,7 @@ void UIManager::update() {
               } else if (pipeCount >= 4) {
                 moreResults.push_back(line);
               }
-            }
-            pclose(pipe);
-          }
+            } // for rawLines
           if (!moreResults.empty()) {
             m_ytAllCachedResults.insert(m_ytAllCachedResults.end(),
                                         moreResults.begin(), moreResults.end());
@@ -3787,7 +4037,13 @@ void UIManager::renderFooter() {
         x = drawFooterHint("L2", "Chọn nhiều", x, barY, barH, fg, m_fontSmall, iconSize, gap) + 30;
       }
       x = drawFooterHint("SELECT", "Lọc", x, barY, barH, fg, m_fontSmall, iconSize, gap) + 30;
-      x = drawFooterHint("START", "Tìm", x, barY, barH, cyan, m_fontSmall, iconSize, gap) + 30;
+      // Tab Thẻ nhớ: START = Sửa ROM lạc trong folder hiện tại.
+      // Tab Drive: START = Tìm kiếm (như cũ).
+      if (m_libraryTab == LibraryTab::SDCARD) {
+        x = drawFooterHint("START", "Sửa ROM", x, barY, barH, cyan, m_fontSmall, iconSize, gap) + 30;
+      } else {
+        x = drawFooterHint("START", "Tìm", x, barY, barH, cyan, m_fontSmall, iconSize, gap) + 30;
+      }
     }
     // L1 + R1 đổi Tab
     {
@@ -3884,6 +4140,12 @@ void UIManager::renderFooter() {
     x = drawFooterHint("Y", m_libraryTab == LibraryTab::DRIVE ? "Đồng bộ" : "Quét thẻ", x, barY, barH, cyan, m_fontSmall, iconSize,
                        gap) +
         30;
+    // Tab Thẻ nhớ: START sửa ROM lạc trong folder hệ đang chọn.
+    if (m_libraryTab == LibraryTab::SDCARD) {
+      x = drawFooterHint("START", "Sửa ROM", x, barY, barH, cyan, m_fontSmall, iconSize,
+                         gap) +
+          30;
+    }
     // L1 + R1 đổi Tab
     {
       int centerY = barY + barH / 2;
@@ -4984,8 +5246,8 @@ void UIManager::runWifiDiagnostics() {
 
 void UIManager::renderSettingsState() {
   // ─── Background + Header chuẩn (giống IPTV/YouTube/Explorer/GameCast) ───
-  // P4: bỏ custom sub-header strip cũ (Y=64..112 + line) để đồng bộ với
-  // các app khác. drawAppHeader tự render: FOOTER_BG bar + separator line +
+  // P4: bỏ custom sub-header strip cũ (Y=64..112 + line) để đồng bộ giao
+  // diện hệ thống. drawAppHeader tự render: FOOTER_BG bar + separator line +
   // title (ACCENT_CYAN) + cum status Wi-Fi/pin/clock bên phải.
   drawAppBackground();
   drawAppHeader(UiStrings::HEADER_SETTINGS);
@@ -5031,9 +5293,28 @@ void UIManager::renderSettingsState() {
         prog.state == UpdateState::UPDATE_AVAILABLE ||
         (prog.state == UpdateState::UP_TO_DATE &&
          !UpdateManager::instance().getLatestInfo().changelog.empty());
+    // RC-Web: hiện hint X ở các state rảnh (không đang tải/cài).
+    bool showXHInt =
+        (prog.state == UpdateState::UPDATE_AVAILABLE ||
+         prog.state == UpdateState::UP_TO_DATE ||
+         prog.state == UpdateState::FAILED) &&
+        UpdateManager::instance().isRcWebUpdateAvailable();
     if (showYHint) {
-      drawAppFooter({{UiTheme::PadBtn::A, "Tải"},
-                     {UiTheme::PadBtn::Y, "Tính năng mới"},
+      if (showXHInt) {
+        drawAppFooter({{UiTheme::PadBtn::A, "Tải"},
+                       {UiTheme::PadBtn::X, "Trình duyệt"},
+                       {UiTheme::PadBtn::Y, "Tính năng mới"},
+                       {UiTheme::PadBtn::B, "Lùi"},
+                       {UiTheme::PadBtn::L1R1, "Chuyển tab"}});
+      } else {
+        drawAppFooter({{UiTheme::PadBtn::A, "Tải"},
+                       {UiTheme::PadBtn::Y, "Tính năng mới"},
+                       {UiTheme::PadBtn::B, "Lùi"},
+                       {UiTheme::PadBtn::L1R1, "Chuyển tab"}});
+      }
+    } else if (showXHInt) {
+      drawAppFooter({{UiTheme::PadBtn::A, "Đồng ý"},
+                     {UiTheme::PadBtn::X, "Trình duyệt"},
                      {UiTheme::PadBtn::B, "Lùi"},
                      {UiTheme::PadBtn::L1R1, "Chuyển tab"}});
     } else {
@@ -5207,6 +5488,15 @@ void UIManager::renderSettingsState() {
     // 5: Kiểm tra mạng Wi-Fi
     items.push_back({"Kiểm tra mạng Wi-Fi", m_wifiDiagStatus, m_wifiDiagColor,
                      "[A] Kiểm tra", SDL_Color{21, 94, 117, 255},
+                     SDL_Color{255, 255, 255, 255}});
+
+    // 6: Sắp xếp ROM — dò ROM trong thư mục Roms, tự xếp đúng hệ máy
+    // (vòng 1: đuôi file, vòng 2: MD5/CRC32). Sửa cả tên folder gốc.
+    items.push_back({UiStrings::SETTING_ORGANIZE_ROMS,
+                     UiStrings::SETTING_ORGANIZE_ROMS_DESC,
+                     SDL_Color{34, 197, 94, 255},
+                     UiStrings::SETTING_ORGANIZE_ROMS_BTN,
+                     SDL_Color{21, 94, 117, 255},
                      SDL_Color{255, 255, 255, 255}});
   }
 
@@ -5549,8 +5839,8 @@ void UIManager::renderSystemTab() {
 
 void UIManager::renderDiagnosticsState() {
   // ─── Background + Header chuẩn (giống Settings/IPTV/YouTube/Explorer) ───
-  // Bỏ custom sub-header strip cũ (Y=64..112 + line + title thủ công) để đồng
-  // bộ với các app khác. drawAppHeader tự render: FOOTER_BG bar (Y=0..64) +
+  // Bỏ custom sub-header strip cũ (Y=64..112 + line + title thủ công) để
+  // đồng bộ giao diện hệ thống. drawAppHeader tự render: FOOTER_BG bar (Y=0..64) +
   // separator line + title ACCENT_CYAN + cum status Wi-Fi/pin/clock bên phải.
   drawAppBackground();
   drawAppHeader(UiStrings::HEADER_DIAG);
@@ -6160,6 +6450,21 @@ void UIManager::renderOTAUpdateState() {
     } else {
       // Fallback trống: không có notes từ release thì không hiện gì thêm.
     }
+    // RC-Web: gói trình duyệt riêng — hiện dòng version + nút X khi có mới.
+    if (UpdateManager::instance().isRcWebUpdateAvailable()) {
+      auto rcInfo = UpdateManager::instance().getLatestInfo();
+      std::string rcCur =
+          UpdateManager::instance().getInstalledRcWebVersion();
+      std::string rcRow =
+          std::string(UiStrings::OTA_RCWEB_ROW_PREFIX) +
+          (rcCur.empty() ? UiStrings::OTA_RCWEB_NOT_INSTALLED
+                         : (std::string("v") + rcCur)) +
+          " -> v" + rcInfo.rcWebVersion;
+      drawText(rcRow, 512, contentBoxY + 318, {0, 180, 216, 255}, m_fontSmall,
+               true);
+      drawText(UiStrings::OTA_RCWEB_BTN, 512, contentBoxY + 342,
+               {255, 255, 255, 255}, m_fontSmall, true);
+    }
     break;
   }
   case UpdateState::UPDATE_AVAILABLE: {
@@ -6182,6 +6487,21 @@ void UIManager::renderOTAUpdateState() {
     drawBadge(512 - badgeWidth(UiStrings::OTA_BTN_INSTALL_NOW, 52) / 2,
               contentBoxY + 260, 0, 52, UiStrings::OTA_BTN_INSTALL_NOW,
               {34, 197, 94, 255}, {0, 0, 0, 255});
+    // RC-Web: như tab ĐÃ MỚI NHẤT (dòng version + nút X khi có mới).
+    if (UpdateManager::instance().isRcWebUpdateAvailable()) {
+      auto rcInfo = UpdateManager::instance().getLatestInfo();
+      std::string rcCur =
+          UpdateManager::instance().getInstalledRcWebVersion();
+      std::string rcRow =
+          std::string(UiStrings::OTA_RCWEB_ROW_PREFIX) +
+          (rcCur.empty() ? UiStrings::OTA_RCWEB_NOT_INSTALLED
+                         : (std::string("v") + rcCur)) +
+          " -> v" + rcInfo.rcWebVersion;
+      drawText(rcRow, 512, contentBoxY + 322, {0, 180, 216, 255}, m_fontSmall,
+               true);
+      drawText(UiStrings::OTA_RCWEB_BTN, 512, contentBoxY + 344,
+               {255, 255, 255, 255}, m_fontSmall, true);
+    }
     break;
   }
   case UpdateState::DOWNLOADING:
@@ -7652,8 +7972,96 @@ void UIManager::saveYouTubeHistory(const std::string &query) {
   }
 }
 
+void UIManager::loadYouTubeWatched() {
+  if (!m_ytWatched.empty())
+    return;
+  std::string appRoot = AppConfig::instance().getAppRoot();
+  if (appRoot.empty())
+    appRoot = "/mnt/SDCARD/Apps/RomCloud";
+  std::ifstream file(appRoot + "/config/yt_watched.txt");
+  if (!file.is_open())
+    return;
+  std::string line;
+  while (std::getline(file, line)) {
+    while (!line.empty() && (line.back() == '\n' || line.back() == '\r'))
+      line.pop_back();
+    if (line.empty())
+      continue;
+    // Dinh dang: id|title|uploader (title/uploader co the rong).
+    size_t p1 = line.find('|');
+    if (p1 == std::string::npos)
+      continue;
+    size_t p2 = line.find('|', p1 + 1);
+    YtWatched w;
+    w.id = line.substr(0, p1);
+    if (p2 == std::string::npos) {
+      w.title = line.substr(p1 + 1);
+    } else {
+      w.title = line.substr(p1 + 1, p2 - p1 - 1);
+      w.uploader = line.substr(p2 + 1);
+    }
+    if (w.id.empty())
+      continue;
+    m_ytWatched.push_back(w);
+    if (m_ytWatched.size() >= 10)
+      break;
+  }
+}
+
+void UIManager::saveYouTubeWatched(const std::string& id,
+                                   const std::string& title,
+                                   const std::string& uploader) {
+  if (id.empty())
+    return;
+  // Da co: dua len dau, giu title/uploader cu neu lan nay rong.
+  for (size_t i = 0; i < m_ytWatched.size(); ++i) {
+    if (m_ytWatched[i].id == id) {
+      YtWatched w = m_ytWatched[i];
+      if (!title.empty())
+        w.title = title;
+      if (!uploader.empty())
+        w.uploader = uploader;
+      m_ytWatched.erase(m_ytWatched.begin() + i);
+      m_ytWatched.insert(m_ytWatched.begin(), w);
+      persistYouTubeWatched();
+      return;
+    }
+  }
+  YtWatched w;
+  w.id = id;
+  w.title = title.empty() ? id : title;
+  w.uploader = uploader;
+  m_ytWatched.insert(m_ytWatched.begin(), w);
+  while (m_ytWatched.size() > 10)
+    m_ytWatched.pop_back();
+  persistYouTubeWatched();
+}
+
+void UIManager::persistYouTubeWatched() {
+  std::string appRoot = AppConfig::instance().getAppRoot();
+  if (appRoot.empty())
+    appRoot = "/mnt/SDCARD/Apps/RomCloud";
+  mkdir((appRoot + "/config").c_str(), 0755);
+  std::ofstream file(appRoot + "/config/yt_watched.txt");
+  if (!file.is_open())
+    return;
+  for (const auto& w : m_ytWatched) {
+    std::string t = w.title, u = w.uploader;
+    for (char& c : t) {
+      if (c == '|' || c == '\n' || c == '\r')
+        c = ' ';
+    }
+    for (char& c : u) {
+      if (c == '|' || c == '\n' || c == '\r')
+        c = ' ';
+    }
+    file << w.id << "|" << t << "|" << u << "\n";
+  }
+}
+
 void UIManager::getYouTubeHistoryPills(std::vector<YtHistoryPill> &row3,
                                        std::vector<YtHistoryPill> &row4) {
+
   row3.clear();
   row4.clear();
   int totalItems = std::min(8, static_cast<int>(m_ytSearchHistory.size()));
@@ -7721,13 +8129,6 @@ std::vector<std::string> UIManager::runYouTubeSearch(const std::string &query,
   if (appRoot.empty())
     appRoot = "/mnt/SDCARD/Apps/RomCloud";
 
-  std::string escapedQuery;
-  for (char c : query) {
-    if (c == '"' || c == '\\' || c == '$' || c == '`')
-      escapedQuery += '\\';
-    escapedQuery += c;
-  }
-
   // Compute max results: page * per_page (page starts at 1)
   int maxResults = page * 24;
   if (maxResults < 24)
@@ -7735,25 +8136,14 @@ std::vector<std::string> UIManager::runYouTubeSearch(const std::string &query,
   if (maxResults > 50)
     maxResults = 50; // Hard cap
 
-  std::string cmd = "LD_LIBRARY_PATH=/mnt/SDCARD/System/lib:$LD_LIBRARY_PATH "
-                    "SSL_CERT_FILE=/mnt/SDCARD/System/lib/python3.11/"
-                    "site-packages/pip/_vendor/certifi/cacert.pem "
-                    "/mnt/SDCARD/System/bin/python3 \"" +
-                    appRoot + "/scripts/youtube_search.py\" smart \"" +
-                    escapedQuery + "\" " + std::to_string(maxResults) +
-                    " 2>/tmp/yt_search_err.log";
   Logger::info("[YouTube] Smart search (P0-3): query='" + query +
                "', maxResults=" + std::to_string(maxResults));
 
-  FILE *pipe = popen(cmd.c_str(), "r");
-  if (!pipe) {
-    Logger::error("[YouTube] popen failed for smart_search");
-    return results;
-  }
+  // Lay dong tho qua helper chung (innertube + fallback).
+  std::vector<std::string> rawLines =
+      fetchSearchLines(query, maxResults, appRoot);
 
-  char buffer[2048];
-  while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
-    std::string line(buffer);
+  for (std::string line : rawLines) {
     while (!line.empty() && (line.back() == '\n' || line.back() == '\r')) {
       line.pop_back();
     }
@@ -7772,8 +8162,7 @@ std::vector<std::string> UIManager::runYouTubeSearch(const std::string &query,
     } else if (pipeCount >= 4) {
       results.push_back(line);
     }
-  }
-  pclose(pipe);
+  } // for rawLines
   if (results.empty()) {
     std::string err = ytErrTail("/tmp/yt_search_err.log");
     Logger::warn("[YouTube] smart search empty, query='" + query + "'" +
@@ -7815,8 +8204,20 @@ std::string UIManager::resolveYouTubeStreamUrl(const std::string &videoId,
 
   // 360p android (~2s, progressive sẵn audio) phát nhanh; 720p DASH nét
   // hơn cho auto-upgrade / SELECT (resolve ngầm, không chặn phát).
+  // Player API truoc (~1s): co URL truc tiep thi dung ngay, khong thi
+  // roi xuong yt-dlp cu (DASH/cipher).
+  {
+    std::string q = quality.empty() ? "720" : quality;
+    std::string direct = YoutubeInnertube::resolveStream(videoId, q);
+    if (!direct.empty()) {
+      std::lock_guard<std::mutex> lock(s_ytStreamMutex);
+      m_ytStreamUrlCache[key] = direct;
+      Logger::info("[YouTube] Resolved via player API (fast path)");
+      return direct;
+    }
+  }
   std::string cmd = "\"" + scriptPath + "\" url \"" + videoId + "\" " +
-                    (quality.empty() ? "360" : quality) + " 2>/dev/null";
+                    (quality.empty() ? "720" : quality) + " 2>/dev/null";
 
   Logger::info("[YouTube] Resolving video URL: " + cmd);
   FILE *pipe = popen(cmd.c_str(), "r");
@@ -7880,11 +8281,11 @@ void UIManager::preloadYouTubeStreamUrl(const std::string &videoId) {
     return; // đang resolve dở: run() sẽ join block UI nên bỏ qua
   {
     std::lock_guard<std::mutex> lock(s_ytStreamMutex);
-    if (m_ytStreamUrlCache.find(videoId + "|360") != m_ytStreamUrlCache.end())
+    if (m_ytStreamUrlCache.find(videoId + "|720") != m_ytStreamUrlCache.end())
       return;
   }
   m_resolveTask.run([this, videoId](TaskProgress &) {
-    resolveYouTubeStreamUrl(videoId, "360");
+    resolveYouTubeStreamUrl(videoId, "720");
   });
 }
 
@@ -8103,12 +8504,13 @@ void UIManager::playYouTubeVideo(const std::string &videoId) {
     return;
 
   // Tiêu đề cho OSD top bar: tìm trong kết quả search (không đổi logic search)
-  std::string videoTitle;
+  std::string videoTitle, videoUploader;
   for (const auto *vec : {&m_ytItems, &m_ytAllItems}) {
     for (const auto &it : *vec) {
       if (it.type == YtItem::Type::Video && it.id == videoId &&
           !it.title.empty()) {
         videoTitle = it.title;
+        videoUploader = it.channel;
         break;
       }
     }
@@ -8116,11 +8518,12 @@ void UIManager::playYouTubeVideo(const std::string &videoId) {
       break;
   }
   m_ytPendingVideoTitle = videoTitle;
+  // Luu Xem lai (id|title|uploader) de gợi y khong can login.
+  saveYouTubeWatched(videoId, videoTitle, videoUploader);
 
-  // Cache: ưu tiên bản nét đã resolve (replay), rồi tới bản nhanh 360p.
+  // Cache: force 720p, chi dung ban 720 da resolve.
   std::string hit = cachedStreamUrl(videoId, "720");
   std::string hitQ = "720";
-  if (hit.empty()) { hit = cachedStreamUrl(videoId, "360"); hitQ = "360"; }
   if (!hit.empty()) {
     m_ytPendingVideoId = videoId;
     m_ytPendingStreamUrl = hit;
@@ -8139,15 +8542,21 @@ void UIManager::playYouTubeVideo(const std::string &videoId) {
   showToast("Đang tải video...", UiTheme::ACCENT_CYAN, 4000);
 
   m_resolveTask.run([this, videoId](TaskProgress &) {
-    // Mặc định 720; chỉ khi 720 không resolve được mới dùng 360.
+    // Force 720p: chi resolve 720, that bai thi bao loi (khong rot 360).
     std::string streamUrl = resolveYouTubeStreamUrl(videoId, "720");
     std::string q = "720";
-    if (streamUrl.empty()) {
-      streamUrl = resolveYouTubeStreamUrl(videoId, "360");
-      if (!streamUrl.empty()) q = "360";
-    }
     m_ytPendingQuality = q;
     m_ytPendingStreamUrl = streamUrl;
+    // Mo ta chay thread rieng song song (khong +1s vao resolve).
+    // Ve sau thi update() day vao OSD dang phat.
+    std::thread([this, videoId]() {
+      std::string desc = YoutubeInnertube::videoDescription(videoId);
+      // Chi nhan neu user van dang xem dung video do (tranh nham sang B).
+      if (!desc.empty() && m_ytPlayingVideoId == videoId) {
+        m_ytPendingVideoDesc = desc;
+        m_ytDescReady = true;
+      }
+    }).detach();
     m_ytVideoReady = true;
   });
 }
@@ -8302,22 +8711,31 @@ void UIManager::drawYtStandardThumb(int tx, int ty, int tw, int th,
 }
 
 void UIManager::drawYtStandardMeta(int x, int y, int maxW, int lineStep,
-                                   const YtItem &item) {
+                                   const YtItem &item, bool showChannel) {
   if (maxW <= 0)
     return;
+  int cy = y;
   // Dòng 1: tên video (TEXT_MAIN, canh trái)
-  drawText(truncateToWidth(item.title, m_fontSmall, maxW), x, y,
+  drawText(truncateToWidth(item.title, m_fontSmall, maxW), x, cy,
            UiTheme::TEXT_MAIN, m_fontSmall, false);
-  // Dòng 2: "duration - lượt xem" (TEXT_SUB, canh trái)
+  cy += lineStep;
+  // Dòng 2: "ten kenh - duration - lượt xem" gop 1 hang (rieng che do
+  // row; grid/results giu 2 dong cu).
   std::string metaLine;
-  if (!item.durationStr.empty())
+  if (showChannel && !item.channel.empty())
+    metaLine += item.channel;
+  // Tiep: "duration - lượt xem" (TEXT_SUB, canh trái)
+  if (!item.durationStr.empty()) {
+    if (!metaLine.empty())
+      metaLine += " - ";
     metaLine += item.durationStr;
+  }
   if (!item.viewsStr.empty()) {
     if (!metaLine.empty())
       metaLine += " - ";
     metaLine += item.viewsStr;
   }
-  drawText(truncateToWidth(metaLine, m_fontSmall, maxW), x, y + lineStep,
+  drawText(truncateToWidth(metaLine, m_fontSmall, maxW), x, cy,
            UiTheme::TEXT_SUB, m_fontSmall, false);
 }
 
@@ -9594,14 +10012,24 @@ UIManager::YtItem UIManager::buildYtItemFromPipe(const std::string &raw) {
   YtItem it;
 
   // P0-3: detect CHANNEL| prefix from smart search backend
-  // Format: "CHANNEL|<name>|<channelId>" (P0-6: trimmed — subs/vcount dropped
-  // from wire payload to optimize ms of search output. C++ uses defaults if
-  // older 5-field format arrives for backward compat.)
+  // Format moi (innertube): "CHANNEL|<name>|<UC channelId>|<avatar>|<subs>"
+  // Format cu (.py): "CHANNEL|<name>|<subs>|<vcount>|<avatar>" (khong id).
+  // Phan biet: parts[1] dang UC... 24 ky tu thi la format moi.
   if (raw.compare(0, 8, "CHANNEL|") == 0) {
     it.type = YtItem::Type::Channel;
     auto parts = split(raw.substr(8), '|');
     it.title = !parts.empty() ? parts[0] : "";
-    it.channelId = parts.size() >= 2 ? parts[1] : "";
+    if (parts.size() >= 2 && parts[1].size() == 24 &&
+        parts[1].compare(0, 2, "UC") == 0) {
+      it.channelId = parts[1];
+      // Avatar nam o m_ytMatchedChannel (card tai rieng); item chi giu chu.
+      it.subscribersStr = parts.size() >= 4 ? parts[3] : "";
+      it.videoCountStr = "";
+    } else {
+      it.channelId = "";
+      it.subscribersStr = parts.size() >= 2 ? parts[1] : "";
+      it.videoCountStr = parts.size() >= 3 ? parts[2] : "";
+    }
     // id = channelId (for selecting → navigate to channel's videos)
     it.id = it.channelId;
 
@@ -9667,17 +10095,16 @@ void UIManager::saveYouTubeViewMode() {
 void UIManager::toggleYouTubeViewMode() {
   m_ytViewMode = !m_ytViewMode;
   saveYouTubeViewMode();
+  if (!m_ytViewMode) {
+    // Ve list doc: gom ve hang 2, index trong 5 muc hien duoc.
+    if (m_ytHomeRow == 3)
+      m_ytHomeRow = 2;
+    int n = static_cast<int>(m_ytSearchResults.size());
+    if (m_ytHomeContentSelected > std::min(4, std::max(0, n - 1)))
+      m_ytHomeContentSelected = std::min(4, std::max(0, n - 1));
+  }
   showToast(m_ytViewMode ? "Chế độ: Lưới 3×2" : "Chế độ: Danh sách dọc",
             UiTheme::ACCENT_GREEN, 1200);
-}
-
-std::string UIManager::currentCategoryFeedQuery() const {
-  if (m_ytSelectedCategory < 0 ||
-      m_ytSelectedCategory >= static_cast<int>(kYtCategories.size())) {
-    return "";
-  }
-  const char *fq = kYtCategories[m_ytSelectedCategory].feedQuery;
-  return (fq && fq[0] != '\0') ? std::string(fq) : std::string();
 }
 
 void UIManager::openYouTubeHomeModal() {
@@ -9685,28 +10112,7 @@ void UIManager::openYouTubeHomeModal() {
   m_ytSearchFocus = 2;
   m_ytHistoryRow = 0;
   m_ytHistoryCol = 0;
-  m_ytSearchModalOpen = false;
   setState(UIState::YOUTUBE_SEARCH);
-}
-
-void UIManager::closeYouTubeHomeModal() {
-  m_ytSearchModalOpen = false;
-  if (m_currentState == UIState::YOUTUBE_SEARCH) {
-    setState(UIState::YOUTUBE_HOME);
-  }
-}
-
-void UIManager::renderYouTubeHomeModalOverlay() {
-  if (!m_ytSearchModalOpen)
-    return;
-  SearchInputModal::render(m_ytHomeModalCfg);
-  drawAppFooter({{UiTheme::PadBtn::A, "Chọn"},
-                 {UiTheme::PadBtn::Y, "Xóa"},
-                 {UiTheme::PadBtn::L1, "Hoa"},
-                 {UiTheme::PadBtn::R1, "ABC/123"},
-                 {UiTheme::PadBtn::SELECT, m_ytVk.telexMode ? "Telex: Bật" : "Telex: Tắt"},
-                 {UiTheme::PadBtn::START, "Tìm"},
-                 {UiTheme::PadBtn::B, "Đóng"}});
 }
 
 void UIManager::renderYouTubeHomeState() {
@@ -9867,15 +10273,91 @@ void UIManager::renderYouTubeHomeState() {
     drawText("Đang tải...", UiTheme::APP_W / 2, contentTop + contentH / 2,
              UiTheme::TEXT_SUB, m_fontMedium, true);
   } else if (totalResults == 0) {
-    drawText("Chọn danh mục để bắt đầu xem.", UiTheme::APP_W / 2,
-             contentTop + 40, UiTheme::TEXT_SUB, m_fontMedium, true);
-    drawText("D-pad L/R: chuyển danh mục • A/X: tìm kiếm", UiTheme::APP_W / 2,
-             contentTop + 80, UiTheme::TEXT_FAINT, m_fontSmall, true);
+    // Chua co ket qua: hien XEM LAI (video da xem, khong can login) neu co.
+    if (!m_ytWatched.empty()) {
+      drawText("XEM LẠI", 36, contentTop + 8, UiTheme::TEXT_SUB, m_fontSmall,
+               false);
+      int wy = contentTop + 38;
+      const int rowGap = 8;
+      int showN = std::min<int>(5, static_cast<int>(m_ytWatched.size()));
+      if (m_ytWatchedIndex < 0)
+        m_ytWatchedIndex = 0;
+      if (m_ytWatchedIndex >= showN)
+        m_ytWatchedIndex = showN - 1;
+      for (int i = 0; i < showN; ++i) {
+        const auto& w = m_ytWatched[i];
+        bool focused =
+            (m_ytHomeRow == 2 && m_ytWatchedIndex == i);
+        int rh = 62;
+        if (focused) {
+          drawRoundedRect(36, wy, 952, rh, UiTheme::RADIUS_ROW,
+                          UiTheme::FOCUS_BG, true);
+          drawRoundedBorder(36, wy, 952, rh, UiTheme::RADIUS_ROW,
+                            UiTheme::ACCENT_CYAN, 2);
+        } else {
+          drawRoundedRect(36, wy, 952, rh, UiTheme::RADIUS_ROW,
+                          UiTheme::ROW_BG, true);
+        }
+        std::string t = w.title.empty() ? w.id : w.title;
+        drawText(truncateToWidth(t, m_fontSmall, 900), 56,
+                 wy + 8, UiTheme::TEXT_MAIN, m_fontSmall, false);
+        if (!w.uploader.empty()) {
+          drawText(truncateToWidth(w.uploader, m_fontSmall, 900), 56,
+                   wy + 34, UiTheme::TEXT_FAINT, m_fontSmall, false);
+        }
+        wy += rh + rowGap;
+      }
+      drawText("A: phát lại", 36, wy + 4, UiTheme::TEXT_FAINT, m_fontSmall,
+               false);
+    } else {
+      drawText("Chọn danh mục để bắt đầu xem.", UiTheme::APP_W / 2,
+               contentTop + 40, UiTheme::TEXT_SUB, m_fontMedium, true);
+      drawText("D-pad L/R: chuyển danh mục • A/X: tìm kiếm", UiTheme::APP_W / 2,
+               contentTop + 80, UiTheme::TEXT_FAINT, m_fontSmall, true);
+    }
   } else {
     if (m_ytMatchedChannel.matched && !m_ytInChannelView)
       renderYouTubeHomeChannelLayout(contentTop, contentH);
-    else
+    else if (m_ytViewMode)
       renderYouTubeHomeContentGrid(contentTop, contentH);
+    else
+      renderYouTubeHomeContentRow(contentTop, contentH);
+  }
+
+  // Tu bu thumb: batch truoc co the bi skip (task ban) -> thu lai moi
+  // 4s cho trang hien tai (task tu bo qua neu dang ban).
+  {
+    static uint32_t s_thumbRetryMs = 0;
+    uint32_t nowMs = SDL_GetTicks();
+    if (nowMs - s_thumbRetryMs > 4000 && !m_thumbTask.isRunning() &&
+        !m_ytSearchResults.empty()) {
+      bool need = false;
+      for (const auto& item : m_ytSearchResults) {
+        if (item.rfind("CHANNEL|", 0) == 0)
+          continue;
+        std::string vid = item.substr(0, item.find('|'));
+        if (vid.empty() || vid == "CHANNEL")
+          continue;
+        struct stat st;
+        std::string p = "/tmp/yt_thumbs/" + vid + ".jpg";
+        if (stat(p.c_str(), &st) != 0 || st.st_size <= 1000) {
+          need = true;
+          break;
+        }
+      }
+      if (need) {
+        s_thumbRetryMs = nowMs;
+        std::vector<std::string> vids;
+        for (const auto& item : m_ytSearchResults) {
+          if (item.rfind("CHANNEL|", 0) == 0)
+            continue;
+          size_t pp = item.find('|');
+          if (pp != std::string::npos)
+            vids.push_back(item.substr(0, pp));
+        }
+        startThumbnailDownloads(vids);
+      }
+    }
   }
 
   // Footer (4 hàng: 0=search, 1=tag, 2=hàng 3, 3=hàng 4)
@@ -9911,21 +10393,17 @@ void UIManager::renderYouTubeHomeState() {
          {UiTheme::PadBtn::START, "Tìm kiếm"},
          {UiTheme::PadBtn::L1R1, "Trang"}});
   }
-
-  // Modal overlay renders above base + footer. Khi modal mở, beginModalDim()
-  // sẽ dim cả base; footer bên dưới bị dim → modal vẽ footer của nó lên cùng.
-  if (m_ytSearchModalOpen) {
-    renderYouTubeHomeModalOverlay();
-  }
 }
 
 // (Footer ở trên đã được dim khi modal mở → modal vẽ footer riêng)
 
 void UIManager::renderYouTubeHomeContentRow(int contentTop, int /*contentH*/) {
-  // 5 rows/page, list vertical, thumb trái 16:9 + info phải
+  // 5 rows/page, list vertical, thumb trái 16:9 + info phải.
+  // Che do list hien 5 muc dau cua trang hien tai (trang data 6 muc,
+  // muc thu 6 xem o che do luoi). Dieu huong doc lap theo index.
   const int itemsPerPage = 5;
   int totalResults = static_cast<int>(m_ytSearchResults.size());
-  int pageStartIndex = (m_ytHomeContentSelected / itemsPerPage) * itemsPerPage;
+  int pageStartIndex = 0;
 
   int rowX = 24;
   int rowW = UiTheme::APP_W - 48;
@@ -9942,7 +10420,9 @@ void UIManager::renderYouTubeHomeContentRow(int contentTop, int /*contentH*/) {
     if (idx >= totalResults)
       break;
     int cy = startY + i * (rowH + gapY);
-    bool isSelected = (idx == m_ytHomeContentSelected);
+    // Chi highlight khi dpad dang o vung list (hang 2/3), khong thi tat
+    // de khoi nham voi search box/pills.
+    bool isSelected = (m_ytHomeRow >= 2 && idx == m_ytHomeContentSelected);
     bool isChannelRow = (idx < static_cast<int>(m_ytItems.size()) &&
                          m_ytItems[idx].type == YtItem::Type::Channel);
 
@@ -9982,12 +10462,13 @@ void UIManager::renderYouTubeHomeContentRow(int contentTop, int /*contentH*/) {
     if (idx < static_cast<int>(m_ytItems.size())) {
       const auto &item = m_ytItems[idx];
       if (!isChannelRow) {
-        // Chuan: 2 dong info (ten video + duration - views), can giua deu voi
-        // thumb
+        // Chuan: ten video + 1 hang "kenh - duration - views", can giua
+        // deu voi thumb.
         int lh = textHeight(m_fontSmall);
         int step = lh + 4;
         int infoY = thumbY + (thumbH - (lh * 2 + 4)) / 2;
-        drawYtStandardMeta(infoX, infoY, infoW, step, item);
+        drawYtStandardMeta(infoX, infoY, infoW, step, item,
+                           /*showChannel=*/true);
       } else {
         drawText("Kênh • A để xem video mới nhất", infoX, cy + (rowH - 18) / 2,
                  UiTheme::TEXT_SUB, m_fontSmall, false);
@@ -10209,7 +10690,57 @@ void UIManager::renderYouTubeHomeChannelLayout(int contentTop, int contentH) {
   }
 }
 
-void UIManager::runYouTubeHomeSearch(const std::string &query) {
+std::vector<std::string> UIManager::fetchSearchLines(
+    const std::string& query, int maxResults, const std::string& appRoot,
+    const std::string& params) {
+  std::string escaped;
+  for (char c : query) {
+    if (c == '"' || c == '\\' || c == '$' || c == '`')
+      escaped += '\\';
+    escaped += c;
+  }
+  std::string cmd = "if [ -x /mnt/SDCARD/System/bin/python3 ]; then "
+                    "LD_LIBRARY_PATH=/mnt/SDCARD/System/lib:$LD_LIBRARY_PATH "
+                    "SSL_CERT_FILE=/mnt/SDCARD/System/lib/python3.11/"
+                    "site-packages/pip/_vendor/certifi/cacert.pem "
+                    "/mnt/SDCARD/System/bin/python3 \"" +
+                    appRoot + "/scripts/youtube_search.py\" smart \"" +
+                    escaped + "\" " + std::to_string(maxResults) +
+                    "; else sh \"" + appRoot +
+                    "/scripts/youtube_search.sh\" search \"" + escaped +
+                    "\" 1 " + std::to_string(maxResults) +
+                    "; fi 2>/tmp/yt_search_err.log";
+  // Innertube truoc (~2-3s): that bai moi xuong yt-dlp cu (~7s).
+  // Luu y: duong .sh khong hieu params (live/date) nen chi dung params
+  // khi innertube an; that bai innertube + co params thi tra rong thay vi
+  // ket qua sai ngu canh.
+  std::vector<std::string> rawLines =
+      YoutubeInnertube::search(query, maxResults, params);
+  if (!rawLines.empty())
+    return rawLines;
+  if (!params.empty())
+    return rawLines;
+  // Query kenh ("channel:<id>"): duong cu (.sh search chu "channel:ID")
+  // chi ra video tap nham -> tra rong de UI bao loi that, khong hien sai.
+  if (query.rfind("channel:", 0) == 0)
+    return rawLines;
+  FILE* fp = popen(cmd.c_str(), "r");
+  if (!fp)
+    return rawLines;
+  char buf[2048];
+  while (fgets(buf, sizeof(buf), fp) != nullptr) {
+    std::string line(buf);
+    while (!line.empty() && (line.back() == '\n' || line.back() == '\r'))
+      line.pop_back();
+    if (!line.empty())
+      rawLines.push_back(line);
+  }
+  pclose(fp);
+  return rawLines;
+}
+
+void UIManager::runYouTubeHomeSearch(const std::string &query,
+                                        const std::string &params) {
   if (query.empty())
     return;
   if (m_ytIsSearching)
@@ -10219,43 +10750,27 @@ void UIManager::runYouTubeHomeSearch(const std::string &query) {
   m_ytCurrentPage = 1;
   m_ytHomePage = 1;
   m_ytLastSearchQuery = query;
+  m_ytLastSearchParams = params;
   m_ytAllCachedResults.clear();
   clearThumbnailCache();
   showToast("Đang tìm...", UiTheme::ACCENT_CYAN, 1500);
 
-  m_ytSearchTask.run([this, query](TaskProgress &) {
+  m_ytSearchTask.run([this, query, params](TaskProgress &) {
     std::string appRoot = AppConfig::instance().getAppRoot();
     if (appRoot.empty())
       appRoot = "/mnt/SDCARD/Apps/RomCloud";
-    std::string escaped;
-    for (char c : query) {
-      if (c == '"' || c == '\\' || c == '$' || c == '`')
-        escaped += '\\';
-      escaped += c;
-    }
-    std::string cmd = "LD_LIBRARY_PATH=/mnt/SDCARD/System/lib:$LD_LIBRARY_PATH "
-                      "SSL_CERT_FILE=/mnt/SDCARD/System/lib/python3.11/"
-                      "site-packages/pip/_vendor/certifi/cacert.pem "
-                      "/mnt/SDCARD/System/bin/python3 \"" +
-                      appRoot + "/scripts/youtube_search.py\" smart \"" +
-                      escaped + "\" 24 2>/tmp/yt_search_err.log";
-    FILE *fp = popen(cmd.c_str(), "r");
-    std::vector<std::string> resultsRaw;
-    if (fp) {
-      char buf[2048];
-      while (fgets(buf, sizeof(buf), fp) != nullptr) {
-        std::string line(buf);
-        while (!line.empty() && (line.back() == '\n' || line.back() == '\r'))
-          line.pop_back();
-        if (line.empty())
-          continue;
+    std::vector<std::string> resultsRaw =
+        fetchSearchLines(query, 24, appRoot, params);
+    {
+      std::vector<std::string> filtered;
+      for (std::string line : resultsRaw) {
         if (line.find("ERROR:") == 0 || line.find("WARNING:") == 0)
           continue;
         if (line.find("WARN:") == 0)
           continue;
-        resultsRaw.push_back(line);
+        filtered.push_back(line);
       }
-      pclose(fp);
+      resultsRaw.swap(filtered);
     }
     if (resultsRaw.empty()) {
       std::string err = ytErrTail("/tmp/yt_search_err.log");
@@ -10270,21 +10785,193 @@ void UIManager::runYouTubeHomeSearch(const std::string &query) {
   });
 }
 
+void UIManager::runTagAction(int index) {
+  if (index < 0 || index >= static_cast<int>(kYtCategories.size())) {
+    openYouTubeHomeModal();
+    return;
+  }
+  std::string action = kYtCategories[index].action ? kYtCategories[index].action : "";
+  m_ytKeyboardQuery.clear();
+  m_ytVk.query.clear();
+  m_ytLastSearchParams.clear();
+  if (action.rfind("feed:", 0) == 0) {
+    m_ytLastSearchQuery = action;
+    runYouTubeHomeSearch(action);
+  } else if (action.rfind("live:", 0) == 0) {
+    std::string q = action.substr(5);
+    m_ytLastSearchQuery = q;
+    m_ytLastSearchParams = "EgJAAQ==";
+    runYouTubeHomeSearch(q, "EgJAAQ==");
+  } else if (action.rfind("search:", 0) == 0) {
+    std::string q = action.substr(7);
+    m_ytLastSearchQuery = q;
+    runYouTubeHomeSearch(q);
+  } else if (action == "latest:") {
+    // Moi tai len: search rong sap xep theo ngay tai len.
+    m_ytLastSearchQuery = "việt nam";
+    m_ytLastSearchParams = "EgIIAg==";
+    runYouTubeHomeSearch("việt nam", "EgIIAg==");
+  } else if (action == "watched:") {
+    m_ytLastSearchQuery = "";
+    showWatchedVideos();
+  } else if (action == "suggest:") {
+    m_ytLastSearchQuery = "";
+    suggestFromHistory();
+  } else {
+    openYouTubeHomeModal();
+  }
+}
+
+void UIManager::showWatchedVideos() {
+  loadYouTubeWatched();
+  std::vector<std::string> rows;
+  for (const auto& w : m_ytWatched) {
+    if (w.id.empty())
+      continue;
+    rows.push_back(w.id + "|" + (w.title.empty() ? w.id : w.title) +
+                   "|0|" + w.uploader + "|0");
+    if (rows.size() >= 10)
+      break;
+  }
+  m_ytCurrentPage = 1;
+  m_ytHomePage = 1;
+  m_ytHomeContentSelected = 0;
+  m_ytHomeCol = 0;
+  m_ytAllCachedResults = rows;
+  m_ytSearchResults = rows;
+  rebuildYtItems();
+  if (rows.empty())
+    showToast("Chưa xem video nào", {245, 158, 11, 255}, 2000);
+}
+
+void UIManager::suggestFromHistory() {
+  if (m_ytIsSearching)
+    return;
+  loadYouTubeWatched();
+  // Gom ten kenh da xem (toi da 3, giu thu tu moi nhat).
+  std::vector<std::string> channels;
+  for (const auto& w : m_ytWatched) {
+    if (w.uploader.empty())
+      continue;
+    bool dup = false;
+    for (const auto& c : channels) {
+      if (c == w.uploader) { dup = true; break; }
+    }
+    if (!dup)
+      channels.push_back(w.uploader);
+    if (channels.size() >= 3)
+      break;
+  }
+  m_ytIsSearching = true;
+  m_ytSearchStartMs = SDL_GetTicks();
+  m_ytCurrentPage = 1;
+  m_ytHomePage = 1;
+  m_ytLastSearchQuery = "";
+  m_ytAllCachedResults.clear();
+  clearThumbnailCache();
+  showToast("Đang gợi ý theo kênh đã xem...", UiTheme::ACCENT_CYAN, 1500);
+  m_ytSearchTask.run([this, channels](TaskProgress &) {
+    std::vector<std::string> out;
+    for (const auto& ch : channels) {
+      if (out.size() >= 18)
+        break;
+      // Tim UC-id qua search ten kenh (hang CHANNEL dau tien).
+      auto lines = YoutubeInnertube::search(ch, 6);
+      std::string cid;
+      for (const auto& l : lines) {
+        if (l.compare(0, 8, "CHANNEL|") == 0) {
+          size_t p1 = l.find('|', 8);
+          size_t p2 = (p1 == std::string::npos)
+                          ? std::string::npos
+                          : l.find('|', p1 + 1);
+          if (p1 != std::string::npos && p2 != std::string::npos) {
+            std::string id = l.substr(p1 + 1, p2 - p1 - 1);
+            if (id.size() == 24 && id.compare(0, 2, "UC") == 0)
+              cid = id;
+          }
+          break;
+        }
+      }
+      if (cid.empty())
+        continue;
+      auto vids = YoutubeInnertube::channelVideos(cid, 6);
+      for (const auto& v : vids) {
+        // Bo video da co (trung id).
+        std::string vid = v.substr(0, v.find('|'));
+        bool dup = false;
+        for (const auto& e : out) {
+          if (e.size() > vid.size() && e.compare(0, vid.size(), vid) == 0 &&
+              e[vid.size()] == '|') {
+            dup = true;
+            break;
+          }
+        }
+        if (!dup)
+          out.push_back(v);
+        if (out.size() >= 18)
+          break;
+      }
+    }
+    if (out.empty()) {
+      // Khong co lich su/khong goi duoc: roi ve trending.
+      auto fb = YoutubeInnertube::search("thinh hanh viet nam", 18);
+      for (const auto& l : fb) {
+        if (l.compare(0, 8, "CHANNEL|") != 0)
+          out.push_back(l);
+      }
+    }
+    {
+      std::lock_guard<std::mutex> lk(m_ytSearchMutex);
+      m_ytPendingSearchResults = std::move(out);
+      m_ytSearchDataReady = true;
+    }
+  });
+}
+
 void UIManager::applyYouTubeSearchResults(std::vector<std::string> results) {
+  // Dang o trang kenh: ket qua search nen ve tre (phan trang cu) khong
+  // duoc ghi de len video kenh -> bo qua.
+  if (m_ytInChannelView) {
+    Logger::info("[YouTube] Bo qua ket qua search tre khi dang o trang kenh");
+    return;
+  }
   m_ytAllCachedResults = std::move(results);
   m_ytMatchedChannel = YtMatchedChannel{};
   m_ytInChannelView = false;
   if (!m_ytAllCachedResults.empty() &&
       m_ytAllCachedResults[0].rfind("CHANNEL|", 0) == 0) {
     std::stringstream ss(m_ytAllCachedResults[0]);
-    std::string tag, name, subs, vcount, avatarUrl;
+    std::string tag, name, f1, f2, f3;
     std::getline(ss, tag, '|');
     std::getline(ss, name, '|');
-    std::getline(ss, subs, '|');
-    std::getline(ss, vcount, '|');
-    std::getline(ss, avatarUrl, '|');
+    std::getline(ss, f1, '|');
+    std::getline(ss, f2, '|');
+    std::getline(ss, f3, '|');
+    std::string subs, vcount, avatarUrl;
+    if (f1.size() == 24 && f1.compare(0, 2, "UC") == 0) {
+      // Format moi: CHANNEL|name|id|avatar|subs (id khong can o day,
+      // YtItem giu id rieng cho nut Xem kenh)
+      avatarUrl = f2;
+      subs = f3;
+    } else {
+      // Format cu (.py): CHANNEL|name|subs|vcount|avatar
+      subs = f1;
+      vcount = f2;
+      avatarUrl = f3;
+    }
     m_ytMatchedChannel.matched = true;
     m_ytMatchedChannel.name = name;
+    m_ytMatchedChannel.channelId = "";
+    // Lay UC-id tu dong CHANNEL goc (format moi co id o cot 2).
+    {
+      std::stringstream ss2(m_ytAllCachedResults[0]);
+      std::string t2, n2, f1;
+      std::getline(ss2, t2, '|');
+      std::getline(ss2, n2, '|');
+      std::getline(ss2, f1, '|');
+      if (f1.size() == 24 && f1.compare(0, 2, "UC") == 0)
+        m_ytMatchedChannel.channelId = f1;
+    }
     m_ytMatchedChannel.subscribers = subs;
     m_ytMatchedChannel.videoCount = vcount;
     m_ytMatchedChannel.avatarUrl = avatarUrl;

@@ -215,7 +215,11 @@ public:
     bool ensureMediaPlayerAvailable();
 
     int getLastPlayingIndex() const { return m_lastPlayingIndex; }
-    bool playYouTubeVideo(const std::string& videoId, const std::string& initialUrl, const std::string& quality = "720", const std::string& title = "");
+    bool playYouTubeVideo(const std::string& videoId, const std::string& initialUrl, const std::string& quality = "720", const std::string& title = "", const std::string& desc = "");
+    // true neu lan phat YouTube vua roi ket thuc tu nhien (het video),
+    // false neu user thoat (B) hoac loi. Dung cho tu phat tiep.
+    bool ytNaturalEnd() const { return m_ytNaturalEnd; }
+    void setYtDesc(const std::string& d) { m_ytDesc = d; }
     bool playYouTubeUrl(const std::string& url);
     bool switchYouTubeQuality(const std::string& videoId, const std::string& targetQuality);
     // Chuyển luồng đã có URL (không resolve): dùng cho auto-upgrade.
@@ -295,6 +299,9 @@ private:
     std::string m_currentChannel;
     // YouTube OSD (UI-only): tiêu đề video + trạng thái thanh điều khiển
     std::string m_ytTitle;
+    std::string m_ytDesc; // mo ta video (OSD dong 2)
+    bool m_ytNaturalEnd = false; // het video tu nhien (up next)
+    bool m_ytStopRequested = false; // user/ma goi stop() giua chung
     std::string m_ytQuality = "720";
     bool m_ytOsdOn = false;
     uint32_t m_ytOsdExpire = 0;

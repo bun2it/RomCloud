@@ -173,6 +173,9 @@ extern const char *SETTING_SCAN_AUTO;
 extern const char *SETTING_WEB_PORTAL;
 extern const char *SETTING_COVER_CACHE;
 extern const char *SETTING_COVER_CACHE_VAL;
+extern const char *SETTING_ORGANIZE_ROMS;
+extern const char *SETTING_ORGANIZE_ROMS_DESC;
+extern const char *SETTING_ORGANIZE_ROMS_BTN;
 
 // --- 10. KẾT NỐI QUA WEB ---
 extern const char *WEB_CONNECT_TITLE;
@@ -270,6 +273,11 @@ extern const char *OTA_MSG_COMPLETED;
 extern const char *OTA_DOWNLOAD_BTN;
 extern const char *OTA_CHECK_AGAIN_BTN;
 extern const char *OTA_BACK_BTN;
+extern const char *OTA_RCWEB_ROW_PREFIX;
+extern const char *OTA_RCWEB_UPDATE_HINT;
+extern const char *OTA_RCWEB_BTN;
+extern const char *OTA_RCWEB_NOT_INSTALLED;
+extern const char *TOAST_RCWEB_BUSY;
 
 // --- 15. TOAST MESSAGES ---
 extern const char *TOAST_ADDED_TO_QUEUE;

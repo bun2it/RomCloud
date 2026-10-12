@@ -356,6 +356,21 @@ bool UpdateManager::checkForUpdatesSync(UpdateInfo &outInfo) {
                  remoteVer + ".zip";
   }
   outInfo.fullZipUrl = fullZipUrl;
+  // RC-Web: gói trình duyệt riêng (không nằm trong full-zip app).
+  // version dạng ngày (YYYYMMDD) do package-rc-web.sh đóng.
+  std::string rcWebVer = "";
+  std::string rcWebUrl = "";
+  if (mResp.success && !mResp.body.empty() && mResp.statusCode == 200) {
+    rcWebVer = JsonHelper::extractString(mResp.body, "rc_web_version");
+    rcWebUrl = JsonHelper::extractString(mResp.body, "rc_web_url");
+  }
+  if (rcWebUrl.empty() && !rcWebVer.empty()) {
+    rcWebUrl = "https://github.com/" + std::string(GITHUB_REPO) +
+               "/releases/download/v" + remoteVer + "/rc-web-" +
+               rcWebVer + ".zip";
+  }
+  outInfo.rcWebVersion = rcWebVer;
+  outInfo.rcWebUrl = rcWebUrl;
   outInfo.changelog = changelog;
   outInfo.releaseDate = relDate;
   outInfo.osType = osType;
@@ -1083,6 +1098,264 @@ bool UpdateManager::downloadAndInstallDependencies(const UpdateInfo& info) {
   unlink(bundlePath.c_str());
 
   return success;
+}
+
+// ============================================================================
+// RC-WEB OTA (gói trình duyệt riêng, ~500M bung ra / ~200M zip)
+// ============================================================================
+
+// Đọc version RC-Web đã cài (rc-web/version.txt do fetch-rc-web.sh hoặc
+// package-rc-web.sh ghi). Trống = chưa từng cài qua gói có version.
+std::string UpdateManager::getInstalledRcWebVersion() {
+  std::string appRoot = AppConfig::instance().getAppRoot();
+  std::string verPath = appRoot + "/rc-web/version.txt";
+  std::ifstream f(verPath.c_str());
+  if (!f.is_open())
+    return std::string();
+  std::string v;
+  std::getline(f, v);
+  // Cắt whitespace/\r (file viết tay trên Win có thể dính CRLF).
+  v.erase(std::remove_if(v.begin(), v.end(), [](unsigned char c) {
+    return c == '\r' || c == '\n' || c == ' ' || c == '\t';
+  }), v.end());
+  return v;
+}
+
+bool UpdateManager::isRcWebUpdateAvailable() {
+  std::lock_guard<std::mutex> lock(m_mutex);
+  const std::string& remote = m_latestInfo.rcWebVersion;
+  if (remote.empty() || m_latestInfo.rcWebUrl.empty())
+    return false;
+  std::string cur = getInstalledRcWebVersion();
+  if (cur.empty())
+    return true;  // đã có gói mới mà máy chưa rõ version -> đề xuất 1 lần
+  return isVersionNewer(remote, cur);
+}
+
+bool UpdateManager::startRcWebUpdate() {
+  if (m_isRunning) {
+    Logger::warn("An OTA update is already in progress.");
+    return false;
+  }
+  UpdateInfo info;
+  {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    info = m_latestInfo;
+  }
+  if (info.rcWebUrl.empty() || info.rcWebVersion.empty()) {
+    Logger::warn("RC-Web OTA: no remote version/url in manifest.");
+    return false;
+  }
+
+  m_cancelRequested = false;
+  m_isRunning = true;
+  {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_progress = UpdateProgress();
+    m_progress.state = UpdateState::DOWNLOADING;
+    m_progress.newVersion = info.remoteVersion;
+    m_progress.currentStep =
+        "Đang tải trình duyệt RC-Web bản " + info.rcWebVersion + "...";
+  }
+  if (m_workerThread.joinable()) {
+    m_workerThread.join();
+  }
+  m_workerThread = std::thread(&UpdateManager::runRcWebWorker, this, info);
+  return true;
+}
+
+void UpdateManager::runRcWebWorker(UpdateInfo info) {
+  Logger::info("Starting RC-Web OTA update: " + info.rcWebVersion);
+  std::string appRoot = AppConfig::instance().getAppRoot();
+  std::string zipPath = appRoot + "/rcweb_update.zip";
+
+  {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_progress.state = UpdateState::DOWNLOADING;
+    m_progress.currentStep =
+        "Đang tải trình duyệt RC-Web bản " + info.rcWebVersion + "...";
+    m_progress.bytesDownloaded = 0;
+    m_progress.totalBytes = 0;
+    m_progress.progressPct = 0.0;
+    m_progress.speedKBps = 0.0;
+  }
+
+  uint64_t downloadedSize = 0;
+  if (!downloadFile(info.rcWebUrl, zipPath, &downloadedSize, true)) {
+    if (m_cancelRequested) {
+      std::lock_guard<std::mutex> lock(m_mutex);
+      m_progress.state = UpdateState::IDLE;
+      m_isRunning = false;
+      return;
+    }
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_progress.state = UpdateState::FAILED;
+    m_progress.errorMessage = "Tải gói RC-Web thất bại. Kiểm tra kết nối mạng!";
+    Logger::error(m_progress.errorMessage);
+    m_isRunning = false;
+    return;
+  }
+
+  // Gói rc-web.zip hợp lệ phải > 50MB (đủ electron + syslibs + weston).
+  if (downloadedSize < 50000000ULL) {
+    unlink(zipPath.c_str());
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_progress.state = UpdateState::FAILED;
+    m_progress.errorMessage = "Gói RC-Web tải về quá nhỏ hoặc không hợp lệ.";
+    Logger::error(m_progress.errorMessage + " size=" + std::to_string(downloadedSize));
+    m_isRunning = false;
+    return;
+  }
+
+  // Cần chỗ cho: zip + bản bung tạm (~500M) + bản đang dùng. Giữ đơn giản:
+  // trống >= zip + 600MB.
+  uint64_t need = downloadedSize + 600ULL * 1024 * 1024;
+  uint64_t freeB = otaFreeBytes(appRoot);
+  if (freeB > 0 && freeB < need) {
+    unlink(zipPath.c_str());
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_progress.state = UpdateState::FAILED;
+    m_progress.errorMessage =
+        "Thẻ nhớ không đủ dung lượng cho RC-Web (cần " +
+        std::to_string(need / 1024 / 1024) + " MB, trống " +
+        std::to_string(freeB / 1024 / 1024) + " MB). Hãy giải phóng và thử lại.";
+    Logger::error(m_progress.errorMessage);
+    m_isRunning = false;
+    return;
+  }
+
+  {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_progress.state = UpdateState::INSTALLING;
+    m_progress.currentStep = "Đang cài trình duyệt RC-Web (giữ lịch sử web)...";
+    m_progress.progressPct = 100.0;
+    m_progress.speedKBps = 0.0;
+  }
+
+  if (!installRcWebZip(zipPath)) {
+    unlink(zipPath.c_str());
+    std::lock_guard<std::mutex> lock(m_mutex);
+    if (m_progress.errorMessage.empty())
+      m_progress.errorMessage = "Cài đặt RC-Web thất bại.";
+    m_progress.state = UpdateState::FAILED;
+    Logger::error(m_progress.errorMessage);
+    m_isRunning = false;
+    return;
+  }
+  unlink(zipPath.c_str());
+
+  Logger::info("RC-Web OTA update completed!");
+  {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_progress.state = UpdateState::COMPLETED;
+    m_progress.progressPct = 100.0;
+    m_progress.currentStep = "Cập nhật RC-Web thành công! Vui lòng khởi động lại.";
+  }
+  m_isRunning = false;
+}
+
+// Bung rc-web.zip và thay thế thư mục rc-web bằng rename (cùng phân vùng
+// nên tức thì, không tốn gấp đôi thời gian chép như cp -a trên thẻ chậm).
+// Giữ duy nhất lịch sử địa chỉ web của user (conf/profile/rc-history.json).
+bool UpdateManager::installRcWebZip(const std::string& zipPath) {
+  std::string appRoot = AppConfig::instance().getAppRoot();
+  std::string webDir = appRoot + "/rc-web";
+  std::string tmpDir = appRoot + "/.rcweb_tmp";
+  std::string backupDir = appRoot + "/.rcweb_backup";
+
+  auto setErr = [this](const std::string& msg) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_progress.errorMessage = msg;
+  };
+
+  system(("rm -rf '" + tmpDir + "' '" + backupDir + "' 2>/dev/null").c_str());
+  mkdir(tmpDir.c_str(), 0755);
+
+  // 0. Dừng phiên web nếu đang chạy: rename đè lên file đang dùng gây lỗi.
+  // (UIManager cũng stop trước khi gọi, đây là chốt chặn phòng race.)
+  system("killall -9 electron 2>/dev/null; killall -9 weston 2>/dev/null; "
+         "killall -9 gptokeyb2 2>/dev/null; killall -9 Xwayland 2>/dev/null");
+
+  // 1. Giữ lịch sử địa chỉ web của user (file nhỏ vài KB).
+  std::string keepHist = backupDir + ".history.json";
+  system(("cp -f '" + webDir + "/conf/profile/rc-history.json' '" + keepHist +
+          "' 2>/dev/null").c_str());
+
+  // 2. Bung zip vào thư mục tạm. Zip do package-rc-web.sh đóng: entries nằm
+  // ở gốc (app/, electron/, syslibs/, weston/, launch.sh, ...).
+  std::string unzipLog = tmpDir + ".unzip.log";
+  int ret = otaRunWithLog(
+      "unzip -o '" + zipPath + "' -d '" + tmpDir + "'", unzipLog);
+  if (ret != 0) {
+    ret = otaRunWithLog(
+        "busybox unzip -o '" + zipPath + "' -d '" + tmpDir + "'", unzipLog);
+  }
+  std::string stagedElectron = tmpDir + "/electron/electron";
+  std::string stagedLaunch = tmpDir + "/launch.sh";
+  struct stat st;
+  bool stagedOk =
+      (stat(stagedElectron.c_str(), &st) == 0 && st.st_size > 100000000ULL) &&
+      (access(stagedLaunch.c_str(), X_OK) == 0 ||
+       stat(stagedLaunch.c_str(), &st) == 0);
+  if (!stagedOk) {
+    std::string tail = otaTailLog(unzipLog, 12);
+    system(("rm -rf '" + tmpDir + "' '" + keepHist + "' '" + unzipLog + "' 2>/dev/null").c_str());
+    setErr("Giải nén gói RC-Web thất bại (thiếu electron/launch.sh). Log:\n" + tail);
+    Logger::error("RC-Web unzip failed. Tail:\n" + tail);
+    return false;
+  } else if (ret != 0) {
+    Logger::warn("unzip returned exit " + std::to_string(ret) +
+                 " but staged RC-Web present — treating as success. Tail:\n" +
+                 otaTailLog(unzipLog, 6));
+  }
+
+  // 3. Trả lịch sử web vào bản mới trước khi swap.
+  system(("mkdir -p '" + tmpDir + "/conf/profile' 2>/dev/null").c_str());
+  system(("cp -f '" + keepHist + "' '" + tmpDir + "/conf/profile/rc-history.json' 2>/dev/null").c_str());
+  system(("rm -f '" + keepHist + "' 2>/dev/null").c_str());
+
+  // 4. Swap: bản cũ -> backup, bản mới -> rc-web (rename, tức thì).
+  if (rename(webDir.c_str(), backupDir.c_str()) != 0 && errno != ENOENT) {
+    system(("rm -rf '" + tmpDir + "' '" + unzipLog + "' 2>/dev/null").c_str());
+    setErr("Không thể dời thư mục RC-Web cũ (có thể đang bận). Thử khởi động lại máy rồi cập nhật lại.");
+    Logger::error("RC-Web rename old -> backup failed.");
+    return false;
+  }
+  if (rename(tmpDir.c_str(), webDir.c_str()) != 0) {
+    // Cố gắng trả bản cũ về để không mất trình duyệt.
+    rename(backupDir.c_str(), webDir.c_str());
+    system(("rm -rf '" + tmpDir + "' '" + unzipLog + "' 2>/dev/null").c_str());
+    setErr("Không thể đưa bản RC-Web mới vào vị trí. Đã giữ nguyên bản cũ.");
+    Logger::error("RC-Web rename tmp -> rc-web failed.");
+    return false;
+  }
+
+  // 5. Quyền thực thi (theo docs/CHROME_FULL_ENGINE.md).
+  system(("chmod +x '" + webDir + "/launch.sh' '" + webDir + "/electron/electron' '" +
+          webDir + "/electron/chrome_crashpad_handler' '" + webDir + "/bin/gptokeyb2' '" +
+          webDir + "/weston/bin/'* 2>/dev/null").c_str());
+  sync();
+
+  // 6. Verify bản mới tại vị trí chính thức.
+  std::string finalElectron = webDir + "/electron/electron";
+  std::string finalVer = webDir + "/version.txt";
+  bool verOk = (stat(finalElectron.c_str(), &st) == 0 && st.st_size > 100000000ULL) &&
+               (access(finalVer.c_str(), R_OK) == 0);
+  if (!verOk) {
+    // Trả bản cũ về.
+    system(("rm -rf '" + webDir + "' 2>/dev/null").c_str());
+    rename(backupDir.c_str(), webDir.c_str());
+    sync();
+    setErr("Bản RC-Web mới không hợp lệ (thiếu electron/version.txt). Đã giữ nguyên bản cũ.");
+    Logger::error("RC-Web verify failed, rolled back.");
+    return false;
+  }
+
+  // 7. Xóa backup + log, chỉ giữ bản mới.
+  system(("rm -rf '" + backupDir + "' '" + unzipLog + "' 2>/dev/null").c_str());
+  sync();
+  Logger::info("RC-Web OTA installed successfully (" + std::to_string(st.st_size) + " bytes electron)");
+  return true;
 }
 
 } // namespace RomCloud

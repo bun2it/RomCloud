@@ -2270,14 +2270,25 @@ void IPTVManager::showYouTubeOSD(bool extendExpire) {
     double dur = ytDuration();
     double cached = ytCacheAhead();
 
-    // --- Top bar 1024x64: tên video + chất lượng ---
+    // --- Top bar 1024x64 (co mo ta: 1024x96): tên video + chất lượng ---
     {
-        const int CW = 1024, CH = 64, STRIDE = CW * 4;
+        const int CW = 1024;
+        int CH = 64;
+        std::string descLine;
+        if (!m_ytDesc.empty())
+            descLine = m_ytDesc;
+        if (!descLine.empty())
+            CH = 96;
+        const int STRIDE = CW * 4;
         std::vector<uint8_t> cv(STRIDE * CH, 0);
         ytFillRect(cv, CW, CH, 0, 0, CW, CH, 0, 0, 0, 140);
         std::string title = m_ytTitle.empty() ? "YouTube" : m_ytTitle;
         ytBlitText(cv, CW, CH, fTitle, ytTruncUtf8(fTitle, title, 780),
                    {255, 255, 255, 255}, 24, 18);
+        if (!descLine.empty() && fBar) {
+            ytBlitText(cv, CW, CH, fBar, ytTruncUtf8(fBar, descLine, 940),
+                       {170, 180, 195, 255}, 24, 62);
+        }
         // Số đo thật từ mpv (video-params); chưa có thì rớt về nhãn yêu cầu.
         std::string q;
         {
@@ -2364,8 +2375,10 @@ void IPTVManager::flashCenter(const std::string& icon, const std::string& textCm
     sendMpvIpcCommand(textCmd);
 }
 
-bool IPTVManager::playYouTubeVideo(const std::string& videoId, const std::string& initialUrl, const std::string& quality, const std::string& title) {
+bool IPTVManager::playYouTubeVideo(const std::string& videoId, const std::string& initialUrl, const std::string& quality, const std::string& title, const std::string& desc) {
     stop();
+    m_ytStopRequested = false;
+    m_ytNaturalEnd = false;
 
     if (initialUrl.empty()) {
         Logger::error("YouTube URL is empty");
@@ -2404,6 +2417,7 @@ bool IPTVManager::playYouTubeVideo(const std::string& videoId, const std::string
         m_currentChannel = "YouTube";
         // YouTube OSD (UI-only): giữ tiêu đề + reset trạng thái thanh điều khiển
         m_ytTitle = title;
+        m_ytDesc = desc;
         m_ytQuality = quality.empty() ? "720" : quality;
         m_ytDuration = -1.0;
         m_ytOsdOn = false;
@@ -2516,6 +2530,8 @@ bool IPTVManager::playYouTubeVideo(const std::string& videoId, const std::string
         unlink("/tmp/mpv_youtube.sock");
         m_isPlaying = false;
         m_currentChannel = "";
+        // Vong lap thoat ma khong ai goi stop() = het video tu nhien.
+        m_ytNaturalEnd = !m_ytStopRequested;
 
         SDL_PumpEvents();
         SDL_FlushEvents(SDL_FIRSTEVENT, SDL_LASTEVENT);
@@ -2525,6 +2541,7 @@ bool IPTVManager::playYouTubeVideo(const std::string& videoId, const std::string
 }
 
 bool IPTVManager::stop() {
+    m_ytStopRequested = true;
     // P1-3: quit ca sock cu (tuong thich), MpvPlayer reap PID hien tai.
     sendMpvIpcCommand("{\"command\":[\"quit\"]}", nullptr, "/tmp/mpv_iptv.sock");
     sendMpvIpcCommand("{\"command\":[\"quit\"]}", nullptr, "/tmp/mpv_youtube.sock");

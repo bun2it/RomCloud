@@ -1,4 +1,6 @@
 #include "RomDetector.h"
+#include "Md5SystemDb.h"
+#include "FbneoCompatDb.h"
 #include "../logging/Logger.h"
 #include "../ui/BoxartScraper.h"
 #include "../utils/HashHelper.h"
@@ -6,6 +8,8 @@
 #include <algorithm>
 #include <cstring>
 #include <cctype>
+#include <cstdio>
+#include <sys/stat.h>
 
 namespace RomCloud {
 
@@ -51,6 +55,8 @@ void RomDetector::initSystemMaps() {
     m_extToSystem["sg"]    = "MS";
     m_extToSystem["gg"]    = "GG";
     m_extToSystem["pak"]   = "OPENBOR";
+    m_extToSystem["ngp"]   = "NGP";
+    m_extToSystem["ngc"]   = "NGP";
     m_extToSystem["cso"]   = "PSP";
     m_extToSystem["gdi"]   = "DC";
     m_extToSystem["cdi"]   = "DC";
@@ -80,6 +86,15 @@ void RomDetector::initSystemMaps() {
     m_systemNames["GG"]        = "Game Gear";
     m_systemNames["SEGACD"]    = "Sega CD";
     m_systemNames["OPENBOR"]   = "OpenBOR";
+    m_systemNames["MAME"]       = "MAME Arcade";
+    m_systemNames["MAME2003PLUS"] = "MAME 2003+";
+    m_systemNames["MAME2010"]   = "MAME 2010";
+    m_systemNames["FBNEO"]      = "FBNeo Arcade";
+    m_systemNames["CPS1"]       = "Capcom CPS1";
+    m_systemNames["CPS2"]       = "Capcom CPS2";
+    m_systemNames["CPS3"]       = "Capcom CPS3";
+    m_systemNames["PGM"]        = "PGM Arcade";
+    m_systemNames["NGP"]        = "Neo Geo Pocket";
 }
 
 bool RomDetector::isKnownSystemCode(const std::string& code) const {
@@ -477,13 +492,185 @@ RomDetectionResult RomDetector::detectByBinaryHeader(const std::string& filePath
     return res;
 }
 
+std::vector<std::pair<std::string, std::string>> RomDetector::getZipEntryNameCrcs(
+    const std::string& zipPath, size_t maxEntries) {
+    std::vector<std::pair<std::string, std::string>> out;
+    std::ifstream file(zipPath, std::ios::binary);
+    if (!file.is_open()) return out;
+
+    file.seekg(0, std::ios::end);
+    std::streamoff fileSize = file.tellg();
+    if (fileSize < 22) return out;
+
+    // Tim End of Central Directory (EOCD: 0x06054b50) trong 65KB cuoi
+    size_t searchLen = std::min<size_t>(fileSize, 65557);
+    file.seekg(fileSize - searchLen, std::ios::beg);
+    std::vector<uint8_t> buffer(searchLen);
+    file.read(reinterpret_cast<char*>(buffer.data()), searchLen);
+
+    int64_t eocdOffset = -1;
+    for (int64_t i = searchLen - 22; i >= 0; --i) {
+        if (buffer[i] == 0x50 && buffer[i+1] == 0x4b && buffer[i+2] == 0x05 && buffer[i+3] == 0x06) {
+            eocdOffset = fileSize - searchLen + i;
+            break;
+        }
+    }
+    if (eocdOffset < 0) return out;
+
+    uint32_t cdOffset = 0;
+    uint16_t numEntries = 0;
+    file.seekg(eocdOffset + 16, std::ios::beg);
+    file.read(reinterpret_cast<char*>(&cdOffset), 4);
+    file.seekg(eocdOffset + 10, std::ios::beg);
+    file.read(reinterpret_cast<char*>(&numEntries), 2);
+
+    // Central directory file header: CRC32 o offset +16, fnameLen +28,
+    // extraLen +30, commentLen +32, ten file o +46.
+    file.seekg(cdOffset, std::ios::beg);
+    char hex[9];
+    while (file.good() && out.size() < maxEntries && out.size() < numEntries) {
+        uint32_t sig = 0;
+        file.read(reinterpret_cast<char*>(&sig), 4);
+        if (sig != 0x02014b50) break;
+
+        uint32_t crc = 0;
+        file.seekg(12, std::ios::cur); // toi offset +16
+        file.read(reinterpret_cast<char*>(&crc), 4);
+        uint16_t fnameLen = 0, extraLen = 0, commentLen = 0;
+        file.seekg(8, std::ios::cur); // toi offset +28
+        file.read(reinterpret_cast<char*>(&fnameLen), 2);
+        file.read(reinterpret_cast<char*>(&extraLen), 2);
+        file.read(reinterpret_cast<char*>(&commentLen), 2);
+        file.seekg(12, std::ios::cur); // toi offset +46 (ten file)
+
+        bool isDir = (fnameLen > 0);
+        std::string entryName;
+        if (fnameLen > 0 && fnameLen < 1024) {
+            entryName.assign(fnameLen, '\0');
+            file.read(&entryName[0], fnameLen);
+            isDir = (!entryName.empty() && entryName.back() == '/');
+        }
+        file.seekg(extraLen + commentLen, std::ios::cur);
+
+        if (!isDir) {
+            snprintf(hex, sizeof(hex), "%08x", crc);
+            out.emplace_back(entryName, hex);
+        }
+    }
+    return out;
+}
+
+std::vector<std::string> RomDetector::getZipEntryCrc32s(const std::string& zipPath,
+                                                        size_t maxEntries) {
+    std::vector<std::string> crcs;
+    for (const auto& p : getZipEntryNameCrcs(zipPath, maxEntries)) {
+        crcs.push_back(p.second);
+    }
+    return crcs;
+}
+
+RomDetector::ArcadeCompat RomDetector::detectArcadeCompat(const std::string& zipPath) {
+    std::string base = zipPath;
+    size_t slash = base.find_last_of("/\\");
+    if (slash != std::string::npos) base = base.substr(slash + 1);
+    size_t dot = base.rfind('.');
+    std::string stemLower = (dot == std::string::npos) ? base : base.substr(0, dot);
+    std::transform(stemLower.begin(), stemLower.end(), stemLower.begin(), ::tolower);
+
+    // Setup NEOGEO cua user giu rieng — khong danh gia de khoi dung cham.
+    if (isNeoGeoGame(stemLower) || stemLower == "neogeo" || stemLower == "pgm") {
+        return ArcadeCompat::UNKNOWN;
+    }
+
+    auto pairs = getZipEntryNameCrcs(zipPath, 200);
+    if (pairs.empty()) return ArcadeCompat::UNKNOWN;
+
+    // Set co biet den khong? (DAT FBNeo, tu dien MAME, hoac chip arcade)
+    bool inFbneo = FbneoCompatDb::instance().hasSet(stemLower);
+    bool inMameDict = !BoxartScraper::instance().resolveArcadeTitle(stemLower).empty();
+    int chipCount = 0;
+    for (const auto& p : pairs) {
+        std::string e = p.first;
+        size_t d = e.rfind('.');
+        std::string ext = (d == std::string::npos) ? "" : e.substr(d + 1);
+        std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+        if (ext == "rom" || ext == "p1" || ext == "p2" || ext == "sp2" ||
+            ext == "v1" || ext == "v2" || ext == "c1" || ext == "m1") {
+            ++chipCount;
+        }
+    }
+    if (!inFbneo && !inMameDict && chipCount < 2) {
+        return ArcadeCompat::UNKNOWN; // khong phai ROM arcade quen -> de yen
+    }
+
+    size_t expected = FbneoCompatDb::instance().expectedCount(stemLower);
+    size_t matched = 0;
+    bool conflict = false;
+    for (const auto& p : pairs) {
+        std::string expCrc = FbneoCompatDb::instance().expectedCrc(stemLower, p.first);
+        if (expCrc.empty()) continue; // file thua (hack/training) -> bo qua
+        std::string actual = p.second;
+        std::transform(actual.begin(), actual.end(), actual.begin(), ::tolower);
+        if (actual == expCrc) {
+            ++matched;
+        } else {
+            conflict = true; // cung ten, khac CRC -> dump khac
+        }
+    }
+
+    if (expected > 0 && !conflict && matched == expected) {
+        return ArcadeCompat::FBNEO_OK;
+    }
+    // Ten set quen (trong DAT hoac tu dien MAME) nhung ruot khong khop
+    // DAT FBNeo -> dump kieu MAME cu, chi core MAME an duoc.
+    return ArcadeCompat::MAME_ONLY;
+}
+
 RomDetectionResult RomDetector::detectByChecksum(const std::string& filePath) {
     RomDetectionResult res;
-    std::string crc = HashHelper::computeFileCrc32(filePath);
-    if (crc.empty()) return res;
+    std::string ext = getFileExtension(filePath);
 
-    // Check with ScreenScraper via BoxartScraper
-    // Note: If needed, ScreenScraper returns <systeme id="..."> which can resolve rare unclassified ROMs.
+    // Vong 2a: file .zip — tra CRC32 cua file ben trong (khong giai nen).
+    // CRC32 nay khop truong crc trong No-Intro DAT.
+    if (ext == "zip") {
+        auto crcs = getZipEntryCrc32s(filePath, 30);
+        for (const auto& c : crcs) {
+            std::string code;
+            if (Md5SystemDb::instance().lookup(c, code) &&
+                isKnownSystemCode(code)) {
+                res.detected = true;
+                res.systemCode = code;
+                res.suggestedDir = code;
+                res.systemName = m_systemNames[code];
+                res.confidence = "CHECKSUM";
+                res.details = "Khop CRC32 ROM trong co so du lieu (" + c + ")";
+                return res;
+            }
+        }
+        return res;
+    }
+    if (ext == "7z") return res; // chua doc duoc CRC trong 7z
+
+    // Vong 2b: file thuong — bam MD5 ca file (khop No-Intro DAT).
+    // Bo qua file dia qua lon (>256MB): bam lau tren Brick, da co vong
+    // header magic xu ly.
+    struct stat st;
+    if (stat(filePath.c_str(), &st) == 0 &&
+        static_cast<uint64_t>(st.st_size) > 256ULL * 1024 * 1024) {
+        return res;
+    }
+    std::string md5 = HashHelper::computeFileMd5(filePath);
+    if (md5.empty()) return res;
+    std::string code;
+    if (Md5SystemDb::instance().lookup(md5, code) && isKnownSystemCode(code)) {
+        res.detected = true;
+        res.systemCode = code;
+        res.suggestedDir = code;
+        res.systemName = m_systemNames[code];
+        res.confidence = "CHECKSUM";
+        res.details = "Khop MD5 trong co so du lieu ROM";
+        return res;
+    }
     return res;
 }
 
@@ -541,7 +728,76 @@ bool RomDetector::isFileInCorrectSystem(const std::string& filePath, const std::
     // Cross-system validation:
     // Does the detected system code match the current folder's system code?
     if (outResult.systemCode == currentSystemCode) {
+        // Ngoai le cuu ho (nut START): zip MAME_ONLY (dump kieu MAME, core
+        // moi/FBA cu khong an) dang nam o folder ARCADE/FBNEO/CPS/PGM ->
+        // danh dau lac de chuyen ve MAME. Chi ap dung khi verdict chac chan;
+        // FBNEO_OK va UNKNOWN giu nguyen (dung xao setup dang chay).
+        if ((currentSystemCode == "ARCADE" || currentSystemCode == "FBNEO" ||
+             currentSystemCode == "CPS1" || currentSystemCode == "CPS2" ||
+             currentSystemCode == "CPS3" || currentSystemCode == "PGM")) {
+            std::string ext = "";
+            size_t d = filePath.rfind('.');
+            if (d != std::string::npos) ext = filePath.substr(d + 1);
+            std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+            if (ext == "zip") {
+                ArcadeCompat vc = detectArcadeCompat(filePath);
+                if (vc == ArcadeCompat::MAME_ONLY) {
+                    outResult.systemCode = "MAME";
+                    outResult.suggestedDir = "MAME";
+                    outResult.systemName = m_systemNames["MAME"];
+                    outResult.confidence = "ARCADE_COMPAT";
+                    outResult.details = "Dump kieu MAME (core FBNeo/FBA khong an) -> ve MAME";
+                    return false;
+                }
+                // Chieu nguoc: set chuan FBNeo hien tai (FBNEO_OK) ma nam o
+                // folder core cu (ARCADE/CPS/PGM doi 2012) -> ve FBNEO (core
+                // moi). Dang o FBNEO hoac MAME* thi giu nguyen.
+                if (vc == ArcadeCompat::FBNEO_OK &&
+                    (currentSystemCode == "ARCADE" || currentSystemCode == "CPS1" ||
+                     currentSystemCode == "CPS2" || currentSystemCode == "CPS3" ||
+                     currentSystemCode == "PGM")) {
+                    outResult.systemCode = "FBNEO";
+                    outResult.suggestedDir = "FBNEO";
+                    outResult.systemName = m_systemNames["FBNEO"];
+                    outResult.confidence = "ARCADE_COMPAT";
+                    outResult.details = "Set chuan FBNeo doi moi (core FBA 2012 khong an) -> ve FBNEO";
+                    return false;
+                }
+            }
+        }
         return true;
+    }
+
+    // Ho arcade (stock): MAME / FBNeo / CPS / PGM khong phan biet duoc bang
+    // noi dung file (cung dinh dang zip MAME) nen khong danh dau lac cho
+    // khi file nam trong bat ky folder nao cua ho nay. NEOGEO giu rieng
+    // (user van muon tach set NeoGeo).
+    static const char* kArcadeFamily[] = {"ARCADE", "MAME", "MAME2003PLUS",
+        "MAME2010", "FBNEO", "CPS1", "CPS2", "CPS3", "PGM"};
+    auto inFamily = [](const std::string& c) {
+        for (const char* f : kArcadeFamily) {
+            if (c == f) return true;
+        }
+        return false;
+    };
+    if (inFamily(outResult.systemCode) && inFamily(currentSystemCode)) {
+        return true;
+    }
+
+    // Zip MAME_ONLY lac o bat ky folder nao (VD: rớt vao ARCADE tu dot
+    // truoc, hoac nam trong NEOGEO) -> keo ve MAME thay vi giu dich ARCADE.
+    {
+        size_t d = filePath.rfind('.');
+        std::string ext = (d == std::string::npos) ? "" : filePath.substr(d + 1);
+        std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+        if (ext == "zip" &&
+            detectArcadeCompat(filePath) == ArcadeCompat::MAME_ONLY) {
+            outResult.systemCode = "MAME";
+            outResult.suggestedDir = "MAME";
+            outResult.systemName = m_systemNames["MAME"];
+            outResult.confidence = "ARCADE_COMPAT";
+            outResult.details = "Dump kieu MAME (core FBNeo/FBA khong an) -> ve MAME";
+        }
     }
 
     // Special allowance: ARCADE vs NEOGEO can coexist in some setups, but separate is cleaner

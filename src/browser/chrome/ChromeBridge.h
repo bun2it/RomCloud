@@ -1,7 +1,7 @@
 #pragma once
 // ChromeBridge — giám sát gói trình duyệt RC-Web của chính RomCloud.
 //
-// Kiến trúc (2026-10-10, thay hướng giám sát app KV-Chrome của bên thứ ba):
+// Kiến trúc (2026-10-10):
 //   RomCloud fork launch.sh của gói rc-web (nằm trong Apps/RomCloud/rc-web,
 //   do chrome/fetch-rc-web.sh ráp từ nguồn mở) và supervise qua waitpid
 //   (mẫu MpvPlayer). Weston chiếm toàn màn hình lúc duyệt; thoát phiên là

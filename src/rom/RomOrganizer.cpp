@@ -243,6 +243,24 @@ std::vector<MisplacedRomRecord> RomOrganizer::fixMisplacedRoms(const std::string
     if (items.empty()) return items;
 
     std::string baseDir = romsBaseDir.empty() ? AppConfig::instance().getRomsDir() : romsBaseDir;
+    return applyFixes(std::move(items), baseDir);
+}
+
+std::vector<MisplacedRomRecord> RomOrganizer::fixSystemFolder(const std::string& systemCode,
+                                                             const std::string& romsBaseDir) {
+    auto items = auditMisplacedRoms(romsBaseDir);
+    std::vector<MisplacedRomRecord> mine;
+    for (auto& it : items) {
+        if (it.currentSystemCode == systemCode) mine.push_back(it);
+    }
+    if (mine.empty()) return mine;
+
+    std::string baseDir = romsBaseDir.empty() ? AppConfig::instance().getRomsDir() : romsBaseDir;
+    return applyFixes(std::move(mine), baseDir);
+}
+
+std::vector<MisplacedRomRecord> RomOrganizer::applyFixes(std::vector<MisplacedRomRecord> items,
+                                                         const std::string& baseDir) {
     auto& db = DatabaseManager::instance();
 
     for (auto& item : items) {
@@ -388,6 +406,280 @@ std::vector<MisplacedRomRecord> RomOrganizer::organizeDirectory(const std::strin
     }
     closedir(dir);
     return results;
+}
+
+// ---------------------------------------------------------------------------
+// Chuan hoa ten folder he may
+// ---------------------------------------------------------------------------
+
+static std::string normalizeFolderKey(const std::string& name) {
+    std::string out;
+    out.reserve(name.size());
+    for (char c : name) {
+        if (c == ' ' || c == '-' || c == '_' || c == '.') continue;
+        out.push_back(static_cast<char>(::tolower(static_cast<unsigned char>(c))));
+    }
+    return out;
+}
+
+// key (da chuan hoa) -> ma he may chuan. CHI gom ma he / romDir trong DB
+// (so hoa/thuong/khoang trang). KHONG doan alias (snes, mame, genesis...)
+// vi ten folder phai trung khop cach dat cua StockOS — doan sai se lam
+// game khong chay duoc. Folder ten la duoc xu ly bang cach chuyen FILE
+// ROM ben trong vao dung folder he may (khong doi ten folder).
+static std::unordered_map<std::string, std::string> buildFolderAliasMap(
+    const std::vector<SystemRecord>& systems) {
+    std::unordered_map<std::string, std::string> m;
+    for (const auto& s : systems) {
+        m[normalizeFolderKey(s.code)] = s.code;
+        m[normalizeFolderKey(s.romDir)] = s.code;
+    }
+    return m;
+}
+
+int RomOrganizer::normalizeSystemFolders(const std::string& romsBaseDir) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_busy = true;
+    int changed = 0;
+
+    std::string baseDir = romsBaseDir.empty() ? AppConfig::instance().getRomsDir() : romsBaseDir;
+    auto systems = DatabaseManager::instance().getSystems(false);
+    std::unordered_map<std::string, SystemRecord> codeToSys;
+    std::unordered_map<std::string, std::string> romDirToCode;
+    for (const auto& s : systems) {
+        codeToSys[s.code] = s;
+        romDirToCode[s.romDir] = s.code;
+    }
+    auto aliasMap = buildFolderAliasMap(systems);
+
+    DIR* dir = opendir(baseDir.c_str());
+    if (!dir) {
+        m_busy = false;
+        return 0;
+    }
+    // Thu thap truoc (doi ten folder trong luc duyet readdir khong an toan)
+    std::vector<std::string> subdirs;
+    struct dirent* entry = nullptr;
+    while ((entry = readdir(dir)) != nullptr) {
+        if (entry->d_name[0] == '.') continue;
+        std::string name = entry->d_name;
+        if (name == "_INBOX") continue;
+        std::string full = baseDir + "/" + name;
+        struct stat st;
+        if (stat(full.c_str(), &st) == 0 && S_ISDIR(st.st_mode)) {
+            subdirs.push_back(name);
+        }
+    }
+    closedir(dir);
+
+    for (const auto& name : subdirs) {
+        if (romDirToCode.find(name) != romDirToCode.end()) continue; // da chuan
+        auto it = aliasMap.find(normalizeFolderKey(name));
+        if (it == aliasMap.end()) continue; // folder la: xu ly o buoc sau
+        const std::string& code = it->second;
+        auto sysIt = codeToSys.find(code);
+        if (sysIt == codeToSys.end()) continue;
+        std::string targetDir = baseDir + "/" + sysIt->second.romDir;
+        std::string srcDir = baseDir + "/" + name;
+        if (srcDir == targetDir) continue;
+
+        struct stat stTarget;
+        bool targetExists = (stat(targetDir.c_str(), &stTarget) == 0);
+        if (!targetExists) {
+            // Doi ten truc tiep: "gba" -> "GBA"
+            if (rename(srcDir.c_str(), targetDir.c_str()) == 0) {
+                sync();
+                ++changed;
+                Logger::info("RomOrganizer: Doi ten folder " + name + " -> " +
+                             sysIt->second.romDir);
+            } else {
+                Logger::warn("RomOrganizer: Khong doi ten duoc folder " + name);
+            }
+        } else {
+            // Gop: ca "GBA" va "gba" ton tai -> don file vao folder chuan
+            DIR* sd = opendir(srcDir.c_str());
+            if (!sd) continue;
+            std::vector<std::string> files;
+            struct dirent* e2 = nullptr;
+            while ((e2 = readdir(sd)) != nullptr) {
+                if (e2->d_name[0] == '.') continue;
+                files.push_back(e2->d_name);
+            }
+            closedir(sd);
+            for (const auto& f : files) {
+                std::string finalDst;
+                safeMoveFile(srcDir + "/" + f, targetDir + "/" + f, finalDst);
+            }
+            rmdir(srcDir.c_str());
+            sync();
+            ++changed;
+            Logger::info("RomOrganizer: Gop folder " + name + " vao " +
+                         sysIt->second.romDir);
+        }
+    }
+
+    m_busy = false;
+    return changed;
+}
+
+// ---------------------------------------------------------------------------
+// Sap xep de quy folder la (file ROM nam rac trong folder khong phai he may)
+// ---------------------------------------------------------------------------
+
+int RomOrganizer::organizeUnknownDirRecursive(
+    const std::string& sourceDir, const std::string& baseDir,
+    const std::unordered_map<std::string, SystemRecord>& codeToSys,
+    OrganizeSummary& summary) {
+    int moved = 0;
+    DIR* dir = opendir(sourceDir.c_str());
+    if (!dir) return 0;
+
+    // Thu thap truoc de tranh sua folder trong luc duyet
+    std::vector<std::pair<std::string, bool>> entries; // (ten, laFolder)
+    struct dirent* entry = nullptr;
+    while ((entry = readdir(dir)) != nullptr) {
+        if (entry->d_name[0] == '.') continue;
+        std::string name = entry->d_name;
+        if (name == "Imgs" || name == "imgs" || name == "media") continue;
+        std::string full = sourceDir + "/" + name;
+        struct stat st;
+        if (stat(full.c_str(), &st) != 0) continue;
+        entries.emplace_back(name, S_ISDIR(st.st_mode));
+    }
+    closedir(dir);
+
+    for (const auto& [name, isDir] : entries) {
+        std::string full = sourceDir + "/" + name;
+        if (isDir) {
+            moved += organizeUnknownDirRecursive(full, baseDir, codeToSys, summary);
+            // Xoa folder rong sau khi don sach
+            DIR* chk = opendir(full.c_str());
+            bool empty = true;
+            if (chk) {
+                struct dirent* e2 = nullptr;
+                while ((e2 = readdir(chk)) != nullptr) {
+                    std::string n2 = e2->d_name;
+                    if (n2 != "." && n2 != "..") { empty = false; break; }
+                }
+                closedir(chk);
+            }
+            if (empty) rmdir(full.c_str());
+            continue;
+        }
+        RomDetectionResult det = RomDetector::instance().detectSystem(full);
+        if (!det.detected) {
+            ++summary.filesSkipped;
+            continue;
+        }
+        auto targetIt = codeToSys.find(det.systemCode);
+        if (targetIt == codeToSys.end()) {
+            ++summary.filesSkipped;
+            continue;
+        }
+        std::string targetDir = baseDir + "/" + targetIt->second.romDir;
+        FileSystemManager::instance().createDirectoryRecursive(targetDir);
+        std::string finalDst;
+        if (safeMoveFile(full, targetDir + "/" + name, finalDst)) {
+            ++moved;
+            ++summary.filesMoved;
+            // Ghi DB
+            GameRecord g;
+            g.systemId = targetIt->second.id;
+            g.filename = name;
+            g.title = getStemFromPath(finalDst);
+            g.localPath = finalDst;
+            g.localState = GameState::LOCAL;
+            struct stat st2;
+            if (stat(finalDst.c_str(), &st2) == 0) g.sizeBytes = st2.st_size;
+            DatabaseManager::instance().upsertGame(g);
+        } else {
+            summary.errors.push_back("Khong chuyen duoc: " + name);
+        }
+    }
+    return moved;
+}
+
+// ---------------------------------------------------------------------------
+// Lam tron 1 lan: chuan hoa folder -> sap xep file la -> dua file lac cho ve
+// ---------------------------------------------------------------------------
+
+OrganizeSummary RomOrganizer::organizeAll(const std::string& romsBaseDir) {
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        if (m_busy) return OrganizeSummary{};
+        m_busy = true;
+    }
+    OrganizeSummary summary;
+    std::string baseDir = romsBaseDir.empty() ? AppConfig::instance().getRomsDir() : romsBaseDir;
+
+    if (!FileSystemManager::instance().directoryExists(baseDir)) {
+        summary.errors.push_back("Khong tim thay thu muc Roms: " + baseDir);
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_busy = false;
+        return summary;
+    }
+
+    auto systems = DatabaseManager::instance().getSystems(false);
+    std::unordered_map<std::string, SystemRecord> codeToSys;
+    std::unordered_map<std::string, bool> knownDirs;
+    for (const auto& s : systems) {
+        codeToSys[s.code] = s;
+        knownDirs[s.romDir] = true;
+    }
+
+    // Buoc 1: sua ten folder he may ve chuan ("gba" -> "GBA", gop trung)
+    int renamed = normalizeSystemFolders(baseDir);
+    summary.foldersRenamed = renamed;
+
+    // Buoc 2: sap xep file trong cac folder la (khong phai he may, khac _INBOX)
+    DIR* dir = opendir(baseDir.c_str());
+    if (dir) {
+        std::vector<std::string> unknownDirs;
+        struct dirent* entry = nullptr;
+        while ((entry = readdir(dir)) != nullptr) {
+            if (entry->d_name[0] == '.') continue;
+            std::string name = entry->d_name;
+            if (name == "_INBOX") continue;
+            if (knownDirs.find(name) != knownDirs.end()) continue;
+            std::string full = baseDir + "/" + name;
+            struct stat st;
+            if (stat(full.c_str(), &st) == 0 && S_ISDIR(st.st_mode)) {
+                unknownDirs.push_back(full);
+            }
+        }
+        closedir(dir);
+        for (const auto& ud : unknownDirs) {
+            organizeUnknownDirRecursive(ud, baseDir, codeToSys, summary);
+            // Xoa folder la neu da rong
+            DIR* chk = opendir(ud.c_str());
+            bool empty = true;
+            if (chk) {
+                struct dirent* e2 = nullptr;
+                while ((e2 = readdir(chk)) != nullptr) {
+                    std::string n2 = e2->d_name;
+                    if (n2 != "." && n2 != "..") { empty = false; break; }
+                }
+                closedir(chk);
+            }
+            if (empty) rmdir(ud.c_str());
+        }
+    }
+
+    // Buoc 3: dua file lac cho trong cac folder he may + root + _INBOX ve dung cho
+    auto fixed = fixMisplacedRoms(baseDir);
+    for (const auto& item : fixed) {
+        if (item.fixed) ++summary.filesMoved;
+    }
+    sync();
+
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_busy = false;
+    }
+    Logger::info("RomOrganizer::organizeAll xong: " +
+                 std::to_string(summary.foldersRenamed) + " folder, " +
+                 std::to_string(summary.filesMoved) + " file da chuyen");
+    return summary;
 }
 
 } // namespace RomCloud

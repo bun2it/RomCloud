@@ -9,7 +9,7 @@
 #   - gamecontrollerdb.txt ......... SDL_GameControllerDB (upstream)
 #   - launch.sh / browser.gptk / fonts.conf / app/ ... code của RomCloud
 #     (nằm trong thư mục chrome/ của repo này)
-# KHÔNG lấy bất kỳ file nào từ gói KV-Chrome. Binary KHÔNG commit vào git.
+# Binary KHÔNG commit vào git.
 #
 # Sau khi chạy xong, đẩy lên máy:
 #   adb push ~/Downloads/rc-web /mnt/SDCARD/Apps/RomCloud/rc-web
@@ -36,10 +36,12 @@ if [ ! -x "$OUT/electron/electron" ]; then
   mkdir -p "$OUT/electron"
   unzip -q -o "$TMP/electron.zip" -d "$OUT/electron"
   chmod +x "$OUT/electron/electron" "$OUT/electron/chrome_crashpad_handler" 2>/dev/null || true
-  cp "$OUT/electron/LICENSE" "$OUT/licenses/LICENSE.Electron.txt" 2>/dev/null || true
 else
   echo "Đã có electron/, bỏ qua."
 fi
+# License Electron: copy MỖI lần (không nằm trong nhánh skip ở trên —
+# chạy lại script khi electron/ đã có vẫn đảm bảo đủ license).
+cp -f "$OUT/electron/LICENSE" "$OUT/licenses/LICENSE.Electron.txt" 2>/dev/null || true
 
 echo "=== 2/6 Thư viện Debian $DEB_SUITE arm64 cho Electron ==="
 curl -fsSL "$DEB_MIRROR/dists/$DEB_SUITE/main/binary-arm64/Packages.gz" \
@@ -180,14 +182,39 @@ cp -f "$SCRIPT_DIR/app-preload.js"     "$OUT/app/preload.js"
 cp -f "$SCRIPT_DIR/app-keyboard.html"  "$OUT/app/keyboard.html"
 cp -f "$SCRIPT_DIR/app-package.json"   "$OUT/app/package.json"
 chmod +x "$OUT/launch.sh"
-cat > "$OUT/licenses/NOTICE.txt" <<'EOF'
-RC-Web cua RomCloud gom:
-- Electron (electronjs.org, MIT/BSD) - file goc trong electron/
-- Thu vien he thong + Weston/Xwayland/seatd (Debian, LGPL/GPL/MIT)
-  trong syslibs/ va weston/ - license tung goi nam trong weston/share/doc/
-- gptokeyb2 + libinterpose (PortMaster, ma nguon mo) trong bin/
-- gamecontrollerdb.txt (SDL_GameControllerDB, zlib)
-- launch.sh, browser.gptk, fonts.conf, app/ la code cua RomCloud.
+# License các thành phần bên thứ ba (MIT/DejaVu yêu cầu kèm license text).
+# Tải mỗi lần ráp để gói luôn đủ giấy tờ, kể cả chạy lại script.
+curl -fsSL "https://raw.githubusercontent.com/PortsMaster/PortMaster-GUI/main/LICENSE" \
+  -o "$OUT/licenses/LICENSE.PortMaster.txt" 2>/dev/null || \
+  echo "  !! không tải được LICENSE PortMaster (giữ bản cũ nếu có)"
+curl -fsSL "https://raw.githubusercontent.com/dejavu-fonts/dejavu-fonts/master/LICENSE" \
+  -o "$OUT/licenses/LICENSE.DejaVu.txt" 2>/dev/null || \
+  echo "  !! không tải được LICENSE DejaVu (giữ bản cũ nếu có)"
+# Dọn file chết: rc-main.js + package.json ở gốc là tàn dư thử nghiệm
+# offscreen cũ (không ai dùng — launcher chạy $OUT/app), .DS_Store của Mac.
+rm -f "$OUT/rc-main.js" "$OUT/package.json"
+find "$OUT" -name ".DS_Store" -delete 2>/dev/null || true
+# version.txt: máy đối chiếu với rc_web_version trong version.json để biết
+# có bản RC-Web mới qua OTA không. Đọc từ repo (script chạy từ repo).
+RCVER="$(grep '"rc_web_version"' "$SCRIPT_DIR/../version.json" 2>/dev/null | head -n 1 | awk -F'"' '{print $4}')"
+if [ -n "$RCVER" ]; then
+  echo "$RCVER" > "$OUT/version.txt"
+  echo "  version.txt = $RCVER"
+else
+  echo "  !! không đọc được rc_web_version từ version.json (giữ version.txt cũ nếu có)"
+fi
+cat > "$OUT/licenses/NOTICE.txt" <<EOF
+RC-Web — goi trinh duyet cua RomCloud (https://github.com/bun2it/RomCloud).
+Code cua RomCloud (launch.sh, browser.gptk, fonts.conf, app/, version.txt):
+viet moi cho du an nay, khong lay tu phan mem khac.
+
+Thanh phan ma nguon mo di kem (lay thang tu noi phat hanh goc):
+- Electron $ELECTRON_VER linux-arm64 (https://github.com/electron/electron/releases/tag/v$ELECTRON_VER, MIT/BSD) — electron/ (LICENSE trong licenses/)
+- Thu vien he thong Debian $DEB_SUITE arm64 ($DEB_MIRROR, LGPL/GPL/MIT) — syslibs/
+- Weston 9 + Xwayland + seatd, Debian $DEB_SUITE arm64 (nguon nhu tren) — weston/ (copyright tung goi trong weston/share/doc/)
+- gptokeyb2 + libinterpose.aarch64.so, PortMaster-GUI $PORTMASTER_TAG (https://github.com/PortsMaster/PortMaster-GUI, MIT) — bin/
+- gamecontrollerdb.txt, SDL_GameControllerDB (https://github.com/mdqinc/SDL_GameControllerDB; upstream khong ghi license, dung theo huong dan cua upstream + ghi nguon tai day va trong file)
+- Font DejaVu (https://dejavu-fonts.github.io, DejaVu Fonts License) — fonts/ (LICENSE trong licenses/)
 EOF
 
 # Thẻ SD (FAT/FAT32) không lưu được symlink: các gói .deb chứa rất nhiều

@@ -182,9 +182,11 @@ bool DatabaseManager::seedDefaultSystems() {
         sqlite3_finalize(stmt);
     }
 
-    if (count > 0) return true;
-
-    Logger::info("Seeding default TrimUI gaming systems into database...");
+    if (count > 0) {
+        Logger::info("Systems table not empty, ensuring stock systems exist (additive)...");
+    } else {
+        Logger::info("Seeding default TrimUI gaming systems into database...");
+    }
     beginTransaction();
 
     const char* insertSql = R"(

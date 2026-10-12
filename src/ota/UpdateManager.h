@@ -35,6 +35,8 @@ struct UpdateInfo {
     std::string iconUrl;          // Official app icon URL
     std::string bundleUrl;        // mpv/codecs bundle
     std::string osBundleUrl;      // OS-specific dependencies
+    std::string rcWebUrl;         // RC-Web browser package (rc-web-<ver>.zip)
+    std::string rcWebVersion;     // Remote RC-Web version (date-based, e.g. 20261011)
     std::string changelog;
     std::string releaseDate;
     uint64_t sizeBytes = 0;
@@ -75,6 +77,12 @@ public:
     bool startUpdate(const UpdateInfo& info);
     void cancelUpdate();
 
+    // RC-Web (trình duyệt): gói riêng ~500M, update thủ công từ màn Cập
+    // nhật (không tự vá ở boot để tránh tải nặng không xin phép).
+    std::string getInstalledRcWebVersion();
+    bool isRcWebUpdateAvailable();
+    bool startRcWebUpdate();
+
     // Tự vá khi boot: nếu thiếu file runtime quan trọng (máy lên đời bằng
     // OTA binary-only đời cũ) thì tự tải full-zip bản hiện tại và cài.
     // Trả về true nếu đã bắt đầu quá trình vá.
@@ -110,6 +118,8 @@ private:
 
     void runDownloadWorker(UpdateInfo info);
     bool installFullZip(const std::string& zipPath);
+    void runRcWebWorker(UpdateInfo info);
+    bool installRcWebZip(const std::string& zipPath);
     void notifyRepairDone(bool ok);
     bool downloadAndInstallDependencies(const UpdateInfo& info);
     bool downloadFile(const std::string& url, const std::string& destPath, uint64_t* outSize = nullptr, bool trackProgress = false);

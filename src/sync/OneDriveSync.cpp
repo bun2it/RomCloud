@@ -33,12 +33,20 @@ struct OdItem{std::string id;std::string name;uint64_t size=0;bool isFolder=fals
 static std::vector<OdItem> odList(const std::string& tok,const std::string& itemId){
     std::vector<OdItem> out;
     std::string url=itemId.empty()?"https://api.onedrive.com/v1.0/shares/"+tok+"/driveItem/children?$top=200":"https://api.onedrive.com/v1.0/shares/"+tok+"/driveItem/items/"+itemId+"/children?$top=200";
-    HttpResponse r=HttpClient::instance().get(url,{"User-Agent: Mozilla/5.0","Accept: application/json"},30);
-    if(!r.success||r.body.empty()){Logger::warn("OneDrive list fail HTTP "+std::to_string(r.statusCode)+" "+r.error);return out;}
-    for(auto& o: JsonHelper::extractArrayObjects(r.body,"value")){
-        OdItem it; it.id=JsonHelper::extractString(o,"id"); it.name=JsonHelper::extractString(o,"name");
-        it.size=JsonHelper::extractUInt64(o,"size",0); it.isFolder=(o.find("\"folder\"")!=std::string::npos);
-        if(!it.id.empty()&&!it.name.empty()) out.push_back(it);
+    // Theo @odata.nextLink để lấy hết folder >200 item (VD: GBA ~1000 ROM).
+    // Chặn 50 trang (10k item) + ngắt khi nextLink lặp để khỏi treo.
+    std::string lastUrl;
+    for(int page=0;page<50&&!url.empty();++page){
+        HttpResponse r=HttpClient::instance().get(url,{"User-Agent: Mozilla/5.0","Accept: application/json"},30);
+        if(!r.success||r.body.empty()){Logger::warn("OneDrive list fail HTTP "+std::to_string(r.statusCode)+" "+r.error);break;}
+        for(auto& o: JsonHelper::extractArrayObjects(r.body,"value")){
+            OdItem it; it.id=JsonHelper::extractString(o,"id"); it.name=JsonHelper::extractString(o,"name");
+            it.size=JsonHelper::extractUInt64(o,"size",0); it.isFolder=(o.find("\"folder\"")!=std::string::npos);
+            if(!it.id.empty()&&!it.name.empty()) out.push_back(it);
+        }
+        lastUrl=url;
+        url=JsonHelper::extractString(r.body,"@odata.nextLink");
+        if(url==lastUrl)break;
     }
     return out;
 }
@@ -50,6 +58,19 @@ static bool odExtOk(const SystemRecord& s,const std::string& e){
         while(!p.empty()&&p.front()==' ')p.erase(0,1);while(!p.empty()&&(p.back()==' '||p.back()==','))p.pop_back();
         std::transform(p.begin(),p.end(),p.begin(),::tolower);if(p==e)return true;}}
     return false;
+}
+// Quét đệ quy 1 folder hệ: file khớp ext thì index, folder con thì xuống
+// tiếp (giữ nguyên system). Chặn sâu 6 tầng chống vòng lặp.
+static std::string odTitle(const std::string& fn);
+static void odSyncFolder(const std::string& tok,const std::string& folderId,
+                         const SystemRecord& sys,int depth,int& indexed){
+    if(depth>6)return;
+    for(auto& it:odList(tok,folderId)){
+        if(it.name.empty()||it.name[0]=='.')continue;
+        if(it.isFolder){odSyncFolder(tok,it.id,sys,depth+1,indexed);continue;}
+        if(!odExtOk(sys,odExt(it.name)))continue;
+        GameRecord g;g.systemId=sys.id;g.filename=it.name;g.title=odTitle(it.name);g.sizeBytes=it.size;g.cloudFileId="od1|"+tok+"|"+it.id;g.localState=GameState::CLOUD;DatabaseManager::instance().upsertGame(g);indexed++;
+    }
 }
 static std::string odTitle(const std::string& fn){
     std::string b=fn;size_t d=b.find_last_of('.');if(d!=std::string::npos)b=b.substr(0,d);
@@ -68,6 +89,10 @@ static std::string odMatch(const std::string& n){
     if(s.find("genesis")!=std::string::npos||s.find("mega drive")!=std::string::npos||s=="md")return "MD";
     if(s.find("n64")!=std::string::npos||s.find("nintendo 64")!=std::string::npos)return "N64";
     if(s.find("nds")!=std::string::npos||s.find("nintendo ds")!=std::string::npos)return "NDS";
+    if(s.find("pocket")!=std::string::npos||s=="ngp")return "NGP";
+    if(s.find("cps3")!=std::string::npos)return "CPS3";
+    if(s.find("cps2")!=std::string::npos)return "CPS2";
+    if(s.find("cps1")!=std::string::npos)return "CPS1";
     if(s.find("playstation")!=std::string::npos||s.find("ps1")!=std::string::npos||s.find("psx")!=std::string::npos)return "PS";
     if(s.find("psp")!=std::string::npos)return "PSP";
     if(s.find("dreamcast")!=std::string::npos)return "DC";
@@ -76,7 +101,11 @@ static std::string odMatch(const std::string& n){
     if(s.find("master system")!=std::string::npos||s=="ms"||s=="sms")return "MS";
     if(s.find("sega cd")!=std::string::npos||s.find("segacd")!=std::string::npos)return "SEGACD";
     if(s.find("neo geo")!=std::string::npos||s.find("neogeo")!=std::string::npos)return "NEOGEO";
-    if(s.find("mame")!=std::string::npos||s.find("arcade")!=std::string::npos||s.find("fbneo")!=std::string::npos)return "ARCADE";
+    if(s.find("mame2010")!=std::string::npos)return "MAME2010";
+    if(s.find("mame2003")!=std::string::npos)return "MAME2003PLUS";
+    if(s.find("fbneo")!=std::string::npos||s.find("final burn")!=std::string::npos)return "FBNEO";
+    if(s.find("pgm")!=std::string::npos)return "PGM";
+    if(s.find("mame")!=std::string::npos||s.find("arcade")!=std::string::npos)return "ARCADE";
     if(s.find("pce")!=std::string::npos||s.find("pc engine")!=std::string::npos||s.find("turbografx")!=std::string::npos)return "PCE";
     if(s.find("atari")!=std::string::npos||s.find("2600")!=std::string::npos)return "ATARI2600";
     if(s.find("nes")!=std::string::npos||s.find("famicom")!=std::string::npos||s=="fc")return "FC";
@@ -103,11 +132,8 @@ int oneDriveSyncShare(const std::string& shareUrl){
         if(!f.isFolder)continue;
         std::string code=odMatch(f.name); if(code.empty())continue;
         auto sit=byCode.find(code); if(sit==byCode.end())continue;
-        for(auto& it:odList(tok,f.id)){
-            if(it.isFolder||it.name.empty()||it.name[0]=='.')continue;
-            if(!odExtOk(sit->second,odExt(it.name)))continue;
-            GameRecord g;g.systemId=sit->second.id;g.filename=it.name;g.title=odTitle(it.name);g.sizeBytes=it.size;g.cloudFileId="od1|"+tok+"|"+it.id;g.localState=GameState::CLOUD;DatabaseManager::instance().upsertGame(g);indexed++;
-        }
+        // Đệ quy: ROM có thể nằm trong subfolder (VD: Roms/MAME/mame2003/).
+        odSyncFolder(tok,f.id,sit->second,0,indexed);
     }
     DatabaseManager::instance().commitTransaction();
     auto now=std::chrono::system_clock::now(); std::time_t tt=std::chrono::system_clock::to_time_t(now);

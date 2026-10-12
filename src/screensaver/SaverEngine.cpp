@@ -12,9 +12,11 @@
 #include <cstring>
 #include <cmath>
 #include <dirent.h>
+#include <sys/stat.h>
 #include <algorithm>
 #include <random>
 #include <ctime>
+#include <thread>
 
 namespace RomCloud {
 
@@ -59,6 +61,8 @@ void SaverEngine::init(UIManager* ui, SDL_Renderer* renderer) {
 }
 
 void SaverEngine::shutdown() {
+    joinPreload();  // dừng hẳn thread giải mã ảnh kế trước khi dọn
+    stopThumbWorker();  // dừng thread thumbnail lưới chọn ảnh
     if (m_fbTexture) {
         SDL_DestroyTexture(m_fbTexture);
         m_fbTexture = nullptr;
@@ -137,7 +141,8 @@ bool SaverEngine::handleInput(int button) {
     const int BTN_Y = 7;
     const int BTN_L1 = 8;
     const int BTN_R1 = 9;
-    const int BTN_START = 12;  // Tai: START mở cài đặt ảnh
+    const int BTN_START = 12;  // Tai: START hiện/ẩn footer khi xem ảnh
+    const int BTN_SELECT = 13; // Tai: SELECT mở cài đặt ảnh (từ 2026-10-10)
     
     // B: thoát (duy nhất)
     if (button == BTN_B) {
@@ -191,6 +196,11 @@ bool SaverEngine::handleInput(int button) {
     // P3: Picture mode
     if (m_mode == SaverMode::PICTURE) {
         if (button == BTN_START) {
+            // Tai 2026-10-10: START hiện/ẩn footer gợi ý khi xem ảnh
+            m_footerVisible = !m_footerVisible;
+            return true;
+        }
+        if (button == BTN_SELECT) {
             toggleSettings();
             return true;
         }
@@ -443,17 +453,11 @@ void SaverEngine::matrixRender() {
 // P3: Picture frame
 // ---------------------------------------------------------------------------
 
-void SaverEngine::scanPhotos() {
-    m_allPhotos.clear();
-    m_photos.clear();
-    std::string targetDir = m_photoDir;
+// Quét 1 thư mục, nạp các file jpg/jpeg/png vào m_allPhotos (và
+// m_photos nếu không bị ẩn). Thư mục không có thì bỏ qua.
+void SaverEngine::scanPhotoDir(const std::string& targetDir) {
     DIR* dir = opendir(targetDir.c_str());
-    if (!dir) {
-        targetDir = "screensaver/photos";
-        dir = opendir(targetDir.c_str());
-    }
     if (!dir) return;
-    
     struct dirent* ent;
     while ((ent = readdir(dir)) != nullptr) {
         std::string name = ent->d_name;
@@ -463,7 +467,7 @@ void SaverEngine::scanPhotos() {
         std::transform(low.begin(), low.end(), low.begin(), ::tolower);
         if (low.size() >= 4) {
             std::string ext = low.substr(low.size() - 4);
-            if (ext == ".jpg" || ext == ".png" || 
+            if (ext == ".jpg" || ext == ".png" ||
                 (low.size() >= 5 && low.substr(low.size() - 5) == ".jpeg")) {
                 std::string full = targetDir + "/" + name;
                 m_allPhotos.push_back(full);
@@ -474,6 +478,27 @@ void SaverEngine::scanPhotos() {
         }
     }
     closedir(dir);
+}
+
+void SaverEngine::scanPhotos() {
+    m_allPhotos.clear();
+    m_photos.clear();
+    // Tai 2026-10-10: nguồn ảnh chính là thư mục Pictures ở gốc thẻ
+    // (chép ảnh từ máy tính vào đây là dùng được, không phải đào sâu
+    // trong thư mục app); quét thêm thư mục photos cũ trong app để
+    // không mất ảnh đã có. Bật/tắt từng ảnh ở Cài đặt -> Chọn ảnh.
+    mkdir("/mnt/SDCARD/Pictures", 0777);
+    scanPhotoDir("/mnt/SDCARD/Pictures");
+    {
+        DIR* probe = opendir(m_photoDir.c_str());
+        if (probe) {
+            closedir(probe);
+            scanPhotoDir(m_photoDir);
+        } else {
+            scanPhotoDir("screensaver/photos");
+        }
+    }
+
     
     static std::default_random_engine rng((unsigned)time(nullptr));
     if (m_photoShuffle) {
@@ -485,16 +510,17 @@ void SaverEngine::scanPhotos() {
     }
 }
 
-bool SaverEngine::loadPhoto(const std::string& path, SDL_Texture** outTex) {
-    if (!m_renderer || !outTex) return false;
-    
+// Chỉ phần CPU của việc load ảnh: giải mã file gốc + scale về vừa
+// 1024x768. Chạy được trong thread nền (không đụng renderer/texture —
+// cùng quy ước với worker thumbnail của UIManager).
+SDL_Surface* SaverEngine::loadPhotoSurface(const std::string& path, int maxW, int maxH) {
     SDL_Surface* surf = IMG_Load(path.c_str());
-    if (!surf) return false;
+    if (!surf) return nullptr;
     
-    // Scale về vừa 1024x768 (giữ tỷ lệ)
+    // Scale về vừa khung maxW x maxH (giữ tỷ lệ)
     int sw = surf->w;
     int sh = surf->h;
-    float scale = std::min(1024.0f / sw, 768.0f / sh);
+    float scale = std::min((float)maxW / sw, (float)maxH / sh);
     if (scale > 1.0f) scale = 1.0f;
     int dw = (int)(sw * scale);
     int dh = (int)(sh * scale);
@@ -509,17 +535,157 @@ bool SaverEngine::loadPhoto(const std::string& path, SDL_Texture** outTex) {
             surf = scaled;
         }
     }
-    
+    return surf;
+}
+
+bool SaverEngine::loadPhoto(const std::string& path, SDL_Texture** outTex) {
+    if (!m_renderer || !outTex) return false;
+    SDL_Surface* surf = loadPhotoSurface(path, 1024, 768);
+    if (!surf) return false;
     SDL_Texture* tex = SDL_CreateTextureFromSurface(m_renderer, surf);
-    
-    // P3-transitions: giữ surface để lấy pixels cho framebuffer
-    // (caller chịu trách nhiệm free surface cũ)
-    
     SDL_FreeSurface(surf);
-    
     if (!tex) return false;
     *outTex = tex;
     return true;
+}
+
+// P4: kích thread nền giải mã trước ảnh kế tiếp trong lúc ảnh hiện tại
+// đang hiển thị, để tới lúc chuyển ảnh là có sẵn texture mà dùng.
+void SaverEngine::kickPreloadNext() {
+    if (m_photos.size() < 2) return;
+    std::string path = m_photos[(m_photoIdx + 1) % (int)m_photos.size()];
+    if (m_preloadThread.joinable() && m_preloadPath == path) return;
+    joinPreload();
+    m_preloadPath = path;
+    m_preloadThread = std::thread([this, path]() {
+        m_preloadSurf = loadPhotoSurface(path, 1024, 768);
+    });
+}
+
+void SaverEngine::joinPreload() {
+    if (m_preloadThread.joinable()) m_preloadThread.join();
+    if (m_preloadSurf) { SDL_FreeSurface(m_preloadSurf); m_preloadSurf = nullptr; }
+    m_preloadPath.clear();
+}
+
+// Lấy texture từ preload nếu đã giải mã đúng ảnh cần; chờ thread xong
+// (thường đã xong từ lâu). Không khớp thì trả nullptr để nơi gọi load
+// đồng bộ như cũ.
+SDL_Texture* SaverEngine::takePreloadedTexture(const std::string& path) {
+    if (!m_preloadThread.joinable() && !m_preloadSurf) return nullptr;
+    if (m_preloadThread.joinable()) m_preloadThread.join();
+    SDL_Texture* tex = nullptr;
+    if (m_preloadSurf && m_preloadPath == path && m_renderer) {
+        tex = SDL_CreateTextureFromSurface(m_renderer, m_preloadSurf);
+    }
+    if (m_preloadSurf) { SDL_FreeSurface(m_preloadSurf); m_preloadSurf = nullptr; }
+    m_preloadPath.clear();
+    return tex;
+}
+
+// ── Thumbnail cho lưới chọn ảnh ─────────────────────────────────────
+// Thread nền giải mã ảnh nhỏ (208x156), main thread tạo texture khi
+// vẽ lưới — cùng quy ước worker thumbnail của UIManager.
+void SaverEngine::ensureThumbWorker() {
+    if (m_thumbStarted) return;
+    m_thumbStarted = true;
+    m_thumbStop = false;
+    m_thumbThread = std::thread([this]() {
+        while (true) {
+            std::string path;
+            {
+                std::unique_lock<std::mutex> lk(m_thumbMutex);
+                m_thumbCv.wait(lk, [this]() {
+                    return m_thumbStop || !m_thumbQueue.empty();
+                });
+                if (m_thumbStop) return;
+                path = m_thumbQueue.front();
+                m_thumbQueue.pop_front();
+            }
+            SDL_Surface* surf = loadPhotoSurface(path, 208, 156);
+            {
+                std::lock_guard<std::mutex> lk(m_thumbMutex);
+                m_thumbReady.push_back({path, surf});
+            }
+        }
+    });
+}
+
+void SaverEngine::stopThumbWorker() {
+    if (!m_thumbStarted) return;
+    {
+        std::lock_guard<std::mutex> lk(m_thumbMutex);
+        m_thumbStop = true;
+    }
+    m_thumbCv.notify_all();
+    if (m_thumbThread.joinable()) m_thumbThread.join();
+    m_thumbStarted = false;
+    freeThumbs();
+}
+
+void SaverEngine::freeThumbs() {
+    for (auto& kv : m_thumbTex) {
+        if (kv.second) SDL_DestroyTexture(kv.second);
+    }
+    m_thumbTex.clear();
+    m_thumbOrder.clear();
+    std::lock_guard<std::mutex> lk(m_thumbMutex);
+    for (auto& rs : m_thumbReady) {
+        if (rs.second) SDL_FreeSurface(rs.second);
+    }
+    m_thumbReady.clear();
+    m_thumbQueue.clear();
+}
+
+// Chuyển các surface đã giải mã xong thành texture (gọi ở thread vẽ).
+void SaverEngine::pumpThumbs() {
+    std::vector<std::pair<std::string, SDL_Surface*>> ready;
+    {
+        std::lock_guard<std::mutex> lk(m_thumbMutex);
+        ready.swap(m_thumbReady);
+    }
+    for (auto& rs : ready) {
+        if (!rs.second) continue;
+        if (!m_renderer || m_thumbTex.count(rs.first)) {
+            SDL_FreeSurface(rs.second);
+            continue;
+        }
+        SDL_Texture* tex = SDL_CreateTextureFromSurface(m_renderer, rs.second);
+        SDL_FreeSurface(rs.second);
+        if (!tex) continue;
+        // Đầy bộ nhớ đệm: đuổi thumbnail cũ nhất
+        if ((int)m_thumbTex.size() >= THUMB_MAX && !m_thumbOrder.empty()) {
+            auto old = m_thumbTex.find(m_thumbOrder.front());
+            if (old != m_thumbTex.end()) {
+                SDL_DestroyTexture(old->second);
+                m_thumbTex.erase(old);
+            }
+            m_thumbOrder.erase(m_thumbOrder.begin());
+        }
+        m_thumbTex[rs.first] = tex;
+        m_thumbOrder.push_back(rs.first);
+    }
+}
+
+// Lấy texture thumbnail; chưa có thì xếp hàng cho thread nền giải mã
+// và trả nullptr (ô ảnh hiện khung chờ).
+SDL_Texture* SaverEngine::getThumb(const std::string& path) {
+    auto it = m_thumbTex.find(path);
+    if (it != m_thumbTex.end()) return it->second;
+    ensureThumbWorker();
+    {
+        std::lock_guard<std::mutex> lk(m_thumbMutex);
+        bool queued = std::find(m_thumbQueue.begin(), m_thumbQueue.end(), path) != m_thumbQueue.end();
+        bool ready = false;
+        for (auto& rs : m_thumbReady) {
+            if (rs.first == path) { ready = true; break; }
+        }
+        if (!queued && !ready) {
+            m_thumbQueue.push_back(path);
+            m_thumbCv.notify_one();
+        }
+    }
+    return nullptr;
 }
 
 // Tạo pixel buffer 480x360 từ texture (dùng cho transitions)
@@ -551,6 +717,7 @@ uint32_t* SaverEngine::textureToPixels(SDL_Texture* tex) {
 }
 
 void SaverEngine::photoInit() {
+    joinPreload();  // dọn preload của phiên xem ảnh trước (nếu có)
     scanPhotos();
     m_photoIdx = 0;
     m_photoTimer = 0;
@@ -566,6 +733,7 @@ void SaverEngine::photoInit() {
     if (!m_photos.empty()) {
         loadPhoto(m_photos[0], &m_photoTex);
         m_photoPixels = textureToPixels(m_photoTex);
+        kickPreloadNext();
     }
 }
 
@@ -595,6 +763,7 @@ void SaverEngine::hideCurrentPhoto() {
     if (!m_photos.empty()) {
         loadPhoto(m_photos[m_photoIdx], &m_photoTex);
         m_photoPixels = textureToPixels(m_photoTex);
+        kickPreloadNext();  // danh sách vừa đổi: nạp trước ảnh kế mới
     }
     m_photoTimer = 0;
 }
@@ -604,10 +773,12 @@ void SaverEngine::startTransition() {
     if (m_photoNextTex) { SDL_DestroyTexture(m_photoNextTex); m_photoNextTex = nullptr; }
     if (m_photoNextPixels) { delete[] m_photoNextPixels; m_photoNextPixels = nullptr; }
     if (!m_photos.empty()) {
-        loadPhoto(m_photos[m_photoIdx], &m_photoNextTex);
-        // Tạo pixel buffers cho transition
-        if (m_photoPixels) { delete[] m_photoPixels; m_photoPixels = nullptr; }
-        m_photoPixels = textureToPixels(m_photoTex);
+        // Ưu tiên ảnh đã được thread nền giải mã trước; chưa kịp thì
+        // load đồng bộ như cũ. Pixels của ảnh hiện tại đã có sẵn từ lúc
+        // nó được nạp nên không tính lại ở đây.
+        SDL_Texture* preTex = takePreloadedTexture(m_photos[m_photoIdx]);
+        if (preTex) m_photoNextTex = preTex;
+        else loadPhoto(m_photos[m_photoIdx], &m_photoNextTex);
         m_photoNextPixels = textureToPixels(m_photoNextTex);
     }
     m_transActive = true;
@@ -636,6 +807,7 @@ void SaverEngine::photoUpdate(float dt) {
             m_photoPixels = m_photoNextPixels;
             m_photoNextPixels = nullptr;
             m_photoTimer = 0;
+            kickPreloadNext();  // giải mã trước ảnh kế trong lúc chờ
             // Giữ nguyên m_transType người dùng đã cấu hình
         }
     } else {
@@ -666,12 +838,12 @@ void SaverEngine::photoRender() {
 
             drawText("CHƯA CÓ HÌNH ẢNH NÀO", 512, 230, 255, 215, 0, true, m_fontTitle);
             drawText("Vui lòng sao chép ảnh (.jpg, .png) vào thư mục:", 512, 285, 210, 225, 240, true);
-            drawText("/mnt/SDCARD/Apps/RomCloud/screensaver/photos/", 512, 325, 0, 210, 255, true);
-            drawText("Nhấn START để mở menu Cài đặt & Quản lý danh sách ảnh", 512, 385, 140, 170, 200, true);
+            drawText("/mnt/SDCARD/Pictures/", 512, 325, 0, 210, 255, true);
+            drawText("Nhấn SELECT để mở menu Cài đặt & Quản lý danh sách ảnh", 512, 385, 140, 170, 200, true);
 
-            if (m_ui) {
+            if (m_ui && m_footerVisible) {
                 m_ui->drawAppFooter({
-                    {UiTheme::PadBtn::START, "Cài đặt"},
+                    {UiTheme::PadBtn::SELECT, "Cài đặt"},
                     {UiTheme::PadBtn::DPAD, "Đổi chế độ"},
                     {UiTheme::PadBtn::B, "Thoát"}
                 });
@@ -728,41 +900,79 @@ void SaverEngine::photoRender() {
             if (m_allPhotos.empty()) {
                 drawText("Không tìm thấy tệp ảnh nào trong thư mục!", modalX + modalW / 2, modalY + 240, 255, 120, 120, true);
             } else {
-                // Hiển thị 6 ảnh mỗi khung nhìn
-                const int visibleCount = 6;
-                for (int i = 0; i < visibleCount && (m_photoListScroll + i) < (int)m_allPhotos.size(); i++) {
+                // Lưới thumbnail 4x3: ảnh nhỏ + ô check bật/tắt hiển thị
+                pumpThumbs();
+                const int COLS = 4, ROWS = 3, PAGE = COLS * ROWS;
+                const int gridX = modalX + 24;
+                const int gridY = modalY + 72;
+                const int gapX = 12, gapY = 12;
+                const int cellW = (modalW - 48 - (COLS - 1) * gapX) / COLS;
+                const int cellH = 128;
+                for (int i = 0; i < PAGE && (m_photoListScroll + i) < (int)m_allPhotos.size(); i++) {
                     int idx = m_photoListScroll + i;
-                    int rowY = modalY + 75 + i * 62;
+                    int col = i % COLS, row = i / COLS;
+                    int cx = gridX + col * (cellW + gapX);
+                    int cy = gridY + row * (cellH + gapY);
                     bool sel = (idx == m_photoListSel);
                     bool hidden = isPhotoHidden(m_allPhotos[idx]);
 
-                    // Nền hàng chọn
-                    if (sel) {
+                    // Ô ảnh (thumbnail giữ đúng tỷ lệ, canh giữa)
+                    SDL_Rect cellRect = {cx, cy, cellW, cellH - 22};
+                    SDL_SetRenderDrawColor(m_renderer, 24, 34, 48, 255);
+                    SDL_RenderFillRect(m_renderer, &cellRect);
+                    SDL_Texture* thumb = getThumb(m_allPhotos[idx]);
+                    if (thumb) {
+                        int tw = 0, th = 0;
+                        SDL_QueryTexture(thumb, nullptr, nullptr, &tw, &th);
+                        if (tw > 0 && th > 0) {
+                            float s = std::min((float)cellRect.w / tw, (float)cellRect.h / th);
+                            int dw = (int)(tw * s), dh = (int)(th * s);
+                            SDL_Rect dst = {cx + (cellRect.w - dw) / 2, cy + (cellRect.h - dh) / 2, dw, dh};
+                            SDL_RenderCopy(m_renderer, thumb, nullptr, &dst);
+                        }
+                    }
+                    if (hidden) {
+                        // Ảnh đã ẩn: phủ mờ lên thumbnail
                         SDL_SetRenderDrawBlendMode(m_renderer, SDL_BLENDMODE_BLEND);
-                        SDL_Rect rowHl = {modalX + 16, rowY, modalW - 32, 54};
-                        SDL_SetRenderDrawColor(m_renderer, 0, 75, 125, 225);
-                        SDL_RenderFillRect(m_renderer, &rowHl);
-                        SDL_SetRenderDrawColor(m_renderer, 0, 200, 255, 255);
-                        SDL_RenderDrawRect(m_renderer, &rowHl);
+                        SDL_SetRenderDrawColor(m_renderer, 0, 0, 0, 120);
+                        SDL_RenderFillRect(m_renderer, &cellRect);
                         SDL_SetRenderDrawBlendMode(m_renderer, SDL_BLENDMODE_NONE);
                     }
-
-                    // Badge trạng thái
-                    if (hidden) {
-                        // Badge [ĐÃ ẨN] màu đỏ cam
-                        drawText("[ĐÃ ẨN]", modalX + 35, rowY + 14, 255, 80, 80);
-                    } else {
-                        // Badge [HIỂN THỊ] màu xanh ngọc
-                        drawText("[HIỂN THỊ]", modalX + 35, rowY + 14, 0, 230, 140);
-                    }
-
-                    // Tên tệp ảnh
-                    const char* pName = getPhotoName(m_allPhotos[idx]);
                     if (sel) {
-                        drawText(pName, modalX + 175, rowY + 14, 255, 255, 255);
+                        SDL_SetRenderDrawColor(m_renderer, 0, 200, 255, 255);
+                        SDL_RenderDrawRect(m_renderer, &cellRect);
+                        SDL_Rect cellRect2 = {cx + 1, cy + 1, cellRect.w - 2, cellRect.h - 2};
+                        SDL_RenderDrawRect(m_renderer, &cellRect2);
                     } else {
-                        drawText(pName, modalX + 175, rowY + 14, 190, 205, 220);
+                        SDL_SetRenderDrawColor(m_renderer, 40, 60, 85, 255);
+                        SDL_RenderDrawRect(m_renderer, &cellRect);
                     }
+
+                    // Ô check ở góc trái trên: xanh + ô trắng = đang hiện,
+                    // xám + dấu X đỏ = đang ẩn
+                    SDL_Rect chk = {cx + 6, cy + 6, 20, 20};
+                    if (!hidden) {
+                        SDL_SetRenderDrawColor(m_renderer, 0, 200, 120, 255);
+                        SDL_RenderFillRect(m_renderer, &chk);
+                        SDL_Rect inner = {cx + 11, cy + 11, 10, 10};
+                        SDL_SetRenderDrawColor(m_renderer, 255, 255, 255, 255);
+                        SDL_RenderFillRect(m_renderer, &inner);
+                    } else {
+                        SDL_SetRenderDrawColor(m_renderer, 70, 75, 85, 255);
+                        SDL_RenderFillRect(m_renderer, &chk);
+                        SDL_SetRenderDrawColor(m_renderer, 255, 90, 90, 255);
+                        SDL_RenderDrawLine(m_renderer, chk.x + 4, chk.y + 4, chk.x + chk.w - 5, chk.y + chk.h - 5);
+                        SDL_RenderDrawLine(m_renderer, chk.x + chk.w - 5, chk.y + 4, chk.x + 4, chk.y + chk.h - 5);
+                    }
+
+                    // Tên tệp dưới ảnh (cắt bớt nếu dài quá ô)
+                    std::string name = getPhotoName(m_allPhotos[idx]);
+                    while (!name.empty() && getTextWidth(name.c_str()) > cellW) {
+                        name.pop_back();
+                        while (!name.empty() && ((unsigned char)name.back() & 0xC0) == 0x80) name.pop_back();
+                    }
+                    if (sel) drawText(name.c_str(), cx + cellW / 2, cy + cellH - 20, 255, 255, 255, true);
+                    else drawText(name.c_str(), cx + cellW / 2, cy + cellH - 20, 170, 190, 210, true);
                 }
 
                 // Dòng trạng thái tổng kết ở đáy modal
@@ -776,8 +986,8 @@ void SaverEngine::photoRender() {
 
             if (m_ui) {
                 m_ui->drawAppFooter({
-                    {UiTheme::PadBtn::DPAD, "Cuộn ảnh"},
-                    {UiTheme::PadBtn::A, "Bật / Tắt hiển thị"},
+                    {UiTheme::PadBtn::DPAD, "Di chuyển"},
+                    {UiTheme::PadBtn::A, "Chọn / bỏ chọn"},
                     {UiTheme::PadBtn::START, "Đóng"},
                     {UiTheme::PadBtn::B, "Quay lại"}
                 });
@@ -927,9 +1137,11 @@ void SaverEngine::photoRender() {
     }
 
     // Chế độ xem ảnh bình thường: Footer Hint chuẩn RomCloud
-    if (m_ui) {
+    // (START ẩn/hiện thanh footer này — Tai 2026-10-10)
+    if (m_ui && m_footerVisible) {
         m_ui->drawAppFooter({
-            {UiTheme::PadBtn::START, "Cài đặt"},
+            {UiTheme::PadBtn::SELECT, "Cài đặt"},
+            {UiTheme::PadBtn::START, "Ẩn footer"},
             {UiTheme::PadBtn::L1R1, "Ảnh trước / sau"},
             {UiTheme::PadBtn::A, "Ẩn ảnh này"},
             {UiTheme::PadBtn::DPAD, "Đổi chế độ"},
@@ -1292,25 +1504,34 @@ void SaverEngine::settingsInput(int button) {
             return;
         }
         if (m_allPhotos.empty()) return;
+        const int GRID_COLS = 4, GRID_PAGE = 12;
+        int nPhotos = (int)m_allPhotos.size();
         if (button == BTN_UP) {
-            m_photoListSel = (m_photoListSel - 1 + m_allPhotos.size()) % m_allPhotos.size();
-            if (m_photoListSel < m_photoListScroll) m_photoListScroll = m_photoListSel;
+            m_photoListSel = std::max(0, m_photoListSel - GRID_COLS);
         } else if (button == BTN_DOWN) {
-            m_photoListSel = (m_photoListSel + 1) % m_allPhotos.size();
-            if (m_photoListSel >= m_photoListScroll + 6) m_photoListScroll = m_photoListSel - 5;
+            m_photoListSel = std::min(nPhotos - 1, m_photoListSel + GRID_COLS);
+        } else if (button == BTN_LEFT) {
+            m_photoListSel = std::max(0, m_photoListSel - 1);
+        } else if (button == BTN_RIGHT) {
+            m_photoListSel = std::min(nPhotos - 1, m_photoListSel + 1);
         } else if (button == BTN_A) {
-            // A: ẩn/hiện ảnh đang chọn
-            if (m_photoListSel >= 0 && m_photoListSel < (int)m_allPhotos.size()) {
+            // A: bật/tắt hiển thị ảnh đang chọn. Cập nhật tại chỗ, không
+            // quét lại danh sách để thứ tự trong lưới không bị xáo trộn.
+            if (m_photoListSel >= 0 && m_photoListSel < nPhotos) {
                 std::string p = m_allPhotos[m_photoListSel];
                 auto it = std::find(m_hiddenPhotos.begin(), m_hiddenPhotos.end(), p);
                 if (it != m_hiddenPhotos.end()) {
                     m_hiddenPhotos.erase(it);  // hiện lại
+                    m_photos.push_back(p);
                 } else {
                     m_hiddenPhotos.push_back(p);  // ẩn
+                    auto ip = std::find(m_photos.begin(), m_photos.end(), p);
+                    if (ip != m_photos.end()) m_photos.erase(ip);
                 }
-                scanPhotos();  // cập nhật lại danh sách slideshow
             }
         }
+        // Giữ ô đang chọn nằm trong trang lưới đang xem
+        m_photoListScroll = (m_photoListSel / GRID_PAGE) * GRID_PAGE;
         return;
     }
     

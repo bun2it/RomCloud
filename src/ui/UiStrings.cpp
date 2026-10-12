@@ -171,6 +171,9 @@ const char *SETTING_SCAN_AUTO = "Tự động";
 const char *SETTING_WEB_PORTAL = "Portal:";
 const char *SETTING_COVER_CACHE = "Bộ nhớ đệm ảnh:";
 const char *SETTING_COVER_CACHE_VAL = "SDL2_image (tối đa 64 ảnh)";
+const char *SETTING_ORGANIZE_ROMS = "Sắp xếp ROM";
+const char *SETTING_ORGANIZE_ROMS_DESC = "Dò ROM trong thư mục Roms, xếp đúng hệ máy";
+const char *SETTING_ORGANIZE_ROMS_BTN = "[A] Sắp xếp";
 
 // --- 10. KẾT NỐI QUA WEB ---
 const char *WEB_CONNECT_TITLE = "KẾT NỐI DRIVE";
@@ -269,6 +272,11 @@ const char *OTA_MSG_COMPLETED = "Khởi động lại để cập nhật.";
 const char *OTA_DOWNLOAD_BTN = "[A] Tải bản mới";
 const char *OTA_CHECK_AGAIN_BTN = "[A] Kiểm tra lại";
 const char *OTA_BACK_BTN = "[B] Quay lại";
+const char *OTA_RCWEB_ROW_PREFIX = "Trình duyệt web: ";
+const char *OTA_RCWEB_UPDATE_HINT = "có bản mới";
+const char *OTA_RCWEB_BTN = "[X] Cập nhật trình duyệt";
+const char *OTA_RCWEB_NOT_INSTALLED = "chưa cài";
+const char *TOAST_RCWEB_BUSY = "Đang cập nhật, vui lòng chờ xong.";
 
 // --- 15. TOAST MESSAGES ---
 const char *TOAST_ADDED_TO_QUEUE = "Đã thêm: ";

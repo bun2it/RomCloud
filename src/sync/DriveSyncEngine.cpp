@@ -193,15 +193,20 @@ int DriveSyncEngine::syncFilesForSystem(const SystemRecord& system, const std::s
     int count = 0;
     std::string pageToken = "";
 
-    // Parse supported extensions
+    // Parse supported extensions (ext_list dung '|' phan tach, kem tuong
+    // thich ',' cu).
     std::vector<std::string> extList;
     std::stringstream ss(system.extList);
-    std::string ext;
-    while (std::getline(ss, ext, ',')) {
-        while (!ext.empty() && ext.front() == ' ') ext.erase(0, 1);
-        while (!ext.empty() && ext.back() == ' ') ext.pop_back();
-        std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
-        if (!ext.empty()) extList.push_back(ext);
+    std::string chunk;
+    while (std::getline(ss, chunk, '|')) {
+        std::stringstream ss2(chunk);
+        std::string ext;
+        while (std::getline(ss2, ext, ',')) {
+            while (!ext.empty() && ext.front() == ' ') ext.erase(0, 1);
+            while (!ext.empty() && ext.back() == ' ') ext.pop_back();
+            std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+            if (!ext.empty()) extList.push_back(ext);
+        }
     }
 
     do {
@@ -564,6 +569,10 @@ std::string DriveSyncEngine::matchFolderToSystemCode(const std::string& name) {
     if (s.find("genesis") != std::string::npos || s.find("mega drive") != std::string::npos || s.find("megadrive") != std::string::npos || s == "md") return "MD";
     if (s.find("nintendo 64") != std::string::npos || s.find("n64") != std::string::npos) return "N64";
     if (s.find("nintendo ds") != std::string::npos || s.find("nds") != std::string::npos || s.find(" ds") != std::string::npos) return "NDS";
+    if (s.find("neo geo pocket") != std::string::npos || s.find("pocket") != std::string::npos || s == "ngp") return "NGP";
+    if (s.find("cps3") != std::string::npos) return "CPS3";
+    if (s.find("cps2") != std::string::npos) return "CPS2";
+    if (s.find("cps1") != std::string::npos) return "CPS1";
     if (s.find("playstation") != std::string::npos || s.find("ps1") != std::string::npos || s.find("psx") != std::string::npos) return "PS";
     if (s.find("psp") != std::string::npos) return "PSP";
     if (s.find("dreamcast") != std::string::npos || s.find("dc") != std::string::npos) return "DC";
@@ -572,7 +581,13 @@ std::string DriveSyncEngine::matchFolderToSystemCode(const std::string& name) {
     if (s.find("master system") != std::string::npos || s == "ms" || s == "sms") return "MS";
     if (s.find("sega cd") != std::string::npos || s.find("segacd") != std::string::npos) return "SEGACD";
     if (s.find("neo geo") != std::string::npos || s.find("neogeo") != std::string::npos) return "NEOGEO";
-    if (s.find("mame") != std::string::npos || s.find("arcade") != std::string::npos || s.find("fbneo") != std::string::npos) return "ARCADE";
+    // Ho arcade stock: ten cu the uu tien truoc ten chung (mame2010 chua
+    // "mame" nen phai check truoc).
+    if (s.find("mame2010") != std::string::npos) return "MAME2010";
+    if (s.find("mame2003") != std::string::npos || s.find("mame 2003") != std::string::npos) return "MAME2003PLUS";
+    if (s.find("fbneo") != std::string::npos || s.find("final burn") != std::string::npos) return "FBNEO";
+    if (s.find("pgm") != std::string::npos) return "PGM";
+    if (s.find("mame") != std::string::npos || s.find("arcade") != std::string::npos) return "ARCADE";
     if (s.find("turbografx") != std::string::npos || s.find("pc engine") != std::string::npos || s.find("pce") != std::string::npos) return "PCE";
     if (s.find("2600") != std::string::npos || s.find("atari") != std::string::npos) return "ATARI2600";
     if ((s.find("famicom") != std::string::npos || s.find("nes") != std::string::npos || s == "fc") && s.find("genesis") == std::string::npos) return "FC";
@@ -816,10 +831,24 @@ void DriveSyncEngine::runSyncWorker() {
         std::transform(upperCode.begin(), upperCode.end(), upperCode.begin(), ::toupper);
 
         auto it = folderMap.find(upperCode);
+        std::string exactId;
         if (it != folderMap.end()) {
             Logger::info("Syncing cloud ROMs for " + sys.code + " (Folder ID: " + it->second + ")...");
             int sysCount = syncFilesForSystem(sys, it->second, token);
             totalSynced += sysCount;
+            exactId = it->second;
+        }
+        // Fallback: folder ten tu do ("NES", "Snes", "Mame"...) — map bang
+        // matchFolderToSystemCode nhu duong public link ( tranh trung folder
+        // da sync o tren).
+        for (const auto& kv : folderMap) {
+            if (m_cancelRequested) break;
+            if (!exactId.empty() && kv.second == exactId) continue;
+            if (matchFolderToSystemCode(kv.first) == sys.code) {
+                Logger::info("Syncing cloud ROMs for " + sys.code + " (alias folder: " + kv.first + ")...");
+                int sysCount = syncFilesForSystem(sys, kv.second, token);
+                totalSynced += sysCount;
+            }
         }
     }
 

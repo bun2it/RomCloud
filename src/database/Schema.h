@@ -95,7 +95,16 @@ const DefaultSystemInfo DEFAULT_SYSTEMS[] = {
     {"MS",       "Master System",               "MS",           "MS",       "sms|rom|gg|sg|zip|7z",             210},
     {"GG",       "Game Gear",                   "GG",           "GG",       "gg|zip|7z",                        220},
     {"SEGACD",   "Sega CD",                     "SEGACD",       "SEGACD",   "bin|chd|cue|iso|zip",              230},
-    {"OPENBOR",  "OpenBOR",                     "OPENBOR",      "OPENBOR",  "pak|zip",                          240}
+    {"OPENBOR",  "OpenBOR",                     "OPENBOR",      "OPENBOR",  "pak|zip",                          240},
+    {"MAME",     "MAME Arcade",                 "MAME",         "MAME",       "zip|7z",                           250},
+    {"MAME2003PLUS", "MAME 2003+",              "MAME2003PLUS", "MAME2003PLUS", "zip|7z",                        260},
+    {"MAME2010", "MAME 2010",                   "MAME2010",     "MAME2010",   "zip|7z",                         270},
+    {"FBNEO",    "FBNeo Arcade",                "FBNEO",        "FBNEO",      "zip|7z",                           280},
+    {"CPS1",     "Capcom CPS1",                 "CPS1",         "CPS1",       "zip|7z",                           290},
+    {"CPS2",     "Capcom CPS2",                 "CPS2",         "CPS2",       "zip|7z",                           300},
+    {"CPS3",     "Capcom CPS3",                 "CPS3",         "CPS3",       "zip|7z",                           310},
+    {"PGM",      "PGM Arcade",                  "PGM",          "PGM",        "zip|7z",                           320},
+    {"NGP",      "Neo Geo Pocket",              "NGP",          "NGP",        "ngp|ngc|zip|7z",                   330}
 };
 
 const size_t DEFAULT_SYSTEMS_COUNT = sizeof(DEFAULT_SYSTEMS) / sizeof(DEFAULT_SYSTEMS[0]);
