@@ -11,7 +11,7 @@
 //   open/claim/handshake lại trên cùng handle (không cần gesture mới).
 // Tem version hiện ở footer để nhìn là biết đang chạy bản mới hay cache cũ.
 // Mỗi lần sửa file này thì đổi chuỗi dưới (ngày + commit ngắn).
-var INSTALL_JS_VER = "2026-10-12/87df07c";
+var INSTALL_JS_VER = "2026-10-12/usb-fix2";
 var APP_INSTALL = {
   romcloud: {
     label: "RomCloud",
@@ -106,10 +106,28 @@ async function tryConnect(device, attempt) {
     try { if (device.opened) await device.close(); } catch (e) {}
     await device.open();
     webusb = new Adb.WebUSB.Transport(device);
+    // Cho gadget USB ổn định sau open (Brick qua hub hay trả
+    // "state change in progress" nếu handshake ngay).
+    await sleep(400);
     log("Đang kết nối adb (duyệt Cho phép trên máy nếu hỏi)...");
-    adb = await webusb.connectAdb("host::", function () {
-      log("Hãy bấm Cho phép / OK trên màn hình máy Brick.");
-    });
+    try {
+      adb = await webusb.connectAdb("host::", function () {
+        log("Hãy bấm Cho phép / OK trên màn hình máy Brick.");
+      });
+    } catch (e2) {
+      // Race open/claim -> handshake: chờ 1s rồi handshake lại trên cùng
+      // transport, không mở lại từ đầu.
+      var m2 = (e2 && e2.message ? e2.message : String(e2));
+      if (/state change|device state/i.test(m2)) {
+        log("Cổng chưa ổn định, chờ 1s thử handshake lại...");
+        await sleep(1000);
+        adb = await webusb.connectAdb("host::", function () {
+          log("Hãy bấm Cho phép / OK trên màn hình máy Brick.");
+        });
+      } else {
+        throw e2;
+      }
+    }
     var model = "?";
     try { model = (await shell("getprop ro.product.model")).trim() || "?"; } catch (e) {}
     devInfo.innerHTML = "Đã kết nối: <b>" + model.replace(/</g, "&lt;") + "</b>";
@@ -123,6 +141,14 @@ async function tryConnect(device, attempt) {
       // dừng ngay thay vì loop vô ích.
       log("Trình duyệt hết gesture — bấm nút Kết nối lại.", "err");
       throw e;
+    }
+    if (/disconnect/i.test(msg)) {
+      // Máy rớt khỏi USB giữa chừng (dây/hub chập chờn, Brick reset cổng):
+      // thử nữa vô ích, báo đúng bệnh để user kiểm tra phần cứng.
+      log("Lần " + attempt + ": máy vừa RỚT khỏi USB — kiểm tra cáp (đổi cáp data xịn), cắm thẳng không qua hub, rồi bấm Kết nối lại.", "err");
+      webusb = null;
+      adb = null;
+      return "gone";
     }
     if (/claimInterface/i.test(msg)) {
       log("Lần " + attempt + " chưa được (cổng đang bị giữ — đã thử gỡ rồi claim lại): " + msg, "err");
@@ -168,14 +194,29 @@ btnConn.onclick = async function () {
     return;
   }
   // Thử claim + handshake trên CÙNG handle đã chọn (không cần gesture thêm).
+  // tryConnect trả: true = xong, false = lỗi thử lại được, "gone" = máy
+  // rớt USB (thử nữa vô ích).
   var ok = false;
+  var gone = false;
   try {
-    for (var attempt = 1; attempt <= 3 && !ok; attempt++) {
-      ok = await tryConnect(picked, attempt);
-      if (!ok && attempt < 3) await sleep(1500);
+    for (var attempt = 1; attempt <= 3 && !ok && !gone; attempt++) {
+      var r = await tryConnect(picked, attempt);
+      if (r === true) {
+        ok = true;
+      } else if (r === "gone") {
+        gone = true;
+      } else if (attempt < 3) {
+        await sleep(1500);
+      }
     }
   } catch (e) {
     ok = false; // gesture: tryConnect đã log, dừng vòng thử
+  }
+  if (gone) {
+    log("Dừng ở đây: máy không còn trên USB. Đổi cáp data khác, cắm thẳng vào Mac (bỏ hub), chắc chắn Brick không reboot giữa chừng, rồi bấm Kết nối.", "err");
+    await closeStale();
+    btnConn.disabled = false;
+    return;
   }
   if (!ok) {
     log("Đã tự thử 3 lần không được. Cổng USB đang bị phần mềm khác giữ (adb/driver trên laptop) — Terminal chạy: adb kill-server, rút cáp cắm lại rồi bấm Kết nối.", "err");
