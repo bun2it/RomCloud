@@ -38,9 +38,30 @@
   </p>
   <p style="font-size:13px;color:var(--dim)">Windows lần đầu cần driver USB 1 lần: mở <a href="https://zadig.akeo.ie">zadig.akeo.ie</a>, chọn thiết bị Android/TrimUI → Install WinUSB. Mac mở file .command lần đầu: chuột phải → Open.</p>
 
-  <footer><a id="homeLink2" href="./">← Trang chủ</a></footer>
+  <footer><a id="homeLink2" href="./">← Trang chủ</a> <span id="jsVer" style="color:var(--dim);font-size:11px;margin-left:12px"></span></footer>
 </div>
 <script src="https://cdn.jsdelivr.net/gh/webadb/webadb.js@master/webadb.js"></script>
-<script src="assets/install.js"></script>
+<script>
+// Nạp install.js LUÔN BẢN MỚI: fetch với cache:'reload' để vượt qua
+// cache cứng đầu của Chrome/CDN (bản cũ kẹt lại là lỗi gesture quay lại).
+// Rớt mạng/file:// thì dùng lại bản cache như cũ.
+(function () {
+  function classic() {
+    var s = document.createElement("script");
+    s.src = "assets/install.js";
+    document.body.appendChild(s);
+  }
+  try {
+    fetch("assets/install.js", { cache: "reload" }).then(function (r) {
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      return r.text();
+    }).then(function (t) {
+      var s = document.createElement("script");
+      s.textContent = t;
+      document.body.appendChild(s);
+    }).catch(function () { classic(); });
+  } catch (e) { classic(); }
+})();
+</script>
 </body>
 </html>

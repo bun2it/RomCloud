@@ -9,6 +9,9 @@
 //   "Must be handling a user gesture".
 // - Vì vậy: chọn máy ĐÚNG 1 lần, giữ lại USBDevice; các lần thử sau chỉ
 //   open/claim/handshake lại trên cùng handle (không cần gesture mới).
+// Tem version hiện ở footer để nhìn là biết đang chạy bản mới hay cache cũ.
+// Mỗi lần sửa file này thì đổi chuỗi dưới (ngày + commit ngắn).
+var INSTALL_JS_VER = "2026-10-12/87df07c";
 var APP_INSTALL = {
   romcloud: {
     label: "RomCloud",
@@ -88,6 +91,8 @@ async function shell(cmd) {
   if (fm) fm.href = CFG.fallbackMac;
   var home = document.getElementById("homeLink");
   if (home) home.href = "./";
+  var jsv = document.getElementById("jsVer");
+  if (jsv) jsv.textContent = "bản web " + INSTALL_JS_VER;
 })();
 
 // Thử mở + claim + handshake adb trên device ĐÃ CHỌN (không gọi
