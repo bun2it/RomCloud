@@ -2,6 +2,7 @@
 #include "../app/Application.h"
 #include "../auth/AuthManager.h"
 #include "../backup/BackupManager.h"
+#include "../browser/chrome/ChromeBridge.h"
 #include "../cast/CastManager.h"
 #include "../config/AppConfig.h"
 #include "../database/DatabaseManager.h"
@@ -10,8 +11,6 @@
 #include "../diagnostics/DeviceIdentity.h"
 #include "../download/DownloadManager.h"
 #include "../filesystem/FileSystemManager.h"
-#include "../rom/EmuLauncher.h"
-#include "../rom/RomOrganizer.h"
 #include "../input/InputManager.h"
 #include "../iptv/IPTVManager.h"
 #include "../localsend/LocalSendManager.h"
@@ -19,14 +18,15 @@
 #include "../logging/Logger.h"
 #include "../media/MpvPlayer.h"
 #include "../network/HttpClient.h"
-#include "../network/YoutubeInnertube.h"
 #include "../network/JsonHelper.h"
 #include "../network/WebServer.h"
+#include "../network/YoutubeInnertube.h"
 #include "../ota/UpdateManager.h"
 #include "../platform/PlatformInfo.h"
+#include "../rom/EmuLauncher.h"
+#include "../rom/RomOrganizer.h"
 #include "../sync/DriveSyncEngine.h"
 #include "../sync/UploadManager.h"
-#include "../browser/chrome/ChromeBridge.h"
 #include "BoxartScraper.h"
 #include "QrRenderer.h"
 #include "TelexHelper.h"
@@ -95,7 +95,7 @@ void UIManager::initGridMenu() {
       {"iptv", "XEM TV", "TV.png", "Kênh TV online"},
       {"youtube", "YOUTUBE", "YOUTUBE.png", "YouTube"},
       {"cast", "GAME CAST", "CAST.png", "Cast lên TV & Laptop"},
-      {"explorer", "FILE EXPLORER", "FOLDER.png", "Duyet file SD"},
+      {"explorer", "EXPLORER", "FOLDER.png", "Duyet file SD"},
       {"weather", "OFFICEGO", "OFFICEGO.png", "Thời tiết & Lịch"},
       {"browser", "WEB", "BROWSER.png", "Web Chrome ngoài + portal"},
       {"localsend", "LOCALSEND", "LOCALSEND.png", "Chia sẻ P2P trong LAN"},
@@ -144,7 +144,7 @@ bool UIManager::init(SDL_Window *window, SDL_Renderer *renderer) {
         m_fontSmall) {
       Logger::info(std::string("Loaded TTF font from: ") + path +
                    " (Sizes: 42, 100, 36, 30, 24)");
-      m_fontPathUsed = path;  // P9: CSS font-size siblings open from here
+      m_fontPathUsed = path; // P9: CSS font-size siblings open from here
       break;
     }
   }
@@ -480,7 +480,8 @@ void UIManager::refreshSystems() {
   if (m_libraryTab == LibraryTab::SDCARD) {
     std::vector<SystemRecord> filtered;
     for (const auto &s : m_cachedSystems) {
-      if (s.localCount > 0) filtered.push_back(s);
+      if (s.localCount > 0)
+        filtered.push_back(s);
     }
     m_cachedSystems = std::move(filtered);
   }
@@ -508,7 +509,8 @@ void UIManager::refreshGames() {
   m_cachedGames = DatabaseManager::instance().getGamesBySystem(
       m_activeSystem.id, filterInt);
 
-  if (m_libraryTab == LibraryTab::DRIVE && m_filterMode == GameFilterMode::LOCAL_ONLY) {
+  if (m_libraryTab == LibraryTab::DRIVE &&
+      m_filterMode == GameFilterMode::LOCAL_ONLY) {
     std::vector<GameRecord> filtered;
     for (const auto &g : m_cachedGames) {
       if (g.localState == GameState::LOCAL) {
@@ -578,22 +580,26 @@ void UIManager::triggerManualSync() {
 
 // Đọc ~300 ký tự cuối file stderr của script python để chẩn đoán khi
 // search về rỗng (trước đây 2>/dev/null nên lỗi câm hoàn toàn).
-static std::string ytErrTail(const char* path) {
+static std::string ytErrTail(const char *path) {
   std::string out;
-  FILE* f = fopen(path, "rb");
-  if (!f) return out;
+  FILE *f = fopen(path, "rb");
+  if (!f)
+    return out;
   fseek(f, 0, SEEK_END);
   long sz = ftell(f);
   fseek(f, sz > 300 ? sz - 300 : 0, SEEK_SET);
   char buf[320];
   size_t n = fread(buf, 1, sizeof(buf) - 1, f);
   fclose(f);
-  if (n == 0) return out;
+  if (n == 0)
+    return out;
   buf[n] = '\0';
   out = buf;
-  for (char& c : out)
-    if (c == '\n' || c == '\r') c = ' ';
-  if (out.size() > 200) out = out.substr(out.size() - 200);
+  for (char &c : out)
+    if (c == '\n' || c == '\r')
+      c = ' ';
+  if (out.size() > 200)
+    out = out.substr(out.size() - 200);
   return out;
 }
 
@@ -817,8 +823,8 @@ void UIManager::update() {
     m_ytChannelPending.clear();
     if (m_ytInChannelView) {
       m_ytAllCachedResults = m_ytChannelAllVideos;
-      int count = std::min<int>(
-          6, static_cast<int>(m_ytAllCachedResults.size()));
+      int count =
+          std::min<int>(6, static_cast<int>(m_ytAllCachedResults.size()));
       m_ytSearchResults.assign(m_ytAllCachedResults.begin(),
                                m_ytAllCachedResults.begin() + count);
       m_ytHomePage = 1;
@@ -826,8 +832,7 @@ void UIManager::update() {
       m_ytHomeCol = 0;
       rebuildYtItems();
       if (count == 0)
-        showToast("Kênh chưa có video nào tải được", {245, 158, 11, 255},
-                  2500);
+        showToast("Kênh chưa có video nào tải được", {245, 158, 11, 255}, 2500);
     }
   }
 
@@ -837,7 +842,8 @@ void UIManager::update() {
     IPTVManager::instance().setYtDesc(m_ytPendingVideoDesc);
     m_ytPendingVideoDesc.clear();
   }
-  if (m_ytVideoReady.exchange(false)) {    m_ytIsLoadingVideo = false;
+  if (m_ytVideoReady.exchange(false)) {
+    m_ytIsLoadingVideo = false;
     if (!m_ytPendingStreamUrl.empty()) {
       std::string url = m_ytPendingStreamUrl;
       std::string vid = m_ytPendingVideoId;
@@ -860,8 +866,8 @@ void UIManager::update() {
         size_t curIdx = 0;
         bool foundCur = false;
         for (size_t i = 0; i < m_ytSearchResults.size(); ++i) {
-          std::string cur = m_ytSearchResults[i].substr(
-              0, m_ytSearchResults[i].find('|'));
+          std::string cur =
+              m_ytSearchResults[i].substr(0, m_ytSearchResults[i].find('|'));
           if (cur == vid) {
             foundCur = true;
             curIdx = i;
@@ -888,17 +894,15 @@ void UIManager::update() {
         if (foundCur) {
           // Vong 1: cung kenh.
           for (size_t i = curIdx + 1; i < m_ytSearchResults.size(); ++i) {
-            const std::string& row = m_ytSearchResults[i];
+            const std::string &row = m_ytSearchResults[i];
             if (row.rfind("CHANNEL|", 0) == 0)
               continue;
             if (!curUp.empty()) {
               size_t q1 = row.find('|');
-              size_t q2 = (q1 == std::string::npos)
-                              ? std::string::npos
-                              : row.find('|', q1 + 1);
-              size_t q3 = (q2 == std::string::npos)
-                              ? std::string::npos
-                              : row.find('|', q2 + 1);
+              size_t q2 = (q1 == std::string::npos) ? std::string::npos
+                                                    : row.find('|', q1 + 1);
+              size_t q3 = (q2 == std::string::npos) ? std::string::npos
+                                                    : row.find('|', q2 + 1);
               std::string up =
                   (q3 == std::string::npos) ? "" : row.substr(q3 + 1);
               size_t q4 = up.find('|');
@@ -955,10 +959,11 @@ void UIManager::update() {
     static uint32_t lastMs = 0;
     uint32_t nowMs = SDL_GetTicks();
     float dt = lastMs == 0 ? 0.016f : (nowMs - lastMs) / 1000.0f;
-    if (dt > 0.1f) dt = 0.1f;  // kẹp hitch
+    if (dt > 0.1f)
+      dt = 0.1f; // kẹp hitch
     lastMs = nowMs;
     m_saver.update(dt);
-    
+
     // P3-Tai: Y/X chuyển mode, các nút khác tùy saver xử lý
     // handleInput trả về true = đã xử lý (không thoát), false = thoát
     bool anyPressed = false;
@@ -966,14 +971,14 @@ void UIManager::update() {
       if (input.isButtonJustPressed(static_cast<Button>(b))) {
         anyPressed = true;
         if (m_saver.handleInput(b)) {
-          anyPressed = false;  // saver đã xử lý (đổi mode, settings...)
+          anyPressed = false; // saver đã xử lý (đổi mode, settings...)
         }
         break;
       }
     }
     if (anyPressed) {
       goBack();
-      lastMs = 0;  // reset khi thoát
+      lastMs = 0; // reset khi thoát
     }
     break;
   }
@@ -1125,9 +1130,12 @@ void UIManager::update() {
 
   case UIState::SYSTEM_SELECT: {
     int total = static_cast<int>(m_cachedSystems.size());
-    if (input.isButtonJustPressed(Button::L1) || input.isButtonJustPressed(Button::R1)) {
-      m_libraryTab = (m_libraryTab == LibraryTab::DRIVE) ? LibraryTab::SDCARD : LibraryTab::DRIVE;
-      std::string tabName = (m_libraryTab == LibraryTab::DRIVE) ? "GOOGLE DRIVE" : "THẺ NHỚ";
+    if (input.isButtonJustPressed(Button::L1) ||
+        input.isButtonJustPressed(Button::R1)) {
+      m_libraryTab = (m_libraryTab == LibraryTab::DRIVE) ? LibraryTab::SDCARD
+                                                         : LibraryTab::DRIVE;
+      std::string tabName =
+          (m_libraryTab == LibraryTab::DRIVE) ? "GOOGLE DRIVE" : "THẺ NHỚ";
       showToast("Tab: " + tabName, {0, 180, 216, 255}, 1200);
       m_selectedSystemIndex = 0;
       refreshSystems();
@@ -1156,8 +1164,7 @@ void UIManager::update() {
                  m_libraryTab == LibraryTab::SDCARD) {
         // Sửa ROM lạc trong folder hệ đang chọn (không cần vào trong).
         if (RomOrganizer::instance().isBusy()) {
-          showToast("Đang sắp xếp, vui lòng chờ...", {245, 158, 11, 255},
-                    2000);
+          showToast("Đang sắp xếp, vui lòng chờ...", {245, 158, 11, 255}, 2000);
         } else {
           SystemRecord sel = m_cachedSystems[m_selectedSystemIndex];
           showToast("Đang kiểm tra ROM lạc trong " + sel.name + "...",
@@ -1166,12 +1173,13 @@ void UIManager::update() {
             auto fixed = RomOrganizer::instance().fixSystemFolder(sel.code);
             refreshSystems();
             int n = 0;
-            for (const auto& it : fixed) {
-              if (it.fixed) ++n;
+            for (const auto &it : fixed) {
+              if (it.fixed)
+                ++n;
             }
-            std::string msg = (n > 0)
-                ? ("Đã sửa " + std::to_string(n) + " ROM lạc chỗ.")
-                : "Không phát hiện ROM lạc trong thư mục này.";
+            std::string msg =
+                (n > 0) ? ("Đã sửa " + std::to_string(n) + " ROM lạc chỗ.")
+                        : "Không phát hiện ROM lạc trong thư mục này.";
             showToast(msg, {34, 197, 94, 255}, 4000);
           }).detach();
         }
@@ -1199,14 +1207,18 @@ void UIManager::update() {
       break;
     }
 
-    // 2. Chuyển Tab (L1 / R1) khi không ở chế độ multi-select: Luôn hoạt động bất kể rỗng hay có game
-    if (!m_multiSelectMode && (input.isButtonJustPressed(Button::L1) || input.isButtonJustPressed(Button::R1))) {
-      m_libraryTab = (m_libraryTab == LibraryTab::DRIVE) ? LibraryTab::SDCARD : LibraryTab::DRIVE;
+    // 2. Chuyển Tab (L1 / R1) khi không ở chế độ multi-select: Luôn hoạt động
+    // bất kể rỗng hay có game
+    if (!m_multiSelectMode && (input.isButtonJustPressed(Button::L1) ||
+                               input.isButtonJustPressed(Button::R1))) {
+      m_libraryTab = (m_libraryTab == LibraryTab::DRIVE) ? LibraryTab::SDCARD
+                                                         : LibraryTab::DRIVE;
       m_selectedGameIndex = 0;
       m_gameScrollOffset = 0;
       m_filterMode = GameFilterMode::ALL;
       refreshGames();
-      std::string tabName = (m_libraryTab == LibraryTab::DRIVE) ? "GOOGLE DRIVE" : "THẺ NHỚ";
+      std::string tabName =
+          (m_libraryTab == LibraryTab::DRIVE) ? "GOOGLE DRIVE" : "THẺ NHỚ";
       showToast("Tab: " + tabName, {0, 180, 216, 255}, 1200);
       break;
     }
@@ -1216,8 +1228,7 @@ void UIManager::update() {
     if (input.isButtonJustPressed(Button::START)) {
       if (m_libraryTab == LibraryTab::SDCARD && !m_multiSelectMode) {
         if (RomOrganizer::instance().isBusy()) {
-          showToast("Đang sắp xếp, vui lòng chờ...", {245, 158, 11, 255},
-                    2000);
+          showToast("Đang sắp xếp, vui lòng chờ...", {245, 158, 11, 255}, 2000);
         } else {
           std::string sysCode = m_activeSystem.code;
           std::string sysName = m_activeSystem.name;
@@ -1228,12 +1239,13 @@ void UIManager::update() {
             refreshSystems();
             refreshGames();
             int n = 0;
-            for (const auto& it : fixed) {
-              if (it.fixed) ++n;
+            for (const auto &it : fixed) {
+              if (it.fixed)
+                ++n;
             }
-            std::string msg = (n > 0)
-                ? ("Đã sửa " + std::to_string(n) + " ROM lạc chỗ.")
-                : "Không phát hiện ROM lạc trong thư mục này.";
+            std::string msg =
+                (n > 0) ? ("Đã sửa " + std::to_string(n) + " ROM lạc chỗ.")
+                        : "Không phát hiện ROM lạc trong thư mục này.";
             showToast(msg, {34, 197, 94, 255}, 4000);
           }).detach();
         }
@@ -1253,10 +1265,14 @@ void UIManager::update() {
     if (input.isButtonJustPressed(Button::SELECT)) {
       if (m_filterMode == GameFilterMode::ALL) {
         m_filterMode = GameFilterMode::LOCAL_ONLY;
-        showToast(m_libraryTab == LibraryTab::DRIVE ? "Lọc: Đã tải về thẻ" : "Lọc: Đã sao lưu", {34, 197, 94, 255}, 1500);
+        showToast(m_libraryTab == LibraryTab::DRIVE ? "Lọc: Đã tải về thẻ"
+                                                    : "Lọc: Đã sao lưu",
+                  {34, 197, 94, 255}, 1500);
       } else if (m_filterMode == GameFilterMode::LOCAL_ONLY) {
         m_filterMode = GameFilterMode::CLOUD_ONLY;
-        showToast(m_libraryTab == LibraryTab::DRIVE ? "Lọc: Chưa tải về thẻ" : "Lọc: Chưa sao lưu", {0, 180, 216, 255}, 1500);
+        showToast(m_libraryTab == LibraryTab::DRIVE ? "Lọc: Chưa tải về thẻ"
+                                                    : "Lọc: Chưa sao lưu",
+                  {0, 180, 216, 255}, 1500);
       } else {
         m_filterMode = GameFilterMode::ALL;
         showToast(UiStrings::FILTER_LABEL_ALL, {168, 85, 247, 255}, 1500);
@@ -1273,7 +1289,8 @@ void UIManager::update() {
         m_multiSelectMode = !m_multiSelectMode;
         if (!m_multiSelectMode) {
           m_selectedGameIds.clear();
-          showToast(UiStrings::MULTI_SELECT_DISABLED, {168, 85, 247, 255}, 2000);
+          showToast(UiStrings::MULTI_SELECT_DISABLED, {168, 85, 247, 255},
+                    2000);
         } else {
           showToast(std::string(UiStrings::MULTI_SELECT_ENABLED) + ". " +
                         UiStrings::MULTI_SELECT_HINT,
@@ -1301,7 +1318,8 @@ void UIManager::update() {
       } else if (input.isButtonJustPressed(Button::LEFT)) {
         m_selectedGameIndex = std::max(0, m_selectedGameIndex - pageSize);
       } else if (input.isButtonJustPressed(Button::RIGHT)) {
-        m_selectedGameIndex = std::min(total - 1, m_selectedGameIndex + pageSize);
+        m_selectedGameIndex =
+            std::min(total - 1, m_selectedGameIndex + pageSize);
       }
 
       if (m_selectedGameIndex < m_gameScrollOffset) {
@@ -1313,7 +1331,8 @@ void UIManager::update() {
       if (input.isButtonJustPressed(Button::Y)) {
         // Toggle chọn game hiện tại
         const auto &g = m_cachedGames[m_selectedGameIndex];
-        auto it = std::find(m_selectedGameIds.begin(), m_selectedGameIds.end(), g.id);
+        auto it =
+            std::find(m_selectedGameIds.begin(), m_selectedGameIds.end(), g.id);
         if (it != m_selectedGameIds.end()) {
           m_selectedGameIds.erase(it);
           showToast("Đã bỏ chọn: " + g.title, {245, 158, 11, 255}, 1500);
@@ -1321,9 +1340,12 @@ void UIManager::update() {
           m_selectedGameIds.push_back(g.id);
           showToast("Đã chọn: " + g.title, {34, 197, 94, 255}, 1500);
         }
-      } else if (input.isButtonJustPressed(Button::X) && !m_selectedGameIds.empty()) {
+      } else if (input.isButtonJustPressed(Button::X) &&
+                 !m_selectedGameIds.empty()) {
         setState(UIState::CONFIRM_BATCH_DELETE);
-      } else if ((input.isButtonJustPressed(Button::R2) || (m_libraryTab == LibraryTab::DRIVE && input.isButtonJustPressed(Button::A))) &&
+      } else if ((input.isButtonJustPressed(Button::R2) ||
+                  (m_libraryTab == LibraryTab::DRIVE &&
+                   input.isButtonJustPressed(Button::A))) &&
                  !m_selectedGameIds.empty()) {
         // Thêm các game đã chọn vào hàng đợi tải xuống
         if (!AuthManager::instance().isLinked()) {
@@ -1341,7 +1363,8 @@ void UIManager::update() {
             }
           }
           if (addedCount > 0) {
-            showToast("Đã thêm " + std::to_string(addedCount) + " game vào hàng tải!",
+            showToast("Đã thêm " + std::to_string(addedCount) +
+                          " game vào hàng tải!",
                       {34, 197, 94, 255}, 3000);
             if (!DownloadManager::instance().isDownloading()) {
               DownloadManager::instance().processNextInQueue();
@@ -1354,32 +1377,37 @@ void UIManager::update() {
           m_selectedGameIds.clear();
           refreshGames();
         }
-      } else if ((m_libraryTab == LibraryTab::SDCARD && input.isButtonJustPressed(Button::A)) &&
+      } else if ((m_libraryTab == LibraryTab::SDCARD &&
+                  input.isButtonJustPressed(Button::A)) &&
                  !m_selectedGameIds.empty()) {
         // Bắt đầu tải lên các game đã chọn lên Drive
         if (!AuthManager::instance().isLinked()) {
           showToast(UiStrings::TOAST_CONNECT_DRIVE_FIRST, {245, 158, 11, 255});
         } else if (!AuthManager::instance().canUpload()) {
-          showToast(UiStrings::TOAST_CONNECT_PERSONAL_DRIVE, {245, 158, 11, 255}, 4000);
+          showToast(UiStrings::TOAST_CONNECT_PERSONAL_DRIVE,
+                    {245, 158, 11, 255}, 4000);
         } else {
           std::vector<int64_t> uploadIds;
           for (int64_t gameId : m_selectedGameIds) {
             for (const auto &g : m_cachedGames) {
-              if (g.id == gameId && g.localState == GameState::LOCAL && g.cloudFileId.empty()) {
+              if (g.id == gameId && g.localState == GameState::LOCAL &&
+                  g.cloudFileId.empty()) {
                 uploadIds.push_back(gameId);
                 break;
               }
             }
           }
           if (!uploadIds.empty()) {
-            showToast("Bắt đầu sao lưu " + std::to_string(uploadIds.size()) + " game lên Drive...",
+            showToast("Bắt đầu sao lưu " + std::to_string(uploadIds.size()) +
+                          " game lên Drive...",
                       {168, 85, 247, 255}, 2000);
             UploadManager::instance().startUploadGames(uploadIds);
             m_multiSelectMode = false;
             m_selectedGameIds.clear();
             setState(UIState::REVERSE_SYNC);
           } else {
-            showToast("Các game đã chọn đều đã có trên Google Drive", {245, 158, 11, 255}, 3000);
+            showToast("Các game đã chọn đều đã có trên Google Drive",
+                      {245, 158, 11, 255}, 3000);
           }
         }
       }
@@ -1409,7 +1437,8 @@ void UIManager::update() {
         m_selectedGameIndex = std::max(0, m_selectedGameIndex - pageSize);
         m_gameScrollOffset = std::max(0, m_gameScrollOffset - pageSize);
       } else if (input.isButtonJustPressed(Button::RIGHT)) {
-        m_selectedGameIndex = std::min(total - 1, m_selectedGameIndex + pageSize);
+        m_selectedGameIndex =
+            std::min(total - 1, m_selectedGameIndex + pageSize);
         m_gameScrollOffset = std::min(std::max(0, total - pageSize),
                                       m_gameScrollOffset + pageSize);
       } else if (input.isButtonJustPressed(Button::A)) {
@@ -1432,12 +1461,15 @@ void UIManager::update() {
           if (g.localState == GameState::LOCAL) {
             showToast("Game đã có sẵn trên thẻ nhớ.", {34, 197, 94, 255}, 2500);
           } else if (DownloadManager::instance().isInQueue(g.id)) {
-            showToast("\"" + g.title + "\" đã có trong hàng đợi tải.", {245, 158, 11, 255});
+            showToast("\"" + g.title + "\" đã có trong hàng đợi tải.",
+                      {245, 158, 11, 255});
           } else {
             if (AuthManager::instance().isLinked()) {
-              bool added = DownloadManager::instance().addToQueue(g, m_activeSystem);
+              bool added =
+                  DownloadManager::instance().addToQueue(g, m_activeSystem);
               if (added) {
-                showToast(std::string(UiStrings::TOAST_ADDED_TO_QUEUE) + g.title,
+                showToast(std::string(UiStrings::TOAST_ADDED_TO_QUEUE) +
+                              g.title,
                           {0, 180, 216, 255}, 2500);
                 if (!DownloadManager::instance().isDownloading()) {
                   DownloadManager::instance().processNextInQueue();
@@ -1445,7 +1477,8 @@ void UIManager::update() {
                 refreshGames();
               }
             } else {
-              showToast(UiStrings::TOAST_CONNECT_DRIVE_FIRST, {245, 158, 11, 255});
+              showToast(UiStrings::TOAST_CONNECT_DRIVE_FIRST,
+                        {245, 158, 11, 255});
             }
           }
         } else {
@@ -1459,12 +1492,15 @@ void UIManager::update() {
           if (DownloadManager::instance().isDownloading() &&
               DownloadManager::instance().getProgress().gameId == g.id) {
             DownloadManager::instance().cancelDownload();
-            showToast(std::string(UiStrings::TOAST_DOWNLOAD_STOPPED) + g.title, {245, 158, 11, 255});
+            showToast(std::string(UiStrings::TOAST_DOWNLOAD_STOPPED) + g.title,
+                      {245, 158, 11, 255});
             DownloadManager::instance().processNextInQueue();
             refreshGames();
           } else if (DownloadManager::instance().isInQueue(g.id)) {
             DownloadManager::instance().removeFromQueue(g.id);
-            showToast(std::string(UiStrings::TOAST_REMOVED_FROM_QUEUE) + g.title, {245, 158, 11, 255});
+            showToast(std::string(UiStrings::TOAST_REMOVED_FROM_QUEUE) +
+                          g.title,
+                      {245, 158, 11, 255});
           } else if (g.localState == GameState::LOCAL) {
             setState(UIState::CONFIRM_DELETE);
           } else {
@@ -1484,7 +1520,8 @@ void UIManager::update() {
             curL = std::toupper(m_cachedGames[m_selectedGameIndex].title[0]);
           }
           int nextIdx = -1;
-          for (size_t i = m_selectedGameIndex + 1; i < m_cachedGames.size(); ++i) {
+          for (size_t i = m_selectedGameIndex + 1; i < m_cachedGames.size();
+               ++i) {
             char l = ' ';
             if (!m_cachedGames[i].title.empty()) {
               l = std::toupper(m_cachedGames[i].title[0]);
@@ -1503,7 +1540,8 @@ void UIManager::update() {
           if (!m_cachedGames[m_selectedGameIndex].title.empty()) {
             newL = std::toupper(m_cachedGames[m_selectedGameIndex].title[0]);
           }
-          showToast(std::string("Chuyển đến vần chữ: [ ") + newL + " ]", {234, 179, 8, 255}, 1500);
+          showToast(std::string("Chuyển đến vần chữ: [ ") + newL + " ]",
+                    {234, 179, 8, 255}, 1500);
         }
       }
     }
@@ -1723,15 +1761,15 @@ void UIManager::update() {
     // Modal Wi-Fi mở thì nhường toàn bộ phím cho modal.
     // 0=CẤU HÌNH, 1=TÙY CHỌN, 2=CẬP NHẬT, 3=WI-FI, 4=GIỚI THIỆU, 5=HỆ THỐNG.
     if (!m_wifiModalOpen) {
-    if (input.isButtonJustPressed(Button::L1)) {
-      m_settingsTab = (m_settingsTab + 5) % 6;
-      m_selectedSettingsRow = 0;
-      m_settingsScrollOffset = 0;
-    } else if (input.isButtonJustPressed(Button::R1)) {
-      m_settingsTab = (m_settingsTab + 1) % 6;
-      m_selectedSettingsRow = 0;
-      m_settingsScrollOffset = 0;
-    }
+      if (input.isButtonJustPressed(Button::L1)) {
+        m_settingsTab = (m_settingsTab + 5) % 6;
+        m_selectedSettingsRow = 0;
+        m_settingsScrollOffset = 0;
+      } else if (input.isButtonJustPressed(Button::R1)) {
+        m_settingsTab = (m_settingsTab + 1) % 6;
+        m_selectedSettingsRow = 0;
+        m_settingsScrollOffset = 0;
+      }
     }
 
     if (m_settingsTab == 0) {
@@ -1914,8 +1952,7 @@ void UIManager::update() {
             showToast("Đang sắp xếp, vui lòng chờ...", {245, 158, 11, 255},
                       2000);
           } else {
-            showToast("Đang quét và sắp xếp ROM...", {0, 180, 216, 255},
-                      60000);
+            showToast("Đang quét và sắp xếp ROM...", {0, 180, 216, 255}, 60000);
             std::thread([this]() {
               OrganizeSummary s = RomOrganizer::instance().organizeAll();
               refreshSystems();
@@ -1951,7 +1988,7 @@ void UIManager::update() {
           // RC-Web: gói trình duyệt riêng (~200M zip). Dừng phiên web
           // trước để swap thư mục an toàn.
           if (UpdateManager::instance().isRcWebUpdateAvailable()) {
-            auto& bridge = ChromeBridge::instance();
+            auto &bridge = ChromeBridge::instance();
             if (bridge.isRunning())
               bridge.stop();
             if (!UpdateManager::instance().startRcWebUpdate()) {
@@ -1976,7 +2013,7 @@ void UIManager::update() {
                     prog.state == UpdateState::FAILED)) {
           // RC-Web: như nhánh UPDATE_AVAILABLE (dừng phiên web + tải).
           if (UpdateManager::instance().isRcWebUpdateAvailable()) {
-            auto& bridge = ChromeBridge::instance();
+            auto &bridge = ChromeBridge::instance();
             if (bridge.isRunning())
               bridge.stop();
             if (!UpdateManager::instance().startRcWebUpdate()) {
@@ -2071,8 +2108,9 @@ void UIManager::update() {
         // Lỗi lấy mã -> thử lại nền (không đơ UI).
         if (AuthManager::instance().getState() == AuthState::ERROR_OCCURRED) {
           AuthManager::instance().cancelDeviceFlow();
-          std::thread([] { AuthManager::instance().startDeviceFlow(); })
-              .detach();
+          std::thread([] {
+            AuthManager::instance().startDeviceFlow();
+          }).detach();
         }
       }
     }
@@ -2204,8 +2242,8 @@ void UIManager::update() {
         std::string err;
         if (IPTVManager::instance().refreshPlaylistFromUrl(
                 selectedPl->sourceFile, err)) {
-          std::string ts =
-              IPTVManager::instance().getLastRefreshedStr(selectedPl->sourceFile);
+          std::string ts = IPTVManager::instance().getLastRefreshedStr(
+              selectedPl->sourceFile);
           showToast("Cập nhật thành công! (" + ts + ")", {34, 197, 94, 255},
                     3000);
         } else {
@@ -2691,10 +2729,9 @@ void UIManager::update() {
     int totalResults = static_cast<int>(m_ytSearchResults.size());
     // Chế độ Xem lại: chưa có kết quả nhưng có video đã xem -> hàng 2
     // thành danh sách Xem lại (lên/xuống đổi index, A phát lại).
-    bool watchMode = (totalResults == 0 && !m_ytIsSearching &&
-                      !m_ytWatched.empty());
-    int watchCount =
-        std::min<int>(5, static_cast<int>(m_ytWatched.size()));
+    bool watchMode =
+        (totalResults == 0 && !m_ytIsSearching && !m_ytWatched.empty());
+    int watchCount = std::min<int>(5, static_cast<int>(m_ytWatched.size()));
     // Che do list doc (Y): hang 2 la danh sach doc duy nhat, dieu huong
     // theo index, không theo cột. Channel card giữ nguyên.
     bool listMode = (!m_ytViewMode && totalResults > 0 &&
@@ -2809,13 +2846,13 @@ void UIManager::update() {
           int rowCount = (m_ytMatchedChannel.matched && !m_ytInChannelView)
                              ? std::min(3, totalResults)
                              : std::max(0, totalResults - 3);
-        if (m_ytHomeCol + 1 < rowCount) {
-          m_ytHomeCol++;
-          m_ytHomeContentSelected =
-              (m_ytMatchedChannel.matched && !m_ytInChannelView)
-                  ? m_ytHomeCol
-                  : (3 + m_ytHomeCol);
-        }
+          if (m_ytHomeCol + 1 < rowCount) {
+            m_ytHomeCol++;
+            m_ytHomeContentSelected =
+                (m_ytMatchedChannel.matched && !m_ytInChannelView)
+                    ? m_ytHomeCol
+                    : (3 + m_ytHomeCol);
+          }
         }
       }
     } else if (input.isButtonJustPressed(Button::UP)) {
@@ -2942,10 +2979,11 @@ void UIManager::update() {
             }).detach();
           } else {
             // Không có id kênh: dùng tạm kết quả search hiện tại.
-            Logger::warn("[YouTube] Vào trang kênh KHÔNG có cid, dùng kết quả trộn");
+            Logger::warn(
+                "[YouTube] Vào trang kênh KHÔNG có cid, dùng kết quả trộn");
             m_ytAllCachedResults = m_ytChannelAllVideos;
-            int count = std::min<int>(
-                6, static_cast<int>(m_ytAllCachedResults.size()));
+            int count =
+                std::min<int>(6, static_cast<int>(m_ytAllCachedResults.size()));
             m_ytSearchResults.assign(m_ytAllCachedResults.begin(),
                                      m_ytAllCachedResults.begin() + count);
             rebuildYtItems();
@@ -2955,8 +2993,7 @@ void UIManager::update() {
           std::string selected = m_ytSearchResults[m_ytHomeContentSelected];
           std::string videoId = selected.substr(0, selected.find('|'));
           playYouTubeVideo(videoId);
-        } else if (watchMode && totalResults == 0 &&
-                   m_ytWatchedIndex >= 0 &&
+        } else if (watchMode && totalResults == 0 && m_ytWatchedIndex >= 0 &&
                    m_ytWatchedIndex < watchCount) {
           // Xem lại: A phát lại video đã xem.
           playYouTubeVideo(m_ytWatched[m_ytWatchedIndex].id);
@@ -3236,14 +3273,14 @@ void UIManager::update() {
               continue;
             if (line.find("ERROR:") == 0 || line.find("WARNING:") == 0)
               continue;
-              int pipeCount = std::count(line.begin(), line.end(), '|');
-              if (line.compare(0, 8, "CHANNEL|") == 0) {
-                if (pipeCount >= 4)
-                  moreResults.push_back(line);
-              } else if (pipeCount >= 4) {
+            int pipeCount = std::count(line.begin(), line.end(), '|');
+            if (line.compare(0, 8, "CHANNEL|") == 0) {
+              if (pipeCount >= 4)
                 moreResults.push_back(line);
-              }
-            } // for rawLines
+            } else if (pipeCount >= 4) {
+              moreResults.push_back(line);
+            }
+          } // for rawLines
           if (!moreResults.empty()) {
             m_ytAllCachedResults.insert(m_ytAllCachedResults.end(),
                                         moreResults.begin(), moreResults.end());
@@ -3444,13 +3481,14 @@ void UIManager::update() {
   case UIState::GAME_PLAYING: {
     // Emulator giữ màn hình: thoát game (tự thoát) thì về list,
     // B cưỡng chế dừng.
-    auto& emu = EmuLauncher::instance();
+    auto &emu = EmuLauncher::instance();
     if (emu.pollExited() || !emu.isRunning()) {
       // Chết tức thì (<3s, exit lỗi): gần chắc core/libretro hỏng
       // (file 0 byte trên thẻ FAT) — báo rõ thay vì đá về im lặng.
-      uint64_t nowMs = (uint64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
-                           std::chrono::steady_clock::now().time_since_epoch())
-                           .count();
+      uint64_t nowMs =
+          (uint64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
+              std::chrono::steady_clock::now().time_since_epoch())
+              .count();
       if (emu.startMs() != 0 && nowMs - emu.startMs() < 3000) {
         showToast("Emulator thoát ngay: core hệ này hỏng (0 byte), thử hệ khác",
                   {239, 68, 68, 255}, 3500);
@@ -3665,7 +3703,7 @@ void UIManager::releaseHeavyState() {
   clearThumbnailCache();
 #ifndef PC_SIMULATOR_MODE
   // Thả pagecache video đã chết (mpv đã kill ở stop path). Best-effort.
-  FILE* f = fopen("/proc/sys/vm/drop_caches", "w");
+  FILE *f = fopen("/proc/sys/vm/drop_caches", "w");
   if (f) {
     fputs("1\n", f);
     fclose(f);
@@ -3758,9 +3796,9 @@ int UIManager::badgeDualWidth(const std::string &label1,
   return m_ui.badgeDualWidth(label1, label2, h);
 }
 
-void UIManager::drawPill(int x, int y, int w, int h, const std::string &text,
-                         bool active, TTF_Font *font) {
-  m_ui.drawPill(x, y, w, h, text, active, font);
+int UIManager::drawPill(int x, int y, int w, int h, const std::string &text,
+                        bool active, TTF_Font *font) {
+  return m_ui.drawPill(x, y, w, h, text, active, font);
 }
 
 int UIManager::textYCentered(int y, int h, TTF_Font *font) {
@@ -4007,39 +4045,69 @@ void UIManager::renderFooter() {
 
   if (m_currentState == UIState::GAME_LIST) {
     if (m_multiSelectMode) {
-      x = drawFooterHint("A", m_libraryTab == LibraryTab::DRIVE ? "Tải về" : "Tải lên", x, barY, barH, cyan, m_fontSmall, iconSize, gap) + 30;
-      x = drawFooterHint("B", "Hủy chọn", x, barY, barH, fg, m_fontSmall, iconSize, gap) + 30;
-      x = drawFooterHint("Y", "Chọn/Bỏ", x, barY, barH, fg, m_fontSmall, iconSize, gap) + 30;
-      x = drawFooterHint("X", "Xóa", x, barY, barH, red, m_fontSmall, iconSize, gap) + 30;
+      x = drawFooterHint(
+              "A", m_libraryTab == LibraryTab::DRIVE ? "Tải về" : "Tải lên", x,
+              barY, barH, cyan, m_fontSmall, iconSize, gap) +
+          30;
+      x = drawFooterHint("B", "Hủy chọn", x, barY, barH, fg, m_fontSmall,
+                         iconSize, gap) +
+          30;
+      x = drawFooterHint("Y", "Chọn/Bỏ", x, barY, barH, fg, m_fontSmall,
+                         iconSize, gap) +
+          30;
+      x = drawFooterHint("X", "Xóa", x, barY, barH, red, m_fontSmall, iconSize,
+                         gap) +
+          30;
     } else {
       if (m_cachedGames.empty()) {
-        x = drawFooterHint("B", "Lùi", x, barY, barH, fg, m_fontSmall, iconSize, gap) + 30;
-        x = drawFooterHint("Y", m_libraryTab == LibraryTab::DRIVE ? "Đồng bộ" : "Quét thẻ", x, barY, barH, cyan, m_fontSmall, iconSize, gap) + 30;
+        x = drawFooterHint("B", "Lùi", x, barY, barH, fg, m_fontSmall, iconSize,
+                           gap) +
+            30;
+        x = drawFooterHint(
+                "Y", m_libraryTab == LibraryTab::DRIVE ? "Đồng bộ" : "Quét thẻ",
+                x, barY, barH, cyan, m_fontSmall, iconSize, gap) +
+            30;
       } else {
         bool isLocal = false;
         if (m_selectedGameIndex >= 0 &&
             m_selectedGameIndex < static_cast<int>(m_cachedGames.size())) {
-          isLocal =
-              (m_cachedGames[m_selectedGameIndex].localState == GameState::LOCAL);
+          isLocal = (m_cachedGames[m_selectedGameIndex].localState ==
+                     GameState::LOCAL);
         }
         std::string aAction = (m_libraryTab == LibraryTab::DRIVE)
-                                        ? (isLocal ? "Chơi" : "Tải")
-                                        : "Chơi";
-        x = drawFooterHint("A", aAction, x, barY, barH, fg, m_fontSmall, iconSize, gap) + 30;
-        x = drawFooterHint("B", "Lùi", x, barY, barH, fg, m_fontSmall, iconSize, gap) + 30;
+                                  ? (isLocal ? "Chơi" : "Tải")
+                                  : "Chơi";
+        x = drawFooterHint("A", aAction, x, barY, barH, fg, m_fontSmall,
+                           iconSize, gap) +
+            30;
+        x = drawFooterHint("B", "Lùi", x, barY, barH, fg, m_fontSmall, iconSize,
+                           gap) +
+            30;
         if (isLocal) {
-          x = drawFooterHint("X", "Xóa ROM", x, barY, barH, red, m_fontSmall, iconSize, gap) + 30;
+          x = drawFooterHint("X", "Xóa ROM", x, barY, barH, red, m_fontSmall,
+                             iconSize, gap) +
+              30;
         }
-        x = drawFooterHint("Y", "Nhảy chữ", x, barY, barH, fg, m_fontSmall, iconSize, gap) + 30;
-        x = drawFooterHint("L2", "Chọn nhiều", x, barY, barH, fg, m_fontSmall, iconSize, gap) + 30;
+        x = drawFooterHint("Y", "Nhảy chữ", x, barY, barH, fg, m_fontSmall,
+                           iconSize, gap) +
+            30;
+        x = drawFooterHint("L2", "Chọn nhiều", x, barY, barH, fg, m_fontSmall,
+                           iconSize, gap) +
+            30;
       }
-      x = drawFooterHint("SELECT", "Lọc", x, barY, barH, fg, m_fontSmall, iconSize, gap) + 30;
+      x = drawFooterHint("SELECT", "Lọc", x, barY, barH, fg, m_fontSmall,
+                         iconSize, gap) +
+          30;
       // Tab Thẻ nhớ: START = Sửa ROM lạc trong folder hiện tại.
       // Tab Drive: START = Tìm kiếm (như cũ).
       if (m_libraryTab == LibraryTab::SDCARD) {
-        x = drawFooterHint("START", "Sửa ROM", x, barY, barH, cyan, m_fontSmall, iconSize, gap) + 30;
+        x = drawFooterHint("START", "Sửa ROM", x, barY, barH, cyan, m_fontSmall,
+                           iconSize, gap) +
+            30;
       } else {
-        x = drawFooterHint("START", "Tìm", x, barY, barH, cyan, m_fontSmall, iconSize, gap) + 30;
+        x = drawFooterHint("START", "Tìm", x, barY, barH, cyan, m_fontSmall,
+                           iconSize, gap) +
+            30;
       }
     }
     // L1 + R1 đổi Tab
@@ -4067,14 +4135,15 @@ void UIManager::renderFooter() {
       x = drawFooterHint("X", "Xóa hết", x, barY, barH, fg, m_fontSmall,
                          iconSize, gap) +
           30;
-      x = drawFooterHint("L1", "Hoa", x, barY, barH, fg, m_fontSmall,
-                         iconSize, gap) +
+      x = drawFooterHint("L1", "Hoa", x, barY, barH, fg, m_fontSmall, iconSize,
+                         gap) +
           30;
       x = drawFooterHint("R1", "ABC/123", x, barY, barH, fg, m_fontSmall,
                          iconSize, gap) +
           30;
-      x = drawFooterHint("SELECT", m_searchVk.telexMode ? "Telex: Bật" : "Telex: Tắt", x, barY, barH, fg, m_fontSmall,
-                         iconSize, gap) +
+      x = drawFooterHint("SELECT",
+                         m_searchVk.telexMode ? "Telex: Bật" : "Telex: Tắt", x,
+                         barY, barH, fg, m_fontSmall, iconSize, gap) +
           30;
       x = drawFooterHint("START", "Tìm", x, barY, barH, cyan, m_fontSmall,
                          iconSize, gap) +
@@ -4134,13 +4203,14 @@ void UIManager::renderFooter() {
     x = drawFooterHint("B", "Menu", x, barY, barH, fg, m_fontSmall, iconSize,
                        gap) +
         30;
-    x = drawFooterHint("Y", m_libraryTab == LibraryTab::DRIVE ? "Đồng bộ" : "Quét thẻ", x, barY, barH, cyan, m_fontSmall, iconSize,
-                       gap) +
+    x = drawFooterHint(
+            "Y", m_libraryTab == LibraryTab::DRIVE ? "Đồng bộ" : "Quét thẻ", x,
+            barY, barH, cyan, m_fontSmall, iconSize, gap) +
         30;
     // Tab Thẻ nhớ: START sửa ROM lạc trong folder hệ đang chọn.
     if (m_libraryTab == LibraryTab::SDCARD) {
-      x = drawFooterHint("START", "Sửa ROM", x, barY, barH, cyan, m_fontSmall, iconSize,
-                         gap) +
+      x = drawFooterHint("START", "Sửa ROM", x, barY, barH, cyan, m_fontSmall,
+                         iconSize, gap) +
           30;
     }
     // L1 + R1 đổi Tab
@@ -4247,18 +4317,21 @@ void UIManager::renderSystemSelectState() {
 
   // 1. Header Bar (Y = 0..64)
   drawRect(0, 0, UiTheme::APP_W, UiTheme::HEADER_H, UiTheme::FOOTER_BG, true);
-  drawRect(0, UiTheme::HEADER_H - 1, UiTheme::APP_W, 1, UiTheme::FOOTER_LINE, true);
+  drawRect(0, UiTheme::HEADER_H - 1, UiTheme::APP_W, 1, UiTheme::FOOTER_LINE,
+           true);
   drawHeaderStatus();
 
   std::string title = "THƯ VIỆN GAME";
-  std::string counts = (m_libraryTab == LibraryTab::DRIVE)
-      ? (" - " + std::to_string(totalCloud) + " game Drive")
-      : (" - " + std::to_string(totalLocal) + " game trên thẻ");
+  std::string counts =
+      (m_libraryTab == LibraryTab::DRIVE)
+          ? (" - " + std::to_string(totalCloud) + " game Drive")
+          : (" - " + std::to_string(totalLocal) + " game trên thẻ");
 
   int hcy = textYCentered(0, UiTheme::HEADER_H, m_fontLarge);
   drawText(title, 24, hcy, UiTheme::ACCENT_CYAN, m_fontLarge);
   int htx = 24 + textWidth(title, m_fontLarge);
-  std::string rest = truncateToWidth(counts, m_fontLarge, UiTheme::APP_W - htx - 260);
+  std::string rest =
+      truncateToWidth(counts, m_fontLarge, UiTheme::APP_W - htx - 260);
   drawText(rest, htx, hcy, UiTheme::TEXT_DIM, m_fontLarge);
 
   // 2. Tab row below title bar (Office Go style: Y = 72, H = 32, right aligned)
@@ -4270,13 +4343,14 @@ void UIManager::renderSystemSelectState() {
   int xDrive = xSd - 8 - wDrive;
   drawPill(xDrive, tabY, wDrive, tabH, "GOOGLE DRIVE",
            m_libraryTab == LibraryTab::DRIVE, m_fontSmall);
-  drawPill(xSd, tabY, wSd, tabH, "THẺ NHỚ",
-           m_libraryTab == LibraryTab::SDCARD, m_fontSmall);
+  drawPill(xSd, tabY, wSd, tabH, "THẺ NHỚ", m_libraryTab == LibraryTab::SDCARD,
+           m_fontSmall);
 
   std::string guide = (m_libraryTab == LibraryTab::DRIVE)
-      ? "Chọn hệ máy để xem ROM trên Google Drive"
-      : "Chọn hệ máy để xem ROM trên thẻ nhớ SD";
-  drawText(guide, 24, textYCentered(tabY, tabH, m_fontSmall), UiTheme::TEXT_SUB, m_fontSmall);
+                          ? "Chọn hệ máy để xem ROM trên Google Drive"
+                          : "Chọn hệ máy để xem ROM trên thẻ nhớ SD";
+  drawText(guide, 24, textYCentered(tabY, tabH, m_fontSmall), UiTheme::TEXT_SUB,
+           m_fontSmall);
 
   // 3. System list starting at Y = 114
   int visibleCount = 6;
@@ -4326,13 +4400,17 @@ void UIManager::renderSystemSelectState() {
     int localW = badgeWidth(localBadge, 40);
     int localX = cloudX - 10 - localW;
 
-    SDL_Color localBg = (m_libraryTab == LibraryTab::SDCARD) ? SDL_Color{22, 101, 52, 255} : UiTheme::PILL_BG;
-    SDL_Color cloudBg = (m_libraryTab == LibraryTab::DRIVE) ? SDL_Color{2, 132, 199, 255} : UiTheme::FOCUS_BG;
+    SDL_Color localBg = (m_libraryTab == LibraryTab::SDCARD)
+                            ? SDL_Color{22, 101, 52, 255}
+                            : UiTheme::PILL_BG;
+    SDL_Color cloudBg = (m_libraryTab == LibraryTab::DRIVE)
+                            ? SDL_Color{2, 132, 199, 255}
+                            : UiTheme::FOCUS_BG;
 
-    drawBadge(localX, y + (rowH - 40) / 2, localW, 40, localBadge,
-              localBg, UiTheme::TEXT_MAIN);
-    drawBadge(cloudX, y + (rowH - 40) / 2, cloudW, 40, cloudBadge,
-              cloudBg, UiTheme::TEXT_MAIN);
+    drawBadge(localX, y + (rowH - 40) / 2, localW, 40, localBadge, localBg,
+              UiTheme::TEXT_MAIN);
+    drawBadge(cloudX, y + (rowH - 40) / 2, cloudW, 40, cloudBadge, cloudBg,
+              UiTheme::TEXT_MAIN);
   }
 
   if (static_cast<int>(m_cachedSystems.size()) > visibleCount) {
@@ -4341,7 +4419,8 @@ void UIManager::renderSystemSelectState() {
     drawRoundedRect(barX, rowY, 4, barTrackH, 2, {35, 42, 54, 255}, true);
     float ratio = (float)visibleCount / (float)m_cachedSystems.size();
     int thumbH = std::max(24, (int)(barTrackH * ratio));
-    float scrollRatio = (float)startIdx / (float)(m_cachedSystems.size() - visibleCount);
+    float scrollRatio =
+        (float)startIdx / (float)(m_cachedSystems.size() - visibleCount);
     int thumbY = rowY + (int)((barTrackH - thumbH) * scrollRatio);
     drawRoundedRect(barX, thumbY, 4, thumbH, 2, {0, 180, 216, 255}, true);
   }
@@ -4375,13 +4454,13 @@ void UIManager::renderGameListState() {
   int xDrive = xSd - 8 - wDrive;
   drawPill(xDrive, tabY, wDrive, tabH, "GOOGLE DRIVE",
            m_libraryTab == LibraryTab::DRIVE, m_fontSmall);
-  drawPill(xSd, tabY, wSd, tabH, "THẺ NHỚ",
-           m_libraryTab == LibraryTab::SDCARD, m_fontSmall);
+  drawPill(xSd, tabY, wSd, tabH, "THẺ NHỚ", m_libraryTab == LibraryTab::SDCARD,
+           m_fontSmall);
 
   std::string infoStr = "/Roms/" + m_activeSystem.romDir + "  •  " +
                         std::to_string(m_cachedGames.size()) + " game";
-  drawText(infoStr, 24, textYCentered(tabY, tabH, m_fontSmall), UiTheme::TEXT_SUB,
-           m_fontSmall);
+  drawText(infoStr, 24, textYCentered(tabY, tabH, m_fontSmall),
+           UiTheme::TEXT_SUB, m_fontSmall);
 
   // 3. Panes Layout (Y = 114, H = 595)
   int listY = 114;
@@ -4410,39 +4489,47 @@ void UIManager::renderGameListState() {
     int cardH = 220;
     int cardX = listX + 20;
     int cardY = listY + 80;
-    drawRoundedRect(cardX, cardY, cardW, cardH, UiTheme::RADIUS_CARD, UiTheme::CARD_BG, true);
-    drawRoundedBorder(cardX, cardY, cardW, cardH, UiTheme::RADIUS_CARD, UiTheme::CARD_BORDER, 1);
+    drawRoundedRect(cardX, cardY, cardW, cardH, UiTheme::RADIUS_CARD,
+                    UiTheme::CARD_BG, true);
+    drawRoundedBorder(cardX, cardY, cardW, cardH, UiTheme::RADIUS_CARD,
+                      UiTheme::CARD_BORDER, 1);
 
     if (m_libraryTab == LibraryTab::DRIVE) {
       if (!AuthManager::instance().isLinked()) {
         drawText("Chưa liên kết Google Drive", cardX + cardW / 2, cardY + 45,
                  {245, 158, 11, 255}, m_fontLarge, true);
         drawText("Vào Cài đặt để quét mã QR liên kết tài khoản Drive.",
-                 cardX + cardW / 2, cardY + 95, UiTheme::TEXT_DIM, m_fontSmall, true);
+                 cardX + cardW / 2, cardY + 95, UiTheme::TEXT_DIM, m_fontSmall,
+                 true);
         drawBadge(cardX + cardW / 2 - 120, cardY + 145, 240, 38,
-                 "[B] Lùi  •  [L1/R1] Xem Thẻ", {45, 55, 72, 255}, UiTheme::TEXT_MAIN);
+                  "[B] Lùi  •  [L1/R1] Xem Thẻ", {45, 55, 72, 255},
+                  UiTheme::TEXT_MAIN);
       } else if (DriveSyncEngine::instance().isSyncing()) {
         drawText("Đang đồng bộ Google Drive...", cardX + cardW / 2, cardY + 45,
                  UiTheme::ACCENT_CYAN, m_fontLarge, true);
         drawText("Vui lòng đợi trong giây lát, danh sách sẽ tự cập nhật.",
-                 cardX + cardW / 2, cardY + 95, UiTheme::TEXT_DIM, m_fontSmall, true);
+                 cardX + cardW / 2, cardY + 95, UiTheme::TEXT_DIM, m_fontSmall,
+                 true);
         drawBadge(cardX + cardW / 2 - 90, cardY + 145, 180, 38,
-                 "Đang đồng bộ...", {2, 132, 199, 255}, UiTheme::TEXT_MAIN);
+                  "Đang đồng bộ...", {2, 132, 199, 255}, UiTheme::TEXT_MAIN);
       } else {
-        drawText("Chưa có dữ liệu ROM trên Drive", cardX + cardW / 2, cardY + 45,
-                 UiTheme::ACCENT_CYAN, m_fontLarge, true);
+        drawText("Chưa có dữ liệu ROM trên Drive", cardX + cardW / 2,
+                 cardY + 45, UiTheme::ACCENT_CYAN, m_fontLarge, true);
         drawText("Bấm [Y] để bắt đầu Đồng bộ thư viện Google Drive",
-                 cardX + cardW / 2, cardY + 95, UiTheme::TEXT_DIM, m_fontSmall, true);
+                 cardX + cardW / 2, cardY + 95, UiTheme::TEXT_DIM, m_fontSmall,
+                 true);
         drawBadge(cardX + cardW / 2 - 100, cardY + 145, 200, 38,
-                 "[Y] Đồng bộ ngay", {34, 197, 94, 255}, {255, 255, 255, 255});
+                  "[Y] Đồng bộ ngay", {34, 197, 94, 255}, {255, 255, 255, 255});
       }
     } else {
       drawText("Không có ROM nào trên thẻ nhớ", cardX + cardW / 2, cardY + 45,
                {245, 158, 11, 255}, m_fontLarge, true);
       std::string pathHint = "Thư mục: /Roms/" + m_activeSystem.romDir;
-      drawText(pathHint, cardX + cardW / 2, cardY + 95, UiTheme::TEXT_DIM, m_fontSmall, true);
+      drawText(pathHint, cardX + cardW / 2, cardY + 95, UiTheme::TEXT_DIM,
+               m_fontSmall, true);
       drawBadge(cardX + cardW / 2 - 100, cardY + 145, 200, 38,
-               "[Y] Quét lại thẻ nhớ", {2, 132, 199, 255}, {255, 255, 255, 255});
+                "[Y] Quét lại thẻ nhớ", {2, 132, 199, 255},
+                {255, 255, 255, 255});
     }
   } else {
     for (int i = 0; i < pageSize && (m_gameScrollOffset + i) < totalGames;
@@ -4461,8 +4548,11 @@ void UIManager::renderGameListState() {
       if (m_libraryTab == LibraryTab::SDCARD) {
         // Tab THẺ NHỚ:
         // 1. Bên phải: duy nhất 1 status pill (backed up, not backed up)
-        std::string badgeTxt = !game.cloudFileId.empty() ? "ĐÃ SAO LƯU" : "CHƯA SAO LƯU";
-        SDL_Color badgeBg = !game.cloudFileId.empty() ? SDL_Color{22, 101, 52, 255} : SDL_Color{217, 119, 6, 255};
+        std::string badgeTxt =
+            !game.cloudFileId.empty() ? "ĐÃ SAO LƯU" : "CHƯA SAO LƯU";
+        SDL_Color badgeBg = !game.cloudFileId.empty()
+                                ? SDL_Color{22, 101, 52, 255}
+                                : SDL_Color{217, 119, 6, 255};
 
         int badgeH = 24;
         int btw = m_fontSmall ? textWidth(badgeTxt, m_fontSmall) : 60;
@@ -4489,11 +4579,16 @@ void UIManager::renderGameListState() {
           for (size_t k = 0; k < titleFull.size();) {
             unsigned char c = titleFull[k];
             size_t len = 1;
-            if ((c & 0x80) == 0x00) len = 1;
-            else if ((c & 0xE0) == 0xC0) len = 2;
-            else if ((c & 0xF0) == 0xE0) len = 3;
-            else if ((c & 0xF8) == 0xF0) len = 4;
-            if (k + len > titleFull.size()) len = titleFull.size() - k;
+            if ((c & 0x80) == 0x00)
+              len = 1;
+            else if ((c & 0xE0) == 0xC0)
+              len = 2;
+            else if ((c & 0xF0) == 0xE0)
+              len = 3;
+            else if ((c & 0xF8) == 0xF0)
+              len = 4;
+            if (k + len > titleFull.size())
+              len = titleFull.size() - k;
             cps.push_back(titleFull.substr(k, len));
             k += len;
           }
@@ -4511,9 +4606,11 @@ void UIManager::renderGameListState() {
             size_t off = ((el - 1200) / 350) % steps;
             if (off < cps.size()) {
               std::string rot;
-              for (size_t k = off; k < cps.size(); k++) rot += cps[k];
+              for (size_t k = off; k < cps.size(); k++)
+                rot += cps[k];
               rot += "   ";
-              for (size_t k = 0; k < off && k < cps.size(); k++) rot += cps[k];
+              for (size_t k = 0; k < off && k < cps.size(); k++)
+                rot += cps[k];
               cand = rot;
             } else {
               cand = titleFull;
@@ -4525,10 +4622,14 @@ void UIManager::renderGameListState() {
         }
 
         SDL_Color titleCol = selected ? UiTheme::TEXT_MAIN : UiTheme::TEXT_DIM;
-        std::string sizeStr = FileSystemManager::instance().formatBytes(game.sizeBytes);
-        std::string sysLabel = !m_activeSystem.name.empty() ? m_activeSystem.name : m_activeSystem.code;
-        std::string sub = truncateToWidth(sysLabel + " (" + m_activeSystem.code + ")  •  " + sizeStr,
-                                          m_fontSmall, titleMaxW);
+        std::string sizeStr =
+            FileSystemManager::instance().formatBytes(game.sizeBytes);
+        std::string sysLabel = !m_activeSystem.name.empty()
+                                   ? m_activeSystem.name
+                                   : m_activeSystem.code;
+        std::string sub = truncateToWidth(
+            sysLabel + " (" + m_activeSystem.code + ")  •  " + sizeStr,
+            m_fontSmall, titleMaxW);
 
         int thM = m_fontLarge ? TTF_FontHeight(m_fontLarge) : 24;
         int thS = m_fontSmall ? TTF_FontHeight(m_fontSmall) : 16;
@@ -4592,11 +4693,16 @@ void UIManager::renderGameListState() {
           for (size_t k = 0; k < titleFull.size();) {
             unsigned char c = titleFull[k];
             size_t len = 1;
-            if ((c & 0x80) == 0x00) len = 1;
-            else if ((c & 0xE0) == 0xC0) len = 2;
-            else if ((c & 0xF0) == 0xE0) len = 3;
-            else if ((c & 0xF8) == 0xF0) len = 4;
-            if (k + len > titleFull.size()) len = titleFull.size() - k;
+            if ((c & 0x80) == 0x00)
+              len = 1;
+            else if ((c & 0xE0) == 0xC0)
+              len = 2;
+            else if ((c & 0xF0) == 0xE0)
+              len = 3;
+            else if ((c & 0xF8) == 0xF0)
+              len = 4;
+            if (k + len > titleFull.size())
+              len = titleFull.size() - k;
             cps.push_back(titleFull.substr(k, len));
             k += len;
           }
@@ -4614,9 +4720,11 @@ void UIManager::renderGameListState() {
             size_t off = ((el - 1200) / 350) % steps;
             if (off < cps.size()) {
               std::string rot;
-              for (size_t k = off; k < cps.size(); k++) rot += cps[k];
+              for (size_t k = off; k < cps.size(); k++)
+                rot += cps[k];
               rot += "   ";
-              for (size_t k = 0; k < off && k < cps.size(); k++) rot += cps[k];
+              for (size_t k = 0; k < off && k < cps.size(); k++)
+                rot += cps[k];
               cand = rot;
             } else {
               cand = titleFull;
@@ -4638,7 +4746,8 @@ void UIManager::renderGameListState() {
           std::snprintf(pctBuf, sizeof(pctBuf), "%.1f%%", dlp.progressPct);
           std::string dlSub =
               FileSystemManager::instance().formatBytes(dlp.bytesDownloaded) +
-              " / " + FileSystemManager::instance().formatBytes(dlp.totalBytes) +
+              " / " +
+              FileSystemManager::instance().formatBytes(dlp.totalBytes) +
               "  (" + pctBuf + ")";
           dlSub = truncateToWidth(dlSub, m_fontSmall, titleMaxW);
           drawText(dlSub, titleX, y + 44, {140, 205, 245, 255}, m_fontSmall);
@@ -4647,15 +4756,16 @@ void UIManager::renderGameListState() {
           int pBarY = y + 70;
           int pBarW = rowX + rowW - 16 - titleX;
           int pBarH = 6;
-          drawRoundedRect(pBarX, pBarY, pBarW, pBarH, 3, {35, 45, 60, 255}, true);
+          drawRoundedRect(pBarX, pBarY, pBarW, pBarH, 3, {35, 45, 60, 255},
+                          true);
           float pct = std::max(0.0, std::min(100.0, dlp.progressPct));
           drawRoundedRect(pBarX, pBarY, (int)(pBarW * (pct / 100.0)), pBarH, 3,
                           {34, 197, 94, 255}, true);
         } else {
           std::string sizeStr =
               FileSystemManager::instance().formatBytes(game.sizeBytes);
-          std::string sub = truncateToWidth(game.filename + "  (" + sizeStr + ")",
-                                            m_fontSmall, titleMaxW);
+          std::string sub = truncateToWidth(
+              game.filename + "  (" + sizeStr + ")", m_fontSmall, titleMaxW);
           int thM = m_fontLarge ? TTF_FontHeight(m_fontLarge) : 24;
           int thS = m_fontSmall ? TTF_FontHeight(m_fontSmall) : 16;
           int blockH = thM + 4 + thS;
@@ -4776,7 +4886,8 @@ void UIManager::renderGameListState() {
     metaY += 28;
     drawText(UiStrings::DETAIL_LOCATION_LABEL, metaX, metaY,
              {140, 155, 175, 255}, m_fontSmall);
-    if (m_libraryTab == LibraryTab::SDCARD || selGame->localState == GameState::LOCAL) {
+    if (m_libraryTab == LibraryTab::SDCARD ||
+        selGame->localState == GameState::LOCAL) {
       std::string locVal =
           truncateToWidth(std::string(UiStrings::GAME_LOCATION_SD_PREFIX) +
                               m_activeSystem.romDir + ")",
@@ -4800,9 +4911,10 @@ void UIManager::renderGameListState() {
     metaY += 34;
     if (m_libraryTab == LibraryTab::SDCARD) {
       int halfW = (detailW - 40) / 2;
-      std::string aSyncText = selGame->cloudFileId.empty() ? "[A] Sao lưu Drive" : "[A] Đồng bộ lại";
-      drawBadge(metaX, metaY, halfW, 46, aSyncText,
-                {2, 132, 199, 255}, {255, 255, 255, 255});
+      std::string aSyncText = selGame->cloudFileId.empty() ? "[A] Sao lưu Drive"
+                                                           : "[A] Đồng bộ lại";
+      drawBadge(metaX, metaY, halfW, 46, aSyncText, {2, 132, 199, 255},
+                {255, 255, 255, 255});
       drawBadge(metaX + 8 + halfW, metaY, halfW, 46,
                 UiStrings::BADGE_DELETE_BTN, UiTheme::ACCENT_RED,
                 UiTheme::TEXT_MAIN);
@@ -4821,8 +4933,8 @@ void UIManager::renderGameListState() {
         auto dlp = DownloadManager::instance().getProgress();
         char pctBuf[32];
         std::snprintf(pctBuf, sizeof(pctBuf), "%.1f%%", dlp.progressPct);
-        std::string dlInfo =
-            std::string(UiStrings::GAME_DOWNLOADING_PREFIX) + std::string(pctBuf);
+        std::string dlInfo = std::string(UiStrings::GAME_DOWNLOADING_PREFIX) +
+                             std::string(pctBuf);
         drawBadge(metaX, metaY, detailW - 32, 40, dlInfo, {2, 132, 199, 255},
                   {255, 255, 255, 255});
 
@@ -5249,8 +5361,9 @@ void UIManager::renderSettingsState() {
   drawAppBackground();
   drawAppHeader(UiStrings::HEADER_SETTINGS);
 
-  // ─── Tab pills top-right (CẤU HÌNH | TÙY CHỌN | CẬP NHẬT | WI-FI | GIỚI THIỆU | HỆ THỐNG)
-  // Tabs nằm trong vùng Y=72..104 (8px gap dưới header, 32px tall).
+  // ─── Tab pills top-right (CẤU HÌNH | TÙY CHỌN | CẬP NHẬT | WI-FI | GIỚI
+  // THIỆU | HỆ THỐNG) Tabs nằm trong vùng Y=72..104 (8px gap dưới header, 32px
+  // tall).
   {
     int tabH = 32;
     int tabY = 72;
@@ -5291,11 +5404,10 @@ void UIManager::renderSettingsState() {
         (prog.state == UpdateState::UP_TO_DATE &&
          !UpdateManager::instance().getLatestInfo().changelog.empty());
     // RC-Web: hiện hint X ở các state rảnh (không đang tải/cài).
-    bool showXHInt =
-        (prog.state == UpdateState::UPDATE_AVAILABLE ||
-         prog.state == UpdateState::UP_TO_DATE ||
-         prog.state == UpdateState::FAILED) &&
-        UpdateManager::instance().isRcWebUpdateAvailable();
+    bool showXHInt = (prog.state == UpdateState::UPDATE_AVAILABLE ||
+                      prog.state == UpdateState::UP_TO_DATE ||
+                      prog.state == UpdateState::FAILED) &&
+                     UpdateManager::instance().isRcWebUpdateAvailable();
     if (showYHint) {
       if (showXHInt) {
         drawAppFooter({{UiTheme::PadBtn::A, "Tải"},
@@ -5331,8 +5443,8 @@ void UIManager::renderSettingsState() {
   // Tab 4/5 (GIỚI THIỆU / HỆ THỐNG, từ INFO)
   if (m_settingsTab == 4) {
     renderAboutTab(124);
-    drawAppFooter({{UiTheme::PadBtn::B, "Lùi"},
-                   {UiTheme::PadBtn::L1R1, "Chuyển tab"}});
+    drawAppFooter(
+        {{UiTheme::PadBtn::B, "Lùi"}, {UiTheme::PadBtn::L1R1, "Chuyển tab"}});
     return;
   }
   if (m_settingsTab == 5) {
@@ -5382,9 +5494,8 @@ void UIManager::renderSettingsState() {
         {UiStrings::SETTING_DRIVE_STATUS,
          personalLinked
              ? (std::string(UiStrings::SETTING_CONNECTED) + " (" + email + ")")
-             : (folderLinked
-                    ? std::string("ĐÃ NỐI THƯ MỤC TẢI GAME")
-                    : std::string(UiStrings::SETTING_DISCONNECTED)),
+             : (folderLinked ? std::string("ĐÃ NỐI THƯ MỤC TẢI GAME")
+                             : std::string(UiStrings::SETTING_DISCONNECTED)),
          personalLinked ? SDL_Color{34, 197, 94, 255}
                         : (folderLinked ? SDL_Color{245, 158, 11, 255}
                                         : SDL_Color{239, 68, 68, 255}),
@@ -5485,12 +5596,11 @@ void UIManager::renderSettingsState() {
 
     // 6: Sắp xếp ROM — dò ROM trong thư mục Roms, tự xếp đúng hệ máy
     // (vòng 1: đuôi file, vòng 2: MD5/CRC32). Sửa cả tên folder gốc.
-    items.push_back({UiStrings::SETTING_ORGANIZE_ROMS,
-                     UiStrings::SETTING_ORGANIZE_ROMS_DESC,
-                     SDL_Color{34, 197, 94, 255},
-                     UiStrings::SETTING_ORGANIZE_ROMS_BTN,
-                     SDL_Color{21, 94, 117, 255},
-                     SDL_Color{255, 255, 255, 255}});
+    items.push_back(
+        {UiStrings::SETTING_ORGANIZE_ROMS,
+         UiStrings::SETTING_ORGANIZE_ROMS_DESC, SDL_Color{34, 197, 94, 255},
+         UiStrings::SETTING_ORGANIZE_ROMS_BTN, SDL_Color{21, 94, 117, 255},
+         SDL_Color{255, 255, 255, 255}});
   }
 
   int cardX = 24;
@@ -5640,17 +5750,16 @@ void UIManager::renderCloudLoginState() {
     drawText("B1: Quét mã QR hoặc vào trang sau trên điện thoại:", 512, dy,
              {200, 215, 230, 255}, m_fontSmall, true);
     if (st == AuthState::AWAITING_USER && !info.verificationUrl.empty()) {
-      QrRenderer::renderQrCode(m_renderer, info.verificationUrl,
-                               512 - 95, dy + 30, 190);
+      QrRenderer::renderQrCode(m_renderer, info.verificationUrl, 512 - 95,
+                               dy + 30, 190);
       drawText(truncateToWidth(info.verificationUrl, m_fontSmall, 700), 512,
                dy + 226, {0, 180, 216, 255}, m_fontSmall, true);
     }
-    drawText("B2: Nhập mã đăng nhập tài khoản Google cá nhân:", 512,
-             dy + 256, {200, 215, 230, 255}, m_fontSmall, true);
+    drawText("B2: Nhập mã đăng nhập tài khoản Google cá nhân:", 512, dy + 256,
+             {200, 215, 230, 255}, m_fontSmall, true);
     if (st == AuthState::AWAITING_USER && !info.userCode.empty()) {
-      TTF_Font* fCode = m_fontHuge ? m_fontHuge : m_fontLarge;
-      drawText(info.userCode, 512, dy + 282, {255, 255, 255, 255}, fCode,
-               true);
+      TTF_Font *fCode = m_fontHuge ? m_fontHuge : m_fontLarge;
+      drawText(info.userCode, 512, dy + 282, {255, 255, 255, 255}, fCode, true);
       drawText("✓ Ứng dụng đã được Google xác minh thương hiệu chính thức", 512,
                dy + 360, {34, 197, 94, 255}, m_fontSmall, true);
       int nd = (int)((SDL_GetTicks() / 500) % 4);
@@ -5712,8 +5821,8 @@ void UIManager::renderCloudLoginState() {
     int urlBoxX = innerX + (innerW - urlBoxW) / 2;
     drawRect(urlBoxX, textY, urlBoxW, urlBoxH, {10, 15, 22, 255}, true);
     drawBorder(urlBoxX, textY, urlBoxW, urlBoxH, {0, 180, 216, 255}, 2);
-    drawText(truncateToWidth(portalUrl,
-                          m_fontTitle ? m_fontTitle : m_fontLarge, urlBoxW - 24),
+    drawText(truncateToWidth(portalUrl, m_fontTitle ? m_fontTitle : m_fontLarge,
+                             urlBoxW - 24),
              urlBoxX + urlBoxW / 2, textY + 18, {0, 180, 216, 255},
              m_fontTitle ? m_fontTitle : m_fontLarge, true);
 
@@ -5833,8 +5942,9 @@ void UIManager::renderSystemTab() {
 void UIManager::renderDiagnosticsState() {
   // Background + Header chuẩn (giống Settings/IPTV/YouTube/Explorer)
   // Bỏ custom sub-header strip cũ (Y=64..112 + line + title thủ công) để
-  // đồng bộ giao diện hệ thống. drawAppHeader tự render: FOOTER_BG bar (Y=0..64) +
-  // separator line + title ACCENT_CYAN + cum status Wi-Fi/pin/clock bên phải.
+  // đồng bộ giao diện hệ thống. drawAppHeader tự render: FOOTER_BG bar
+  // (Y=0..64) + separator line + title ACCENT_CYAN + cum status Wi-Fi/pin/clock
+  // bên phải.
   drawAppBackground();
   drawAppHeader(UiStrings::HEADER_DIAG);
 
@@ -6286,8 +6396,8 @@ void UIManager::renderReverseSyncState() {
         int rsnY = contentY + 205;
         while (std::getline(rsnStream, rsnLine) && rsnY < contentY + 320) {
           drawText(truncateToWidth(rsnLine, m_fontSmall, 700),
-                   cardX + cardW / 2, rsnY, {200, 210, 225, 255},
-                   m_fontSmall, true);
+                   cardX + cardW / 2, rsnY, {200, 210, 225, 255}, m_fontSmall,
+                   true);
           rsnY += 26;
         }
       }
@@ -6444,13 +6554,11 @@ void UIManager::renderOTAUpdateState() {
     // RC-Web: gói trình duyệt riêng — hiện dòng version + nút X khi có mới.
     if (UpdateManager::instance().isRcWebUpdateAvailable()) {
       auto rcInfo = UpdateManager::instance().getLatestInfo();
-      std::string rcCur =
-          UpdateManager::instance().getInstalledRcWebVersion();
-      std::string rcRow =
-          std::string(UiStrings::OTA_RCWEB_ROW_PREFIX) +
-          (rcCur.empty() ? UiStrings::OTA_RCWEB_NOT_INSTALLED
-                         : (std::string("v") + rcCur)) +
-          " -> v" + rcInfo.rcWebVersion;
+      std::string rcCur = UpdateManager::instance().getInstalledRcWebVersion();
+      std::string rcRow = std::string(UiStrings::OTA_RCWEB_ROW_PREFIX) +
+                          (rcCur.empty() ? UiStrings::OTA_RCWEB_NOT_INSTALLED
+                                         : (std::string("v") + rcCur)) +
+                          " -> v" + rcInfo.rcWebVersion;
       drawText(rcRow, 512, contentBoxY + 318, {0, 180, 216, 255}, m_fontSmall,
                true);
       drawText(UiStrings::OTA_RCWEB_BTN, 512, contentBoxY + 342,
@@ -6481,13 +6589,11 @@ void UIManager::renderOTAUpdateState() {
     // RC-Web: như tab ĐÃ MỚI NHẤT (dòng version + nút X khi có mới).
     if (UpdateManager::instance().isRcWebUpdateAvailable()) {
       auto rcInfo = UpdateManager::instance().getLatestInfo();
-      std::string rcCur =
-          UpdateManager::instance().getInstalledRcWebVersion();
-      std::string rcRow =
-          std::string(UiStrings::OTA_RCWEB_ROW_PREFIX) +
-          (rcCur.empty() ? UiStrings::OTA_RCWEB_NOT_INSTALLED
-                         : (std::string("v") + rcCur)) +
-          " -> v" + rcInfo.rcWebVersion;
+      std::string rcCur = UpdateManager::instance().getInstalledRcWebVersion();
+      std::string rcRow = std::string(UiStrings::OTA_RCWEB_ROW_PREFIX) +
+                          (rcCur.empty() ? UiStrings::OTA_RCWEB_NOT_INSTALLED
+                                         : (std::string("v") + rcCur)) +
+                          " -> v" + rcInfo.rcWebVersion;
       drawText(rcRow, 512, contentBoxY + 322, {0, 180, 216, 255}, m_fontSmall,
                true);
       drawText(UiStrings::OTA_RCWEB_BTN, 512, contentBoxY + 344,
@@ -7457,7 +7563,8 @@ void UIManager::renderIPTVSearchState() {
                    {UiTheme::PadBtn::Y, "Xóa"},
                    {UiTheme::PadBtn::L1, "Hoa"},
                    {UiTheme::PadBtn::R1, "ABC/123"},
-                   {UiTheme::PadBtn::SELECT, m_iptvVk.telexMode ? "Telex: Bật" : "Telex: Tắt"},
+                   {UiTheme::PadBtn::SELECT,
+                    m_iptvVk.telexMode ? "Telex: Bật" : "Telex: Tắt"},
                    {UiTheme::PadBtn::START, "Tìm kênh"}});
   }
 }
@@ -7611,7 +7718,7 @@ void UIManager::render() {
     // P0: Screensaver render fullscreen, không header/footer
     m_saver.render();
     SDL_RenderPresent(m_renderer);
-    return;  // bỏ qua footer/toast
+    return; // bỏ qua footer/toast
   default:
     break;
   }
@@ -7631,12 +7738,14 @@ static std::string rcWebUiMode() {
   // Nội dung cờ lớp phụ của web: "" = không lớp nào, "kb"/"pointer" =
   // đang mở. File do launch.sh xóa đầu/cuối phiên nên không bao giờ
   // sót qua phiên khác (xem launch.sh L00/L12).
-  FILE* f = fopen("/tmp/rc-web-ui-mode", "r");
-  if (!f) return "";
+  FILE *f = fopen("/tmp/rc-web-ui-mode", "r");
+  if (!f)
+    return "";
   char buf[16] = {0};
   size_t n = fread(buf, 1, sizeof(buf) - 1, f);
   fclose(f);
-  if (n == 0 || buf[0] == '\n') return "";
+  if (n == 0 || buf[0] == '\n')
+    return "";
   return std::string(buf);
 }
 static bool rcWebUiModeOpen() { return !rcWebUiMode().empty(); }
@@ -7657,14 +7766,16 @@ static int s_chromeLayerBCount = 0;
 // thoát về menu thay vì kẹt (chỉ trên Linux; đọc không được thì thôi).
 static uint32_t s_chromeMemPollMs = 0;
 static int s_chromeMemLowCount = 0;
-static constexpr long kChromeMemLowKb = 30720;  // <30MB coi như sắp thrash
+static constexpr long kChromeMemLowKb = 30720; // <30MB coi như sắp thrash
 static long chromeMemAvailableKb() {
-  FILE* f = fopen("/proc/meminfo", "r");
-  if (!f) return -1;
+  FILE *f = fopen("/proc/meminfo", "r");
+  if (!f)
+    return -1;
   char line[128];
   long avail = -1;
   while (fgets(line, sizeof(line), f)) {
-    if (sscanf(line, "MemAvailable: %ld kB", &avail) == 1) break;
+    if (sscanf(line, "MemAvailable: %ld kB", &avail) == 1)
+      break;
   }
   fclose(f);
   return avail;
@@ -7680,11 +7791,11 @@ void UIManager::handleChromeInput() {
   // Phiên RC-Web (weston takeover toàn màn hình): RomCloud supervise +
   // deep-link. Nút trong trang do mapping gptokeyb của gói rc-web (của
   // RomCloud) đảm nhiệm; RomCloud chỉ giữ B thoát (theo tầng).
-  auto& bridge = ChromeBridge::instance();
-  auto& input = InputManager::instance();
+  auto &bridge = ChromeBridge::instance();
+  auto &input = InputManager::instance();
   if (bridge.pollExited() || !bridge.isRunning()) {
     showToast("Chrome đã thoát", {150, 160, 175, 255}, 1500);
-    bridge.stop();  // quét xác theo tên (weston sót sẽ vẽ chồng fb0)
+    bridge.stop(); // quét xác theo tên (weston sót sẽ vẽ chồng fb0)
     goBack();
     return;
   }
@@ -7725,7 +7836,7 @@ void UIManager::handleChromeInput() {
         s_chromeLayerMode = mode;
         s_chromeLayerBCount = 1;
       }
-      s_chromeLayerBMs = SDL_GetTicks();  // nuốt B này, chờ Electron đóng lớp
+      s_chromeLayerBMs = SDL_GetTicks(); // nuốt B này, chờ Electron đóng lớp
     } else if (SDL_GetTicks() - s_chromeLayerBMs < kChromeLayerBDebounceMs) {
       // B vừa đóng lớp phụ xong (tay giữ lâu/repeat): bỏ qua, chưa thoát.
       s_chromeLayerMode.clear();
@@ -7733,7 +7844,7 @@ void UIManager::handleChromeInput() {
     } else {
       s_chromeLayerMode.clear();
       s_chromeLayerBCount = 0;
-      bridge.stop();  // trap cleanup của launcher dọn weston/electron/gptokeyb
+      bridge.stop(); // trap cleanup của launcher dọn weston/electron/gptokeyb
       goBack();
       return;
     }
@@ -7772,9 +7883,9 @@ void UIManager::handleChromeInput() {
       s_chromeHbMs = nowHb;
       bool sock = (access("/tmp/rc-web-run/wayland-1", F_OK) == 0);
       Logger::info(std::string("[WEBTRACE] BHB ready=") +
-                   (bridge.isReady() ? "1" : "0") + " failed=" +
-                   (bridge.failed() ? "1" : "0") + " socket=" +
-                   (sock ? "1" : "0") + " ui=" + rcWebUiMode());
+                   (bridge.isReady() ? "1" : "0") +
+                   " failed=" + (bridge.failed() ? "1" : "0") +
+                   " socket=" + (sock ? "1" : "0") + " ui=" + rcWebUiMode());
     }
   }
 }
@@ -7786,21 +7897,24 @@ void UIManager::renderChromeState() {
   // Vẽ đè sau thời điểm này là nguyên nhân "freeze ở UI RomCloud" dù
   // backend khỏe (weston idle khi trang tĩnh, không present lại để đè).
   // Latch chống isReady chập chờn; reset khi phiên kết thúc.
-  auto& bridge = ChromeBridge::instance();
+  auto &bridge = ChromeBridge::instance();
   if (!bridge.isRunning()) {
     s_chromeReadyLatched = false;
     s_chromeBootStartMs = 0;
-    return;  // update() sắp goBack, không vẽ
+    return; // update() sắp goBack, không vẽ
   }
   if (bridge.isReady()) {
     s_chromeReadyLatched = true;
     return;
   }
-  if (s_chromeReadyLatched) return;
-  if (access("/tmp/rc-web-run/wayland-1", F_OK) == 0) return;
-  if (s_chromeBootStartMs == 0) s_chromeBootStartMs = SDL_GetTicks();
+  if (s_chromeReadyLatched)
+    return;
+  if (access("/tmp/rc-web-run/wayland-1", F_OK) == 0)
+    return;
+  if (s_chromeBootStartMs == 0)
+    s_chromeBootStartMs = SDL_GetTicks();
   uint32_t elapsed =
-      (SDL_GetTicks() - s_chromeBootStartMs + 500) / 1000;  // làm tròn giây
+      (SDL_GetTicks() - s_chromeBootStartMs + 500) / 1000; // làm tròn giây
 
   SDL_SetRenderDrawColor(m_renderer, UiTheme::BG_APP.r, UiTheme::BG_APP.g,
                          UiTheme::BG_APP.b, 255);
@@ -7809,14 +7923,15 @@ void UIManager::renderChromeState() {
   const int pw = 560, ph = 220, px = (1024 - pw) / 2, py = (768 - ph) / 2;
   drawRect(px, py, pw, ph, {18, 22, 32, 255}, true);
   drawRect(px, py, pw, ph, {0, 180, 255, 255}, false);
-  TTF_Font* titleF = m_fontLarge ? m_fontLarge : m_fontMedium;
-  TTF_Font* rowF = m_fontMedium ? m_fontMedium : m_fontSmall;
+  TTF_Font *titleF = m_fontLarge ? m_fontLarge : m_fontMedium;
+  TTF_Font *rowF = m_fontMedium ? m_fontMedium : m_fontSmall;
   if (titleF)
-    drawText("ĐANG MỞ TRÌNH DUYỆT", 512, py + 30, {0, 180, 255, 255},
-             titleF, true);
+    drawText("ĐANG MỞ TRÌNH DUYỆT", 512, py + 30, {0, 180, 255, 255}, titleF,
+             true);
   if (rowF) {
     char buf[64];
-    snprintf(buf, sizeof(buf), "Đang tải... %us / 30s", elapsed > 99 ? 99 : elapsed);
+    snprintf(buf, sizeof(buf), "Đang tải... %us / 30s",
+             elapsed > 99 ? 99 : elapsed);
     drawText(buf, 512, py + 100, {200, 205, 215, 255}, rowF, true);
     drawText("B: hủy", 512, py + 150, {130, 140, 155, 255},
              m_fontSmall ? m_fontSmall : rowF, true);
@@ -7989,9 +8104,9 @@ void UIManager::loadYouTubeWatched() {
   }
 }
 
-void UIManager::saveYouTubeWatched(const std::string& id,
-                                   const std::string& title,
-                                   const std::string& uploader) {
+void UIManager::saveYouTubeWatched(const std::string &id,
+                                   const std::string &title,
+                                   const std::string &uploader) {
   if (id.empty())
     return;
   // Đã có: đưa lên đầu, giữ title/uploader cũ nếu lần này rỗng.
@@ -8026,13 +8141,13 @@ void UIManager::persistYouTubeWatched() {
   std::ofstream file(appRoot + "/config/yt_watched.txt");
   if (!file.is_open())
     return;
-  for (const auto& w : m_ytWatched) {
+  for (const auto &w : m_ytWatched) {
     std::string t = w.title, u = w.uploader;
-    for (char& c : t) {
+    for (char &c : t) {
       if (c == '|' || c == '\n' || c == '\r')
         c = ' ';
     }
-    for (char& c : u) {
+    for (char &c : u) {
       if (c == '|' || c == '\n' || c == '\r')
         c = ' ';
     }
@@ -8155,7 +8270,7 @@ std::vector<std::string> UIManager::runYouTubeSearch(const std::string &query,
 }
 
 std::string UIManager::resolveYouTubeStreamUrl(const std::string &videoId,
-                                                 const std::string &quality) {
+                                               const std::string &quality) {
   if (videoId.empty())
     return "";
   std::string key = videoId + "|" + quality;
@@ -8868,7 +8983,8 @@ void UIManager::renderYouTubeSearchState() {
                    {UiTheme::PadBtn::Y, "Xóa"},
                    {UiTheme::PadBtn::L1, "Hoa"},
                    {UiTheme::PadBtn::R1, "ABC/123"},
-                   {UiTheme::PadBtn::SELECT, m_ytVk.telexMode ? "Telex: Bật" : "Telex: Tắt"},
+                   {UiTheme::PadBtn::SELECT,
+                    m_ytVk.telexMode ? "Telex: Bật" : "Telex: Tắt"},
                    {UiTheme::PadBtn::START, "Tìm"},
                    {UiTheme::PadBtn::B, "Thoát"}});
   }
@@ -10256,9 +10372,8 @@ void UIManager::renderYouTubeHomeState() {
       if (m_ytWatchedIndex >= showN)
         m_ytWatchedIndex = showN - 1;
       for (int i = 0; i < showN; ++i) {
-        const auto& w = m_ytWatched[i];
-        bool focused =
-            (m_ytHomeRow == 2 && m_ytWatchedIndex == i);
+        const auto &w = m_ytWatched[i];
+        bool focused = (m_ytHomeRow == 2 && m_ytWatchedIndex == i);
         int rh = 62;
         if (focused) {
           drawRoundedRect(36, wy, 952, rh, UiTheme::RADIUS_ROW,
@@ -10266,15 +10381,15 @@ void UIManager::renderYouTubeHomeState() {
           drawRoundedBorder(36, wy, 952, rh, UiTheme::RADIUS_ROW,
                             UiTheme::ACCENT_CYAN, 2);
         } else {
-          drawRoundedRect(36, wy, 952, rh, UiTheme::RADIUS_ROW,
-                          UiTheme::ROW_BG, true);
+          drawRoundedRect(36, wy, 952, rh, UiTheme::RADIUS_ROW, UiTheme::ROW_BG,
+                          true);
         }
         std::string t = w.title.empty() ? w.id : w.title;
-        drawText(truncateToWidth(t, m_fontSmall, 900), 56,
-                 wy + 8, UiTheme::TEXT_MAIN, m_fontSmall, false);
+        drawText(truncateToWidth(t, m_fontSmall, 900), 56, wy + 8,
+                 UiTheme::TEXT_MAIN, m_fontSmall, false);
         if (!w.uploader.empty()) {
-          drawText(truncateToWidth(w.uploader, m_fontSmall, 900), 56,
-                   wy + 34, UiTheme::TEXT_FAINT, m_fontSmall, false);
+          drawText(truncateToWidth(w.uploader, m_fontSmall, 900), 56, wy + 34,
+                   UiTheme::TEXT_FAINT, m_fontSmall, false);
         }
         wy += rh + rowGap;
       }
@@ -10303,7 +10418,7 @@ void UIManager::renderYouTubeHomeState() {
     if (nowMs - s_thumbRetryMs > 4000 && !m_thumbTask.isRunning() &&
         !m_ytSearchResults.empty()) {
       bool need = false;
-      for (const auto& item : m_ytSearchResults) {
+      for (const auto &item : m_ytSearchResults) {
         if (item.rfind("CHANNEL|", 0) == 0)
           continue;
         std::string vid = item.substr(0, item.find('|'));
@@ -10319,7 +10434,7 @@ void UIManager::renderYouTubeHomeState() {
       if (need) {
         s_thumbRetryMs = nowMs;
         std::vector<std::string> vids;
-        for (const auto& item : m_ytSearchResults) {
+        for (const auto &item : m_ytSearchResults) {
           if (item.rfind("CHANNEL|", 0) == 0)
             continue;
           size_t pp = item.find('|');
@@ -10661,26 +10776,26 @@ void UIManager::renderYouTubeHomeChannelLayout(int contentTop, int contentH) {
   }
 }
 
-std::vector<std::string> UIManager::fetchSearchLines(
-    const std::string& query, int maxResults, const std::string& appRoot,
-    const std::string& params) {
+std::vector<std::string>
+UIManager::fetchSearchLines(const std::string &query, int maxResults,
+                            const std::string &appRoot,
+                            const std::string &params) {
   std::string escaped;
   for (char c : query) {
     if (c == '"' || c == '\\' || c == '$' || c == '`')
       escaped += '\\';
     escaped += c;
   }
-  std::string cmd = "if [ -x /mnt/SDCARD/System/bin/python3 ]; then "
-                    "LD_LIBRARY_PATH=/mnt/SDCARD/System/lib:$LD_LIBRARY_PATH "
-                    "SSL_CERT_FILE=/mnt/SDCARD/System/lib/python3.11/"
-                    "site-packages/pip/_vendor/certifi/cacert.pem "
-                    "/mnt/SDCARD/System/bin/python3 \"" +
-                    appRoot + "/scripts/youtube_search.py\" smart \"" +
-                    escaped + "\" " + std::to_string(maxResults) +
-                    "; else sh \"" + appRoot +
-                    "/scripts/youtube_search.sh\" search \"" + escaped +
-                    "\" 1 " + std::to_string(maxResults) +
-                    "; fi 2>/tmp/yt_search_err.log";
+  std::string cmd =
+      "if [ -x /mnt/SDCARD/System/bin/python3 ]; then "
+      "LD_LIBRARY_PATH=/mnt/SDCARD/System/lib:$LD_LIBRARY_PATH "
+      "SSL_CERT_FILE=/mnt/SDCARD/System/lib/python3.11/"
+      "site-packages/pip/_vendor/certifi/cacert.pem "
+      "/mnt/SDCARD/System/bin/python3 \"" +
+      appRoot + "/scripts/youtube_search.py\" smart \"" + escaped + "\" " +
+      std::to_string(maxResults) + "; else sh \"" + appRoot +
+      "/scripts/youtube_search.sh\" search \"" + escaped + "\" 1 " +
+      std::to_string(maxResults) + "; fi 2>/tmp/yt_search_err.log";
   // Innertube trước (~2-3s): thất bại mới xuống yt-dlp cũ (~7s).
   // Lưu ý: đường .sh không hiểu params (live/date) nên chỉ dùng params
   // khi innertube ăn; thất bại innertube + có params thì trả rỗng thay vì
@@ -10695,7 +10810,7 @@ std::vector<std::string> UIManager::fetchSearchLines(
   // chỉ ra video tạp nham -> trả rỗng để UI báo lỗi thật, không hiện sai.
   if (query.rfind("channel:", 0) == 0)
     return rawLines;
-  FILE* fp = popen(cmd.c_str(), "r");
+  FILE *fp = popen(cmd.c_str(), "r");
   if (!fp)
     return rawLines;
   char buf[2048];
@@ -10711,7 +10826,7 @@ std::vector<std::string> UIManager::fetchSearchLines(
 }
 
 void UIManager::runYouTubeHomeSearch(const std::string &query,
-                                        const std::string &params) {
+                                     const std::string &params) {
   if (query.empty())
     return;
   if (m_ytIsSearching)
@@ -10761,7 +10876,8 @@ void UIManager::runTagAction(int index) {
     openYouTubeHomeModal();
     return;
   }
-  std::string action = kYtCategories[index].action ? kYtCategories[index].action : "";
+  std::string action =
+      kYtCategories[index].action ? kYtCategories[index].action : "";
   m_ytKeyboardQuery.clear();
   m_ytVk.query.clear();
   m_ytLastSearchParams.clear();
@@ -10796,11 +10912,11 @@ void UIManager::runTagAction(int index) {
 void UIManager::showWatchedVideos() {
   loadYouTubeWatched();
   std::vector<std::string> rows;
-  for (const auto& w : m_ytWatched) {
+  for (const auto &w : m_ytWatched) {
     if (w.id.empty())
       continue;
-    rows.push_back(w.id + "|" + (w.title.empty() ? w.id : w.title) +
-                   "|0|" + w.uploader + "|0");
+    rows.push_back(w.id + "|" + (w.title.empty() ? w.id : w.title) + "|0|" +
+                   w.uploader + "|0");
     if (rows.size() >= 10)
       break;
   }
@@ -10821,12 +10937,15 @@ void UIManager::suggestFromHistory() {
   loadYouTubeWatched();
   // Gom tên kênh đã xem (tối đa 3, giữ thứ tự mới nhất).
   std::vector<std::string> channels;
-  for (const auto& w : m_ytWatched) {
+  for (const auto &w : m_ytWatched) {
     if (w.uploader.empty())
       continue;
     bool dup = false;
-    for (const auto& c : channels) {
-      if (c == w.uploader) { dup = true; break; }
+    for (const auto &c : channels) {
+      if (c == w.uploader) {
+        dup = true;
+        break;
+      }
     }
     if (!dup)
       channels.push_back(w.uploader);
@@ -10843,18 +10962,17 @@ void UIManager::suggestFromHistory() {
   showToast("Đang gợi ý theo kênh đã xem...", UiTheme::ACCENT_CYAN, 1500);
   m_ytSearchTask.run([this, channels](TaskProgress &) {
     std::vector<std::string> out;
-    for (const auto& ch : channels) {
+    for (const auto &ch : channels) {
       if (out.size() >= 18)
         break;
       // Tìm UC-id qua search tên kênh (hàng CHANNEL đầu tiên).
       auto lines = YoutubeInnertube::search(ch, 6);
       std::string cid;
-      for (const auto& l : lines) {
+      for (const auto &l : lines) {
         if (l.compare(0, 8, "CHANNEL|") == 0) {
           size_t p1 = l.find('|', 8);
-          size_t p2 = (p1 == std::string::npos)
-                          ? std::string::npos
-                          : l.find('|', p1 + 1);
+          size_t p2 = (p1 == std::string::npos) ? std::string::npos
+                                                : l.find('|', p1 + 1);
           if (p1 != std::string::npos && p2 != std::string::npos) {
             std::string id = l.substr(p1 + 1, p2 - p1 - 1);
             if (id.size() == 24 && id.compare(0, 2, "UC") == 0)
@@ -10866,11 +10984,11 @@ void UIManager::suggestFromHistory() {
       if (cid.empty())
         continue;
       auto vids = YoutubeInnertube::channelVideos(cid, 6);
-      for (const auto& v : vids) {
+      for (const auto &v : vids) {
         // Bo video da co (trung id).
         std::string vid = v.substr(0, v.find('|'));
         bool dup = false;
-        for (const auto& e : out) {
+        for (const auto &e : out) {
           if (e.size() > vid.size() && e.compare(0, vid.size(), vid) == 0 &&
               e[vid.size()] == '|') {
             dup = true;
@@ -10886,7 +11004,7 @@ void UIManager::suggestFromHistory() {
     if (out.empty()) {
       // Không có lịch sử/không gọi được: rớt về trending.
       auto fb = YoutubeInnertube::search("thinh hanh viet nam", 18);
-      for (const auto& l : fb) {
+      for (const auto &l : fb) {
         if (l.compare(0, 8, "CHANNEL|") != 0)
           out.push_back(l);
       }
@@ -10991,15 +11109,15 @@ void UIManager::applyYouTubeSearchResults(std::vector<std::string> results) {
   m_ytIsSearching = false;
   m_ytSearchFinished = true;
   // HOME về rỗng: báo rõ thay vì để trắng (feed/API lỗi câm trước đây).
-  if (m_ytAllCachedResults.empty() &&
-      m_currentState == UIState::YOUTUBE_HOME) {
+  if (m_ytAllCachedResults.empty() && m_currentState == UIState::YOUTUBE_HOME) {
     showToast("Không tải được nội dung. Kiểm tra mạng.", {245, 158, 11, 255},
               3500);
-    Logger::warn("[YouTube] HOME empty results, query='" +
-                 m_ytLastSearchQuery + "'");
+    Logger::warn("[YouTube] HOME empty results, query='" + m_ytLastSearchQuery +
+                 "'");
   }
   // Tải trước URL video đầu lúc rảnh: bấm A là phát ngay.
-  if (!vids.empty()) preloadYouTubeStreamUrl(vids[0]);
+  if (!vids.empty())
+    preloadYouTubeStreamUrl(vids[0]);
 #ifdef __GLIBC__
   malloc_trim(0);
 #endif

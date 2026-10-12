@@ -452,7 +452,7 @@ private:
   bool handleFolderPickerInput();
   bool handleExplorerBrowser();
   // Default landing page for WEB menu.
-  std::string m_browserUrl = "https://vnexpress.net";
+  std::string m_browserUrl = "https://www.google.com/";
   void syncExplorerDialogs();
   // Action dùng chung cho phím tắt (Y/X/MENU) và popup menu (A trên file)
   void expCopyCurrent();
@@ -824,8 +824,8 @@ private:
   int badgeDualWidth(const std::string &label1, const std::string &label2,
                      int h);
   // Chip/button/badge tron mem (phuong an A: pill full-round h/2)
-  void drawPill(int x, int y, int w, int h, const std::string &text,
-                bool active, TTF_Font *font = nullptr);
+  int drawPill(int x, int y, int w, int h, const std::string &text,
+               bool active, TTF_Font *font = nullptr);
   // Row list chuan (game/channel/file/cai dat...)
   // Y căn giữa dọc chuẩn cho 1 dòng text trong box h (dùng FontHeight)
   int textYCentered(int y, int h, TTF_Font *font);

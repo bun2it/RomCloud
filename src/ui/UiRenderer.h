@@ -68,7 +68,9 @@ public:
     int badgeDualWidth(const std::string& label1, const std::string& label2, int h);
 
     // widget
-    void drawPill(int x, int y, int w, int h, const std::string& text,
+    // Vẽ pill: text dài quá thì xuống 2 hàng, pill giãn cao bọc hết.
+    // Trả về chiều cao đã vẽ (h hoặc cao hơn) để caller xếp hàng tiếp.
+    int drawPill(int x, int y, int w, int h, const std::string& text,
                   bool active, TTF_Font* font = nullptr);
     int textYCentered(int y, int h, TTF_Font* font);
     void drawRowMainSub(int x, int y, int h, const std::string& main, TTF_Font* fMain,

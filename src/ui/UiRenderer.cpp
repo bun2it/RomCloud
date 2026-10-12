@@ -762,21 +762,72 @@ int UiRenderer::badgeDualWidth(const std::string &label1,
   return total + 24;
 }
 
-void UiRenderer::drawPill(int x, int y, int w, int h, const std::string &text,
+int UiRenderer::drawPill(int x, int y, int w, int h, const std::string &text,
                           bool active, TTF_Font *font) {
   TTF_Font *f = font ? font : m_fSmall;
   int rad = h / 2;
   SDL_Color bg = active ? UiTheme::PILL_BG_ACTIVE : UiTheme::PILL_BG;
-  drawRoundedRect(x, y, w, h, rad, bg, true);
-  if (active)
-    drawRoundedBorder(x, y, w, h, rad, UiTheme::FOCUS_GLOW, 1);
-  else
+  if (!f) {
+    drawRoundedRect(x, y, w, h, rad, bg, true);
     drawRoundedBorder(x, y, w, h, rad, UiTheme::PILL_BORDER, 1);
-  if (!f)
-    return;
+    return h;
+  }
+  // Text dai hon pill: tach 2 hang theo tu (khong cat giua tu/UTF-8),
+  // pill gian cao boc ca 2 hang. 1 tu don qua dai thi truncate hang 2.
+  int padX = UiTheme::PILL_PAD_X * 2;
+  int avail = w - padX;
+  std::string line1 = text, line2;
+  if (avail > 0 && textWidth(text, f) > avail) {
+    // Greedy theo tu (space la ASCII nen khong cat giua UTF-8).
+    size_t pos = 0;
+    std::string cur;
+    while (pos < text.size()) {
+      size_t sp = text.find(' ', pos);
+      std::string word = (sp == std::string::npos) ? text.substr(pos)
+                                                   : text.substr(pos, sp - pos);
+      std::string trial = cur.empty() ? word : (cur + " " + word);
+      if (textWidth(trial, f) <= avail) {
+        cur = trial;
+        pos = (sp == std::string::npos) ? text.size() : sp + 1;
+      } else {
+        break;
+      }
+    }
+    if (!cur.empty() && pos < text.size()) {
+      line1 = cur;
+      line2 = text.substr(pos);
+      if (!line2.empty() && textWidth(line2, f) > avail)
+        line2 = truncateToWidth(line2, f, avail);
+    } else if (cur.empty()) {
+      // 1 tu don da tran: truncate hang 1, khong mo hang 2 vo nghia.
+      line1 = truncateToWidth(text, f, avail);
+    } else {
+      line1 = cur; // vua khit 1 hang
+    }
+  }
+  if (line2.empty()) {
+    drawRoundedRect(x, y, w, h, rad, bg, true);
+    if (active)
+      drawRoundedBorder(x, y, w, h, rad, UiTheme::FOCUS_GLOW, 1);
+    else
+      drawRoundedBorder(x, y, w, h, rad, UiTheme::PILL_BORDER, 1);
+    SDL_Color fg = active ? UiTheme::TEXT_MAIN : UiTheme::PILL_TEXT_DIM;
+    std::string disp = truncateToWidth(line1, f, avail > 0 ? avail : w);
+    drawText(disp, x + w / 2, textYCentered(y, h, f), fg, f, true);
+    return h;
+  }
+  int lineH = TTF_FontHeight(f);
+  int h2 = h + lineH + 6;
+  drawRoundedRect(x, y, w, h2, rad, bg, true);
+  if (active)
+    drawRoundedBorder(x, y, w, h2, rad, UiTheme::FOCUS_GLOW, 1);
+  else
+    drawRoundedBorder(x, y, w, h2, rad, UiTheme::PILL_BORDER, 1);
   SDL_Color fg = active ? UiTheme::TEXT_MAIN : UiTheme::PILL_TEXT_DIM;
-  std::string disp = truncateToWidth(text, f, w - UiTheme::PILL_PAD_X * 2);
-  drawText(disp, x + w / 2, textYCentered(y, h, f), fg, f, true);
+  int y1 = y + (h2 - (lineH * 2 + 4)) / 2;
+  drawText(truncateToWidth(line1, f, avail), x + w / 2, y1, fg, f, true);
+  drawText(line2, x + w / 2, y1 + lineH + 4, fg, f, true);
+  return h2;
 }
 
 int UiRenderer::textYCentered(int y, int h, TTF_Font *font) {
