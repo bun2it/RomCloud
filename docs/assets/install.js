@@ -2,6 +2,13 @@
 // Luồng: kết nối máy -> tải zip release mới nhất -> đẩy vào thẻ ->
 // bung ra /mnt/SDCARD/Apps -> chmod -> sync. User chỉ bấm 2 nút.
 // Hỗ trợ 2 app qua ?app=romcloud|brickdrop (mặc định romcloud).
+//
+// Quy tắc gesture của WebUSB (quan trọng):
+// - requestDevice() (hộp chọn máy) CHỈ được gọi trong gesture của click.
+//   Gọi lại ở lần thử sau (sau await/sleep) là chết chắc với lỗi
+//   "Must be handling a user gesture".
+// - Vì vậy: chọn máy ĐÚNG 1 lần, giữ lại USBDevice; các lần thử sau chỉ
+//   open/claim/handshake lại trên cùng handle (không cần gesture mới).
 var APP_INSTALL = {
   romcloud: {
     label: "RomCloud",
@@ -83,48 +90,94 @@ async function shell(cmd) {
   if (home) home.href = "./";
 })();
 
+// Thử mở + claim + handshake adb trên device ĐÃ CHỌN (không gọi
+// requestDevice nên không cần gesture mới). Trả true khi xong.
+async function tryConnect(device, attempt) {
+  try {
+    if (attempt > 1) {
+      log("Thử lại claim/kết nối lần " + attempt + "/3 (giữ nguyên máy đã chọn)...");
+      try { await device.reset(); } catch (e) {} // gỡ trạng thái kẹt, nếu được
+    }
+    try { if (device.opened) await device.close(); } catch (e) {}
+    await device.open();
+    webusb = new Adb.WebUSB.Transport(device);
+    log("Đang kết nối adb (duyệt Cho phép trên máy nếu hỏi)...");
+    adb = await webusb.connectAdb("host::", function () {
+      log("Hãy bấm Cho phép / OK trên màn hình máy Brick.");
+    });
+    var model = "?";
+    try { model = (await shell("getprop ro.product.model")).trim() || "?"; } catch (e) {}
+    devInfo.innerHTML = "Đã kết nối: <b>" + model.replace(/</g, "&lt;") + "</b>";
+    log("Đã kết nối máy: " + model, "ok");
+    btnInstall.disabled = false;
+    return true;
+  } catch (e) {
+    var msg = (e && e.message ? e.message : String(e));
+    if (/user gesture/i.test(msg)) {
+      // Không bao giờ tới đây với handle cũ, nhưng chặn để vòng ngoài
+      // dừng ngay thay vì loop vô ích.
+      log("Trình duyệt hết gesture — bấm nút Kết nối lại.", "err");
+      throw e;
+    }
+    if (/claimInterface/i.test(msg)) {
+      log("Lần " + attempt + " chưa được (cổng đang bị giữ — đã thử gỡ rồi claim lại): " + msg, "err");
+    } else {
+      log("Lần " + attempt + " chưa được: " + msg, "err");
+    }
+    webusb = null;
+    adb = null;
+    try { if (device.opened) await device.close(); } catch (e2) {}
+    return false;
+  }
+}
+
 btnConn.onclick = async function () {
   btnConn.disabled = true;
-  var ok = false;
-  // Tự thử lại 3 lần: dọn handle cũ + mở lại (chọn đúng máy nếu chọn nhầm).
-  for (var attempt = 1; attempt <= 3 && !ok; attempt++) {
-    try {
-      if (!("usb" in navigator)) {
-        log("Trình duyệt này không hỗ trợ WebUSB. Hãy dùng Chrome/Edge.", "err");
-        break;
-      }
-      if (typeof Adb === "undefined") {
-        log("Chưa tải được thư viện webadb (mất mạng?). Tải lại trang.", "err");
-        break;
-      }
-      await closeStale();
-      if (attempt > 1) {
-        log("Tự thử lại lần " + attempt + "/3...");
-        await sleep(1500);
-      } else {
-        log("Đang mở chọn thiết bị...");
-      }
-      webusb = await Adb.open("WebUSB");
-      log("Đang kết nối adb (duyệt trên máy nếu hỏi)...");
-      adb = await webusb.connectAdb("host::", function () {
-        log("Hãy bấm Cho phép / OK trên màn hình máy Brick.");
-      });
-      var model = "?";
-      try { model = (await shell("getprop ro.product.model")).trim() || "?"; } catch (e) {}
-      devInfo.innerHTML = "Đã kết nối: <b>" + model.replace(/</g, "&lt;") + "</b>";
-      log("Đã kết nối máy: " + model, "ok");
-      btnInstall.disabled = false;
-      ok = true;
-    } catch (e) {
-      var msg = (e && e.message ? e.message : String(e));
-      log("Lần " + attempt + " chưa được: " + msg, "err");
-      await closeStale();
+  if (!("usb" in navigator)) {
+    log("Trình duyệt này không hỗ trợ WebUSB. Hãy dùng Chrome/Edge.", "err");
+    btnConn.disabled = false;
+    return;
+  }
+  if (typeof Adb === "undefined") {
+    log("Chưa tải được thư viện webadb (mất mạng?). Tải lại trang.", "err");
+    btnConn.disabled = false;
+    return;
+  }
+  // Lần 1: mở hộp chọn thiết bị — BẮT BUỘC nằm trong gesture của click này.
+  await closeStale();
+  var picked = null;
+  try {
+    log("Đang mở chọn thiết bị...");
+    var t0 = await Adb.open("WebUSB");
+    picked = t0.device;
+  } catch (e) {
+    var m0 = (e && e.message ? e.message : String(e));
+    if (/No device selected|not found/i.test(m0)) {
+      log("Bạn chưa chọn thiết bị nào — bấm Kết nối rồi chọn máy Brick.", "err");
+    } else if (/user gesture/i.test(m0)) {
+      log("Trình duyệt chặn hộp chọn (hết gesture) — bấm nút Kết nối lại.", "err");
+    } else {
+      log("Không mở được hộp chọn thiết bị: " + m0, "err");
     }
+    btnConn.disabled = false;
+    return;
+  }
+  // Thử claim + handshake trên CÙNG handle đã chọn (không cần gesture thêm).
+  var ok = false;
+  try {
+    for (var attempt = 1; attempt <= 3 && !ok; attempt++) {
+      ok = await tryConnect(picked, attempt);
+      if (!ok && attempt < 3) await sleep(1500);
+    }
+  } catch (e) {
+    ok = false; // gesture: tryConnect đã log, dừng vòng thử
   }
   if (!ok) {
-    log("Đã tự thử 3 lần không được. Còn 1 khả năng duy nhất: phần mềm khác (adb/driver) trên laptop đang giữ cổng — tắt nó đi (vd Terminal: adb kill-server), rút cáp cắm lại rồi bấm Kết nối.", "err");
+    log("Đã tự thử 3 lần không được. Cổng USB đang bị phần mềm khác giữ (adb/driver trên laptop) — Terminal chạy: adb kill-server, rút cáp cắm lại rồi bấm Kết nối.", "err");
+    await closeStale();
     btnConn.disabled = false;
   }
+  // Thành công: giữ btnConn disabled như cũ, handle sống để cài tiếp.
 };
 
 btnInstall.onclick = async function () {
