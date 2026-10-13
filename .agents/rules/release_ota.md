@@ -61,6 +61,11 @@ Mọi agent làm release BẮT BUỘC tuân thủ các quy tắc dưới đây.
   (`ota_manifest_url`, `delta_zip_url`, `lite_zip_url`,
   `completion_zip_url`). Máy hiện tại tự suy URL theo quy ước khi thiếu,
   nhưng đó chỉ là fallback — đổi tên file là OTA gãy im lặng.
+- Bump version PHẢI gồm cả `os_versions` (STOCK_PS/NEXTUI/SPRUCE_OS):
+  code máy ưu tiên version theo OS (`checkForUpdatesSync` đọc key OS
+  trước, `JsonHelper` tìm thấy key lồng trong `os_versions`) — sự cố
+  v2.5.3: `version` đã 2.5.3 nhưng `os_versions` còn 2.5.2 nên máy báo
+  "đã mới nhất", bấm kiểm tra cũng im lặng.
 - Changelog trong `version.json` là nguồn feed release notes cho màn hình
   Cập nhật (trống thì máy hiện trống — không chế text giả).
 

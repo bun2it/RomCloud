@@ -11,9 +11,9 @@
   "rc_web_version": "20261011",
   "rc_web_url": "https://github.com/bun2it/RomCloud/releases/download/v2.5.0/rc-web-20261011.zip",
   "os_versions": {
-    "STOCK_PS": "2.5.2",
-    "NEXTUI": "2.5.2",
-    "SPRUCE_OS": "2.5.2"
+    "STOCK_PS": "2.5.3",
+    "NEXTUI": "2.5.3",
+    "SPRUCE_OS": "2.5.3"
   },
   "changelog": "1. Có playlist kênh mới là máy tự báo — bấm Y để tải.\n2. YouTube đúng nhãn chất lượng: 720p ra đúng 720p, thêm nấc 480p.\n3. Tinh chỉnh hiệu năng và sửa lỗi nhỏ."
 }
