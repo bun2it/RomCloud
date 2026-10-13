@@ -42,9 +42,9 @@ struct UpdateInfo {
     // OTA delta (v2.5.2+): chỉ tải file đổi thay vì cả build.
     std::string otaManifestUrl;   // ota-manifest.json của bản remote
     std::string manifestBaseVersion; // delta này build trên nền bản nào
-    std::string deltaZipUrl;      // RomCloud-vX-delta.zip (file đổi)
-    std::string liteZipUrl;       // RomCloud-vX-lite.zip (cho máy mới)
-    std::string completionZipUrl; // gói hoàn thiện lite -> full
+    std::string deltaZipUrl;      // ota-patch-vX.zip (file đổi)
+    std::string liteZipUrl;       // ota-core-vX.zip (cho máy mới)
+    std::string completionZipUrl; // ota-media-vX.zip: hoàn thiện core -> full
     std::string changelog;
     std::string releaseDate;
     uint64_t sizeBytes = 0;

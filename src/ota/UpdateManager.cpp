@@ -370,8 +370,10 @@ bool UpdateManager::checkForUpdatesSync(UpdateInfo &outInfo) {
   }
   outInfo.rcWebVersion = rcWebVer;
   outInfo.rcWebUrl = rcWebUrl;
-  // OTA delta (v2.5.2+): manifest + gói delta/lite/completion. Tự suy URL
+  // OTA delta (v2.5.2+): manifest + gói core/patch/media. Tự suy URL
   // theo quy ước khi manifest không ghi (giống fullZipUrl).
+  // Quy ước tên (từ v2.5.3): chỉ bản full mang tên RomCloud, file máy
+  // mang prefix ota- (ota-core/-patch/-media-vX.Y.Z.zip).
   std::string otaMfUrl = "";
   std::string deltaUrl = "";
   std::string liteUrl = "";
@@ -392,11 +394,11 @@ bool UpdateManager::checkForUpdatesSync(UpdateInfo &outInfo) {
   if (otaMfUrl.empty() && !remoteVer.empty())
     otaMfUrl = relBase + "ota-manifest.json";
   if (deltaUrl.empty() && !remoteVer.empty())
-    deltaUrl = relBase + "RomCloud-v" + remoteVer + "-delta.zip";
+    deltaUrl = relBase + "ota-patch-v" + remoteVer + ".zip";
   if (liteUrl.empty() && !remoteVer.empty())
-    liteUrl = relBase + "RomCloud-v" + remoteVer + "-lite.zip";
+    liteUrl = relBase + "ota-core-v" + remoteVer + ".zip";
   if (completionUrl.empty() && !remoteVer.empty())
-    completionUrl = relBase + "RomCloud-v" + remoteVer + "-completion.zip";
+    completionUrl = relBase + "ota-media-v" + remoteVer + ".zip";
   outInfo.otaManifestUrl = otaMfUrl;
   outInfo.deltaZipUrl = deltaUrl;
   outInfo.liteZipUrl = liteUrl;
@@ -1140,8 +1142,7 @@ void UpdateManager::ensureCompleted() {
                 mfVer == ver) {
                 std::string zipPath = appRoot + "/ota_completion.zip";
                 uint64_t dlSize = 0;
-                if (downloadFile(base + "RomCloud-v" + ver +
-                                     "-completion.zip",
+                if (downloadFile(base + "ota-media-v" + ver + ".zip",
                                  zipPath, &dlSize, true) &&
                     dlSize >= 10240 &&
                     applyOtaPackage(zipPath, entries)) {

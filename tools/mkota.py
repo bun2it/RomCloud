@@ -5,8 +5,18 @@
 #   mkota.py manifest <TREE> <VERSION> [DELTA_BASE]
 #       -> in ota-manifest.json ra stdout (TREE = thư mục app, vd staging/Apps/RomCloud)
 #   mkota.py release <STAGING> <VERSION> <BASE_MANIFEST> <OUT_DIR>
-#       -> OUT_DIR/RomCloud-v*-{lite,completion,delta}.zip + ota-manifest.json
+#       -> OUT_DIR/ota-{core,media,patch}-v*.zip + ota-manifest.json
 #       + in hashes + fragment version.json.
+#
+# Quy ước đặt tên (từ v2.5.3): CHỈ bản full cài-chạy-OTA được mới mang tên
+# RomCloud (RomCloud-vX.Y.Z.zip). File máy (linh kiện OTA, user không tải
+# tay) mang prefix ota- để nhìn là biết không phải bản cài:
+#   ota-core-vX.Y.Z.zip   (= lite cũ: full trừ cụm media/dat)
+#   ota-media-vX.Y.Z.zip  (= completion cũ: phần media/dat vá cho máy core)
+#   ota-patch-vX.Y.Z.zip  (= delta cũ: file đổi so baseline)
+# (v2.5.2 trở về trước dùng tên cũ RomCloud-v*-{lite,completion,delta}.zip;
+#  code máy đọc URL tường minh trong version.json trước, suy tên mới khi
+#  thiếu, nên vẫn tương thích.)
 #
 # Quy ước (khớp UpdateManager.cpp):
 # - manifest: {"version": X, "delta_base": <bản nền cho delta>, "files": [{"path","sha256","size"}]}
@@ -14,9 +24,9 @@
 #   baseline (không phục vụ máy, chỉ để diff).
 # - delta.zip/completion.zip/lite.zip layout trong: Apps/RomCloud/<relpath>
 #   (giống full-zip để tái dùng kịp swap).
-# - LITE = full trừ cụm media/dat (mpv/yt-dlp/ffmpeg/.dat): đủ chạy local,
+# - CORE = full trừ cụm media/dat (mpv/yt-dlp/ffmpeg/.dat): đủ chạy local,
 #   media lấy lazy theo cơ chế mpv_bundle có sẵn.
-# - completion = full trừ lite. delta = file đổi so baseline.
+# - MEDIA = full trừ CORE. PATCH = file đổi so baseline.
 # - File user (data/cache/log/dotfiles/rc-web/.ota_flavor) KHÔNG vào manifest.
 import hashlib
 import json
@@ -136,16 +146,16 @@ def cmd_release(argv):
                if base_map.get(p) != e["sha256"]]
     deleted = sorted(set(base_map) - set(new_map))
 
-    stem = "RomCloud-v%s" % version
-    lite_zip = os.path.join(out_dir, stem + "-lite.zip")
-    comp_zip = os.path.join(out_dir, stem + "-completion.zip")
-    delta_zip = os.path.join(out_dir, stem + "-delta.zip")
-    write_zip(lite_zip, tree, lite_rels, flavor="lite")
-    write_zip(comp_zip, tree, completion_rels)
+    stem = "ota-%s-v%s.zip"
+    core_zip = os.path.join(out_dir, stem % ("core", version))
+    media_zip = os.path.join(out_dir, stem % ("media", version))
+    patch_zip = os.path.join(out_dir, stem % ("patch", version))
+    write_zip(core_zip, tree, lite_rels, flavor="lite")
+    write_zip(media_zip, tree, completion_rels)
     # delta_base = version của baseline (máy phải đúng bản đó mới áp delta).
     mf["delta_base"] = base.get("version", "")
     if changed:
-        write_zip(delta_zip, tree, changed)
+        write_zip(patch_zip, tree, changed)
     else:
         print("WARNING: khong co file nao doi so baseline "
               "(delta rong)!", file=sys.stderr)
@@ -166,8 +176,8 @@ def cmd_release(argv):
     base_url = ("https://github.com/bun2it/RomCloud/releases/download/v%s/"
                 % version)
     frag = {}
-    for tag, zp in (("lite", lite_zip), ("completion", comp_zip),
-                    ("delta", delta_zip if changed else None)):
+    for tag, zp in (("lite", core_zip), ("completion", media_zip),
+                    ("delta", patch_zip if changed else None)):
         if zp is None or not os.path.exists(zp):
             continue
         h, s = digest(zp)
