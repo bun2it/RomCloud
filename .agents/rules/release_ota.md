@@ -53,8 +53,33 @@ Mọi agent làm release BẮT BUỘC tuân thủ các quy tắc dưới đây.
   `*_bundle_url`, `icon_url`) phải **tồn tại thật trên release** — verify
   bằng `gh release view <tag>` hoặc `curl -fI` từng URL trước khi publish.
   URL 404 (như `bundle-STOCK_PS.zip` của v2.3.0) là FAIL.
+- `version.json` BẮT BUỘC có đủ fragment OTA do `tools/mkota.py` in ra
+  (`ota_manifest_url`, `delta_zip_url`, `lite_zip_url`,
+  `completion_zip_url`). Máy hiện tại tự suy URL theo quy ước khi thiếu,
+  nhưng đó chỉ là fallback — đổi tên file là OTA gãy im lặng.
 - Changelog trong `version.json` là nguồn feed release notes cho màn hình
   Cập nhật (trống thì máy hiện trống — không chế text giả).
+
+## 3b. Release notes BẮT BUỘC có banner hướng dẫn tải (sự cố v2.5.2)
+
+- Bài học v2.5.2: `completion.zip` 22 lượt tải nhầm vì tên nghe như "bản đầy
+  đủ nhất" + to nhất (68.8MB > full 58.7MB), trong khi body release không
+  có 1 chữ hướng dẫn. Mọi release BẮT BUỘC mở đầu body bằng banner sau
+  (thay X.Y.Z + dung lượng thật từ `gh release view`):
+  ```markdown
+  > ⬇️ **TẢI FILE NÀO? — User mới / cài mới chỉ tải đúng 1 file:**
+  > **`RomCloud-vX.Y.Z.zip` (NN.N MB)** — bản đầy đủ, chép vào máy là chạy.
+  > 4 file còn lại do **máy tự tải khi bấm Cập nhật**, KHÔNG tải tay:
+  > | File | Để làm gì (máy tự dùng) |
+  > |---|---|
+  > | `RomCloud-vX.Y.Z-lite.zip` | Gói nhẹ cho máy tự cập nhật |
+  > | `RomCloud-vX.Y.Z-delta.zip` | Gói vá phần đổi cho máy tự cập nhật |
+  > | `RomCloud-vX.Y.Z-completion.zip` | ⚠️ KHÔNG phải bản đầy đủ! Chỉ là phần media vá cho máy lite |
+  > | `ota-manifest.json` | Danh sách file để máy tự kiểm tra cập nhật |
+  > Máy đang dùng bản cũ thì **không cần tải gì cả**: mở app → Cập nhật → máy tự lo.
+  ```
+- Không được đổi tên 4 file máy (`lite/delta/completion/manifest`) nếu chưa
+  sửa đồng thời `UpdateManager.cpp` (tự suy URL theo tên) + test máy thật.
 
 ## 4. Quy trình publish (đúng thứ tự)
 
@@ -62,7 +87,8 @@ Mọi agent làm release BẮT BUỘC tuân thủ các quy tắc dưới đây.
 2. `./package.sh` (ra `dist/RomCloud-vX.Y.Z.zip` duy nhất).
 3. Verify zip: `unzip -l`, đối chiếu file đổi (mục 2), check stripped.
 4. Gắn tag + tạo release **chỉ với 1 zip đó**.
-5. Update `version.json` trên main, verify từng URL (mục 3).
+5. Update `version.json` trên main (kèm đủ fragment OTA của `mkota.py`),
+   verify từng URL (mục 3); body release mở đầu bằng banner tải file (mục 3b).
 6. Test trên máy thật qua adb (`adb push`, mở app kiểm tra) trước khi
   báo user — đặc biệt các tính năng động tới file ngoài binary
   (YouTube, IPTV, icon mới, GameCast).
