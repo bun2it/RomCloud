@@ -136,7 +136,8 @@ cd "$SCRIPT_DIR"
 if [ -f bin/mpv ]; then
     cp bin/mpv "$STAGING_DIR/Apps/RomCloud/bin/"
     chmod +x "$STAGING_DIR/Apps/RomCloud/bin/mpv"
-fiif [ -f bin/yt-dlp-glibc ]; then
+fi
+if [ -f bin/yt-dlp-glibc ]; then
     cp bin/yt-dlp-glibc "$STAGING_DIR/Apps/RomCloud/bin/"
     chmod +x "$STAGING_DIR/Apps/RomCloud/bin/yt-dlp-glibc"
 fi

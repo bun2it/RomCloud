@@ -476,6 +476,8 @@ void UIManager::setState(UIState state) {
     openConfirmDeleteDialog();
   } else if (state == UIState::CONFIRM_BATCH_DELETE) {
     openConfirmBatchDeleteDialog();
+  } else if (state == UIState::CONFIRM_MOVE_SYSTEM) {
+    openConfirmMoveSystemDialog();
   }
 }
 
@@ -582,6 +584,11 @@ void UIManager::triggerManualSync() {
         break;
       RomIndexer::instance().scanSystem(sys, romsDir, nullptr);
       p.done = ++idx;
+    }
+    int renamed = BoxartScraper::instance().normalizeLocalTitles();
+    if (renamed > 0) {
+      showToast("Đã chuẩn hóa tên " + std::to_string(renamed) + " game.",
+                {34, 197, 94, 255}, 2500);
     }
     BoxartScraper::instance().startAutoScrapeSdCard(false);
     m_needLibraryRefresh = true;
@@ -697,6 +704,31 @@ void UIManager::update() {
         m_castStats.downscale.store(parseBool("downscale"));
         m_castStats.valid.store(true);
       }).detach();
+    }
+  }
+
+  // Boot: quét thẻ 1 lần để game chép tay hiện ngay (không cần bấm Đồng
+  // bộ). Nền, im lặng, chỉ quét local (không đụng Drive sync). Dùng chung
+  // m_indexTask nên bấm Đồng bộ tay lúc đang quét sẽ được báo bận, không
+  // quét chồng.
+  if (!m_bootScanDone) {
+    m_bootScanDone = true;
+    if (!isIndexing()) {
+      Logger::info("Boot rescan thu vien (game chep tay se hien)...");
+      m_indexTask.run([this](TaskProgress &p) {
+        std::string romsDir = AppConfig::instance().getRomsDir();
+        auto all = DatabaseManager::instance().getSystems(false);
+        p.total = all.empty() ? 1 : all.size();
+        p.done = 0;
+        uint64_t idx = 0;
+        for (const auto &sys : all) {
+          if (p.cancel.load())
+            break;
+          RomIndexer::instance().scanSystem(sys, romsDir, nullptr);
+          p.done = ++idx;
+        }
+        m_needLibraryRefresh = true;
+      });
     }
   }
 
@@ -1285,7 +1317,9 @@ void UIManager::update() {
           showToast("Đang kiểm tra ROM lạc trong " + sel.name + "...",
                     {0, 180, 216, 255}, 60000);
           std::thread([this, sel]() {
-            auto fixed = RomOrganizer::instance().fixSystemFolder(sel.code);
+            int unknownCount = 0;
+            auto fixed = RomOrganizer::instance().fixSystemFolder(
+                sel.code, "", &unknownCount);
             refreshSystems();
             int n = 0;
             for (const auto &it : fixed) {
@@ -1295,6 +1329,10 @@ void UIManager::update() {
             std::string msg =
                 (n > 0) ? ("Đã sửa " + std::to_string(n) + " ROM lạc chỗ.")
                         : "Không phát hiện ROM lạc trong thư mục này.";
+            if (unknownCount > 0) {
+              msg += " (" + std::to_string(unknownCount) +
+                     " file không nhận diện được, giữ nguyên)";
+            }
             showToast(msg, {34, 197, 94, 255}, 4000);
           }).detach();
         }
@@ -1309,6 +1347,20 @@ void UIManager::update() {
   case UIState::GAME_LIST: {
     int total = static_cast<int>(m_cachedGames.size());
     int pageSize = 6;
+
+    // 0. Menu ROM / picker hệ đích tab Thẻ nhớ đang mở thì route vào
+    // trước; kết quả kiểm tra ROM nền về thì xử lý (đổ vào dialog
+    // Chuyển hệ nếu lạc).
+    consumeGameCheckResult();
+    if (m_currentState != UIState::GAME_LIST) break;
+    if (m_sysPickerOpen) {
+      handleSysPickerInput();
+      break;
+    }
+    if (m_gameMenuOpen) {
+      handleGameMenuInput();
+      break;
+    }
 
     // 1. Phím B: LÙI - Luôn luôn hoạt động bất kể danh sách rỗng hay có game
     if (input.isButtonJustPressed(Button::B)) {
@@ -1338,34 +1390,10 @@ void UIManager::update() {
       break;
     }
 
-    // 3. Phím START: tab Thẻ nhớ = Sửa ROM trong folder hệ hiện tại
-    // (chỉ có nghĩa trên thẻ); tab Drive = Mở tìm kiếm (như cũ).
+    // 3. Phím START: tab Thẻ nhớ không dùng (Sửa ROM dọn qua menu A);
+    // tab Drive = Mở tìm kiếm (như cũ).
     if (input.isButtonJustPressed(Button::START)) {
-      if (m_libraryTab == LibraryTab::SDCARD && !m_multiSelectMode) {
-        if (RomOrganizer::instance().isBusy()) {
-          showToast("Đang sắp xếp, vui lòng chờ...", {245, 158, 11, 255}, 2000);
-        } else {
-          std::string sysCode = m_activeSystem.code;
-          std::string sysName = m_activeSystem.name;
-          showToast("Đang kiểm tra ROM lạc trong " + sysName + "...",
-                    {0, 180, 216, 255}, 60000);
-          std::thread([this, sysCode]() {
-            auto fixed = RomOrganizer::instance().fixSystemFolder(sysCode);
-            refreshSystems();
-            refreshGames();
-            int n = 0;
-            for (const auto &it : fixed) {
-              if (it.fixed)
-                ++n;
-            }
-            std::string msg =
-                (n > 0) ? ("Đã sửa " + std::to_string(n) + " ROM lạc chỗ.")
-                        : "Không phát hiện ROM lạc trong thư mục này.";
-            showToast(msg, {34, 197, 94, 255}, 4000);
-          }).detach();
-        }
-        break;
-      }
+      if (m_libraryTab == LibraryTab::SDCARD && !m_multiSelectMode) break;
       VirtualKeyboard::reset(m_searchVk, true);
       m_searchVk.charset = 1;
       m_searchVk.maxLen = 30;
@@ -1455,9 +1483,6 @@ void UIManager::update() {
           m_selectedGameIds.push_back(g.id);
           showToast("Đã chọn: " + g.title, {34, 197, 94, 255}, 1500);
         }
-      } else if (input.isButtonJustPressed(Button::X) &&
-                 !m_selectedGameIds.empty()) {
-        setState(UIState::CONFIRM_BATCH_DELETE);
       } else if ((input.isButtonJustPressed(Button::R2) ||
                   (m_libraryTab == LibraryTab::DRIVE &&
                    input.isButtonJustPressed(Button::A))) &&
@@ -1557,6 +1582,11 @@ void UIManager::update() {
         m_gameScrollOffset = std::min(std::max(0, total - pageSize),
                                       m_gameScrollOffset + pageSize);
       } else if (input.isButtonJustPressed(Button::A)) {
+        // Tab THẺ NHỚ: A mở menu ROM (Chơi / Chuyển hệ / Kiểm tra / Xóa).
+        if (m_libraryTab == LibraryTab::SDCARD) {
+          openGameMenu();
+          break;
+        }
         const auto &g = m_cachedGames[m_selectedGameIndex];
         if (g.localState == GameState::LOCAL &&
             FileSystemManager::instance().fileExists(g.localPath)) {
@@ -1622,10 +1652,7 @@ void UIManager::update() {
             showToast(UiStrings::TOAST_GAME_ONLY_ON_DRIVE, {245, 158, 11, 255});
           }
         } else {
-          // Tab THẺ NHỚ: Xóa ROM khỏi thẻ
-          if (g.localState == GameState::LOCAL) {
-            setState(UIState::CONFIRM_DELETE);
-          }
+          // Tab THẺ NHỚ: Xóa ROM qua menu A (X rảnh, không làm gì).
         }
       } else if (input.isButtonJustPressed(Button::Y)) {
         // Nhảy vần chữ cái
@@ -1676,6 +1703,18 @@ void UIManager::update() {
   }
 
   case UIState::CONFIRM_BATCH_DELETE: {
+    if (input.isButtonJustPressed(Button::A)) {
+      m_dialogs.confirm.confirm();
+      setState(UIState::GAME_LIST);
+    } else if (input.isButtonJustPressed(Button::B) ||
+               input.isButtonJustPressed(Button::X)) {
+      m_dialogs.confirm.cancel();
+      setState(UIState::GAME_LIST);
+    }
+    break;
+  }
+
+  case UIState::CONFIRM_MOVE_SYSTEM: {
     if (input.isButtonJustPressed(Button::A)) {
       m_dialogs.confirm.confirm();
       setState(UIState::GAME_LIST);
@@ -2078,6 +2117,10 @@ void UIManager::update() {
               if (s.filesSkipped > 0) {
                 msg += " (" + std::to_string(s.filesSkipped) +
                        " file không nhận diện được)";
+              }
+              if (s.duplicatesQuarantined > 0) {
+                msg += ", gom " + std::to_string(s.duplicatesQuarantined) +
+                       " file trung vao _TRUNG (giu 1 ban)";
               }
               if (!s.errors.empty()) {
                 msg += " — có " + std::to_string(s.errors.size()) + " lỗi";
@@ -4194,9 +4237,6 @@ void UIManager::renderFooter() {
       x = drawFooterHint("Y", "Chọn/Bỏ", x, barY, barH, fg, m_fontSmall,
                          iconSize, gap) +
           30;
-      x = drawFooterHint("X", "Xóa", x, barY, barH, red, m_fontSmall, iconSize,
-                         gap) +
-          30;
     } else {
       if (m_cachedGames.empty()) {
         x = drawFooterHint("B", "Lùi", x, barY, barH, fg, m_fontSmall, iconSize,
@@ -4215,14 +4255,15 @@ void UIManager::renderFooter() {
         }
         std::string aAction = (m_libraryTab == LibraryTab::DRIVE)
                                   ? (isLocal ? "Chơi" : "Tải")
-                                  : "Chơi";
+                                  : "Chọn";
         x = drawFooterHint("A", aAction, x, barY, barH, fg, m_fontSmall,
                            iconSize, gap) +
             30;
         x = drawFooterHint("B", "Lùi", x, barY, barH, fg, m_fontSmall, iconSize,
                            gap) +
             30;
-        if (isLocal) {
+        // Tab Drive: X xóa/hủy tải. Tab Thẻ nhớ: Xóa ROM qua menu A.
+        if (isLocal && m_libraryTab == LibraryTab::DRIVE) {
           x = drawFooterHint("X", "Xóa ROM", x, barY, barH, red, m_fontSmall,
                              iconSize, gap) +
               30;
@@ -4237,13 +4278,8 @@ void UIManager::renderFooter() {
       x = drawFooterHint("SELECT", "Lọc", x, barY, barH, fg, m_fontSmall,
                          iconSize, gap) +
           30;
-      // Tab Thẻ nhớ: START = Sửa ROM lạc trong folder hiện tại.
-      // Tab Drive: START = Tìm kiếm (như cũ).
-      if (m_libraryTab == LibraryTab::SDCARD) {
-        x = drawFooterHint("START", "Sửa ROM", x, barY, barH, cyan, m_fontSmall,
-                           iconSize, gap) +
-            30;
-      } else {
+      // Tab Drive: START = Tìm kiếm (như cũ). Tab Thẻ nhớ: START rảnh.
+      if (m_libraryTab != LibraryTab::SDCARD) {
         x = drawFooterHint("START", "Tìm", x, barY, barH, cyan, m_fontSmall,
                            iconSize, gap) +
             30;
@@ -4305,6 +4341,13 @@ void UIManager::renderFooter() {
              m_currentState == UIState::CONFIRM_BATCH_DELETE) {
     x = drawFooterHint("A", "Xóa", x, barY, barH, red, m_fontSmall, iconSize,
                        gap) +
+        30;
+    x = drawFooterHint("B", "Hủy", x, barY, barH, fg, m_fontSmall, iconSize,
+                       gap) +
+        30;
+  } else if (m_currentState == UIState::CONFIRM_MOVE_SYSTEM) {
+    x = drawFooterHint("A", "Chuyển", x, barY, barH, cyan, m_fontSmall,
+                       iconSize, gap) +
         30;
     x = drawFooterHint("B", "Hủy", x, barY, barH, fg, m_fontSmall, iconSize,
                        gap) +
@@ -5002,11 +5045,6 @@ void UIManager::renderGameListState() {
     int valMaxW = detailX + detailW - 16 - valX;
     int metaY = coverBoxY + coverBoxH + 16;
 
-    std::string title =
-        truncateToWidth(selGame->title, m_fontLarge, detailW - 48);
-    drawText(title, metaX, metaY, {255, 255, 255, 255}, m_fontLarge);
-
-    metaY += 34;
     drawText(UiStrings::DETAIL_SYS_LABEL, metaX, metaY, {140, 155, 175, 255},
              m_fontSmall);
     std::string sysVal =
@@ -5014,29 +5052,16 @@ void UIManager::renderGameListState() {
                         m_fontSmall, valMaxW);
     drawText(sysVal, valX, metaY, {0, 180, 216, 255}, m_fontSmall);
 
+    // Dung lượng: nhãn dài ("Dung lượng:") tràn vào giá trị khi chung
+    // hàng nên giá trị xuống hàng riêng.
     metaY += 28;
     drawText(UiStrings::DETAIL_SIZE_LABEL, metaX, metaY, {140, 155, 175, 255},
              m_fontSmall);
+    metaY += 24;
     std::string sizeVal = truncateToWidth(
         FileSystemManager::instance().formatBytes(selGame->sizeBytes),
-        m_fontSmall, valMaxW);
-    drawText(sizeVal, valX, metaY, {255, 255, 255, 255}, m_fontSmall);
-
-    metaY += 28;
-    drawText(UiStrings::DETAIL_LOCATION_LABEL, metaX, metaY,
-             {140, 155, 175, 255}, m_fontSmall);
-    if (m_libraryTab == LibraryTab::SDCARD ||
-        selGame->localState == GameState::LOCAL) {
-      std::string locVal =
-          truncateToWidth(std::string(UiStrings::GAME_LOCATION_SD_PREFIX) +
-                              m_activeSystem.romDir + ")",
-                          m_fontSmall, valMaxW);
-      drawText(locVal, valX, metaY, {34, 197, 94, 255}, m_fontSmall);
-    } else {
-      std::string locVal =
-          truncateToWidth(UiStrings::GAME_LOCATION_DRIVE, m_fontSmall, valMaxW);
-      drawText(locVal, valX, metaY, {0, 180, 216, 255}, m_fontSmall);
-    }
+        m_fontSmall, detailW - 48);
+    drawText(sizeVal, metaX, metaY, {255, 255, 255, 255}, m_fontSmall);
 
     metaY += 28;
     drawText("Drive:", metaX, metaY, {140, 155, 175, 255}, m_fontSmall);
@@ -5049,14 +5074,9 @@ void UIManager::renderGameListState() {
     // Action Status Pill & Live Progress
     metaY += 34;
     if (m_libraryTab == LibraryTab::SDCARD) {
-      int halfW = (detailW - 40) / 2;
-      std::string aSyncText = selGame->cloudFileId.empty() ? "[A] Sao lưu Drive"
-                                                           : "[A] Đồng bộ lại";
-      drawBadge(metaX, metaY, halfW, 46, aSyncText, {2, 132, 199, 255},
-                {255, 255, 255, 255});
-      drawBadge(metaX + 8 + halfW, metaY, halfW, 46,
-                UiStrings::BADGE_DELETE_BTN, UiTheme::ACCENT_RED,
-                UiTheme::TEXT_MAIN);
+      // Xóa ROM đi qua menu A (đã bỏ badge [X] XÓA cho gọn).
+      drawBadge(metaX, metaY, detailW - 32, 46, "[A] Tùy chọn",
+                {2, 132, 199, 255}, {255, 255, 255, 255});
     } else {
       // Tab DRIVE
       if (selGame->localState == GameState::LOCAL) {
@@ -5178,6 +5198,95 @@ void UIManager::openConfirmDeleteDialog() {
         refreshGames();
         showToast("Đã xóa \"" + gameTitle + "\" khỏi thẻ nhớ.",
                   {239, 68, 68, 255}, 3000);
+      },
+      true);
+}
+
+void UIManager::openConfirmMoveSystemDialog() {
+  const GameRecord* g = nullptr;
+  for (const auto& it : m_cachedGames) {
+    if (it.id == m_movePendingGameId) {
+      g = &it;
+      break;
+    }
+  }
+  if (!g || m_moveTargetDir.empty()) {
+    showToast("Không tìm thấy ROM cần dời.", {239, 68, 68, 255}, 2000);
+    setState(UIState::GAME_LIST);
+    return;
+  }
+  std::string fileLine =
+      std::string("File: ") + g->filename + " (" +
+      FileSystemManager::instance().formatBytes(g->sizeBytes) + ")";
+  std::string destLine = "Hệ hiện tại: " + m_activeSystem.name +
+                         "  ->  " + m_moveTargetSystem.name;
+  int64_t gameId = g->id;
+  std::string srcPath = g->localPath;
+  std::string title = g->title;
+  std::string oldCover = g->coverPath;
+  std::string oldCode = m_activeSystem.code;
+  SystemRecord targetSys = m_moveTargetSystem;
+  std::string targetDir = m_moveTargetDir;
+  m_dialogs.confirm.open(
+      "Chuyển ROM sang hệ khác?",
+      {title, fileLine, destLine},
+      [this, gameId, srcPath, title, oldCover, oldCode, targetSys,
+       targetDir]() {
+        if (RomOrganizer::instance().isBusy()) {
+          showToast("Đang sắp xếp, vui lòng chờ...", {245, 158, 11, 255},
+                    2000);
+          refreshGames();
+          return;
+        }
+        FileSystemManager::instance().createDirectoryRecursive(targetDir);
+        std::string name = srcPath.substr(srcPath.find_last_of('/') + 1);
+        std::string finalDst;
+        if (!RomOrganizer::instance().safeMoveFile(
+                srcPath, targetDir + "/" + name, finalDst)) {
+          showToast("Không dời được file!", {239, 68, 68, 255}, 2500);
+          refreshGames();
+          return;
+        }
+        // Dời luôn cover cache covers/<mã cũ>/ -> covers/<mã mới>/ nếu có.
+        std::string newCover;
+        if (!oldCover.empty() &&
+            FileSystemManager::instance().fileExists(oldCover)) {
+          std::string coverName =
+              oldCover.substr(oldCover.find_last_of('/') + 1);
+          std::string coverParent =
+              oldCover.substr(0, oldCover.find_last_of('/'));
+          std::string coverGrand =
+              (coverParent.find_last_of('/') == std::string::npos)
+                  ? ""
+                  : coverParent.substr(coverParent.find_last_of('/') + 1);
+          if (coverGrand == oldCode) {
+            std::string newCoverDir = AppConfig::instance().getCacheDir() +
+                                      "/covers/" + targetSys.code;
+            FileSystemManager::instance().createDirectoryRecursive(
+                newCoverDir);
+            std::string finalCover;
+            if (RomOrganizer::instance().safeMoveFile(
+                    oldCover, newCoverDir + "/" + coverName, finalCover)) {
+              newCover = finalCover;
+            }
+          }
+        }
+        if (!DatabaseManager::instance().moveGameToSystem(gameId,
+                                                          targetSys.id,
+                                                          finalDst, newCover)) {
+          showToast("Đã dời file nhưng lỗi DB, hãy quét lại thẻ.",
+                    {245, 158, 11, 255}, 3000);
+        } else {
+          showToast("Đã dời \"" + title + "\" sang " + targetSys.name + ".",
+                    {34, 197, 94, 255}, 3000);
+        }
+        refreshSystems();
+        refreshGames();
+        if (m_selectedGameIndex >= static_cast<int>(m_cachedGames.size())) {
+          m_selectedGameIndex =
+              std::max(0, static_cast<int>(m_cachedGames.size()) - 1);
+          m_gameScrollOffset = 0;
+        }
       },
       true);
 }
@@ -7761,6 +7870,8 @@ void UIManager::render() {
     break;
   case UIState::GAME_LIST:
     renderGameListState();
+    if (m_sysPickerOpen) renderSysPicker();
+    else if (m_gameMenuOpen) renderGameMenu();
     break;
   case UIState::SEARCH:
     renderSearchState();
@@ -7772,6 +7883,10 @@ void UIManager::render() {
   case UIState::CONFIRM_BATCH_DELETE:
     renderGameListState();
     renderConfirmBatchDeleteDialog();
+    break;
+  case UIState::CONFIRM_MOVE_SYSTEM:
+    renderGameListState();
+    renderConfirmDialogFromState();
     break;
   case UIState::DISCLAIMER:
     renderDisclaimerState();

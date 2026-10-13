@@ -3,6 +3,8 @@
 #include <vector>
 #include <unordered_map>
 #include <cstdint>
+#include <mutex>
+#include <curl/curl.h>
 
 namespace RomCloud {
 
@@ -42,6 +44,12 @@ private:
 
     bool m_initialized = false;
     std::string m_cookieJarPath = "/tmp/romcloud_cookies.txt";
+    // Tái dùng 1 easy handle cho mọi GET (giữ keep-alive + DNS cache +
+    // TLS session): scrape hàng chục request liên tiếp nhanh gấp nhiều lần
+    // so với init/cleanup mỗi lần. Có mutex vì GET gọi từ nhiều thread.
+    // POST giữ handle riêng (tránh rò CURLOPT_POST/POSTFIELDS).
+    CURL* m_getCurl = nullptr;
+    std::mutex m_getMutex;
 };
 
 } // namespace RomCloud

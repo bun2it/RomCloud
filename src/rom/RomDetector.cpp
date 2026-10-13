@@ -1,6 +1,7 @@
 #include "RomDetector.h"
 #include "Md5SystemDb.h"
 #include "FbneoCompatDb.h"
+#include "../config/AppConfig.h"
 #include "../logging/Logger.h"
 #include "../ui/BoxartScraper.h"
 #include "../utils/HashHelper.h"
@@ -9,6 +10,8 @@
 #include <cstring>
 #include <cctype>
 #include <cstdio>
+#include <cstdlib>
+#include <unistd.h>
 #include <sys/stat.h>
 
 namespace RomCloud {
@@ -237,6 +240,65 @@ RomDetectionResult RomDetector::detectFromZip(const std::string& zipPath) {
     std::string stem = getFileStem(zipPath);
     std::string stemLower = stem;
     std::transform(stemLower.begin(), stemLower.end(), stemLower.begin(), ::tolower);
+
+    // 0. DAT FBNeo biết set này thì nhận diện luôn họ arcade (VD raiden2dx
+    // Seibu SPI: từ điển MAME không có, chip-heuristic mù đuôi .bin/.6s,
+    // checksum No-Intro không có arcade). Không có bước này thì file rớt
+    // hết các vòng dưới và bị coi "đúng chỗ" oan. Luồng
+    // isFileInCorrectSystem phía sau tự chia tiếp (chuẩn -> FBNEO qua
+    // ARCADE_COMPAT, dump lạ -> MAME).
+    if (FbneoCompatDb::instance().hasSet(stemLower)) {
+        res.detected = true;
+        if (isNeoGeoGame(stemLower)) {
+            res.systemCode = "NEOGEO";
+            res.suggestedDir = "NEOGEO";
+            res.systemName = m_systemNames["NEOGEO"];
+            res.details = "Set FBNeo đã biết (Neo Geo): " + stem;
+        } else {
+            res.systemCode = "ARCADE";
+            res.suggestedDir = "ARCADE";
+            res.systemName = m_systemNames["ARCADE"];
+            res.details = "Set FBNeo đã biết: " + stem;
+        }
+        res.confidence = "FBNEO_DAT";
+        return res;
+    }
+
+    // 0b. Zip/7z đổi tên: stem lạ nhưng ruột khớp set FBNeo (đối chiếu
+    // CRC từng ROM, không giải nén). Bắt được cả file bị đặt tên sai mà
+    // bước 0 bỏ sót.
+    {
+        auto pairs = getArchiveEntryNameCrcs(zipPath, 200);
+        if (!pairs.empty()) {
+            std::string guessed;
+            size_t matched = 0, expected = 0;
+            if (FbneoCompatDb::instance().guessSetByContent(pairs, guessed,
+                                                            matched,
+                                                            expected) &&
+                !guessed.empty()) {
+                res.detected = true;
+                if (isNeoGeoGame(guessed)) {
+                    res.systemCode = "NEOGEO";
+                    res.suggestedDir = "NEOGEO";
+                    res.systemName = m_systemNames["NEOGEO"];
+                    res.details = "Ruột file khớp set Neo Geo '" + guessed +
+                                  "' (" + std::to_string(matched) + "/" +
+                                  std::to_string(expected) +
+                                  " ROM) dù tên file khác";
+                } else {
+                    res.systemCode = "ARCADE";
+                    res.suggestedDir = "ARCADE";
+                    res.systemName = m_systemNames["ARCADE"];
+                    res.details = "Ruột file khớp set FBNeo '" + guessed +
+                                  "' (" + std::to_string(matched) + "/" +
+                                  std::to_string(expected) +
+                                  " ROM) dù tên file khác";
+                }
+                res.confidence = "FBNEO_CRC";
+                return res;
+            }
+        }
+    }
 
     // 1. Check if the zip file itself is an Arcade / NeoGeo MAME ROM set
     std::string arcadeTitle = BoxartScraper::instance().resolveArcadeTitle(stemLower);
@@ -562,11 +624,141 @@ std::vector<std::pair<std::string, std::string>> RomDetector::getZipEntryNameCrc
 
 std::vector<std::string> RomDetector::getZipEntryCrc32s(const std::string& zipPath,
                                                         size_t maxEntries) {
+    // Dùng dispatcher (zip + 7z) để vòng checksum bắt được cả 2 loại.
     std::vector<std::string> crcs;
-    for (const auto& p : getZipEntryNameCrcs(zipPath, maxEntries)) {
+    for (const auto& p : getArchiveEntryNameCrcs(zipPath, maxEntries)) {
         crcs.push_back(p.second);
     }
     return crcs;
+}
+
+std::vector<std::pair<std::string, std::string>> RomDetector::parseSevenZipListing(
+    const std::string& text) {
+    // Output `7z l -slt`: các block cách nhau bằng dòng trắng, mỗi block
+    // file có "Path = ..." và "CRC = XXXXXXXX" (thư mục/header không có
+    // CRC -> bỏ qua tự nhiên).
+    std::vector<std::pair<std::string, std::string>> out;
+    std::string path, crc;
+    auto flush = [&]() {
+        if (!path.empty() && !crc.empty() && path.back() != '/') {
+            bool hex8 = (crc.size() == 8);
+            for (char c : crc) {
+                if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') ||
+                      (c >= 'A' && c <= 'F'))) {
+                    hex8 = false;
+                    break;
+                }
+            }
+            if (hex8) out.push_back({path, crc});
+        }
+        path.clear();
+        crc.clear();
+    };
+    size_t pos = 0;
+    while (pos <= text.size()) {
+        size_t nl = text.find('\n', pos);
+        std::string line = (nl == std::string::npos) ? text.substr(pos)
+                                                     : text.substr(pos, nl - pos);
+        pos = (nl == std::string::npos) ? text.size() + 1 : nl + 1;
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        if (line.empty()) {
+            flush();
+            continue;
+        }
+        if (line.compare(0, 7, "Path = ") == 0) {
+            path = line.substr(7);
+            while (!path.empty() && (path.back() == ' ' || path.back() == '\t'))
+                path.pop_back();
+        } else if (line.compare(0, 6, "CRC = ") == 0) {
+            crc = line.substr(6);
+            while (!crc.empty() && (crc.front() == ' ' || crc.front() == '\t'))
+                crc.erase(0, 1);
+            while (!crc.empty() && (crc.back() == ' ' || crc.back() == '\t'))
+                crc.pop_back();
+        }
+    }
+    flush();
+    return out;
+}
+
+namespace {
+// Binary 7z dùng để liệt kê ruột file .7z (không giải nén). Ưu tiên bản
+// đóng gói cùng app, rồi tới PATH. Probe 1 lần, cache lại.
+const std::string& resolveSevenZipTool() {
+    static std::string tool;
+    static bool probed = false;
+    if (!probed) {
+        probed = true;
+        std::string appRoot;
+        try {
+            appRoot = AppConfig::instance().getAppRoot();
+        } catch (...) {
+            appRoot.clear();
+        }
+        if (!appRoot.empty()) {
+            std::string p = appRoot + "/bin/7zzs";
+            if (access(p.c_str(), X_OK) == 0) tool = p;
+        }
+        if (tool.empty()) {
+            // Bare name: hỏi shell (không tự đoán PATH).
+            if (system("command -v 7zzs >/dev/null 2>&1") == 0) {
+                tool = "7zzs";
+            } else if (system("command -v 7z >/dev/null 2>&1") == 0) {
+                tool = "7z";
+            }
+        }
+    }
+    return tool;
+}
+
+bool isShellSafePath(const std::string& p) {
+    if (p.empty()) return false;
+    for (char c : p) {
+        if (c == '\'' || c == '"' || c == '`' || c == '$' || c == '\\' ||
+            c == '\n' || c == '\r') {
+            return false;
+        }
+    }
+    return true;
+}
+} // namespace
+
+std::vector<std::pair<std::string, std::string>> RomDetector::getArchiveEntryNameCrcs(
+    const std::string& archivePath, size_t maxEntries) {
+    std::string ext = getFileExtension(archivePath);
+    if (ext != "7z") {
+        return getZipEntryNameCrcs(archivePath, maxEntries);
+    }
+    // .7z: liệt kê qua 7zzs (không giải nén). Không có tool / path lạ /
+    // đọc lỗi -> rỗng (luồng gọi tự rớt xuống heuristic cũ).
+    std::vector<std::pair<std::string, std::string>> out;
+    const std::string& tool = resolveSevenZipTool();
+    if (tool.empty() || !isShellSafePath(archivePath) ||
+        !isShellSafePath(tool)) {
+        return out;
+    }
+    std::string cmd = tool + " l -slt -- '" + archivePath + "' 2>/dev/null";
+    FILE* pipe = popen(cmd.c_str(), "r");
+    if (!pipe) return out;
+    std::string text;
+    {
+        char buf[8192];
+        size_t total = 0;
+        const size_t kCap = 4 * 1024 * 1024; // listing header-only, chặn file điên
+        size_t n = 0;
+        while ((n = fread(buf, 1, sizeof(buf), pipe)) > 0) {
+            if (total + n > kCap) {
+                text.append(buf, kCap - total);
+                break;
+            }
+            text.append(buf, n);
+            total += n;
+        }
+    }
+    pclose(pipe);
+    out = parseSevenZipListing(text);
+    if (out.size() > maxEntries) out.resize(maxEntries);
+    return out;
 }
 
 RomDetector::ArcadeCompat RomDetector::detectArcadeCompat(const std::string& zipPath) {
@@ -626,13 +818,108 @@ RomDetector::ArcadeCompat RomDetector::detectArcadeCompat(const std::string& zip
     return ArcadeCompat::MAME_ONLY;
 }
 
+RomDetector::RomAuditResult RomDetector::auditArchive(
+    const std::string& archivePath) {
+    RomAuditResult r;
+    std::string ext = getFileExtension(archivePath);
+    if (ext != "zip" && ext != "7z") return r;
+    struct stat st;
+    if (stat(archivePath.c_str(), &st) != 0 || st.st_size < 22) return r;
+    std::string stem = getFileStem(archivePath);
+    std::string stemLower = stem;
+    std::transform(stemLower.begin(), stemLower.end(), stemLower.begin(),
+                   ::tolower);
+    auto lower = [](std::string s) {
+        std::transform(s.begin(), s.end(), s.begin(), ::tolower);
+        return s;
+    };
+    std::string set = stemLower;
+    if (!FbneoCompatDb::instance().hasSet(set)) {
+        auto probe = getArchiveEntryNameCrcs(archivePath, 500);
+        std::string guessed;
+        size_t m = 0, e = 0;
+        if (!FbneoCompatDb::instance().guessSetByContent(probe, guessed, m,
+                                                         e) ||
+            guessed.empty())
+            return r; // set lạ hoắc
+        set = guessed;
+    }
+    r.knownSet = true;
+    r.setName = set;
+    // Bảng mong đợi: tên lower -> (tên hiển thị, crc lower).
+    std::vector<std::string> raw;
+    FbneoCompatDb::instance().getSetPairs(set, raw);
+    std::unordered_map<std::string, std::pair<std::string, std::string>> exp;
+    for (const auto& pr : raw) {
+        size_t pp = pr.rfind('|');
+        if (pp == std::string::npos) continue;
+        std::string nm = pr.substr(0, pp);
+        exp[lower(nm)] = {nm, lower(pr.substr(pp + 1))};
+    }
+    // Ruột file thật (central directory, không giải nén).
+    std::unordered_map<std::string, std::pair<std::string, std::string>> act;
+    for (const auto& p : getArchiveEntryNameCrcs(archivePath, 2000)) {
+        // Bỏ folder entry / file trùng tên (lấy cái đầu).
+        if (p.first.empty() || p.first.back() == '/') continue;
+        std::string k = lower(p.first);
+        if (act.find(k) == act.end())
+            act[k] = {p.first, lower(p.second)};
+    }
+    for (const auto& kv : exp) {
+        RomAuditEntry en;
+        en.name = kv.second.first;
+        en.expectedCrc = kv.second.second;
+        auto it = act.find(kv.first);
+        if (it == act.end()) {
+            en.status = 1; // THIẾU
+        } else {
+            en.name = it->second.first;
+            en.actualCrc = it->second.second;
+            en.status = (en.actualCrc == en.expectedCrc) ? 0 : 2; // OK/SAI
+        }
+        r.entries.push_back(en);
+    }
+    for (const auto& kv : act) {
+        if (exp.find(kv.first) == exp.end()) {
+            RomAuditEntry en;
+            en.name = kv.second.first;
+            en.actualCrc = kv.second.second;
+            en.status = 3; // THỪA
+            r.entries.push_back(en);
+        }
+    }
+    std::sort(r.entries.begin(), r.entries.end(),
+              [](const RomAuditEntry& a, const RomAuditEntry& b) {
+                  if (a.status != b.status) return a.status < b.status;
+                  return a.name < b.name;
+              });
+    // Verdict theo nội dung (kể cả zip đổi tên: stem lạ nhưng ruột khớp
+    // vẫn FBNEO_OK). Giống detectArcadeCompat: đủ + khớp hết -> FBNEO_OK,
+    // còn lại -> MAME_ONLY; họ NeoGeo không đánh giá.
+    bool isNeo = isNeoGeoGame(set) || set == "neogeo" || set == "pgm";
+    if (isNeo) {
+        r.verdict = ArcadeCompat::UNKNOWN;
+    } else {
+        bool complete = true;
+        for (const auto& en : r.entries) {
+            if (en.status == 1 || en.status == 2) {
+                complete = false;
+                break;
+            }
+        }
+        r.verdict =
+            complete ? ArcadeCompat::FBNEO_OK : ArcadeCompat::MAME_ONLY;
+    }
+    return r;
+}
+
 RomDetectionResult RomDetector::detectByChecksum(const std::string& filePath) {
     RomDetectionResult res;
     std::string ext = getFileExtension(filePath);
 
-    // Vong 2a: file .zip — tra CRC32 cua file ben trong (khong giai nen).
-    // CRC32 này khớp trường crc trong No-Intro DAT.
-    if (ext == "zip") {
+    // Vong 2a: file .zip/.7z — tra CRC32 cua file ben trong (khong giai
+    // nen). CRC32 này khớp trường crc trong No-Intro DAT (.7z đọc qua 7zzs).
+    if (ext == "zip" || ext == "7z") {
         auto crcs = getZipEntryCrc32s(filePath, 30);
         for (const auto& c : crcs) {
             std::string code;
@@ -649,7 +936,6 @@ RomDetectionResult RomDetector::detectByChecksum(const std::string& filePath) {
         }
         return res;
     }
-    if (ext == "7z") return res; // chua doc duoc CRC trong 7z
 
     // Vong 2b: file thuong — bam MD5 ca file (khop No-Intro DAT).
     // Bỏ qua file đĩa quá lớn (>256MB): băm lâu trên Brick, đã có vòng

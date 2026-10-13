@@ -5,6 +5,10 @@
 #include "../logging/Logger.h"
 #include "../config/AppConfig.h"
 #include "../utils/HashHelper.h"
+#include "../rom/Md5SystemDb.h"
+#include "../rom/RomDetector.h"
+#include "../rom/RomTitle.h"
+#include <sys/stat.h>
 
 #include <algorithm>
 #include <cctype>
@@ -13,9 +17,6 @@
 #include <unordered_set>
 
 namespace RomCloud {
-
-static const char* DEFAULT_DEV_ID = "bun2it";
-static const char* DEFAULT_DEV_PASS = "RomCloudTrimUI2026";
 
 // Fast Arcade / NeoGeo filename mapping dictionary
 static const std::unordered_map<std::string, std::string>& getArcadeMap() {
@@ -47,9 +48,9 @@ static const std::unordered_map<std::string, std::string>& getArcadeMap() {
         {"sfiii", "Street Fighter III - New Generation"},
         {"sfiii2", "Street Fighter III 2nd Impact - Giant Attack"},
         {"sfiii3", "Street Fighter III 3rd Strike - Fight for the Future"},
-        {"dino", "Cadillacs and Dinosaurs"},
+        {"dino", "Cadillacs _ Dinosaurs (930201 USA)"},
         {"captcomm", "Captain Commando"},
-        {"punisher", "The Punisher"},
+        {"punisher", "The Punisher (930422 USA)"},
         {"wof", "Warriors of Fate"},
         {"ffight", "Final Fight"},
         {"garou", "Garou - Mark of the Wolves"},
@@ -82,12 +83,12 @@ static const std::unordered_map<std::string, std::string>& getArcadeMap() {
         {"mk3", "Mortal Kombat 3"},
         {"umk3", "Ultimate Mortal Kombat 3"},
         {"1941", "1941 - Counter Attack"},
-        {"1942", "1942"},
-        {"1943", "1943 - The Battle of Midway"},
-        {"1944", "1944 - The Loop Master"},
-        {"19xx", "19XX - The War Against Destiny"},
-        {"avsp", "Alien vs. Predator"},
-        {"armwar", "Armored Warriors"},
+        {"1942", "1942 (Revision B)"},
+        {"1943", "1943_ The Battle of Midway (US)"},
+        {"1944", "1944 - the loop master (000620 USA)"},
+        {"19xx", "19XX - the war against destiny (951207 USA)"},
+        {"avsp", "Alien vs Predator (940520 Euro)"},
+        {"armwar", "Armored Warriors (941024 USA)"},
         {"ddragon", "Double Dragon"},
         {"ddragon2", "Double Dragon II - The Revenge"},
         {"fatfury1", "Fatal Fury - King of Fighters"},
@@ -119,7 +120,7 @@ static const std::unordered_map<std::string, std::string>& getArcadeMap() {
         {"lastbld2", "The Last Blade 2"},
         {"aof", "Art of Fighting"},
         {"aof2", "Art of Fighting 2"},
-        {"aof3", "Art of Fighting 3 - Path of the Warrior"},
+        {"aof3", "Art of Fighting 3 - The Path of the Warrior _ Art of Fighting - Ryuuko no Ken Gaiden"},
         {"wakuwak7", "Waku Waku 7"},
         {"breakers", "Breakers"},
         {"breakrev", "Breakers Revenge"},
@@ -148,8 +149,70 @@ static const std::unordered_map<std::string, std::string>& getArcadeMap() {
         {"donpachi", "DonPachi"},
         {"esprade", "ESP Ra.De."},
         {"guwange", "Guwange"},
-        {"progear", "Progear"},
-        {"daraku", "The Fallen Angels"}
+        {"progear", "Progear (010117 USA)"},
+        {"daraku", "The Fallen Angels"},
+        {"raiden2", "Raiden II (US, set 1)"},
+        {"captcommj", "Captain Commando (911202 Japan)"},
+        {"blktiger", "Black Tiger"},
+        {"1943kai", "1943 Kai"},
+        {"ataxx", "Ataxx (set 1)"},
+        {"bowlrama", "Bowl-O-Rama"},
+        {"cbasebal", "Capcom Baseball (Japan)"},
+        {"dimahoo", "Dimahoo (US 000121)"},
+        {"mbombrd", "Bomber Man World (World)"},
+        {"pbobble3", "Puzzle Bobble 3 (World)"},
+        {"pbobble4", "Puzzle Bobble 4 (World)"},
+        {"avengers", "Avengers (US set 1)"},
+        {"batcir", "Battle Circuit (970319 Euro)"},
+        {"bionicc", "Bionic Commando (Euro)"},
+        {"cawing", "Carrier Air Wing (U.S. navy 901012 USA)"},
+        {"commando", "Commando (World)"},
+        {"cybots", "Cyberbots - fullmetal madness (950424 USA)"},
+        {"ddsom", "Dungeons _ Dragons - shadow over mystara (960209 USA)"},
+        {"ddtod", "Dungeons _ Dragons - tower of doom (940113 USA)"},
+        {"dstlk", "Darkstalkers - the night warriors (940705 USA)"},
+        {"ecofghtr", "Eco Fighters (940215 USA)"},
+        {"exedexes", "Exed Exes"},
+        {"f1dream", "F-1 Dream [Game is bugged, use the bootleg instead.]"},
+        {"gigawing", "Giga Wing (990222 USA)"},
+        {"gng", "Ghosts'n Goblins (World_ set 1)"},
+        {"gunsmoke", "Gun.Smoke (World, 851115)"},
+        {"higemaru", "Pirate Ship Higemaru"},
+        {"jojo", "JoJo's Venture _ JoJo no Kimyou na Bouken (USA 981202)"},
+        {"jojoba", "JoJo's Bizarre Adventure_ Heritage for the Future _ JoJo no Kimyou na Bouken_ Mirai e no Isan (Japan 990927)"},
+        {"knights", "Knights of the Round (911127 etc)"},
+        {"kod", "The King of Dragons (910711 etc)"},
+        {"lastduel", "Last Duel (US New Ver.)"},
+        {"lwings", "Legendary Wings (US set 1)"},
+        {"madgear", "Mad Gear (US)"},
+        {"megaman", "Mega Man - the power battle (951006 USA)"},
+        {"megaman2", "Rockman 2 - the power fighters (960708 Japan)"},
+        {"mercs", "Mercs (900302 USA)"},
+        {"mpang", "Mighty! Pang (001010 Euro)"},
+        {"msh", "Marvel Super Heroes (951024 Euro)"},
+        {"mshvsf", "Marvel Super Heroes vs Street Fighter (970620 Asia)"},
+        {"msword", "Magic Sword - heroic fantasy (25.07.1990 USA)"},
+        {"mvsc", "Marvel vs Capcom - clash of super heroes (980123 Euro)"},
+        {"nemo", "Nemo (90 11 20 Japan)"},
+        {"nwarr", "Night Warriors - darkstalkers' revenge (950316 Euro)"},
+        {"pang3", "Pang! 3 (950601 Euro)"},
+        {"pbobble2", "Puzzle Bobble 2 _ Bust-A-Move Again (Neo-Geo)"},
+        {"pnickj", "Pnickies (940608 Japan)"},
+        {"redearth", "Red Earth _ War-Zard (Euro 961121)"},
+        {"ringdest", "Ring of Destruction - slammasters II (940902 Euro)"},
+        {"sectionz", "Section Z (set 1)"},
+        {"sidearms", "Side Arms - Hyper Dyne (World, 861129)"},
+        {"slammast", "Saturday Night Slam Masters (slam masters 930713 USA)"},
+        {"sonson", "Son Son"},
+        {"srumbler", "The Speed Rumbler (set 1)"},
+        {"trojan", "Trojan (US set 1)"},
+        {"unsquad", "U.N. Squadron (US)"},
+        {"varth", "Varth - operation thunderstorm (920612 USA)"},
+        {"vhunt2", "Vampire Hunter 2 - darkstalkers revenge (970929 Japan)"},
+        {"vsav", "Vampire Savior - the lord of vampire (970519 Euro)"},
+        {"vsav2", "Vampire Savior 2 - the lord of vampire (970913 Japan)"},
+        {"vulgus", "Vulgus (Japan_)"},
+        {"willow", "Willow (USA)"},
     };
     return arcadeMap;
 }
@@ -223,10 +286,13 @@ std::string BoxartScraper::getLibretroSystemName(const std::string& systemCode) 
     if (code == "N64") return "Nintendo - Nintendo 64";
     if (code == "NDS") return "Nintendo - Nintendo DS";
     if (code == "NEOGEO") return "SNK - Neo Geo";
-    if (code == "MAME" || code == "ARCADE") return "FBNeo - Arcade Games";
-    if (code == "CPS1") return "Capcom - CP System I";
-    if (code == "CPS2") return "Capcom - CP System II";
-    if (code == "CPS3") return "Capcom - CP System III";
+    // Họ arcade dùng chung "FB Alpha - Arcade Games" (tên đầy đủ):
+    // "FBNeo - Arcade Games" và "Capcom - CP System I/II/III" không tồn tại
+    // trên libretro-thumbnails (404 toàn bộ nếu map sai).
+    if (code == "MAME" || code == "ARCADE" || code == "FBNEO" ||
+        code == "MAME2003PLUS" || code == "MAME2010" || code == "PGM" ||
+        code == "CPS1" || code == "CPS2" || code == "CPS3")
+        return "FB Alpha - Arcade Games";
     if (code == "PCE") return "NEC - PC Engine - TurboGrafx 16";
     if (code == "SMS" || code == "MS") return "Sega - Master System - Mark III";
     if (code == "GG") return "Sega - Game Gear";
@@ -240,6 +306,17 @@ std::string BoxartScraper::getLibretroSystemName(const std::string& systemCode) 
     if (code == "SEGACD") return "Sega - Mega-CD - Sega CD";
     return "";
 }
+
+namespace {
+// Họ arcade dùng chung art (FB Alpha + MAME): nhận diện + fallback thư mục.
+bool isArcadeFamilySys(const std::string& systemCode) {
+    std::string up = systemCode;
+    std::transform(up.begin(), up.end(), up.begin(), ::toupper);
+    return up == "ARCADE" || up == "MAME" || up == "FBNEO" ||
+           up == "MAME2003PLUS" || up == "MAME2010" || up == "PGM" ||
+           up == "NEOGEO" || up == "CPS1" || up == "CPS2" || up == "CPS3";
+}
+} // namespace
 
 std::string BoxartScraper::resolveArcadeTitle(const std::string& romName) {
     std::string base = romName;
@@ -259,9 +336,19 @@ std::string BoxartScraper::resolveArcadeTitle(const std::string& romName) {
 
 std::string BoxartScraper::cleanNameForLibretro(const std::string& filenameOrTitle) {
     std::string name = filenameOrTitle;
+    // Chỉ cắt đuôi ext thật (ngắn, alnum, ở cuối): tên game có dấu chấm
+    // ("U.S. navy", "Gun.Smoke", "25.07.1990") phải giữ nguyên.
     size_t lastDot = name.find_last_of('.');
-    if (lastDot != std::string::npos && lastDot > 0) {
-        name = name.substr(0, lastDot);
+    if (lastDot != std::string::npos && lastDot > 0 &&
+        name.size() - lastDot - 1 <= 4) {
+        bool extLike = true;
+        for (size_t i = lastDot + 1; i < name.size(); ++i) {
+            if (!isalnum((unsigned char)name[i])) {
+                extLike = false;
+                break;
+            }
+        }
+        if (extLike) name = name.substr(0, lastDot);
     }
 
     for (char& c : name) {
@@ -275,9 +362,18 @@ std::string BoxartScraper::cleanNameForLibretro(const std::string& filenameOrTit
 
 std::string BoxartScraper::cleanRomTitle(const std::string& filenameOrTitle) {
     std::string s = filenameOrTitle;
+    // Chỉ cắt đuôi ext thật (ngắn, alnum, ở cuối) — giữ dấu chấm trong tên.
     size_t lastDot = s.find_last_of('.');
-    if (lastDot != std::string::npos && lastDot > 0) {
-        s = s.substr(0, lastDot);
+    if (lastDot != std::string::npos && lastDot > 0 &&
+        s.size() - lastDot - 1 <= 4) {
+        bool extLike = true;
+        for (size_t i = lastDot + 1; i < s.size(); ++i) {
+            if (!isalnum((unsigned char)s[i])) {
+                extLike = false;
+                break;
+            }
+        }
+        if (extLike) s = s.substr(0, lastDot);
     }
 
     std::string clean;
@@ -322,7 +418,7 @@ std::string BoxartScraper::cleanRomTitle(const std::string& filenameOrTitle) {
     return res.empty() ? filenameOrTitle : res;
 }
 
-std::vector<std::string> BoxartScraper::generateLibretroCandidates(const std::string& filenameOrTitle, const std::string& systemCode) {
+std::vector<std::string> BoxartScraper::generateLibretroCandidates(const std::string& filenameOrTitle, const std::string& systemCode, const std::string& exactTitle) {
     std::vector<std::string> candidates;
     std::unordered_set<std::string> seen;
 
@@ -335,12 +431,37 @@ std::vector<std::string> BoxartScraper::generateLibretroCandidates(const std::st
         }
     };
 
+    // 0. Tên chuẩn No-Intro tra theo MD5/CRC (chính xác tuyệt đối).
+    if (!exactTitle.empty()) addCandidate(exactTitle);
+
     // 1. If Arcade or NeoGeo, check Arcade dictionary first!
-    std::string upSys = systemCode;
-    std::transform(upSys.begin(), upSys.end(), upSys.begin(), ::toupper);
-    if (upSys == "ARCADE" || upSys == "MAME" || upSys == "NEOGEO" || upSys == "CPS1" || upSys == "CPS2" || upSys == "CPS3") {
+    if (isArcadeFamilySys(systemCode)) {
         std::string arcadeTitle = resolveArcadeTitle(filenameOrTitle);
-        if (!arcadeTitle.empty()) {
+        if (arcadeTitle.empty()) {
+            // Clone MAME (captcommj, sfa2u...): bỏ hậu tố vùng 1 chữ cái
+            // (j=Japan, u=USA, e=Europe) rồi tra tên set cha.
+            std::string stemOnly = filenameOrTitle;
+            size_t ld = stemOnly.find_last_of('.');
+            if (ld != std::string::npos && ld > 0)
+                stemOnly = stemOnly.substr(0, ld);
+            if (stemOnly.size() >= 5) {
+                char last = (char)tolower((unsigned char)stemOnly.back());
+                const char* region = (last == 'j')   ? "Japan"
+                                     : (last == 'u') ? "USA"
+                                     : (last == 'e') ? "Europe"
+                                                     : nullptr;
+                if (region) {
+                    std::string parentTitle = resolveArcadeTitle(
+                        stemOnly.substr(0, stemOnly.size() - 1));
+                    if (!parentTitle.empty()) {
+                        addCandidate(parentTitle + " (" + region + ")");
+                        addCandidate(parentTitle + " (World)");
+                        addCandidate(parentTitle + " (USA)");
+                        addCandidate(parentTitle + " (Japan)");
+                    }
+                }
+            }
+        } else {
             addCandidate(arcadeTitle);
             addCandidate(arcadeTitle + " (World)");
             addCandidate(arcadeTitle + " (USA)");
@@ -415,12 +536,98 @@ std::string BoxartScraper::extractYearFromFilename(const std::string& filename) 
     return "";
 }
 
+std::string BoxartScraper::exactTitleByHash(const std::string& localPath) {
+    if (localPath.empty() ||
+        !FileSystemManager::instance().fileExists(localPath))
+        return "";
+    std::string ext;
+    size_t dot = localPath.rfind('.');
+    if (dot != std::string::npos) {
+        ext = localPath.substr(dot + 1);
+        std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+    }
+    // Zip/7z: tra CRC từng file ruột (central directory, không giải nén).
+    if (ext == "zip" || ext == "7z") {
+        for (const auto& crc :
+             RomDetector::instance().getZipEntryCrc32s(localPath, 10)) {
+            std::string code, title;
+            if (Md5SystemDb::instance().lookup(crc, code, title) &&
+                !title.empty() &&
+                RomDetector::instance().isKnownSystemCode(code))
+                return title;
+        }
+        return "";
+    }
+    // File lẻ: băm MD5 (bỏ file đĩa >256MB như vòng checksum).
+    struct stat st;
+    if (stat(localPath.c_str(), &st) != 0 ||
+        static_cast<uint64_t>(st.st_size) > 256ULL * 1024 * 1024)
+        return "";
+    std::string md5 = HashHelper::computeFileMd5(localPath);
+    if (md5.empty()) return "";
+    std::string code, title;
+    if (Md5SystemDb::instance().lookup(md5, code, title) && !title.empty() &&
+        RomDetector::instance().isKnownSystemCode(code))
+        return title;
+    return "";
+}
+
+int BoxartScraper::normalizeLocalTitles() {
+    // systemId=-1: tất cả hệ; stateFilter=1: chỉ game local.
+    auto games = DatabaseManager::instance().getGamesBySystem(-1, 1);
+    int n = 0;
+    for (const auto& g : games) {
+        if (g.localPath.empty() ||
+            !FileSystemManager::instance().fileExists(g.localPath))
+            continue;
+        // Giữ tên đã chuẩn / tên riêng (không phải auto theo filename).
+        std::string autoTitle = cleanDisplayTitle(g.filename);
+        if (!g.title.empty() && g.title != autoTitle && g.title != g.filename)
+            continue;
+        std::string exact = exactTitleByHash(g.localPath);
+        if (exact.empty()) {
+            // Zip arcade: từ điển theo stem (chỉ khi đúng hệ arcade).
+            std::string ext;
+            size_t dot = g.localPath.rfind('.');
+            if (dot != std::string::npos) {
+                ext = g.localPath.substr(dot + 1);
+                std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+            }
+            if (ext == "zip" || ext == "7z") {
+                SystemRecord sys;
+                std::string code;
+                if (DatabaseManager::instance().getSystemById(g.systemId,
+                                                              sys))
+                    code = sys.code;
+                else
+                    code = g.systemCode;
+                std::transform(code.begin(), code.end(), code.begin(),
+                               ::toupper);
+                if (code == "ARCADE" || code == "MAME" || code == "FBNEO" ||
+                    code == "MAME2003PLUS" || code == "MAME2010" ||
+                    code == "PGM" || code == "NEOGEO" || code == "CPS1" ||
+                    code == "CPS2" || code == "CPS3") {
+                    std::string stem = g.filename;
+                    size_t d2 = stem.rfind('.');
+                    if (d2 != std::string::npos) stem = stem.substr(0, d2);
+                    exact = resolveArcadeTitle(stem);
+                }
+            }
+        }
+        if (!exact.empty() && exact != g.title) {
+            if (DatabaseManager::instance().updateGameTitle(g.id, exact))
+                ++n;
+        }
+    }
+    return n;
+}
+
 bool BoxartScraper::downloadCoverFromUrl(const std::string& url, const std::string& targetPath) {
     if (url.empty() || targetPath.empty()) return false;
     std::vector<std::string> headers = {
         "User-Agent: RomCloud-TrimUI-Scraper/1.0"
     };
-    HttpResponse resp = HttpClient::instance().get(url, headers, 10000);
+    HttpResponse resp = HttpClient::instance().get(url, headers, 12);
 
     if (resp.statusCode == 200 && !resp.body.empty() && resp.body.size() > 512) {
         FILE* fp = fopen(targetPath.c_str(), "wb");
@@ -446,210 +653,44 @@ bool BoxartScraper::scrapeCover(const GameRecord& game, const SystemRecord& sys,
         return true;
     }
 
-    // 2. Try ScreenScraper if credentials configured
-    GameScrapeResult ssResult;
-    if (scrapeFromScreenScraper(game, sys, ssResult) && ssResult.coverFound) {
-        outCoverPath = ssResult.coverPath;
-        return true;
-    }
-
-    // 3. Fallback to Libretro Thumbnails GitHub with Smart Multi-Candidate Matching
+    // 2. Libretro Thumbnails GitHub (nguồn duy nhất, không acc).
     std::string libretroSys = getLibretroSystemName(sys.code);
     if (!libretroSys.empty()) {
         std::string rawName = game.filename.empty() ? game.title : game.filename;
-        std::vector<std::string> candidates = generateLibretroCandidates(rawName, sys.code);
+        // Ưu tiên tên chuẩn No-Intro tra theo MD5/CRC (chính xác tuyệt đối).
+        std::vector<std::string> candidates = generateLibretroCandidates(
+            rawName, sys.code, exactTitleByHash(game.localPath));
 
-        const char* subdirs[] = { "Named_Boxarts", "Named_Titles", "Named_Snaps" };
-        std::string encodedSys = HttpClient::instance().urlEncode(libretroSys);
-
-        for (const auto& cand : candidates) {
-            std::string encodedCand = HttpClient::instance().urlEncode(cand);
+        auto tryDir = [&](const std::string& dir) {
+            std::string encDir = HttpClient::instance().urlEncode(dir);
+            // Boxarts trước (ảnh cần hiện), rồi mới Titles/Snaps.
+            const char* subdirs[] = { "Named_Boxarts", "Named_Titles",
+                                      "Named_Snaps" };
             for (const char* subdir : subdirs) {
-                // Use GitHub raw URL instead of CDN (CDN may have issues)
-                std::string url = "https://raw.githubusercontent.com/libretro/libretro-thumbnails/master/" + encodedSys + "/" + subdir + "/" + encodedCand + ".png";
-                if (downloadCoverFromUrl(url, targetPath)) {
-                    outCoverPath = targetPath;
-                    Logger::info("BoxartScraper: Match found on Libretro GitHub (" + cand + ") -> " + targetPath);
-                    return true;
+                for (const auto& cand : candidates) {
+                    std::string encodedCand =
+                        HttpClient::instance().urlEncode(cand);
+                    // Use GitHub raw URL instead of CDN (CDN may have issues)
+                    std::string url = "https://raw.githubusercontent.com/libretro/libretro-thumbnails/master/" + encDir + "/" + subdir + "/" + encodedCand + ".png";
+                    if (downloadCoverFromUrl(url, targetPath)) {
+                        outCoverPath = targetPath;
+                        Logger::info("BoxartScraper: Match found on Libretro GitHub (" + cand + ") -> " + targetPath);
+                        return true;
+                    }
                 }
             }
+            return false;
+        };
+
+        if (tryDir(libretroSys)) return true;
+        // Họ arcade rớt hết ở FB Alpha thì thử tiếp thư mục MAME
+        // (một số set/hack chỉ có art ở đây: Ataxx, Dimahoo...).
+        if (isArcadeFamilySys(sys.code) && libretroSys != "MAME") {
+            if (tryDir("MAME")) return true;
         }
     }
 
     return false;
-}
-
-bool BoxartScraper::scrapeFromScreenScraper(const GameRecord& game, const SystemRecord& sys, GameScrapeResult& outResult) {
-    std::string ssUser = DatabaseManager::instance().getSetting("screenscraper_user", "");
-    std::string ssPass = DatabaseManager::instance().getSetting("screenscraper_pass", "");
-    std::string ssDevId = DatabaseManager::instance().getSetting("screenscraper_devid", DEFAULT_DEV_ID);
-    std::string ssDevPass = DatabaseManager::instance().getSetting("screenscraper_devpass", DEFAULT_DEV_PASS);
-
-    if (ssUser.empty() || ssPass.empty()) {
-        return false;
-    }
-
-    int sysId = getScreenScraperSystemId(sys.code);
-    std::string fn = game.filename.empty() ? game.title : game.filename;
-
-    // Checksum & File Size matching for 100% exact identification
-    std::string crc;
-    std::string md5;
-    std::string fileSizeStr;
-    if (!game.localPath.empty() && FileSystemManager::instance().fileExists(game.localPath)) {
-        crc = HashHelper::computeFileCrc32(game.localPath);
-        md5 = HashHelper::computeFileMd5(game.localPath);
-        size_t sz = FileSystemManager::instance().getFileSize(game.localPath);
-        if (sz > 0) fileSizeStr = std::to_string(sz);
-    }
-
-    // Step A: Query by romnom / crc / md5
-    std::string url = "https://api.screenscraper.fr/api2/jeuInfos.php?devid=" + HttpClient::instance().urlEncode(ssDevId) +
-                      "&devpassword=" + HttpClient::instance().urlEncode(ssDevPass) +
-                      "&softname=RomCloud&output=json" +
-                      "&ssid=" + HttpClient::instance().urlEncode(ssUser) +
-                      "&sspassword=" + HttpClient::instance().urlEncode(ssPass) +
-                      "&romnom=" + HttpClient::instance().urlEncode(fn);
-
-    if (sysId > 0) url += "&systemeid=" + std::to_string(sysId);
-    if (!crc.empty()) url += "&crc=" + crc;
-    if (!md5.empty()) url += "&md5=" + md5;
-    if (!fileSizeStr.empty()) url += "&romtaille=" + fileSizeStr;
-
-    Logger::info("BoxartScraper: Querying ScreenScraper.fr for " + fn);
-    std::vector<std::string> headers = { "User-Agent: RomCloud-TrimUI-Scraper/1.0" };
-    HttpResponse resp = HttpClient::instance().get(url, headers, 8000);
-
-    // Step B: If exact lookup failed, fallback to search by title (jeuRecherche.php)
-    if (resp.statusCode != 200 || resp.body.find("\"jeu\"") == std::string::npos) {
-        std::string searchTitle = cleanRomTitle(fn);
-        std::string searchUrl = "https://api.screenscraper.fr/api2/jeuRecherche.php?devid=" + HttpClient::instance().urlEncode(ssDevId) +
-                                "&devpassword=" + HttpClient::instance().urlEncode(ssDevPass) +
-                                "&softname=RomCloud&output=json" +
-                                "&ssid=" + HttpClient::instance().urlEncode(ssUser) +
-                                "&sspassword=" + HttpClient::instance().urlEncode(ssPass) +
-                                "&recherche=" + HttpClient::instance().urlEncode(searchTitle);
-        if (sysId > 0) searchUrl += "&systemeid=" + std::to_string(sysId);
-
-        Logger::info("BoxartScraper: Fallback search ScreenScraper.fr for: " + searchTitle);
-        HttpResponse sresp = HttpClient::instance().get(searchUrl, headers, 8000);
-
-        if (sresp.statusCode == 200 && sresp.body.find("\"id\"") != std::string::npos) {
-            std::string gameIdStr = JsonHelper::extractString(sresp.body, "id");
-            if (!gameIdStr.empty()) {
-                std::string detailUrl = "https://api.screenscraper.fr/api2/jeuInfos.php?devid=" + HttpClient::instance().urlEncode(ssDevId) +
-                                        "&devpassword=" + HttpClient::instance().urlEncode(ssDevPass) +
-                                        "&softname=RomCloud&output=json" +
-                                        "&ssid=" + HttpClient::instance().urlEncode(ssUser) +
-                                        "&sspassword=" + HttpClient::instance().urlEncode(ssPass) +
-                                        "&gameid=" + gameIdStr;
-                resp = HttpClient::instance().get(detailUrl, headers, 8000);
-            }
-        }
-    }
-
-    if (resp.statusCode != 200 || resp.body.empty() || resp.body.find("\"jeu\"") == std::string::npos) {
-        return false;
-    }
-
-    std::string body = resp.body;
-    outResult.source = "screenscraper";
-
-    // 1. Title
-    std::string ssNom = JsonHelper::extractString(body, "nom_us");
-    if (ssNom.empty()) ssNom = JsonHelper::extractString(body, "nom_eu");
-    if (ssNom.empty()) ssNom = JsonHelper::extractString(body, "nom");
-    outResult.title = ssNom.empty() ? cleanRomTitle(fn) : ssNom;
-
-    // 2. Release Year
-    size_t datesPos = body.find("\"dates\"");
-    if (datesPos != std::string::npos) {
-        size_t textPos = body.find("\"text\":", datesPos);
-        if (textPos != std::string::npos && textPos - datesPos < 300) {
-            size_t q1 = body.find('\"', textPos + 7);
-            if (q1 != std::string::npos && q1 + 5 < body.size()) {
-                std::string dateStr = body.substr(q1 + 1, 4);
-                if (std::isdigit(dateStr[0]) && std::isdigit(dateStr[1])) {
-                    outResult.releaseYear = dateStr;
-                }
-            }
-        }
-    }
-    if (outResult.releaseYear.empty()) {
-        outResult.releaseYear = extractYearFromFilename(fn);
-    }
-
-    // 3. Developer & Publisher
-    size_t devPos = body.find("\"developpeur\"");
-    if (devPos != std::string::npos) {
-        outResult.developer = JsonHelper::extractString(body.substr(devPos, 200), "nom");
-    }
-    size_t pubPos = body.find("\"editeur\"");
-    if (pubPos != std::string::npos) {
-        std::string pub = JsonHelper::extractString(body.substr(pubPos, 200), "nom");
-        if (!pub.empty() && !outResult.developer.empty() && pub != outResult.developer) {
-            outResult.developer += " / " + pub;
-        } else if (outResult.developer.empty()) {
-            outResult.developer = pub;
-        }
-    }
-
-    // 4. Genre
-    size_t genrePos = body.find("\"genres\"");
-    if (genrePos != std::string::npos) {
-        outResult.genre = JsonHelper::extractString(body.substr(genrePos, 250), "nom");
-    }
-
-    // 5. Synopsis / Story (Vietnamese > English > French)
-    size_t synPos = body.find("\"synopsis\"");
-    if (synPos != std::string::npos) {
-        std::string synBlock = body.substr(synPos, 2500);
-        size_t viPos = synBlock.find("\"langue\":\"vi\"");
-        if (viPos != std::string::npos) {
-            outResult.description = JsonHelper::extractString(synBlock.substr(viPos, 800), "texte");
-        }
-        if (outResult.description.empty()) {
-            size_t enPos = synBlock.find("\"langue\":\"en\"");
-            if (enPos != std::string::npos) {
-                outResult.description = JsonHelper::extractString(synBlock.substr(enPos, 800), "texte");
-            }
-        }
-        if (outResult.description.empty()) {
-            outResult.description = JsonHelper::extractString(synBlock, "texte");
-        }
-    }
-
-    // 6. Media Boxart (2D, 3D, Wheel, or Screenshot)
-    std::string mediaUrl;
-    size_t mediaPos = body.find("\"media_box2d\"");
-    if (mediaPos != std::string::npos) mediaUrl = JsonHelper::extractString(body.substr(mediaPos, 400), "url");
-    if (mediaUrl.empty()) {
-        mediaPos = body.find("\"media_box3d\"");
-        if (mediaPos != std::string::npos) mediaUrl = JsonHelper::extractString(body.substr(mediaPos, 400), "url");
-    }
-    if (mediaUrl.empty()) {
-        mediaPos = body.find("\"media_wheel\"");
-        if (mediaPos != std::string::npos) mediaUrl = JsonHelper::extractString(body.substr(mediaPos, 400), "url");
-    }
-    if (mediaUrl.empty()) {
-        mediaPos = body.find("\"media_screenshoot\"");
-        if (mediaPos != std::string::npos) mediaUrl = JsonHelper::extractString(body.substr(mediaPos, 400), "url");
-    }
-
-    if (!mediaUrl.empty()) {
-        std::string cleanName = cleanNameForLibretro(fn);
-        std::string targetDir = AppConfig::instance().getImgsDir() + "/" + sys.code;
-        FileSystemManager::instance().createDirectoryRecursive(targetDir);
-        std::string targetPath = targetDir + "/" + cleanName + ".png";
-
-        if (downloadCoverFromUrl(mediaUrl, targetPath)) {
-            outResult.coverPath = targetPath;
-            outResult.coverFound = true;
-        }
-    }
-
-    outResult.success = true;
-    return true;
 }
 
 bool BoxartScraper::scrapeFromLibretro(const GameRecord& game, const SystemRecord& sys, GameScrapeResult& outResult) {
@@ -673,22 +714,17 @@ GameScrapeResult BoxartScraper::scrapeGameInfo(const GameRecord& game, const Sys
     GameScrapeResult result;
     result.title = game.title.empty() ? cleanRomTitle(game.filename) : game.title;
 
-    // 1. Try ScreenScraper first
-    bool ssSuccess = scrapeFromScreenScraper(game, sys, result);
-
-    // 2. If ScreenScraper wasn't configured or failed to find cover, use Libretro candidate pipeline
-    if (!ssSuccess || !result.coverFound) {
-        GameScrapeResult libResult;
-        scrapeFromLibretro(game, sys, libResult);
-        if (!result.coverFound && libResult.coverFound) {
-            result.coverPath = libResult.coverPath;
-            result.coverFound = true;
-        }
-        if (result.title.empty()) result.title = libResult.title;
-        if (result.releaseYear.empty()) result.releaseYear = libResult.releaseYear;
-        if (result.description.empty()) result.description = libResult.description;
-        result.success = true;
+    // Chỉ dùng Libretro (ScreenScraper đã gỡ: dev chết).
+    GameScrapeResult libResult;
+    scrapeFromLibretro(game, sys, libResult);
+    if (!result.coverFound && libResult.coverFound) {
+        result.coverPath = libResult.coverPath;
+        result.coverFound = true;
     }
+    if (result.title.empty()) result.title = libResult.title;
+    if (result.releaseYear.empty()) result.releaseYear = libResult.releaseYear;
+    if (result.description.empty()) result.description = libResult.description;
+    result.success = true;
 
     // 3. Save metadata into SQLite
     if (result.success) {
@@ -702,56 +738,6 @@ GameScrapeResult BoxartScraper::scrapeGameInfo(const GameRecord& game, const Sys
 std::vector<ScrapeCandidate> BoxartScraper::searchCandidates(const std::string& query, const std::string& systemCode) {
     std::vector<ScrapeCandidate> results;
     if (query.empty()) return results;
-
-    std::string ssUser = DatabaseManager::instance().getSetting("screenscraper_user", "");
-    std::string ssPass = DatabaseManager::instance().getSetting("screenscraper_pass", "");
-    std::string ssDevId = DatabaseManager::instance().getSetting("screenscraper_devid", DEFAULT_DEV_ID);
-    std::string ssDevPass = DatabaseManager::instance().getSetting("screenscraper_devpass", DEFAULT_DEV_PASS);
-    int sysId = getScreenScraperSystemId(systemCode);
-
-    // 1. Search on ScreenScraper.fr if user configured
-    if (!ssUser.empty() && !ssPass.empty()) {
-        std::string searchUrl = "https://api.screenscraper.fr/api2/jeuRecherche.php?devid=" + HttpClient::instance().urlEncode(ssDevId) +
-                                "&devpassword=" + HttpClient::instance().urlEncode(ssDevPass) +
-                                "&softname=RomCloud&output=json" +
-                                "&ssid=" + HttpClient::instance().urlEncode(ssUser) +
-                                "&sspassword=" + HttpClient::instance().urlEncode(ssPass) +
-                                "&recherche=" + HttpClient::instance().urlEncode(query);
-        if (sysId > 0) searchUrl += "&systemeid=" + std::to_string(sysId);
-
-        std::vector<std::string> headers = { "User-Agent: RomCloud-TrimUI-Scraper/1.0" };
-        HttpResponse resp = HttpClient::instance().get(searchUrl, headers, 8000);
-
-        if (resp.statusCode == 200 && resp.body.find("\"jeux\"") != std::string::npos) {
-            std::string body = resp.body;
-            size_t pos = 0;
-            while ((pos = body.find("\"id\":", pos)) != std::string::npos && results.size() < 6) {
-                ScrapeCandidate cand;
-                cand.source = "ScreenScraper.fr";
-                size_t idEnd = body.find_first_of(",}", pos);
-                std::string gId = body.substr(pos + 5, idEnd - (pos + 5));
-
-                size_t blockEnd = body.find("},", pos);
-                if (blockEnd == std::string::npos) blockEnd = body.find("}]", pos);
-                std::string block = (blockEnd != std::string::npos) ? body.substr(pos, blockEnd - pos) : "";
-
-                cand.title = JsonHelper::extractString(block, "nom_us");
-                if (cand.title.empty()) cand.title = JsonHelper::extractString(block, "nom");
-                if (cand.title.empty()) cand.title = query;
-
-                // Media URL
-                size_t mPos = block.find("\"media_box2d\"");
-                if (mPos != std::string::npos) cand.coverUrl = JsonHelper::extractString(block.substr(mPos, 300), "url");
-                if (cand.coverUrl.empty()) {
-                    mPos = block.find("\"media_box3d\"");
-                    if (mPos != std::string::npos) cand.coverUrl = JsonHelper::extractString(block.substr(mPos, 300), "url");
-                }
-
-                results.push_back(cand);
-                pos = (blockEnd != std::string::npos) ? blockEnd + 2 : pos + 10;
-            }
-        }
-    }
 
     // 2. Generate Libretro GitHub Candidates
     std::string libretroSys = getLibretroSystemName(systemCode);
@@ -904,37 +890,5 @@ AutoScrapeStatus BoxartScraper::getAutoScrapeStatus() {
     return m_status;
 }
 
-bool BoxartScraper::testScreenScraperAuth(const std::string& user, const std::string& pass,
-                                         const std::string& devId, const std::string& devPass,
-                                         std::string& outError) {
-    if (user.empty() || pass.empty()) {
-        outError = "Tên đăng nhập và mật khẩu ScreenScraper không được để trống.";
-        return false;
-    }
-
-    std::string dId = devId.empty() ? DEFAULT_DEV_ID : devId;
-    std::string dPass = devPass.empty() ? DEFAULT_DEV_PASS : devPass;
-
-    std::string testUrl = "https://api.screenscraper.fr/api2/jeuInfos.php?devid=" + HttpClient::instance().urlEncode(dId) +
-                          "&devpassword=" + HttpClient::instance().urlEncode(dPass) +
-                          "&softname=RomCloud&output=json" +
-                          "&ssid=" + HttpClient::instance().urlEncode(user) +
-                          "&sspassword=" + HttpClient::instance().urlEncode(pass) +
-                          "&systemeid=4&romnom=Super%20Mario%20World%20(USA).sfc";
-
-    std::vector<std::string> headers = { "User-Agent: RomCloud-TrimUI-Scraper/1.0" };
-    HttpResponse resp = HttpClient::instance().get(testUrl, headers, 8000);
-
-    if (resp.statusCode == 200 && resp.body.find("\"response\"") != std::string::npos) {
-        if (resp.body.find("\"Erreur\"") != std::string::npos || resp.body.find("\"error\"") != std::string::npos) {
-            outError = "Thông tin đăng nhập ScreenScraper không hợp lệ hoặc tài khoản bị giới hạn.";
-            return false;
-        }
-        return true;
-    } else {
-        outError = "Không thể kết nối đến máy chủ ScreenScraper.fr (Mã lỗi: " + std::to_string(resp.statusCode) + ")";
-        return false;
-    }
-}
 
 } // namespace RomCloud

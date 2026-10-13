@@ -63,7 +63,10 @@ public:
     std::string cleanRomTitle(const std::string& filenameOrTitle);
 
     // Generate smart candidate variations for Libretro CDN (e.g. USA, World, Europe, etc.)
-    std::vector<std::string> generateLibretroCandidates(const std::string& filenameOrTitle, const std::string& systemCode);
+    std::vector<std::string> generateLibretroCandidates(const std::string& filenameOrTitle, const std::string& systemCode, const std::string& exactTitle = "");
+    // Tên game chuẩn No-Intro tra theo MD5 file (hoặc CRC ruột zip/7z).
+    // "" khi không khớp / file quá lớn. Dùng làm candidate đầu tiên.
+    std::string exactTitleByHash(const std::string& localPath);
 
     // Extract release year from filename tags e.g. (1996) or [1994]
     std::string extractYearFromFilename(const std::string& filename);
@@ -82,18 +85,16 @@ public:
 
     // Background auto-scraper for all ROMs on the SD card
     bool startAutoScrapeSdCard(bool forceAll = false);
+    // Chuẩn hóa title game local về tên chuẩn (No-Intro theo MD5/CRC,
+    // arcade theo từ điển): chỉ đổi khi title còn auto theo filename.
+    // Trả về số game đã đổi tên. Chạy trong thread nền quét thẻ.
+    int normalizeLocalTitles();
     void cancelAutoScrape();
     AutoScrapeStatus getAutoScrapeStatus();
-
-    // Test ScreenScraper credentials
-    bool testScreenScraperAuth(const std::string& user, const std::string& pass,
-                               const std::string& devId, const std::string& devPass,
-                               std::string& outError);
 
 private:
     BoxartScraper();
 
-    bool scrapeFromScreenScraper(const GameRecord& game, const SystemRecord& sys, GameScrapeResult& outResult);
     bool scrapeFromLibretro(const GameRecord& game, const SystemRecord& sys, GameScrapeResult& outResult);
     bool downloadCoverFromUrl(const std::string& url, const std::string& targetPath);
 

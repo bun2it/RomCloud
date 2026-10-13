@@ -5,10 +5,13 @@ Sinh assets/md5systems.dat tu cac file No-Intro DAT (.dat/.xml).
 Ho tro 2 dinh dang: Logiqx XML (datomatic) va ClrMamePro text
 (libretro-database/metadat/no-intro mirror).
 
-Moi dong output: "<hash> <SYSTEMCODE>"
+Moi dong output: "<hash> <SYSTEMCODE>|<TENT_GAME>"
   - hash 32 ky tu hex = MD5 cua file ROM (dung cho file le)
   - hash 8 ky tu hex  = CRC32 (dung cho file ben trong .zip, doc tu
     central directory khong can giai nen)
+  - TEN_GAME = ten game goc trong DAT (No-Intro) de scraper lay ten
+    chinh xac thay vi doan tu ten file. Ky tu '|' trong ten bi thay
+    bang '/'.
 
 Cach dung:
   1. Tai No-Intro DATs ve thu muc dat/ (VD tu
@@ -138,8 +141,16 @@ def dat_name_to_system(dat_name, filename):
     return None
 
 
+def clean_title(t):
+    """Ten game 1 dong, khong '|' (phu hop dinh dang output)."""
+    t = (t or "").replace("\r", " ").replace("\n", " ").replace("\t", " ")
+    t = t.replace("|", "/")
+    t = re.sub(r"\s+", " ", t).strip()
+    return t
+
+
 def parse_logiqx(path):
-    """Tra ve (system_code, [(md5, crc), ...])."""
+    """Tra ve (system_code, [(md5, crc, title), ...])."""
     tree = ET.parse(path)
     root = tree.getroot()
     header_name = ""
@@ -152,15 +163,47 @@ def parse_logiqx(path):
     entries = []
     if code:
         for game in root.iter("game"):
+            title = clean_title(game.get("name"))
             for rom in game.iter("rom"):
                 md5 = (rom.get("md5") or "").lower()
                 crc = (rom.get("crc") or "").lower()
-                entries.append((md5, crc))
+                entries.append((md5, crc, title))
     return code, entries
 
 
+def iter_game_blocks(text):
+    """Yield (game_name, game_body) cho moi khoi 'game ( ... )', xu ly
+    dung ten file co chua ngoac don."""
+    idx = 0
+    n = len(text)
+    while True:
+        m = re.search(r"\bgame\s*\(", text[idx:])
+        if not m:
+            return
+        p = idx + m.end()
+        depth = 1
+        in_quote = False
+        start = p
+        while p < n and depth > 0:
+            c = text[p]
+            if in_quote:
+                if c == '"':
+                    in_quote = False
+            elif c == '"':
+                in_quote = True
+            elif c == '(':
+                depth += 1
+            elif c == ')':
+                depth -= 1
+            p += 1
+        body = text[start:p - 1]
+        nm = re.search(r'^\s*name\s+"([^"]+)"', body)
+        yield (nm.group(1) if nm else ""), body
+        idx = p
+
+
 def parse_clrmamepro(path):
-    """Tra ve (system_code, [(md5, crc), ...])."""
+    """Tra ve (system_code, [(md5, crc, title), ...])."""
     with open(path, encoding="utf-8", errors="replace") as f:
         text = f.read()
     m = RE_CLRMAMEPRO_NAME.search(text)
@@ -168,12 +211,18 @@ def parse_clrmamepro(path):
     code = dat_name_to_system(dat_name, os.path.basename(path))
     entries = []
     if code:
-        for body in iter_rom_blocks(text):
-            md5_m = RE_MD5.search(body)
-            crc_m = RE_CRC.search(body)
-            md5 = md5_m.group(1).lower() if md5_m else ""
-            crc = crc_m.group(1).lower() if crc_m else ""
-            entries.append((md5, crc))
+        for game_name, body in iter_game_blocks(text):
+            title = clean_title(game_name)
+            for m in re.finditer(r"\brom\s*\(", body):
+                # lay khoi rom(...) con bang iter_rom_blocks tren doan con
+                sub = body[m.start():]
+                for rb in iter_rom_blocks(sub):
+                    md5_m = RE_MD5.search(rb)
+                    crc_m = RE_CRC.search(rb)
+                    md5 = md5_m.group(1).lower() if md5_m else ""
+                    crc = crc_m.group(1).lower() if crc_m else ""
+                    entries.append((md5, crc, title))
+                    break
     return code, entries
 
 
@@ -202,7 +251,7 @@ def main():
         dat_dir = cli[0]
         out_path = cli[1] if len(cli) > 1 else "assets/md5systems.dat"
 
-    table = {}  # hash -> code (giu muc dau tien)
+    table = {}  # hash -> (code, title) (giu muc dau tien)
     total_files = 0
     for root, _dirs, files in os.walk(dat_dir):
         for fn in sorted(files):
@@ -216,21 +265,22 @@ def main():
                       file=sys.stderr)
                 continue
             added = 0
-            for md5, crc in entries:
+            for md5, crc, title in entries:
                 if len(md5) == 32 and md5 not in table:
-                    table[md5] = code
+                    table[md5] = (code, title)
                     added += 1
                 if len(crc) == 8 and crc not in table:
-                    table[crc] = code
+                    table[crc] = (code, title)
                     added += 1
             print(f"  {fn}: he {code}, {len(entries)} rom, +{added} muc moi")
 
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
     with open(out_path, "w", encoding="utf-8") as f:
         f.write("# md5systems.dat - sinh tu No-Intro DATs boi tools/gen_md5db.py\n")
-        f.write("# dinh dang: <md5 32 ky tu | crc32 8 ky tu> <MA_HE_MAY>\n")
+        f.write("# dinh dang: <md5 32 ky tu | crc32 8 ky tu> <MA_HE_MAY>|<TEN_GAME>\n")
         for h in sorted(table):
-            f.write(f"{h} {table[h]}\n")
+            code, title = table[h]
+            f.write(f"{h} {code}|{title}\n")
     size_kb = os.path.getsize(out_path) // 1024
     print(f"Xong: {len(table)} muc tu {total_files} file DAT "
           f"({size_kb} KB) -> {out_path}")

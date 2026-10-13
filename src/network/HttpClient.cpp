@@ -61,6 +61,13 @@ bool HttpClient::init() {
 }
 
 void HttpClient::shutdown() {
+    {
+        std::lock_guard<std::mutex> lock(m_getMutex);
+        if (m_getCurl) {
+            curl_easy_cleanup(m_getCurl);
+            m_getCurl = nullptr;
+        }
+    }
     if (m_initialized) {
         curl_global_cleanup();
         m_initialized = false;
@@ -132,11 +139,18 @@ HttpResponse HttpClient::get(const std::string& url, const std::vector<std::stri
     if (!m_initialized) init();
 
     HttpResponse response;
-    CURL* curl = curl_easy_init();
-    if (!curl) {
-        response.error = "Failed to initialize CURL handle";
-        return response;
+    // Handle tái dùng + reset (giữ connection pool/DNS/TLS session).
+    // Mọi opt đều set lại bên dưới nên không rò rỉ giữa các request.
+    std::lock_guard<std::mutex> lock(m_getMutex);
+    if (!m_getCurl) {
+        m_getCurl = curl_easy_init();
+        if (!m_getCurl) {
+            response.error = "Failed to initialize CURL handle";
+            return response;
+        }
     }
+    CURL* curl = m_getCurl;
+    curl_easy_reset(curl);
 
     // Preflight: emit one log line with hostname + DNS state so a Brick user
     // can see whether the failure is DNS, network, or HTTP from /var/log.
@@ -224,7 +238,7 @@ HttpResponse HttpClient::get(const std::string& url, const std::vector<std::stri
     }
 
     if (chunk) curl_slist_free_all(chunk);
-    curl_easy_cleanup(curl);
+    // GIỮ handle cho request sau (keep-alive) — chỉ free ở shutdown().
     return response;
 }
 

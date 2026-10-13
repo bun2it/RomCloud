@@ -62,12 +62,27 @@ bool Md5SystemDb::ensureLoaded() {
 }
 
 bool Md5SystemDb::lookup(const std::string& hashHex, std::string& outSystemCode) {
+    std::string dummy;
+    return lookup(hashHex, outSystemCode, dummy);
+}
+
+bool Md5SystemDb::lookup(const std::string& hashHex, std::string& outSystemCode,
+                         std::string& outTitle) {
     if (!ensureLoaded()) return false;
     std::string key = hashHex;
     std::transform(key.begin(), key.end(), key.begin(), ::tolower);
     auto it = m_table.find(key);
     if (it == m_table.end()) return false;
-    outSystemCode = it->second;
+    // Giá trị: "CODE" (dòng cũ) hoặc "CODE|Tên game".
+    const std::string& val = it->second;
+    size_t bar = val.find('|');
+    if (bar == std::string::npos) {
+        outSystemCode = val;
+        outTitle.clear();
+    } else {
+        outSystemCode = val.substr(0, bar);
+        outTitle = val.substr(bar + 1);
+    }
     return true;
 }
 

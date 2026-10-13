@@ -109,7 +109,8 @@ void UIManager::renderFileExplorer() {
     renderExpMenu();
 }
 
-void UIManager::renderExpMenu() {  int n = (int)m_expMenuItems.size();
+void UIManager::renderExpMenu() {
+  int n = (int)m_expMenuItems.size();
   if (n == 0) return;
   // Popup overlay giữa 2 pane: căn giữa màn hình, KHÔNG phủ mờ để
   // vẫn thấy cả 2 pane xung quanh. Nhỏ vừa đủ nội dung.
@@ -135,6 +136,83 @@ void UIManager::renderExpMenu() {  int n = (int)m_expMenuItems.size();
              i == m_expMenuSel ? SDL_Color{255, 255, 255, 255}
                                : SDL_Color{203, 213, 225, 255},
              m_fontSmall, false);
+    y += rowH;
+  }
+  drawInlineHintsCentered("A Chọn  •  B Đóng", boxX + boxW / 2, y + 8,
+                          {148, 163, 184, 255}, m_fontSmall, 24);
+}
+
+void UIManager::renderGameMenu() {
+  int n = (int)m_gameMenuItems.size();
+  if (n == 0) return;
+  // Popup overlay giữa màn hình (giống menu Explorer): tiêu đề = tên ROM.
+  const int boxW = 440;
+  const int titleH = 52, rowH = 46, hintH = 40;
+  const int boxH = titleH + n * rowH + hintH;
+  int boxX = (1024 - boxW) / 2;
+  int boxY = (715 - boxH) / 2;
+  if (boxY < 70) boxY = 70;
+  drawModalDialog(boxX, boxY, boxW, boxH, UiTheme::RADIUS_MODAL,
+                  {24, 28, 38, 255}, {18, 55, 95, 255}, titleH);
+  std::string title;
+  for (const auto& g : m_cachedGames) {
+    if (g.id == m_gameMenuGameId) {
+      title = g.title;
+      break;
+    }
+  }
+  if (title.empty()) title = "ROM";
+  drawText(truncateToWidth(title, m_fontSmall, boxW - 32), boxX + 16,
+           boxY + (titleH - textHeight(m_fontSmall)) / 2,
+           {255, 255, 255, 255}, m_fontSmall, false);
+  int y = boxY + titleH;
+  for (int i = 0; i < n; ++i) {
+    if (i == m_gameMenuSel)
+      drawHighlight(boxX + 10, y + 3, boxW - 20, rowH - 6);
+    drawText(m_gameMenuItems[i], boxX + 24, y + (rowH - textHeight(m_fontSmall)) / 2,
+             i == m_gameMenuSel ? SDL_Color{255, 255, 255, 255}
+                               : SDL_Color{203, 213, 225, 255},
+             m_fontSmall, false);
+    y += rowH;
+  }
+  drawInlineHintsCentered("A Chọn  •  B Đóng", boxX + boxW / 2, y + 8,
+                          {148, 163, 184, 255}, m_fontSmall, 24);
+}
+
+void UIManager::renderSysPicker() {
+  int n = (int)m_sysPickerSystems.size();
+  if (n == 0) return;
+  // Modal danh sách console: icon + tên + path preset Roms/<romDir>.
+  const int visRows = 5;
+  const int boxW = 620;
+  const int titleH = 52, rowH = 62, hintH = 40;
+  const int boxH = titleH + visRows * rowH + hintH;
+  int boxX = (1024 - boxW) / 2;
+  int boxY = (715 - boxH) / 2;
+  if (boxY < 70) boxY = 70;
+  drawModalDialog(boxX, boxY, boxW, boxH, UiTheme::RADIUS_MODAL,
+                  {24, 28, 38, 255}, {18, 55, 95, 255}, titleH);
+  drawText("CHỌN HỆ MÁY ĐÍCH", boxX + 16,
+           boxY + (titleH - textHeight(m_fontSmall)) / 2,
+           {255, 255, 255, 255}, m_fontSmall, false);
+  if (m_sysPickerSel < m_sysPickerScroll) m_sysPickerScroll = m_sysPickerSel;
+  else if (m_sysPickerSel >= m_sysPickerScroll + visRows)
+    m_sysPickerScroll = m_sysPickerSel - visRows + 1;
+  int nameW = boxW - 82 - 24;
+  int y = boxY + titleH;
+  for (int r = 0; r < visRows && m_sysPickerScroll + r < n; ++r) {
+    int i = m_sysPickerScroll + r;
+    const auto& s = m_sysPickerSystems[i];
+    bool sel = (i == m_sysPickerSel);
+    if (sel) drawHighlight(boxX + 10, y + 3, boxW - 20, rowH - 6);
+    drawIcon(s.code, boxX + 22, y + (rowH - 48) / 2, 48, 48);
+    SDL_Color nameFg = sel ? SDL_Color{255, 255, 255, 255}
+                           : SDL_Color{203, 213, 225, 255};
+    drawText(truncateToWidth(s.name, m_fontSmall, nameW), boxX + 82, y + 8,
+             nameFg, m_fontSmall, false);
+    drawText(truncateToWidth("/Roms/" + s.romDir, m_fontSmall, nameW),
+             boxX + 82, y + 8 + textHeight(m_fontSmall) + 4,
+             {148, 163, 184, 255}, m_fontSmall, false);
     y += rowH;
   }
   drawInlineHintsCentered("A Chọn  •  B Đóng", boxX + boxW / 2, y + 8,

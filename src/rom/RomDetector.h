@@ -48,10 +48,36 @@ public:
     std::vector<std::pair<std::string, std::string>> getZipEntryNameCrcs(
         const std::string& zipPath, size_t maxEntries = 200);
 
+    // Helper: như trên nhưng cho cả .zip lẫn .7z (.7z đọc qua 7zzs của
+    // máy, không giải nén). Dùng để zip/7z đổi tên vẫn bắt được bằng ruột.
+    std::vector<std::pair<std::string, std::string>> getArchiveEntryNameCrcs(
+        const std::string& archivePath, size_t maxEntries = 200);
+
+    // Parse output `7z l -slt` thành cặp (tên, CRC). Hàm tĩnh để test độc
+    // lập không cần binary/device.
+    static std::vector<std::pair<std::string, std::string>> parseSevenZipListing(
+        const std::string& text);
+
     // Verdict tương thích arcade cho 1 file .zip (chỉ có nghĩa khi file là
     // ROM arcade): FBNEO_OK = core mới ăn được; MAME_ONLY = dump kiểu MAME
     // (core mới không ăn, để ở MAME); UNKNOWN = không đủ chứng cứ (để yên).
     enum class ArcadeCompat { UNKNOWN, FBNEO_OK, MAME_ONLY };
+
+    // Chi tiết từng file trong set arcade (đọc central directory, không
+    // giải nén): OK / THIẾU / SAI CRC / THỪA. Dùng cho màn "Chi tiết file".
+    struct RomAuditEntry {
+        std::string name;
+        std::string expectedCrc; // "" nếu THỪA
+        std::string actualCrc;   // "" nếu THIẾU
+        int status = 0;          // 0=OK, 1=THIẾU, 2=SAI CRC, 3=THỪA
+    };
+    struct RomAuditResult {
+        bool knownSet = false;
+        std::string setName;
+        std::vector<RomAuditEntry> entries;
+        ArcadeCompat verdict = ArcadeCompat::UNKNOWN;
+    };
+    RomAuditResult auditArchive(const std::string& archivePath);
     ArcadeCompat detectArcadeCompat(const std::string& zipPath);
 
     // Helper: check if a system code is known/supported

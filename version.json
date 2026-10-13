@@ -1,15 +1,15 @@
 {
-  "version": "2.5.1",
-  "release_date": "2026-10-12",
+  "version": "2.5.2",
+  "release_date": "2026-10-13",
   "target_os": "ALL",
   "icon_url": "https://raw.githubusercontent.com/bun2it/RomCloud/main/icon.png",
-  "full_zip_url": "https://github.com/bun2it/RomCloud/releases/download/v2.5.1/RomCloud-v2.5.1.zip",
+  "full_zip_url": "https://github.com/bun2it/RomCloud/releases/download/v2.5.2/RomCloud-v2.5.2.zip",
   "rc_web_version": "20261011",
   "rc_web_url": "https://github.com/bun2it/RomCloud/releases/download/v2.5.0/rc-web-20261011.zip",
   "os_versions": {
-    "STOCK_PS": "2.5.1",
-    "NEXTUI": "2.5.1",
-    "SPRUCE_OS": "2.5.1"
+    "STOCK_PS": "2.5.2",
+    "NEXTUI": "2.5.2",
+    "SPRUCE_OS": "2.5.2"
   },
-  "changelog": "1. Sửa lỗi\n2. Chơi game ngay từ thư viện:  vào game trong thư viện là chơi luôn, không cần thoát ra mở giả lập riêng.\n3. YouTube cải thiện: cải thiện luồng 360p-720p"
+  "changelog": "1. Menu ROM tab Thẻ nhớ: bấm A mở menu Chơi/Chuyển hệ/Kiểm tra/Chi tiết/Xóa.\n2. Tự nhận diện ROM theo MD5, dời về đúng hệ máy, tên game chuẩn No-Intro.\n3. Tự tải ảnh bìa Libretro nhanh và chính xác hơn.\n4. Sửa treo khi đổi chất lượng lúc đang phát YouTube."
 }

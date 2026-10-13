@@ -1830,50 +1830,6 @@ std::string WebServer::buildHtmlResponse() {
         </div>
       </div>
 
-      <!-- CARD: SCREENSCRAPER.FR CONFIGURATION -->
-      <div class="card" style="margin-top: 20px; border-color: rgba(2, 132, 199, 0.4);">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-          <h3>Tài khoản ScreenScraper (lấy ảnh bìa)</h3>
-        </div>
-        <p style="font-size: 12.5px; color: var(--text-muted); line-height: 1.5; margin-bottom: 12px;">
-          Ảnh bìa và thông tin game lấy từ <b>ScreenScraper.fr</b> và <b>Libretro Thumbnails</b>. Có tài khoản ScreenScraper sẽ lấy nhanh và đầy đủ hơn.
-        </p>
-
-        <form id="form-screenscraper-config" onsubmit="saveScreenScraperConfig(event)" style="display: flex; flex-direction: column; gap: 10px;">
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
-            <div>
-              <label style="font-size: 11.5px; color: var(--text-dim); display: block; margin-bottom: 4px;">Tên tài khoản ScreenScraper:</label>
-              <input type="text" id="input-ss-user" placeholder="Ví dụ: myusername" style="width: 100%; padding: 8px 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: #fff; font-size: 12px;">
-            </div>
-            <div>
-              <label style="font-size: 11.5px; color: var(--text-dim); display: block; margin-bottom: 4px;">Mật khẩu ScreenScraper:</label>
-              <input type="password" id="input-ss-pass" placeholder="•••••••• (để trống nếu không đổi)" style="width: 100%; padding: 8px 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: #fff; font-size: 12px;">
-            </div>
-          </div>
-
-          <details style="font-size: 11.5px; color: var(--text-dim);">
-            <summary style="cursor: pointer; color: #38bdf8;">Nâng cao: mã nhà phát triển (không bắt buộc)</summary>
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 8px;">
-              <div>
-                <label style="font-size: 11px; display: block; margin-bottom: 3px;">Mã nhà phát triển:</label>
-                <input type="text" id="input-ss-devid" placeholder="Mặc định: bun2it" style="width: 100%; padding: 6px 8px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: #fff; font-size: 11px;">
-              </div>
-              <div>
-                <label style="font-size: 11px; display: block; margin-bottom: 3px;">Mật khẩu nhà phát triển:</label>
-                <input type="password" id="input-ss-devpass" placeholder="Mặc định của RomCloud" style="width: 100%; padding: 6px 8px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: #fff; font-size: 11px;">
-              </div>
-            </div>
-          </details>
-
-          <div style="display: flex; gap: 8px; margin-top: 6px; flex-wrap: wrap;">
-            <button type="submit" class="btn btn-primary" style="font-size: 12px; padding: 7px 14px;">Lưu</button>
-            <button type="button" class="btn btn-secondary" onclick="testScreenScraperConn()" style="font-size: 12px; padding: 7px 14px;">Kiểm tra kết nối</button>
-            <a href="https://www.screenscraper.fr/" target="_blank" rel="noopener noreferrer" class="btn btn-secondary" style="font-size: 12px; padding: 7px 14px; text-decoration: none;">Đăng ký tài khoản (miễn phí)</a>
-          </div>
-          <div id="ss-test-status" style="font-size: 12px; margin-top: 4px; display: none;"></div>
-        </form>
-      </div>
-    </div>
   <!-- MODAL: GAME DETAIL & METADATA -->
   <div id="game-detail-modal" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.8); z-index: 1000; align-items: center; justify-content: center; padding: 20px; backdrop-filter: blur(4px);">
     <div style="background: var(--card-bg); border: 1px solid var(--border); border-radius: 12px; max-width: 680px; width: 100%; max-height: 90vh; overflow-y: auto; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5);">
@@ -1918,7 +1874,7 @@ std::string WebServer::buildHtmlResponse() {
 
           <!-- MANUAL SCRAPER REFINEMENT SEARCH (LIKE SCRAPE-EDIT) -->
           <div style="margin-top: 14px; border-top: 1px solid var(--border); padding-top: 10px;">
-            <div style="font-size: 11.5px; font-weight: 600; color: #38bdf8; margin-bottom: 6px;">Tìm bìa khác (ScreenScraper / Libretro):</div>
+            <div style="font-size: 11.5px; font-weight: 600; color: #38bdf8; margin-bottom: 6px;">Tìm bìa khác (Libretro):</div>
             <div style="display: flex; gap: 6px;">
               <input type="text" id="modal-search-query" placeholder="Nhập tên game để tìm..." style="flex: 1; padding: 6px 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: #fff; font-size: 12px;">
               <button type="button" class="btn btn-secondary" onclick="searchModalScraperCandidates()" style="font-size: 11px; padding: 6px 12px; border-color: #0284c7; color: #38bdf8;">Tìm</button>
@@ -2123,7 +2079,6 @@ std::string WebServer::buildHtmlResponse() {
       startPolling();
       pollUploadProgress();
       pollScrapeProgress();
-      loadScreenScraperConfig();
       setTimeout(() => checkOtaUpdate(true), 1200);
       setInterval(() => checkOtaUpdate(true), 180000);
     });
@@ -2179,8 +2134,7 @@ std::string WebServer::buildHtmlResponse() {
       if (tabId === 'tab-queue') updateDownloadQueueUI();
       if (tabId === 'tab-storage') {
         loadStorageInfo();
-        loadScreenScraperConfig();
-      }
+        }
       if (tabId === 'tab-iptv' && typeof loadIptvSources === 'function') {
         loadIptvSources();
       }
@@ -2505,7 +2459,7 @@ std::string WebServer::buildHtmlResponse() {
       const cList = document.getElementById('modal-candidates-list');
       if (cList) {
         cList.style.display = 'flex';
-        cList.innerHTML = '<div style="color:var(--text-dim); padding:10px; text-align:center;">Đang tìm trên ScreenScraper &amp; Libretro...</div>';
+        cList.innerHTML = '<div style="color:var(--text-dim); padding:10px; text-align:center;">Đang tìm trên Libretro...</div>';
       }
 
       try {
@@ -2577,7 +2531,7 @@ std::string WebServer::buildHtmlResponse() {
       const btn = document.getElementById('btn-modal-scrape');
       const origText = btn ? btn.innerHTML : 'Lấy lại bìa và thông tin';
       if (btn) { btn.disabled = true; btn.innerHTML = 'Đang lấy dữ liệu...'; }
-      showToast('Đang tìm bìa và thông tin trên ScreenScraper & Libretro...');
+      showToast('Đang tìm bìa và thông tin trên Libretro...');
 
       try {
         const res = await fetch('/api/scrape_cover', {
@@ -2868,7 +2822,7 @@ std::string WebServer::buildHtmlResponse() {
 
     // Auto-scrape all SD Card ROMs in background
     async function startAutoScrapeSd(force = false) {
-      if (!confirm('Tự lấy ảnh bìa và thông tin cho mọi game trên thẻ (chạy ngầm)?\n\nNguồn: ScreenScraper.fr và Libretro Thumbnails.')) {
+      if (!confirm('Tự lấy ảnh bìa và thông tin cho mọi game trên thẻ (chạy ngầm)?\n\nNguồn: Libretro Thumbnails.')) {
         return;
       }
       try {
@@ -2932,87 +2886,6 @@ std::string WebServer::buildHtmlResponse() {
           scrapePollTimer = null;
         }
       } catch (e) {}
-    }
-
-    async function loadScreenScraperConfig() {
-      try {
-        const res = await fetch('/api/screenscraper_config');
-        const data = await res.json();
-        const userInput = document.getElementById('input-ss-user');
-        const devInput = document.getElementById('input-ss-devid');
-        const passInput = document.getElementById('input-ss-pass');
-        if (userInput && data.user) userInput.value = data.user;
-        if (devInput && data.dev_id) devInput.value = data.dev_id;
-        if (passInput && data.has_pass) passInput.placeholder = '•••••••• (Đã lưu mật khẩu)';
-      } catch (e) {}
-    }
-
-    async function saveScreenScraperConfig(e) {
-      e.preventDefault();
-      const user = (document.getElementById('input-ss-user')?.value || '').trim();
-      const pass = (document.getElementById('input-ss-pass')?.value || '').trim();
-      const devId = (document.getElementById('input-ss-devid')?.value || '').trim();
-      const devPass = (document.getElementById('input-ss-devpass')?.value || '').trim();
-
-      const params = new URLSearchParams();
-      params.append('user', user);
-      if (pass) params.append('pass', pass);
-      if (devId) params.append('dev_id', devId);
-      if (devPass) params.append('dev_pass', devPass);
-
-      try {
-        const res = await fetch('/api/save_screenscraper_config', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: params.toString()
-        });
-        const data = await res.json();
-        showToast(data.message || 'Đã lưu tài khoản ScreenScraper');
-        const st = document.getElementById('ss-test-status');
-        if (st) {
-          st.style.display = 'block';
-          st.innerHTML = '<span style="color:var(--green);">Đã lưu. Bấm "Kiểm tra kết nối" để thử tài khoản.</span>';
-        }
-      } catch (e) {
-        showToast('Lỗi khi lưu.');
-      }
-    }
-
-    async function testScreenScraperConn() {
-      const user = (document.getElementById('input-ss-user')?.value || '').trim();
-      const pass = (document.getElementById('input-ss-pass')?.value || '').trim();
-      const devId = (document.getElementById('input-ss-devid')?.value || '').trim();
-      const devPass = (document.getElementById('input-ss-devpass')?.value || '').trim();
-
-      const st = document.getElementById('ss-test-status');
-      if (st) {
-        st.style.display = 'block';
-        st.innerHTML = '<span style="color:var(--accent);">Đang kết nối ScreenScraper.fr...</span>';
-      }
-
-      const params = new URLSearchParams();
-      params.append('user', user);
-      if (pass) params.append('pass', pass);
-      if (devId) params.append('dev_id', devId);
-      if (devPass) params.append('dev_pass', devPass);
-
-      try {
-        const res = await fetch('/api/test_screenscraper', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: params.toString()
-        });
-        const data = await res.json();
-        if (st) {
-          if (data.success) {
-            st.innerHTML = `<span style="color:var(--green);">${escapeHtml(data.message)}</span>`;
-          } else {
-            st.innerHTML = `<span style="color:var(--red);">${escapeHtml(data.message)}</span>`;
-          }
-        }
-      } catch (e) {
-        if (st) st.innerHTML = '<span style="color:var(--red);">Lỗi kết nối.</span>';
-      }
     }
 
     async function cancelActiveDownload() {
@@ -4494,7 +4367,7 @@ void WebServer::handleClient(int clientFd) {
             msg = "Đã lấy bìa và thông tin cho \"" +
                   (title.empty() ? g.title : title) + "\"!";
           } else {
-            msg = "Không tìm thấy dữ liệu trên ScreenScraper.fr / Libretro.";
+            msg = "Không tìm thấy dữ liệu trên Libretro.";
           }
         }
       }
@@ -4563,81 +4436,6 @@ void WebServer::handleClient(int clientFd) {
     BoxartScraper::instance().cancelAutoScrape();
     std::string json =
         "{\"success\":true,\"message\":\"Đã yêu cầu hủy.\"}";
-    std::string res = "HTTP/1.1 200 OK\r\n"
-                      "Content-Type: application/json; charset=UTF-8\r\n"
-                      "Access-Control-Allow-Origin: *\r\n"
-                      "Content-Length: " +
-                      std::to_string(json.length()) +
-                      "\r\n"
-                      "Connection: close\r\n\r\n" +
-                      json;
-    send(clientFd, res.c_str(), res.length(), 0);
-  } else if (method == "GET" && path == "/api/screenscraper_config") {
-    std::string user =
-        DatabaseManager::instance().getSetting("screenscraper_user", "");
-    std::string devId =
-        DatabaseManager::instance().getSetting("screenscraper_devid", "");
-    bool hasPass = !DatabaseManager::instance()
-                        .getSetting("screenscraper_pass", "")
-                        .empty();
-    std::string json = "{";
-    json += "\"user\":\"" + escapeJson(user) + "\",";
-    json += "\"dev_id\":\"" + escapeJson(devId) + "\",";
-    json += "\"has_pass\":" + std::string(hasPass ? "true" : "false");
-    json += "}";
-    std::string res = "HTTP/1.1 200 OK\r\n"
-                      "Content-Type: application/json; charset=UTF-8\r\n"
-                      "Access-Control-Allow-Origin: *\r\n"
-                      "Content-Length: " +
-                      std::to_string(json.length()) +
-                      "\r\n"
-                      "Connection: close\r\n\r\n" +
-                      json;
-    send(clientFd, res.c_str(), res.length(), 0);
-  } else if (method == "POST" && path == "/api/save_screenscraper_config") {
-    std::string user = extractPostParam(postBody, "user");
-    std::string pass = extractPostParam(postBody, "pass");
-    std::string devId = extractPostParam(postBody, "dev_id");
-    std::string devPass = extractPostParam(postBody, "dev_pass");
-
-    DatabaseManager::instance().setSetting("screenscraper_user", user);
-    if (!pass.empty()) {
-      DatabaseManager::instance().setSetting("screenscraper_pass", pass);
-    }
-    if (!devId.empty()) {
-      DatabaseManager::instance().setSetting("screenscraper_devid", devId);
-    }
-    if (!devPass.empty()) {
-      DatabaseManager::instance().setSetting("screenscraper_devpass", devPass);
-    }
-
-    std::string json = "{\"success\":true,\"message\":\"Đã lưu tài khoản ScreenScraper!\"}";
-    std::string res = "HTTP/1.1 200 OK\r\n"
-                      "Content-Type: application/json; charset=UTF-8\r\n"
-                      "Access-Control-Allow-Origin: *\r\n"
-                      "Content-Length: " +
-                      std::to_string(json.length()) +
-                      "\r\n"
-                      "Connection: close\r\n\r\n" +
-                      json;
-    send(clientFd, res.c_str(), res.length(), 0);
-  } else if (method == "POST" && path == "/api/test_screenscraper") {
-    std::string user = extractPostParam(postBody, "user");
-    std::string pass = extractPostParam(postBody, "pass");
-    std::string devId = extractPostParam(postBody, "dev_id");
-    std::string devPass = extractPostParam(postBody, "dev_pass");
-
-    if (pass.empty()) {
-      pass = DatabaseManager::instance().getSetting("screenscraper_pass", "");
-    }
-
-    std::string errMsg;
-    bool ok = BoxartScraper::instance().testScreenScraperAuth(user, pass, devId,
-                                                              devPass, errMsg);
-    std::string msg = ok ? "Kết nối được!" : errMsg;
-
-    std::string json = "{\"success\":" + std::string(ok ? "true" : "false") +
-                       ",\"message\":\"" + escapeJson(msg) + "\"}";
     std::string res = "HTTP/1.1 200 OK\r\n"
                       "Content-Type: application/json; charset=UTF-8\r\n"
                       "Access-Control-Allow-Origin: *\r\n"

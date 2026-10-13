@@ -2365,7 +2365,7 @@ void IPTVManager::showYouTubeOSD(bool extendExpire) {
                      255, 255, 255, 255);
         std::string t = ytFmtTime(cur) + " / " + (dur >= 0 ? ytFmtTime(dur) : "--:--");
         ytBlitText(cv, CW, CH, fBar, t, {255, 255, 255, 255}, 24, 42);
-        std::string hints = "A: Tạm dừng   \u2190 \u2192 +-10s   SELECT: 720/360   B: Thoát";
+        std::string hints = "A: Tạm dừng   \u2190 \u2192 +-10s   B: Thoát";
         int hintW = 0, hintH = 0;
         if (fBar && TTF_SizeUTF8(fBar, hints.c_str(), &hintW, &hintH) == 0)
             ytBlitText(cv, CW, CH, fBar, hints,
@@ -2537,17 +2537,9 @@ bool IPTVManager::playYouTubeVideo(const std::string& videoId, const std::string
                     sendMpvIpcCommand("{\"command\":[\"cycle-values\",\"speed\",\"1.0\",\"1.25\",\"1.5\",\"0.75\"]}");
                     flashCenter("speed", "{\"command\":[\"show-text\",\"{\\\\an5\\\\fs80\\\\bord3\\\\b1}Tốc độ phát\", 1400]}");
                     showYouTubeOSD();
-                } else if (input.isButtonJustPressed(Button::SELECT)) {
-                    if (!videoId.empty()) {
-                        std::string nextQ = (currentQuality == "720") ? "360" : "720";
-                        showOverlayIcon("quality", 1400);
-                        sendMpvIpcCommand("{\"command\":[\"show-text\",\"{\\\\an5\\\\fs75\\\\bord3\\\\b1}Đổi chất lượng: " + nextQ + "p...\", 1400]}");
-                        if (switchYouTubeQuality(videoId, nextQ)) {
-                            currentQuality = nextQ;
-                            m_ytQuality = currentQuality;
-                        }
-                    }
                 }
+                // SELECT đổi 360/720 lúc đang phát đã gỡ (gây freeze):
+                // chọn chất lượng mặc định ở màn YouTube ngoài lúc phát.
             }
             // YouTube OSD tick (UI-only): tự ẩn sau 3s, vẽ lại tiến trình 1s/lần
             if (m_ytOsdOn) {

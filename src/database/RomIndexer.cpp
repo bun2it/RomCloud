@@ -7,6 +7,7 @@
 #include <dirent.h>
 #include <sys/stat.h>
 #include <algorithm>
+#include <cctype>
 #include <unordered_set>
 
 namespace RomCloud {
@@ -54,24 +55,64 @@ ScanProgress RomIndexer::scanSystem(const SystemRecord& system, const std::strin
     progress.currentSystem = system.code;
 
     std::string systemDir = romsBaseDir + "/" + system.romDir;
-    if (!FileSystemManager::instance().directoryExists(systemDir)) {
+    // Gom dir chính + dir trùng tên khác hoa/thường ("gba" cạnh "GBA"
+    // trên FS phân biệt hoa/thường). FS không phân biệt (exFAT trên máy)
+    // thì cùng 1 inode -> quét 1 lần (so dev+ino). Chỉ đọc, không đổi tên
+    // (đổi tên là việc của organizeAll).
+    std::vector<std::string> scanDirs;
+    {
+        struct stat dstRoot;
+        bool haveRoot = (stat(systemDir.c_str(), &dstRoot) == 0 &&
+                         S_ISDIR(dstRoot.st_mode));
+        if (haveRoot) scanDirs.push_back(systemDir);
+        DIR* base = opendir(romsBaseDir.c_str());
+        if (base) {
+            struct dirent* be = nullptr;
+            while ((be = readdir(base)) != nullptr) {
+                std::string n = be->d_name;
+                if (n == "." || n == "..") continue;
+                if (n.size() != system.romDir.size()) continue;
+                std::string nl = n, rl = system.romDir;
+                std::transform(nl.begin(), nl.end(), nl.begin(), ::tolower);
+                std::transform(rl.begin(), rl.end(), rl.begin(), ::tolower);
+                if (nl != rl) continue;
+                std::string cand = romsBaseDir + "/" + n;
+                struct stat cst;
+                if (stat(cand.c_str(), &cst) != 0 || !S_ISDIR(cst.st_mode))
+                    continue;
+                bool dup = false;
+                for (const auto& d : scanDirs) {
+                    struct stat dst2;
+                    if (stat(d.c_str(), &dst2) == 0 &&
+                        dst2.st_dev == cst.st_dev && dst2.st_ino == cst.st_ino) {
+                        dup = true;
+                        break;
+                    }
+                }
+                if (!dup) scanDirs.push_back(cand);
+            }
+            closedir(base);
+        }
+    }
+    if (scanDirs.empty()) {
         return progress;
     }
-
-    DIR* dir = opendir(systemDir.c_str());
-    if (!dir) return progress;
 
     auto& db = DatabaseManager::instance();
     db.beginTransaction();
 
     std::unordered_set<std::string> foundFiles;
+    // Quét gộp nhiều folder vào cùng 1 hệ (foundFiles chung nên DB đúng).
+    for (const std::string& curDir : scanDirs) {
+    DIR* dir = opendir(curDir.c_str());
+    if (!dir) continue;
     struct dirent* entry = nullptr;
 
     while ((entry = readdir(dir)) != nullptr) {
         if (entry->d_name[0] == '.') continue;
 
         std::string fname = entry->d_name;
-        std::string fullPath = systemDir + "/" + fname;
+        std::string fullPath = curDir + "/" + fname;
 
         struct stat st;
         if (stat(fullPath.c_str(), &st) != 0) continue;
@@ -139,8 +180,8 @@ ScanProgress RomIndexer::scanSystem(const SystemRecord& system, const std::strin
 
         if (progressCb) progressCb(progress);
     }
-
     closedir(dir);
+    } // het 1 folder (chinh + bien the hoa/thuong)
 
     auto dbGames = db.getGamesBySystem(system.id, static_cast<int>(GameState::LOCAL));
     for (const auto& g : dbGames) {

@@ -5,6 +5,7 @@
 #include "../fileexplorer/FileExplorer.h"
 #include "../iptv/IPTVManager.h"
 #include "../localsend/LocalSendProtocol.h"
+#include "../rom/RomDetector.h"
 #include "../weather/WeatherManager.h"
 #include "CoverManager.h"
 #include "DialogManager.h"
@@ -41,6 +42,7 @@ enum class UIState {
   SEARCH,
   CONFIRM_DELETE,
   CONFIRM_BATCH_DELETE,
+  CONFIRM_MOVE_SYSTEM,
   DISCLAIMER,
   CLOUD_LOGIN,
   SETTINGS,
@@ -211,6 +213,30 @@ private:
   int m_expMenuSel = 0;
   std::vector<std::string> m_expMenuItems;
   std::string m_expMenuFile;
+  // Popup menu game tab Thẻ nhớ (A trên ROM): Chơi / Chuyển hệ giả lập /
+  // Kiểm tra ROM / Xóa ROM. A thực thi, B đóng.
+  bool m_gameMenuOpen = false;
+  int m_gameMenuSel = 0;
+  std::vector<std::string> m_gameMenuItems;
+  int64_t m_gameMenuGameId = 0;
+  // Picker hệ máy đích (menu A -> Chuyển hệ giả lập): danh sách console
+  // kèm icon, path preset Roms/<romDir>. A chọn, B đóng.
+  bool m_sysPickerOpen = false;
+  std::vector<SystemRecord> m_sysPickerSystems;
+  int m_sysPickerSel = 0;
+  int m_sysPickerScroll = 0;
+  // Kết quả kiểm tra ROM chạy nền (poll ở GAME_LIST rồi đổ vào dialog).
+  struct GameCheckResult {
+    bool ready = false;
+    bool misplaced = false;
+    RomDetectionResult res;
+    int64_t gameId = 0;
+    std::string srcPath;
+    std::string title;
+    std::string curCode;
+  };
+  GameCheckResult m_gameCheck;
+  std::mutex m_gameCheckMutex;
   // Cache lễ quan trọng (tính 1 lần/ngày, không quét 400 ngày mỗi frame)
   int m_holDayKey = -1;
   std::string m_holText;
@@ -219,6 +245,7 @@ private:
   std::string m_textViewPath;
   std::vector<std::string> m_textViewLines;
   int m_textViewScroll = 0;
+  UIState m_textViewReturn = UIState::FILE_EXPLORER;
   // Cache texture ngày âm scale 75% (rebuild khi đổi tháng)
   int m_lunarCacheY = 0, m_lunarCacheM = 0;
   std::vector<SDL_Texture *> m_lunarTex;
@@ -443,6 +470,9 @@ private:
   int m_pickerPendingOp = 0;
   std::string m_pickerPendingSrc;
   bool m_pickerPendingIsDir = false;
+  int64_t m_movePendingGameId = 0;
+  SystemRecord m_moveTargetSystem;
+  std::string m_moveTargetDir;
 
   void renderFileExplorer();
   void renderExplorerKeyboard();
@@ -464,6 +494,19 @@ private:
   void runExpMenuAction(int idx);
   bool handleExpMenuInput();
   void renderExpMenu();
+  // Popup menu game tab Thẻ nhớ
+  void openGameMenu();
+  void runGameMenuAction(int idx);
+  bool handleGameMenuInput();
+  void renderGameMenu();
+  void playMenuGameSelection();
+  void checkSelectedGameRom();
+  void auditSelectedGameRom();
+  void consumeGameCheckResult();
+  // Picker hệ máy đích cho Chuyển hệ giả lập
+  void openSysPicker();
+  bool handleSysPickerInput();
+  void renderSysPicker();
   // Text viewer
   static bool isTextFile(const std::string &path);
   void openTextViewer(const std::string &path);
@@ -737,6 +780,7 @@ private:
   void renderSearchState();
   void openConfirmDeleteDialog();
   void openConfirmBatchDeleteDialog();
+  void openConfirmMoveSystemDialog();
   void renderConfirmDialogFromState();
   void renderConfirmDeleteDialog();
   void renderConfirmBatchDeleteDialog();
@@ -918,6 +962,9 @@ private:
 
   // P1-1: scan/index SD chay tren BackgroundTask (thay std::thread().detach()).
   BackgroundTask m_indexTask;
+  // Quét thẻ 1 lần khi boot để game chép tay hiện ngay (không cần bấm Đồng
+  // bộ). Im lặng, chỉ quét local (không đụng Drive sync).
+  bool m_bootScanDone = false;
   // Media tasks: search YT/TT riêng (tránh wait-block UI khi chuyển màn hình),
   // resolve (stream URL) + thumb (tai thumbnail) dung chung.
   BackgroundTask m_ytSearchTask;

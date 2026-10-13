@@ -9,8 +9,74 @@
 #include <unistd.h>
 #include <fstream>
 #include <algorithm>
+#include <cctype>
+#include <unordered_set>
 
 namespace RomCloud {
+
+// File có "khả năng là ROM" (đáng báo unknown khi không nhận diện được)
+// = đuôi nằm trong extList của bất kỳ hệ nào, hoặc đuôi ROM/phổ biến,
+// hoặc không đuôi (ROM trần/BIOS). Còn lại (ảnh bìa .png, .txt, save
+// .sav/.srm/.state...) thì bỏ qua im lặng như cũ để khỏi spam.
+// Ngoại lệ duy nhất: .png chỉ tính khi ruột là cart PICO-8 (magic
+// "pico-8 cartridge") — .png thường là ảnh bìa, bỏ qua.
+static bool hasPico8Magic(const std::string& fullPath) {
+    std::ifstream f(fullPath, std::ios::binary);
+    if (!f.is_open()) return false;
+    char head[32] = {0};
+    f.read(head, sizeof(head));
+    std::string s(head, (size_t)f.gcount());
+    std::transform(s.begin(), s.end(), s.begin(), ::tolower);
+    return s.find("pico-8 cartridge") != std::string::npos;
+}
+
+static bool isRomPlausible(const std::string& fullPath,
+                           const std::string& fname,
+                           const std::unordered_set<std::string>& knownExts) {
+    size_t d = fname.rfind('.');
+    std::string ext = (d == std::string::npos) ? "" : fname.substr(d + 1);
+    std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+    if (ext.empty()) return true;
+    if (ext == "png") return hasPico8Magic(fullPath);
+    if (knownExts.find(ext) != knownExts.end()) return true;
+    static const char* kExtra[] = {"zip", "7z", "bin", "iso", "img",
+                                   "cue", "gdi", "m3u", "chd", "mds",
+                                   nullptr};
+    for (int i = 0; kExtra[i] != nullptr; ++i) {
+        if (ext == kExtra[i]) return true;
+    }
+    return false;
+}
+
+static std::unordered_set<std::string> collectKnownExts(
+    const std::vector<SystemRecord>& systems) {
+    std::unordered_set<std::string> out;
+    for (const auto& s : systems) {
+        size_t start = 0;
+        while (start <= s.extList.size()) {
+            size_t end = s.extList.find('|', start);
+            if (end == std::string::npos) end = s.extList.size();
+            std::string tok = s.extList.substr(start, end - start);
+            std::transform(tok.begin(), tok.end(), tok.begin(), ::tolower);
+            if (!tok.empty()) out.insert(tok);
+            start = end + 1;
+        }
+    }
+    return out;
+}
+
+static void pushUnknown(std::vector<UnknownRomRecord>* outUnknown,
+                        const std::string& fullPath,
+                        const std::string& fname,
+                        const std::string& currentCode) {
+    if (!outUnknown) return;
+    UnknownRomRecord u;
+    u.originalPath = fullPath;
+    u.filename = fname;
+    u.currentSystemCode = currentCode;
+    u.reason = "Không nhận diện được hệ máy (giữ nguyên, không di chuyển)";
+    outUnknown->push_back(u);
+}
 
 RomOrganizer& RomOrganizer::instance() {
     static RomOrganizer s_instance;
@@ -102,7 +168,9 @@ bool RomOrganizer::safeMoveFile(const std::string& src, const std::string& dst, 
     return false;
 }
 
-std::vector<MisplacedRomRecord> RomOrganizer::auditMisplacedRoms(const std::string& romsBaseDir) {
+std::vector<MisplacedRomRecord> RomOrganizer::auditMisplacedRoms(
+    const std::string& romsBaseDir,
+    std::vector<UnknownRomRecord>* outUnknown) {
     std::lock_guard<std::mutex> lock(m_mutex);
     m_busy = true;
 
@@ -118,6 +186,7 @@ std::vector<MisplacedRomRecord> RomOrganizer::auditMisplacedRoms(const std::stri
     for (const auto& s : systems) {
         codeToSys[s.code] = s;
     }
+    const std::unordered_set<std::string> knownExts = collectKnownExts(systems);
 
     // 1. Audit each system's directory (e.g. /mnt/SDCARD/Roms/FC/, GBA/, etc.)
     for (const auto& sys : systems) {
@@ -156,6 +225,9 @@ std::vector<MisplacedRomRecord> RomOrganizer::auditMisplacedRoms(const std::stri
 
                 results.push_back(item);
                 Logger::info("RomOrganizer Audit: Found misplaced ROM " + fname + " in " + sys.code + " -> belongs to " + det.systemCode);
+            } else if (!det.detected && isRomPlausible(fullPath, fname, knownExts)) {
+                // Quét thấy mà không biết là gì: báo riêng, KHÔNG im lặng.
+                pushUnknown(outUnknown, fullPath, fname, sys.code);
             }
         }
         closedir(dir);
@@ -192,6 +264,8 @@ std::vector<MisplacedRomRecord> RomOrganizer::auditMisplacedRoms(const std::stri
                 }
 
                 results.push_back(item);
+            } else if (isRomPlausible(fullPath, fname, knownExts)) {
+                pushUnknown(outUnknown, fullPath, fname, "ROOT");
             }
         }
         closedir(rootDir);
@@ -229,6 +303,8 @@ std::vector<MisplacedRomRecord> RomOrganizer::auditMisplacedRoms(const std::stri
                 }
 
                 results.push_back(item);
+            } else if (isRomPlausible(fullPath, fname, knownExts)) {
+                pushUnknown(outUnknown, fullPath, fname, "_INBOX");
             }
         }
         closedir(inDir);
@@ -238,8 +314,11 @@ std::vector<MisplacedRomRecord> RomOrganizer::auditMisplacedRoms(const std::stri
     return results;
 }
 
-std::vector<MisplacedRomRecord> RomOrganizer::fixMisplacedRoms(const std::string& romsBaseDir) {
-    auto items = auditMisplacedRoms(romsBaseDir);
+std::vector<MisplacedRomRecord> RomOrganizer::fixMisplacedRoms(const std::string& romsBaseDir,
+                                                               int* outUnknownCount) {
+    std::vector<UnknownRomRecord> unknown;
+    auto items = auditMisplacedRoms(romsBaseDir, outUnknownCount ? &unknown : nullptr);
+    if (outUnknownCount) *outUnknownCount = static_cast<int>(unknown.size());
     if (items.empty()) return items;
 
     std::string baseDir = romsBaseDir.empty() ? AppConfig::instance().getRomsDir() : romsBaseDir;
@@ -247,16 +326,129 @@ std::vector<MisplacedRomRecord> RomOrganizer::fixMisplacedRoms(const std::string
 }
 
 std::vector<MisplacedRomRecord> RomOrganizer::fixSystemFolder(const std::string& systemCode,
-                                                             const std::string& romsBaseDir) {
-    auto items = auditMisplacedRoms(romsBaseDir);
+                                                             const std::string& romsBaseDir,
+                                                             int* outUnknownCount) {
+    std::vector<UnknownRomRecord> unknown;
+    auto items = auditMisplacedRoms(romsBaseDir, outUnknownCount ? &unknown : nullptr);
     std::vector<MisplacedRomRecord> mine;
     for (auto& it : items) {
         if (it.currentSystemCode == systemCode) mine.push_back(it);
+    }
+    if (outUnknownCount) {
+        int n = 0;
+        for (auto& u : unknown) {
+            if (u.currentSystemCode == systemCode) ++n;
+        }
+        *outUnknownCount = n;
     }
     if (mine.empty()) return mine;
 
     std::string baseDir = romsBaseDir.empty() ? AppConfig::instance().getRomsDir() : romsBaseDir;
     return applyFixes(std::move(mine), baseDir);
+}
+
+std::vector<DuplicateGroup> RomOrganizer::findDuplicateRoms(
+    const std::string& romsBaseDir) {
+    std::vector<DuplicateGroup> groups;
+    std::string baseDir = romsBaseDir.empty() ? AppConfig::instance().getRomsDir() : romsBaseDir;
+    if (!FileSystemManager::instance().directoryExists(baseDir)) return groups;
+    auto systems = DatabaseManager::instance().getSystems(false);
+    const std::unordered_set<std::string> knownExts = collectKnownExts(systems);
+
+    // Gom theo size trước (stat miễn phí), chỉ băm MD5 nhóm >= 2 file.
+    // Chỉ xét file lẻ trong folder hệ máy (bỏ qua folder game, save, ảnh).
+    std::unordered_map<uint64_t, std::vector<DuplicateFile>> bySize;
+    for (const auto& sys : systems) {
+        std::string sysDir = baseDir + "/" + sys.romDir;
+        DIR* dir = opendir(sysDir.c_str());
+        if (!dir) continue;
+        struct dirent* entry = nullptr;
+        while ((entry = readdir(dir)) != nullptr) {
+            if (entry->d_name[0] == '.') continue;
+            std::string fname = entry->d_name;
+            if (fname == "Imgs" || fname == "imgs" || fname == "media") continue;
+            std::string fullPath = sysDir + "/" + fname;
+            struct stat st;
+            if (stat(fullPath.c_str(), &st) != 0 || !S_ISREG(st.st_mode)) continue;
+            if (!isRomPlausible(fullPath, fname, knownExts)) continue;
+            DuplicateFile df;
+            df.path = fullPath;
+            df.filename = fname;
+            df.systemCode = sys.code;
+            bySize[(uint64_t)st.st_size].push_back(df);
+        }
+        closedir(dir);
+    }
+
+    for (auto& kv : bySize) {
+        if (kv.second.size() < 2) continue;
+        std::unordered_map<std::string, std::vector<DuplicateFile>> byMd5;
+        for (auto& df : kv.second) {
+            std::string md5 = HashHelper::computeFileMd5(df.path);
+            if (md5.empty()) continue; // đọc lỗi: bỏ qua, không gom bừa
+            byMd5[md5].push_back(df);
+        }
+        for (auto& mkv : byMd5) {
+            if (mkv.second.size() < 2) continue;
+            DuplicateGroup g;
+            g.md5 = mkv.first;
+            g.sizeBytes = kv.first;
+            g.files = std::move(mkv.second);
+            groups.push_back(std::move(g));
+        }
+    }
+    return groups;
+}
+
+int RomOrganizer::quarantineDuplicates(const std::string& romsBaseDir) {
+    std::string baseDir = romsBaseDir.empty() ? AppConfig::instance().getRomsDir() : romsBaseDir;
+    if (!FileSystemManager::instance().directoryExists(baseDir)) return 0;
+    auto groups = findDuplicateRoms(baseDir);
+    if (groups.empty()) return 0;
+    std::string qDir = baseDir + "/_TRUNG";
+    FileSystemManager::instance().createDirectoryRecursive(qDir);
+    auto& db = DatabaseManager::instance();
+    int moved = 0;
+    for (auto& g : groups) {
+        // Giữ 1 bản: file đang đúng hệ máy trước (theo detect), rồi đường
+        // dẫn ngắn nhất, rồi tên (ổn định, không ngẫu nhiên).
+        std::vector<size_t> order(g.files.size());
+        for (size_t i = 0; i < order.size(); ++i) order[i] = i;
+        std::sort(order.begin(), order.end(),
+                  [&](size_t a, size_t b) {
+                      const auto& fa = g.files[a];
+                      const auto& fb = g.files[b];
+                      RomDetectionResult da =
+                          RomDetector::instance().detectSystem(fa.path);
+                      RomDetectionResult dbr =
+                          RomDetector::instance().detectSystem(fb.path);
+                      int sa = (da.detected && da.systemCode == fa.systemCode) ? 0 : 1;
+                      int sb = (dbr.detected && dbr.systemCode == fb.systemCode) ? 0 : 1;
+                      if (sa != sb) return sa < sb;
+                      if (fa.path.size() != fb.path.size())
+                          return fa.path.size() < fb.path.size();
+                      return fa.path < fb.path;
+                  });
+        for (size_t k = 1; k < order.size(); ++k) {
+            const auto& f = g.files[order[k]];
+            std::string finalDst;
+            if (!safeMoveFile(f.path, qDir + "/" + f.filename, finalDst)) {
+                Logger::warn("RomOrganizer: khong gom được file trùng " + f.path);
+                continue;
+            }
+            SystemRecord sysRec;
+            if (db.getSystemByCode(f.systemCode, sysRec)) {
+                GameRecord existing;
+                if (db.getGameByFilename(sysRec.id, f.filename, existing)) {
+                    db.markGameDeletedLocally(existing.id);
+                }
+            }
+            ++moved;
+            Logger::info("RomOrganizer: gom trùng " + f.path + " -> " + finalDst);
+        }
+    }
+    sync();
+    return moved;
 }
 
 std::vector<MisplacedRomRecord> RomOrganizer::applyFixes(std::vector<MisplacedRomRecord> items,
@@ -664,6 +856,9 @@ OrganizeSummary RomOrganizer::organizeAll(const std::string& romsBaseDir) {
     for (const auto& item : fixed) {
         if (item.fixed) ++summary.filesMoved;
     }
+    // Buoc 4: gom file trung noi dung vao _TRUNG (giu 1 ban, khong xoa).
+    // Chay sau buoc 3 de quy tac "giu ban dung he" nhin thay folder dung.
+    summary.duplicatesQuarantined = quarantineDuplicates(baseDir);
     sync();
 
     {
