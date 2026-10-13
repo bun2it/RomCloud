@@ -93,21 +93,11 @@ IPTVManager::IPTVManager() {
         }
     }
 
-    // Nếu chưa có live.m3u (máy mới / chưa OTA bao giờ): tải nền,
-    // khong block startup.
-    {
-        struct stat stLive;
-        if (stat((m_iptvDir + "/live.m3u").c_str(), &stLive) != 0) {
-            std::thread([]() {
-                std::string msg;
-                if (IPTVManager::instance().updateOtaPlaylist(msg)) {
-                    Logger::info("IPTVManager: tu tai live.m3u lan dau: " + msg);
-                } else {
-                    Logger::warn("IPTVManager: chua tai duoc live.m3u: " + msg);
-                }
-            }).detach();
-        }
-    }
+    // Boot: kiểm tra OTA playlist nền (không block startup).
+    // - Chưa có live.m3u (máy mới): tải luôn.
+    // - Có rồi mà manifest có bản mới hơn: CHỈ BÁO (toast + cờ available),
+    //   user tự bấm Y trên màn playlist để tải, máy không tự tải ngầm.
+    std::thread([]() { IPTVManager::instance().checkOtaPlaylistBoot(); }).detach();
 
     // Tự động refresh các playlist URL bị stale (không block startup nếu lỗi mạng)
     int refreshed = checkAndAutoRefresh();
@@ -824,19 +814,21 @@ bool IPTVManager::refreshPlaylistFromUrl(const std::string& filename, std::strin
     return true;
 }
 
-// updateOtaPlaylist
-// Tự động kiểm tra manifest và cập nhật Live M3U Playlist từ xa qua OTA
-bool IPTVManager::updateOtaPlaylist(std::string& outMessage) {
-    outMessage.clear();
+// fetchOtaManifestInfo
+// Chỉ tải manifest OTA (không tải playlist): dùng cho boot-check bản mới
+bool IPTVManager::fetchOtaManifestInfo(std::string& outVersion,
+                                       std::string& outSha256,
+                                       int& outChannelCount,
+                                       std::string& outDownloadUrl) {
+    outVersion.clear();
+    outSha256.clear();
+    outChannelCount = 0;
+    outDownloadUrl.clear();
+
     std::string defaultManifestUrl = "https://raw.githubusercontent.com/bun2it/RomCloud/main/iptv/iptv_manifest.json";
-    std::string defaultPlaylistUrl = "https://raw.githubusercontent.com/bun2it/RomCloud/main/iptv/live.m3u";
-
     std::string manifestUrl = DatabaseManager::instance().getSetting("iptv_ota_manifest_url", defaultManifestUrl);
-    std::string playlistUrl = DatabaseManager::instance().getSetting("iptv_ota_playlist_url", defaultPlaylistUrl);
 
-    Logger::info("IPTV: Checking OTA playlist update from: " + manifestUrl);
-
-    // 1. Fetch manifest (kèm cache-busting để vượt qua Fastly CDN cache của raw.githubusercontent.com)
+    // Kèm cache-busting để vượt qua Fastly CDN cache của raw.githubusercontent.com
     std::string cacheBuster = "?t=" + std::to_string(std::time(nullptr));
     std::string fetchManifestUrl = manifestUrl + (manifestUrl.find('?') == std::string::npos ? cacheBuster : "&t=" + std::to_string(std::time(nullptr)));
     std::vector<std::string> noCacheHeaders = {
@@ -845,16 +837,127 @@ bool IPTVManager::updateOtaPlaylist(std::string& outMessage) {
     };
 
     HttpResponse mResp = HttpClient::instance().get(fetchManifestUrl, noCacheHeaders, 10);
+    if (!mResp.success || (mResp.statusCode != 200 && mResp.statusCode != 206)) {
+        Logger::warn("IPTV: Could not fetch OTA manifest from: " + manifestUrl);
+        return false;
+    }
+    outVersion = JsonHelper::extractString(mResp.body, "version");
+    outSha256 = JsonHelper::extractString(mResp.body, "sha256");
+    outChannelCount = JsonHelper::extractInt(mResp.body, "channel_count", 0);
+    outDownloadUrl = JsonHelper::extractString(mResp.body, "download_url");
+    return true;
+}
+
+bool IPTVManager::isRemoteOtaNewer(const std::string& remoteVer,
+                                   const std::string& remoteSha,
+                                   const std::string& localVer,
+                                   const std::string& localSha) {
+    // version manifest dạng YYYYMMDD_HHMMSS: so sánh chuỗi là đủ
+    if (!remoteVer.empty() && !localVer.empty()) return remoteVer > localVer;
+    if (!remoteVer.empty() && localVer.empty()) return true;
+    if (remoteVer.empty() && !remoteSha.empty()) {
+        if (localSha.empty()) return true;
+        return remoteSha != localSha;
+    }
+    return false;
+}
+
+IPTVManager::OtaPlaylistStatus IPTVManager::getOtaPlaylistStatus() const {
+    std::lock_guard<std::mutex> lk(m_otaMtx);
+    return m_otaStatus;
+}
+
+void IPTVManager::queueOtaToast(const std::string& msg, bool ok) {
+    std::lock_guard<std::mutex> lk(m_otaMtx);
+    m_otaToastMsg = msg;
+    m_otaToastOk = ok;
+    m_otaToastHas = true;
+}
+
+bool IPTVManager::takePendingOtaToast(std::string& outMsg, bool& outOk) {
+    std::lock_guard<std::mutex> lk(m_otaMtx);
+    if (!m_otaToastHas) return false;
+    outMsg = m_otaToastMsg;
+    outOk = m_otaToastOk;
+    m_otaToastHas = false;
+    m_otaToastMsg.clear();
+    return true;
+}
+
+// checkOtaPlaylistBoot
+// Chạy luồng nền lúc boot: thiếu live.m3u thì tải luôn (máy mới);
+// có rồi mà manifest mới hơn thì CHỈ BÁO, user tự bấm Y để tải.
+void IPTVManager::checkOtaPlaylistBoot() {
+    struct stat stLive;
+    bool liveExists = (stat((m_iptvDir + "/live.m3u").c_str(), &stLive) == 0);
+    if (!liveExists) {
+        std::string msg;
+        if (updateOtaPlaylist(msg)) {
+            Logger::info("IPTVManager: tu tai live.m3u lan dau: " + msg);
+            queueOtaToast(msg, true);
+        } else {
+            Logger::warn("IPTVManager: chua tai duoc live.m3u: " + msg);
+        }
+        return;
+    }
+
+    std::string ver, sha, dlUrl;
+    int count = 0;
+    if (!fetchOtaManifestInfo(ver, sha, count, dlUrl)) return; // lỗi mạng: im lặng
+    std::string savedVer = DatabaseManager::instance().getSetting("iptv_ota_version", "");
+    std::string savedSha = DatabaseManager::instance().getSetting("iptv_ota_sha256", "");
+    bool newer = isRemoteOtaNewer(ver, sha, savedVer, savedSha);
+    {
+        std::lock_guard<std::mutex> lk(m_otaMtx);
+        m_otaStatus.checked = true;
+        m_otaStatus.localVersion = savedVer;
+        m_otaStatus.remoteVersion = ver;
+        m_otaStatus.remoteCount = count;
+        m_otaStatus.available = newer;
+    }
+    if (newer) {
+        std::string t = "Có playlist OTA mới" +
+                        (ver.empty() ? "" : (" (" + ver + ")")) +
+                        (count > 0 ? (": " + std::to_string(count) + " kênh") : "") +
+                        ". Vào XEM TV bấm Y để tải.";
+        Logger::info("IPTV: " + t);
+        queueOtaToast(t, true);
+    } else {
+        Logger::info("IPTV: OTA playlist đã mới nhất, không tải lại.");
+    }
+}
+
+// updateOtaPlaylist
+// Tự động kiểm tra manifest và cập nhật Live M3U Playlist từ xa qua OTA.
+// Đã là bản mới nhất thì bỏ qua tải lại (đỡ tốn băng thông).
+bool IPTVManager::updateOtaPlaylist(std::string& outMessage) {
+    outMessage.clear();
+    // Chống tải chồng (luồng boot + user bấm Y cùng lúc)
+    bool expected = false;
+    if (!m_otaBusy.compare_exchange_strong(expected, true)) {
+        outMessage = "Đang tải playlist, chờ chút...";
+        return false;
+    }
+    struct BusyGuard {
+        std::atomic<bool>& f;
+        explicit BusyGuard(std::atomic<bool>& b) : f(b) {}
+        ~BusyGuard() { f.store(false); }
+    } guard(m_otaBusy);
+    std::string defaultPlaylistUrl = "https://raw.githubusercontent.com/bun2it/RomCloud/main/iptv/live.m3u";
+    std::string playlistUrl = DatabaseManager::instance().getSetting("iptv_ota_playlist_url", defaultPlaylistUrl);
+
+    Logger::info("IPTV: Checking OTA playlist update from manifest");
+
+    // 1. Fetch manifest (không tải playlist vội)
     std::string targetM3uUrl = playlistUrl;
     std::string otaVersion = "";
     std::string otaSha256 = "";
     int manifestChannelCount = 0;
+    std::string dlUrl;
 
-    if (mResp.success && (mResp.statusCode == 200 || mResp.statusCode == 206)) {
-        otaVersion = JsonHelper::extractString(mResp.body, "version");
-        otaSha256 = JsonHelper::extractString(mResp.body, "sha256");
-        manifestChannelCount = JsonHelper::extractInt(mResp.body, "channel_count", 0);
-        std::string dlUrl = JsonHelper::extractString(mResp.body, "download_url");
+    bool mfOk = fetchOtaManifestInfo(otaVersion, otaSha256,
+                                     manifestChannelCount, dlUrl);
+    if (mfOk) {
         if (!dlUrl.empty()) {
             targetM3uUrl = dlUrl;
         }
@@ -862,7 +965,25 @@ bool IPTVManager::updateOtaPlaylist(std::string& outMessage) {
         Logger::warn("IPTV: Could not fetch manifest, attempting direct playlist download from: " + playlistUrl);
     }
 
+    // 1b. Đã là bản mới nhất + file có sẵn thì bỏ qua, khỏi tải lại
+    struct stat stLiveEarly;
+    bool liveExists = (stat((m_iptvDir + "/live.m3u").c_str(), &stLiveEarly) == 0);
+    std::string savedVer = DatabaseManager::instance().getSetting("iptv_ota_version", "");
+    std::string savedSha = DatabaseManager::instance().getSetting("iptv_ota_sha256", "");
+    if (mfOk && liveExists &&
+        !isRemoteOtaNewer(otaVersion, otaSha256, savedVer, savedSha)) {
+        outMessage = "Playlist đã mới nhất" +
+                     (savedVer.empty() ? "" : (" (" + savedVer + ")")) + ".";
+        Logger::info("IPTV: " + outMessage);
+        return true;
+    }
+
     // 2. Fetch M3U playlist (kèm cache-busting)
+    std::string cacheBuster = "?t=" + std::to_string(std::time(nullptr));
+    std::vector<std::string> noCacheHeaders = {
+        "Cache-Control: no-cache, no-store, must-revalidate",
+        "Pragma: no-cache"
+    };
     std::string fetchM3uUrl = targetM3uUrl + (targetM3uUrl.find('?') == std::string::npos ? cacheBuster : "&t=" + std::to_string(std::time(nullptr)));
     Logger::info("IPTV: Fetching OTA M3U playlist from: " + fetchM3uUrl);
     HttpResponse pResp = HttpClient::instance().get(fetchM3uUrl, noCacheHeaders, 25);
@@ -903,12 +1024,18 @@ bool IPTVManager::updateOtaPlaylist(std::string& outMessage) {
     m_sourcesMeta["live.m3u"] = src;
     saveSourcesMeta();
 
-    // 5. Lưu thông tin phiên bản vào Database
+    // 5. Lưu thông tin phiên bản vào Database + hạ cờ bản mới
     if (!otaVersion.empty()) {
         DatabaseManager::instance().setSetting("iptv_ota_version", otaVersion);
     }
     if (!otaSha256.empty()) {
         DatabaseManager::instance().setSetting("iptv_ota_sha256", otaSha256);
+    }
+    {
+        std::lock_guard<std::mutex> lk(m_otaMtx);
+        m_otaStatus.available = false;
+        m_otaStatus.localVersion = otaVersion.empty() ? savedVer : otaVersion;
+        m_otaStatus.checked = true;
     }
 
     // 6. Reload lại toàn bộ playlist vào RAM
@@ -1704,7 +1831,7 @@ void IPTVManager::showIPTVChannelOSD(
         }
     }
 
-    blitText(s_fontSmall, "Lên/Xuống: Chọn  |  A: Xem  |  SELECT: Ẩn/Hiện OSD  |  B: Thoát",
+    blitText(s_fontSmall, "Lên/Xuống: Chọn  |  Trái/Phải: Nhóm  |  A: Xem  |  B: Thoát",
              dim, 20, CH - 24, 255);
 
     // Write to raw file
@@ -1917,6 +2044,41 @@ void IPTVManager::hideIPTVPlaybackFooter() {
     sendMpvIpcCommand("{\"command\":[\"overlay-remove\",2]}\n", &reply, "/tmp/mpv_iptv.sock");
 }
 
+// Đổi nhóm kênh trong OSD đang mở (LEFT/RIGHT): thay list theo nhóm
+// kế/trước (vòng tròn). Highlight về kênh đang phát nếu nó thuộc nhóm
+// mới, không thì đầu list (current = SIZE_MAX: không đánh dấu "đang xem").
+void IPTVManager::switchOsdGroup(int dir) {
+    if (m_iptvChannelList.empty()) return;
+    std::vector<std::string> groups = getGroups();
+    if (groups.size() < 2) return; // 1 nhóm thì không có gì để chuyển
+    std::string cur;
+    if (m_iptvSelectedIndex < m_iptvChannelList.size())
+        cur = m_iptvChannelList[m_iptvSelectedIndex].group;
+    size_t pos = 0;
+    for (size_t i = 0; i < groups.size(); ++i) {
+        if (groups[i] == cur) {
+            pos = i;
+            break;
+        }
+    }
+    pos = (pos + groups.size() + (dir >= 0 ? 1 : groups.size() - 1)) %
+          groups.size();
+    std::vector<IPTVChannel> nl = getChannelsByGroup(groups[pos]);
+    if (nl.empty()) return;
+    m_iptvChannelList = nl;
+    m_iptvSelectedIndex = 0;
+    m_iptvCurrentIndex = SIZE_MAX;
+    for (size_t i = 0; i < nl.size(); ++i) {
+        if (nl[i].name == m_currentChannel) {
+            m_iptvSelectedIndex = i;
+            m_iptvCurrentIndex = i;
+            break;
+        }
+    }
+    showIPTVChannelOSD(m_iptvChannelList, (int)m_iptvSelectedIndex,
+                       groups[pos], 0);
+}
+
 // playChannel: blocking. Forks mpv and handles all playback controls + channel list OSD
 // in the same process. This is the same pattern as playYouTubeVideo.
 bool IPTVManager::playChannel(const IPTVChannel& channel, size_t initialIndex, const std::vector<IPTVChannel>& customList) {
@@ -2041,17 +2203,25 @@ bool IPTVManager::playChannel(const IPTVChannel& channel, size_t initialIndex, c
                         nullptr, "/tmp/mpv_iptv.sock");
                 }
 
-            // LEFT: Seek -10s
+            // LEFT: Đổi nhóm kênh khi list hiện, Seek -10s khi list ẩn
             } else if (input.isButtonJustPressed(Button::LEFT)) {
-                sendMpvIpcCommand("{\"command\":[\"seek\",-10,\"relative\"]}", nullptr, "/tmp/mpv_iptv.sock");
-                showOverlayIcon("rewind", 1200);
-                sendMpvIpcCommand("{\"command\":[\"show-text\",\"{\\\\an2\\\\fs44\\\\bord2\\\\b1}◀◀  -10s\", 1200]}", nullptr, "/tmp/mpv_iptv.sock");
+                if (channelListVisible && !m_iptvChannelList.empty()) {
+                    switchOsdGroup(-1);
+                } else {
+                    sendMpvIpcCommand("{\"command\":[\"seek\",-10,\"relative\"]}", nullptr, "/tmp/mpv_iptv.sock");
+                    showOverlayIcon("rewind", 1200);
+                    sendMpvIpcCommand("{\"command\":[\"show-text\",\"{\\\\an2\\\\fs44\\\\bord2\\\\b1}◀◀  -10s\", 1200]}", nullptr, "/tmp/mpv_iptv.sock");
+                }
 
-            // RIGHT: Seek +10s
+            // RIGHT: Đổi nhóm kênh khi list hiện, Seek +10s khi list ẩn
             } else if (input.isButtonJustPressed(Button::RIGHT)) {
-                sendMpvIpcCommand("{\"command\":[\"seek\",10,\"relative\"]}", nullptr, "/tmp/mpv_iptv.sock");
-                showOverlayIcon("forward", 1200);
-                sendMpvIpcCommand("{\"command\":[\"show-text\",\"{\\\\an2\\\\fs44\\\\bord2\\\\b1}▶▶  +10s\", 1200]}", nullptr, "/tmp/mpv_iptv.sock");
+                if (channelListVisible && !m_iptvChannelList.empty()) {
+                    switchOsdGroup(1);
+                } else {
+                    sendMpvIpcCommand("{\"command\":[\"seek\",10,\"relative\"]}", nullptr, "/tmp/mpv_iptv.sock");
+                    showOverlayIcon("forward", 1200);
+                    sendMpvIpcCommand("{\"command\":[\"show-text\",\"{\\\\an2\\\\fs44\\\\bord2\\\\b1}▶▶  +10s\", 1200]}", nullptr, "/tmp/mpv_iptv.sock");
+                }
 
             // L1: Nhảy 8 kênh khi list hiện, Seek -60s khi list ẩn
             } else if (input.isButtonJustPressed(Button::L1)) {
@@ -2455,6 +2625,9 @@ bool IPTVManager::playYouTubeVideo(const std::string& videoId, const std::string
         uint32_t playStartTime = SDL_GetTicks();
         std::string currentQuality = quality.empty() ? "720" : quality;
         bool isPaused = false;
+        // Chốt nhãn theo độ phân giải đo thật (1 lần): đảm bảo nhãn luôn
+        // đúng hình đang phát (VD xin 720 nhưng stream chỉ 480).
+        bool ytLabelFixed = false;
         m_overlayExpireTime = 0;
         Logger::info("YouTube player started with PID: " + std::to_string(pid));
 
@@ -2484,58 +2657,70 @@ bool IPTVManager::playYouTubeVideo(const std::string& videoId, const std::string
             auto& input = InputManager::instance();
 
             if (SDL_GetTicks() - playStartTime >= 600) {
+                // Một lần duy nhất: nhãn = chiều cao đo thật từ mpv.
+                if (!ytLabelFixed) {
+                    int mh = ytMeasuredH();
+                    if (mh > 0) {
+                        std::string realQ = (mh == 360)   ? "360"
+                                            : (mh == 480) ? "480"
+                                            : (mh == 720) ? "720"
+                                                          : "";
+                        if (!realQ.empty() && realQ != currentQuality) {
+                            currentQuality = realQ;
+                            m_ytQuality = realQ;
+                            sendMpvIpcCommand("{\"command\":[\"show-text\",\"Đang phát " +
+                                              realQ + "p\",2000]}");
+                        }
+                        ytLabelFixed = true;
+                    } else if (SDL_GetTicks() - playStartTime > 15000) {
+                        ytLabelFixed = true; // không đo được thì giữ nhãn cũ
+                    }
+                }
                 if (input.isButtonJustPressed(Button::B) || input.isButtonJustPressed(Button::MENU)) {
                     stop();
                     break;
                 } else if (input.isButtonJustPressed(Button::A)) {
                     isPaused = !isPaused;
                     sendMpvIpcCommand("{\"command\":[\"cycle\",\"pause\"]}");
-                    showOverlayIcon(isPaused ? "pause" : "play", 1400);
                     sendMpvIpcCommand(isPaused
-                        ? "{\"command\":[\"show-text\",\"{\\\\an2\\\\fs44\\\\bord2\\\\b1}❚❚  TẠM DỪNG\", 1400]}"
-                        : "{\"command\":[\"show-text\",\"{\\\\an2\\\\fs44\\\\bord2\\\\b1}▶  ĐANG PHÁT\", 1400]}");
+                        ? "{\"command\":[\"show-text\",\"❚❚  TẠM DỪNG\", 1400]}"
+                        : "{\"command\":[\"show-text\",\"▶  ĐANG PHÁT\", 1400]}");
                     showYouTubeOSD();
                 } else if (input.isButtonJustPressed(Button::RIGHT)) {
                     sendMpvIpcCommand("{\"command\":[\"seek\",10,\"relative\"]}");
-                    showOverlayIcon("forward", 1200);
-                    sendMpvIpcCommand("{\"command\":[\"show-text\",\"{\\\\an2\\\\fs44\\\\bord2\\\\b1}▶▶  +10s\", 1200]}");
+                    sendMpvIpcCommand("{\"command\":[\"show-text\",\"▶▶  +10s\", 1200]}");
                     showYouTubeOSD();
                 } else if (input.isButtonJustPressed(Button::LEFT)) {
                     sendMpvIpcCommand("{\"command\":[\"seek\",-10,\"relative\"]}");
-                    showOverlayIcon("rewind", 1200);
-                    sendMpvIpcCommand("{\"command\":[\"show-text\",\"{\\\\an2\\\\fs44\\\\bord2\\\\b1}◀◀  -10s\", 1200]}");
+                    sendMpvIpcCommand("{\"command\":[\"show-text\",\"◀◀  -10s\", 1200]}");
                     showYouTubeOSD();
                 } else if (input.isButtonJustPressed(Button::UP)) {
                     sendMpvIpcCommand("{\"command\":[\"add\",\"volume\",5]}");
-                    showOverlayIcon("vol_up", 1200);
-                    sendMpvIpcCommand("{\"command\":[\"show-text\",\"{\\\\an5\\\\fs70\\\\bord3\\\\b1}▲  Âm lượng +5%\", 1200]}");
+                    sendMpvIpcCommand("{\"command\":[\"show-text\",\"▲  Âm lượng +5%\", 1200]}");
                     showYouTubeOSD();
                 } else if (input.isButtonJustPressed(Button::DOWN)) {
                     sendMpvIpcCommand("{\"command\":[\"add\",\"volume\",-5]}");
-                    showOverlayIcon("vol_down", 1200);
-                    sendMpvIpcCommand("{\"command\":[\"show-text\",\"{\\\\an5\\\\fs70\\\\bord3\\\\b1}▼  Âm lượng -5%\", 1200]}");
+                    sendMpvIpcCommand("{\"command\":[\"show-text\",\"▼  Âm lượng -5%\", 1200]}");
                     showYouTubeOSD();
                 } else if (input.isButtonJustPressed(Button::R1)) {
                     sendMpvIpcCommand("{\"command\":[\"seek\",60,\"relative\"]}");
-                    showOverlayIcon("forward", 1400);
-                    sendMpvIpcCommand("{\"command\":[\"show-text\",\"{\\\\an2\\\\fs44\\\\bord2\\\\b1}▶▶  +60s\", 1400]}");
+                    sendMpvIpcCommand("{\"command\":[\"show-text\",\"▶▶  +60s\", 1400]}");
                     showYouTubeOSD();
                 } else if (input.isButtonJustPressed(Button::L1)) {
                     sendMpvIpcCommand("{\"command\":[\"seek\",-60,\"relative\"]}");
-                    showOverlayIcon("rewind", 1400);
-                    sendMpvIpcCommand("{\"command\":[\"show-text\",\"{\\\\an2\\\\fs44\\\\bord2\\\\b1}◀◀  -60s\", 1400]}");
+                    sendMpvIpcCommand("{\"command\":[\"show-text\",\"◀◀  -60s\", 1400]}");
                     showYouTubeOSD();
                 } else if (input.isButtonJustPressed(Button::X)) {
                     sendMpvIpcCommand("{\"command\":[\"cycle-values\",\"video-aspect-override\",\"16:9\",\"4:3\",\"-1\"]}");
-                    flashCenter("aspect", "{\"command\":[\"show-text\",\"{\\\\an5\\\\fs75\\\\bord3\\\\b1}Tỉ lệ màn hình\", 1400]}");
+                    sendMpvIpcCommand("{\"command\":[\"show-text\",\"Tỉ lệ màn hình\", 1400]}");
                     showYouTubeOSD();
                 } else if (input.isButtonJustPressed(Button::Y)) {
                     sendMpvIpcCommand("{\"command\":[\"cycle\",\"sub\"]}");
-                    flashCenter("cc", "{\"command\":[\"show-text\",\"{\\\\an5\\\\fs75\\\\bord3\\\\b1}Phụ đề (CC)\", 1400]}");
+                    sendMpvIpcCommand("{\"command\":[\"show-text\",\"Phụ đề (CC)\", 1400]}");
                     showYouTubeOSD();
                 } else if (input.isButtonJustPressed(Button::START)) {
                     sendMpvIpcCommand("{\"command\":[\"cycle-values\",\"speed\",\"1.0\",\"1.25\",\"1.5\",\"0.75\"]}");
-                    flashCenter("speed", "{\"command\":[\"show-text\",\"{\\\\an5\\\\fs80\\\\bord3\\\\b1}Tốc độ phát\", 1400]}");
+                    sendMpvIpcCommand("{\"command\":[\"show-text\",\"Tốc độ phát\", 1400]}");
                     showYouTubeOSD();
                 }
                 // SELECT đổi 360/720 lúc đang phát đã gỡ (gây freeze):

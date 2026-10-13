@@ -81,9 +81,13 @@ case "$1" in
         # ~2s nhung co 720p that (android chi co toi 360p progressive).
         # Uu tien AVC 30fps (itag 135): nhe CPU nhat cho A53. AV1/VP9
         # 720p60 giai ma mem gay giat tren may yeu.
-        FORMAT="bv*[height<=720][fps<=30][vcodec^=avc]+ba/bv*[height<=720][vcodec^=avc]+ba/bv*[height<=720][fps<=30]+ba/bv*[height<=720]+ba/best[height<=720]/best"
+        # 720p FORCE đúng 720 (mọi codec, AVC trước cho mượt): không đuôi
+        # best<=720 (rớt 480p gán nhãn 720). 480p cũng exact-only.
+        # Thiếu là fail loud để C++ toast rõ, không phát sai nhãn.
+        FORMAT="bv*[height=720][fps<=30][vcodec^=avc]+ba/bv*[height=720][vcodec^=avc]+ba/bv*[height=720][fps<=30]+ba/bv*[height=720]+ba"
         case "$QUALITY" in
             360) FORMAT="18/best[height<=360]" ;;
+            480) FORMAT="bv*[height=480][fps<=30][vcodec^=avc]+ba/bv*[height=480][vcodec^=avc]+ba/bv*[height=480][fps<=30]+ba/bv*[height=480]+ba" ;;
             *)   ;;
         esac
         if [ "$QUALITY" = "360" ]; then
@@ -130,6 +134,8 @@ case "$1" in
 
         # Fallback: android progressive (luon co, toi da 360p) de dam bao
         # video phat duoc thay vi bao loi khi client mac dinh that bai.
+        # KHÔNG áp dụng cho nấc force 720/480 (rớt 360 là sai nhãn).
+        if [ "$QUALITY" != "720" ] && [ "$QUALITY" != "480" ]; then
         T0=$(date +%s)
         RAW_URLS=$("$YTDLP" -g --cache-dir /tmp/yt_cache --socket-timeout 8 --no-warnings --no-playlist --no-check-certificates --extractor-args "youtube:player_client=android" -f "18/best[height<=360]/best" "https://www.youtube.com/watch?v=${VIDEO_ID}" 2>/dev/null)
         echo "yt_url fallback_android360 $(( $(date +%s) - T0 ))s ${VIDEO_ID}" >> /tmp/yt_timing.log 2>/dev/null
@@ -143,6 +149,7 @@ case "$1" in
                 echo "${V_URL}"
             fi
             exit 0
+        fi
         fi
 
         echo "ERROR:NOSTREAM Failed to extract stream URL" >&2

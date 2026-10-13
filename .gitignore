@@ -30,3 +30,4 @@ screen_shot.png
 
 node_modules/
 *.bak
+tools/iptv_curator/ai_config.json

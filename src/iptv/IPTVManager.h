@@ -175,6 +175,29 @@ public:
 
     // OTA Update Playlist (tải playlist M3U mới nhất từ xa)
     bool updateOtaPlaylist(std::string& outMessage);
+    // Chỉ fetch manifest OTA (không tải playlist): dùng cho boot-check
+    bool fetchOtaManifestInfo(std::string& outVersion, std::string& outSha256,
+                              int& outChannelCount, std::string& outDownloadUrl);
+    // Trạng thái bản OTA mới (user bấm Y để tải, máy KHÔNG tự tải ngầm)
+    struct OtaPlaylistStatus {
+        bool checked = false;   // đã check xong 1 vòng boot
+        bool available = false; // có bản OTA mới hơn bản đang dùng
+        std::string remoteVersion;
+        int remoteCount = 0;
+        std::string localVersion;
+    };
+    OtaPlaylistStatus getOtaPlaylistStatus() const;
+    // Boot-check nền: thiếu live.m3u thì tải luôn; có rồi mà manifest mới
+    // hơn thì CHỈ BÁO (toast + cờ available), không tự tải.
+    void checkOtaPlaylistBoot();
+    static bool isRemoteOtaNewer(const std::string& remoteVer,
+                                 const std::string& remoteSha,
+                                 const std::string& localVer,
+                                 const std::string& localSha);
+    // Hàng đợi toast cho luồng nền (UIManager::update xả ra showToast,
+    // vì ToastState không thread-safe)
+    void queueOtaToast(const std::string& msg, bool ok);
+    bool takePendingOtaToast(std::string& outMsg, bool& outOk);
 
     IPTVChannel* getChannel(size_t index);
 
@@ -218,6 +241,9 @@ public:
     bool playChannel(const IPTVChannel& channel, size_t initialIndex = 0, const std::vector<IPTVChannel>& customList = {});
     // Chuyển kênh trong lúc đang phát (loadfile replace, không restart mpv)
     bool switchIPTVChannelByIndex(size_t idx);
+    // Đổi nhóm kênh trong OSD đang mở (LEFT/RIGHT): thay list theo nhóm
+    // kế/trước (vòng tròn), highlight về kênh đang phát nếu có.
+    void switchOsdGroup(int dir);
     void showIPTVChannelOSD(const std::vector<IPTVChannel>& channels,
                             int selectedIndex,
                             const std::string& groupName = "",
@@ -320,6 +346,13 @@ private:
     std::string m_ytUpgradeUrl;
     std::string m_ytUpgradingKey;
     std::mutex m_ytUpgradeMtx;
+    // OTA playlist boot-check (luồng nền -> UI): trạng thái + hàng đợi toast
+    mutable std::mutex m_otaMtx;
+    OtaPlaylistStatus m_otaStatus;
+    std::string m_otaToastMsg;
+    bool m_otaToastOk = true;
+    bool m_otaToastHas = false;
+    std::atomic<bool> m_otaBusy{false}; // chống tải chồng (boot + bấm Y)
     // Prefetch 720p: nạp ngầm trong lúc 360 vẫn phát, đủ đệm mới nhảy index.
     std::string m_ytPreVid;
     std::string m_ytPreVideo;

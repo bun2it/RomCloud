@@ -50,6 +50,74 @@ def get_standard_m3u_path() -> str:
 # Khởi tạo engine toàn cục
 engine = CuratorEngine(work_dir=CUR_DIR)
 
+# Tự động feed: quét folder Drive IPTV, nạp hết *.m3u mới/đổi/xóa.
+# Không nút bấm: chạy 1 lần lúc khởi động + lặp nền. Nguồn nạp tay
+# (link URL, dán text) được giữ lại, chỉ thay phần file Drive.
+DRIVE_IPTV_DIR = os.path.dirname(USER_STANDARD_M3U)
+AUTO_FEED_INTERVAL_SEC = 300
+auto_feed_state = {
+    "enabled": True,
+    "interval_sec": AUTO_FEED_INTERVAL_SEC,
+    "last_scan": "",
+    "last_result": "chưa quét",
+    "files_seen": {},
+}
+
+def _snap_drive_files():
+    try:
+        names = sorted(f for f in os.listdir(DRIVE_IPTV_DIR)
+                       if f.lower().endswith((".m3u", ".m3u8")))
+    except Exception as e:
+        return None, f"Không đọc được folder Drive: {e}"
+    snap = {}
+    for fn in names:
+        p = os.path.join(DRIVE_IPTV_DIR, fn)
+        try:
+            st = os.stat(p)
+            snap[p] = (st.st_size, int(st.st_mtime))
+        except Exception:
+            continue
+    return snap, ""
+
+def scan_drive_folder_once() -> str:
+    """1 vòng feed: file Drive mới/đổi/mất -> nạp lại + gom cụm."""
+    snap, err = _snap_drive_files()
+    if snap is None:
+        return err
+    if snap == auto_feed_state["files_seen"]:
+        return f"Không đổi ({len(snap)} file)"
+    prefix = DRIVE_IPTV_DIR + os.sep
+    kept = [ch for ch in engine.raw_channels
+            if not (getattr(ch, "source_file", "") or "").startswith(prefix)]
+    engine.raw_channels = kept
+    total = 0
+    for p in sorted(snap):
+        try:
+            total += engine.add_source_file(p)
+        except Exception as e:
+            print(f"[!] auto-feed bỏ qua {p}: {e}")
+    try:
+        engine.process_and_cluster()
+    except Exception as e:
+        return f"Lỗi gom cụm: {e}"
+    auto_feed_state["files_seen"] = snap
+    return f"Đã nạp {total} kênh từ {len(snap)} file Drive"
+
+def auto_feed_loop():
+    import datetime
+    while True:
+        time.sleep(AUTO_FEED_INTERVAL_SEC)
+        try:
+            if probe_state.get("is_running"):
+                continue
+            msg = scan_drive_folder_once()
+            auto_feed_state["last_scan"] = datetime.datetime.now().strftime(
+                "%H:%M:%S %d/%m")
+            auto_feed_state["last_result"] = msg
+            print(f"[auto-feed] {msg}")
+        except Exception as e:
+            print(f"[auto-feed] lỗi: {e}")
+
 # Trạng thái tiến trình Health Check
 probe_state = {
     "is_running": False,
@@ -112,17 +180,30 @@ class CuratorRequestHandler(BaseHTTPRequestHandler):
             })
             return
 
-        # 2. API: Lấy danh sách kênh đã gom nhóm
+        # 2. API: Lấy danh sách kênh đã gom nhóm (nhóm hiển thị 2 tầng:
+        # prefix đủ kênh sống thì đôn lên nhóm chính, còn lại theo 18 nhóm chuẩn)
         if path == "/api/channels":
             group_filter = query.get("group", [""])[0]
             search_query = query.get("q", [""])[0].lower()
+
+            url_alive = None
+            try:
+                lr = probe_state.get("last_result") or {}
+                if lr:
+                    url_alive = {u: bool(v.get("is_alive", False))
+                                 for u, v in lr.items()
+                                 if isinstance(v, dict)}
+            except Exception:
+                url_alive = None
+            promoted = engine.compute_promotion(url_alive)
 
             results = []
             for ch_name, streams in engine.clustered_channels.items():
                 if not streams:
                     continue
                 first = streams[0]
-                grp = first["canonical_group"]
+                grp = engine.resolve_group(
+                    ch_name, first.get("canonical_group", "Kênh Chung"), promoted)
 
                 if group_filter and group_filter != "Tất cả" and grp != group_filter:
                     continue
@@ -169,14 +250,66 @@ class CuratorRequestHandler(BaseHTTPRequestHandler):
             self.send_json(probe_state)
             return
 
-        # 4. API: Lấy danh sách nhóm
+        # 4. API: Lấy danh sách nhóm (2 tầng: 18 nhóm chuẩn trước,
+        # nhóm prefix được đôn lên chính sau)
         if path == "/api/groups":
-            groups = set()
-            for ch_name, streams in engine.clustered_channels.items():
-                if streams:
-                    groups.add(streams[0]["canonical_group"])
-            sorted_groups = sorted(list(groups))
-            self.send_json({"groups": ["Tất cả"] + sorted_groups})
+            url_alive = None
+            try:
+                lr = probe_state.get("last_result") or {}
+                if lr:
+                    url_alive = {u: bool(v.get("is_alive", False))
+                                 for u, v in lr.items()
+                                 if isinstance(v, dict)}
+            except Exception:
+                url_alive = None
+            self.send_json({"groups": ["Tất cả"] + engine.display_group_order(url_alive)})
+            return
+
+        # 4b. API: Liệt kê nguồn playlist đang dùng (drive + file đã nạp)
+        if path == "/api/sources/list":
+            from collections import Counter
+            counts = Counter(
+                (getattr(ch, "source_file", "") or "(không rõ)")
+                for ch in engine.raw_channels
+            )
+            drive_path = USER_STANDARD_M3U if os.path.exists(USER_STANDARD_M3U) else ""
+            self.send_json({
+                "drive_path": drive_path,
+                "drive_dir": DRIVE_IPTV_DIR,
+                "repo_default": os.path.join(REPO_ROOT, "iptv", "default.m3u"),
+                "sources": [{"source": s, "count": c}
+                            for s, c in sorted(counts.items())],
+                "total": len(engine.raw_channels),
+                "autofeed": {
+                    "enabled": auto_feed_state["enabled"],
+                    "interval_sec": auto_feed_state["interval_sec"],
+                    "last_scan": auto_feed_state["last_scan"],
+                    "last_result": auto_feed_state["last_result"],
+                    "files": sorted(auto_feed_state["files_seen"].keys()),
+                },
+            })
+            return
+
+        # 4c. API: AI Vilao.ai trạng thái cấu hình
+        if path == "/api/ai/status":
+            from ai_helper import load_config, DEFAULT_PROMPT_TEMPLATE
+            cfg = load_config()
+            self.send_json({"has_key": bool(cfg["api_key"]),
+                            "model": cfg["model"],
+                            "base_url": cfg["base_url"],
+                            "prompt_template": (cfg.get("prompt_template") or
+                                                "").strip() or DEFAULT_PROMPT_TEMPLATE,
+                            "prompt_custom": bool((cfg.get("prompt_template") or "").strip())})
+            return
+        if path == "/api/ai/models":
+            from ai_helper import load_config, list_models
+            cfg = load_config()
+            if not cfg["api_key"]:
+                self.send_json({"models": [], "error": "Chưa nhập API key"})
+                return
+            models, err = list_models(cfg["base_url"], cfg["api_key"])
+            self.send_json({"models": models, "current": cfg["model"],
+                            "error": err})
             return
 
         # 5. API: Lấy cấu hình Rules
@@ -184,7 +317,11 @@ class CuratorRequestHandler(BaseHTTPRequestHandler):
             self.send_json({
                 "group_mappings": engine.normalizer.group_mappings,
                 "channel_aliases": engine.normalizer.channel_aliases,
-                "ping_thresholds": getattr(engine.normalizer, "ping_thresholds", {"good_ms": 500, "fair_ms": 1500})
+                "ping_thresholds": getattr(engine.normalizer, "ping_thresholds", {"good_ms": 500, "fair_ms": 1500}),
+                "prefix_group_min": getattr(engine.normalizer, "prefix_group_min", 4),
+                "prefix_stoplist": getattr(engine.normalizer, "prefix_stoplist", []),
+                "prefix_protected_groups": getattr(engine.normalizer, "prefix_protected_groups", []),
+                "prefix_promote_alive_min": getattr(engine.normalizer, "prefix_promote_alive_min", 11)
             })
             return
 
@@ -501,9 +638,80 @@ class CuratorRequestHandler(BaseHTTPRequestHandler):
                 engine.normalizer.channel_aliases = body["channel_aliases"]
             if "ping_thresholds" in body:
                 engine.normalizer.ping_thresholds = body["ping_thresholds"]
+            if "prefix_group_min" in body:
+                try:
+                    engine.normalizer.prefix_group_min = int(body["prefix_group_min"])
+                except (ValueError, TypeError):
+                    pass
+            if "prefix_stoplist" in body and isinstance(body["prefix_stoplist"], list):
+                engine.normalizer.prefix_stoplist = [str(x).upper().strip() for x in body["prefix_stoplist"] if str(x).strip()]
+            if "prefix_protected_groups" in body and isinstance(body["prefix_protected_groups"], list):
+                engine.normalizer.prefix_protected_groups = [str(x).strip() for x in body["prefix_protected_groups"] if str(x).strip()]
+            if "prefix_promote_alive_min" in body:
+                try:
+                    engine.normalizer.prefix_promote_alive_min = int(body["prefix_promote_alive_min"])
+                except (ValueError, TypeError):
+                    pass
             engine.normalizer.save_rules()
             engine.process_and_cluster()
-            self.send_json({"success": True, "ping_thresholds": engine.normalizer.ping_thresholds})
+            self.send_json({"success": True, "ping_thresholds": engine.normalizer.ping_thresholds,
+                            "prefix_group_min": engine.normalizer.prefix_group_min,
+                            "prefix_stoplist": engine.normalizer.prefix_stoplist,
+                            "prefix_protected_groups": engine.normalizer.prefix_protected_groups,
+                            "prefix_promote_alive_min": engine.normalizer.prefix_promote_alive_min})
+            return
+
+        # 8b. API: AI Vilao.ai — config/status/phân loại/áp dụng
+        if path == "/api/ai/save_config":
+            from ai_helper import save_config
+            body = self.read_json_body()
+            res = save_config(base_url=body.get("base_url", ""),
+                              api_key=body.get("api_key", ""),
+                              model=body.get("model", ""),
+                              prompt_template=body.get("prompt_template", ""))
+            self.send_json({"success": True, **res})
+            return
+        if path == "/api/ai/classify_unknown":
+            from ai_helper import classify_unknown
+            items, seen = [], set()
+            for ch in engine.raw_channels:
+                nm = getattr(ch, "name", "") or ""
+                grp = getattr(ch, "group", "") or ""
+                try:
+                    canon = engine.normalizer.canonicalize_group(grp, nm[:40])
+                except Exception:
+                    canon = ""
+                if canon == "Kênh Chung" and nm not in seen:
+                    seen.add(nm)
+                    items.append({"name": nm, "raw_group": grp})
+                if len(items) >= 120:
+                    break
+            groups = sorted(engine.normalizer.group_mappings.keys())
+            res = classify_unknown(items, groups)
+            res["count_unknown"] = len(items)
+            self.send_json(res)
+            return
+        if path == "/api/ai/apply":
+            body = self.read_json_body()
+            applied, skipped = [], []
+            for it in body.get("items", []):
+                name = str(it.get("name", "")).strip()
+                group = str(it.get("group", "")).strip()
+                raw = str(it.get("raw_group", "")).strip()
+                if not name or group not in engine.normalizer.group_mappings:
+                    skipped.append(name)
+                    continue
+                alias = raw or name
+                cur = engine.normalizer.group_mappings[group]
+                if alias not in cur:
+                    cur.append(alias)
+                    applied.append({"name": name, "group": group})
+                else:
+                    skipped.append(name)
+            engine.normalizer.save_rules()
+            engine.process_and_cluster()
+            self.send_json({"success": True, "applied": applied,
+                            "skipped": skipped})
             return
 
         # 9. API: Test Ping thử 1 luồng đơn lẻ
@@ -579,12 +787,18 @@ class CuratorRequestHandler(BaseHTTPRequestHandler):
 
 
 def run_server(port: int = PORT):
-    # Tự động nạp file IPTV chuẩn ban đầu nếu có
-    target_m3u = get_standard_m3u_path()
-    if os.path.exists(target_m3u):
-        cnt = engine.add_source_file(target_m3u)
-        engine.process_and_cluster()
-        print(f"[*] Tự động nạp {cnt} kênh từ file chuẩn: {target_m3u}")
+    # Tự động nạp file IPTV chuẩn ban đầu nếu có (lỗi quyền đọc Drive
+    # hay file hỏng thì bỏ qua, không crash cả server).
+    try:
+        msg = scan_drive_folder_once()
+        import datetime
+        auto_feed_state["last_scan"] = datetime.datetime.now().strftime(
+            "%H:%M:%S %d/%m")
+        auto_feed_state["last_result"] = msg
+        print(f"[*] auto-feed khởi động: {msg}")
+    except Exception as e:
+        print(f"[!] Bỏ qua auto-load ({e}); nạp thủ công ở Web UI.")
+    threading.Thread(target=auto_feed_loop, daemon=True).start()
 
     server_address = ("", port)
     httpd = ThreadingHTTPServer(server_address, CuratorRequestHandler)

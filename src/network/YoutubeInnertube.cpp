@@ -504,7 +504,7 @@ static int findInt(const std::string& j, const std::string& key, size_t from,
 std::string YoutubeInnertube::resolveStream(const std::string& videoId,
                                             const std::string& quality) {
     if (videoId.empty() || videoId.size() > 16) return std::string();
-    int limit = (quality == "720") ? 720 : 360;
+    int limit = (quality == "720") ? 720 : (quality == "480") ? 480 : 360;
 
     std::string body =
         std::string("{\"context\":{\"client\":{\"clientName\":\"ANDROID\","

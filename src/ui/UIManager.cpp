@@ -630,6 +630,18 @@ void UIManager::update() {
   // leaks)
   drainReadyThumbs();
 
+  // IPTV OTA: xả thông báo playlist mới từ luồng nền boot-check
+  // (ToastState không thread-safe nên luồng nền chỉ xếp hàng, main xả)
+  {
+    std::string otaToast;
+    bool otaOk = true;
+    if (IPTVManager::instance().takePendingOtaToast(otaToast, otaOk)) {
+      showToast(otaToast, otaOk ? SDL_Color{34, 197, 94, 255}
+                                : SDL_Color{239, 68, 68, 255},
+                6000);
+    }
+  }
+
   // Poll Hardware FN Switch for GameCast stream toggle
   CastManager::instance().update();
 
@@ -914,6 +926,20 @@ void UIManager::update() {
         m_ytPlayingVideoId = vid;
         ready = true;
       }
+    }
+    if (!ready) {
+      // Resolve thất bại (VD force 720p nhưng không có stream 720):
+      // báo rõ nấc nào thiếu thay vì im lặng.
+      std::string fq;
+      {
+        std::lock_guard<std::mutex> plk(s_ytPendingMutex);
+        fq = m_ytPendingQuality.empty() ? m_ytDefaultQuality
+                                        : m_ytPendingQuality;
+        m_ytPendingVideoId.clear();
+        m_ytPendingQuality.clear();
+      }
+      showToast("Không có " + fq + "p cho video này, thử nấc khác.",
+                {239, 68, 68, 255}, 3000);
     }
     if (ready) {
       // Đo tuổi thọ phiên phát để phát hiện chết tức thì (mpv sập /
@@ -3193,7 +3219,7 @@ void UIManager::update() {
       // Y = view mode toggle (alt to L1/R1 in row mode)
       toggleYouTubeViewMode();
     } else if (input.isButtonJustPressed(Button::SELECT)) {
-      // SELECT = chất lượng phát mặc định 360p ⇄ 720p (lưu ngay).
+      // SELECT = chất lượng mặc định 360p -> 480p -> 720p (lưu ngay).
       toggleYouTubeQuality();
     } else if (input.isButtonJustPressed(Button::B)) {
       if (m_ytInChannelView) {
@@ -7197,8 +7223,10 @@ void UIManager::renderIPTVPlaylistSelectState() {
     }
   }
 
-  // Footer chuẩn IPTV (drawAppFooter tự vẽ nền)
-  drawAppFooter({{UiTheme::PadBtn::Y, "Cập nhật OTA"},
+  // Footer chuẩn IPTV (drawAppFooter tự vẽ nền).
+  // Có bản OTA mới (boot-check thấy) thì nút Y báo rõ để user bấm tải.
+  bool otaNew = IPTVManager::instance().getOtaPlaylistStatus().available;
+  drawAppFooter({{UiTheme::PadBtn::Y, otaNew ? "Tải playlist mới!" : "Cập nhật OTA"},
                  {UiTheme::PadBtn::X, "Đổi chu kỳ"},
                  {UiTheme::PadBtn::B, "Menu"}});
 }
@@ -8043,6 +8071,14 @@ static long chromeMemAvailableKb() {
 // Reset khi phiên kết thúc (!isRunning).
 static bool s_chromeReadyLatched = false;
 static uint32_t s_chromeBootStartMs = 0;
+// Bàn giao màn hình cho weston sau mốc này (kể từ lúc bắt đầu chờ):
+// dừng cả vẽ lẫn Present để SDL/KMSDRM không giật lại DRM master.
+// Weston boot lần đầu chậm (socket ra muộn); cứ Present là weston không
+// modeset đè lên được -> kẹt ở "ĐANG MỞ TRÌNH DUYỆT" dù backend khỏe.
+// B vẫn hủy được (input ở handleChromeInput); fail/dead thì stop()+
+// goBack() vẽ lại menu bình thường. Chỉ áp dụng trên máy (PC không
+// tranh master).
+static const uint32_t kChromeHandoverMs = 2500;
 
 // P13: launch mpv for page video (fullscreen takeover, B to return).
 void UIManager::handleChromeInput() {
@@ -8171,6 +8207,10 @@ void UIManager::renderChromeState() {
     return;
   if (s_chromeBootStartMs == 0)
     s_chromeBootStartMs = SDL_GetTicks();
+#ifndef PC_SIMULATOR_MODE
+  if (SDL_GetTicks() - s_chromeBootStartMs > kChromeHandoverMs)
+    return; // nhường màn cho weston: không vẽ, không Present
+#endif
   uint32_t elapsed =
       (SDL_GetTicks() - s_chromeBootStartMs + 500) / 1000; // làm tròn giây
 
@@ -10504,21 +10544,25 @@ void UIManager::saveYouTubeViewMode() {
 
 void UIManager::loadYouTubeQuality() {
   std::string q = DatabaseManager::instance().getSetting("yt_quality", "720");
-  m_ytDefaultQuality = (q == "360") ? "360" : "720";
+  m_ytDefaultQuality = (q == "360") ? "360" : (q == "480") ? "480" : "720";
 }
 
 void UIManager::saveYouTubeQuality() {
   DatabaseManager::instance().setSetting("yt_quality", m_ytDefaultQuality);
 }
 
-// SELECT ở HOME: đổi chất lượng mặc định 360p (nhanh, Innertube) ⇄ 720p
-// (nét, yt-dlp tải ~10s). Đánh đổi công khai, lưu ngay.
+// SELECT ở HOME: vòng chất lượng mặc định 360p (nhanh) -> 480p (vừa) ->
+// 720p (nét). Nhãn luôn chốt theo độ phân giải đo thật lúc phát.
 void UIManager::toggleYouTubeQuality() {
-  m_ytDefaultQuality = (m_ytDefaultQuality == "360") ? "720" : "360";
+  if (m_ytDefaultQuality == "360") m_ytDefaultQuality = "480";
+  else if (m_ytDefaultQuality == "480") m_ytDefaultQuality = "720";
+  else m_ytDefaultQuality = "360";
   saveYouTubeQuality();
   showToast(m_ytDefaultQuality == "360"
                 ? "Mặc định: 360p (nhanh, phát ngay)"
-                : "Mặc định: 720p (nét, tải ~10s)",
+                : m_ytDefaultQuality == "480"
+                      ? "Mặc định: 480p (vừa nét vừa nhẹ)"
+                      : "Mặc định: 720p (nét, tải ~10s)",
             UiTheme::ACCENT_GREEN, 2000);
 }
 
@@ -10791,7 +10835,8 @@ void UIManager::renderYouTubeHomeState() {
 
   // Footer (4 hàng: 0=search, 1=tag, 2=hàng 3, 3=hàng 4). SELECT = chất
   // lượng phát mặc định, nhãn hiện giá trị hiện tại để toggle.
-  const char *qHint = (m_ytDefaultQuality == "360") ? "360p" : "720p";
+  std::string qHintStr = m_ytDefaultQuality + "p";
+  const char *qHint = qHintStr.c_str();
   if (m_ytHomeRow == 0) {
     drawAppFooter({{UiTheme::PadBtn::A, "Tìm kiếm"},
                    {UiTheme::PadBtn::B, "Thoát"},

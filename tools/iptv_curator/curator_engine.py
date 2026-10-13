@@ -8,7 +8,7 @@ Kết nối Parser -> Normalizer -> HealthChecker -> HistoryDB -> Exporter thàn
 import os
 from typing import List, Dict, Any, Optional, Callable
 from m3u_parser import M3UParser, RawChannel
-from normalizer import Normalizer
+from normalizer import Normalizer, is_betting_channel
 from health_checker import HealthChecker, ProbeResult
 from db_history import HistoryDB
 from exporter import PlaylistExporter, LiveChannelEntry
@@ -25,6 +25,7 @@ class CuratorEngine:
 
         self.raw_channels: List[RawChannel] = []
         self.clustered_channels: Dict[str, List[Dict[str, Any]]] = {}
+        self.prefix_buckets: Dict[str, List[str]] = {}
 
     def add_source_file(self, file_path: str) -> int:
         """Đọc và thêm các kênh từ file M3U cục bộ"""
@@ -54,8 +55,12 @@ class CuratorEngine:
         """
         Bước 1: Chuẩn hóa tên/nhóm kênh và gom cụm các luồng của cùng 1 kênh
         Loại trừ trùng lặp URL trong cùng 1 kênh.
+        Cuối cùng gắn tag prefix tầng 2 cho mọi kênh (không đổi nhóm chuẩn
+        tầng 1). Việc đôn prefix lên nhóm chính xét sau, theo kênh SỐNG,
+        lúc xuất file (compute_promotion).
         """
         self.clustered_channels.clear()
+        self.prefix_buckets = {}
         unique_urls = set()
 
         for ch in self.raw_channels:
@@ -74,6 +79,7 @@ class CuratorEngine:
                     "raw": ch,
                     "canonical_name": canon_name,
                     "canonical_group": canon_group,
+                    "prefix_sub": None,
                     "url": ch.url,
                     "logo": ch.logo,
                     "tvg_id": ch.tvg_id,
@@ -81,11 +87,119 @@ class CuratorEngine:
                 })
                 unique_urls.add(ch.url)
 
+        prefix_info = self._tag_prefix_groups()
+
         return {
             "total_raw": len(self.raw_channels),
             "distinct_channels": len(self.clustered_channels),
-            "unique_stream_urls": len(unique_urls)
+            "unique_stream_urls": len(unique_urls),
+            "prefix_buckets": prefix_info.get("buckets", {}),
+            "prefix_tagged_channels": prefix_info.get("tagged_channels", 0),
         }
+
+    # Thứ tự tầng 1 cố định: 17 nhóm chuẩn theo rules + Kênh Chung cuối.
+    FALLBACK_GROUP = "Kênh Chung"
+
+    def standard_group_order(self) -> List[str]:
+        order = list(self.normalizer.group_mappings.keys())
+        if self.FALLBACK_GROUP not in order:
+            order.append(self.FALLBACK_GROUP)
+        return order
+
+    def _tag_prefix_groups(self) -> Dict[str, Any]:
+        """Gắn tag prefix tầng 2 cho mọi kênh (không đổi nhóm chuẩn tầng 1).
+
+        - Tách prefix qua Normalizer.extract_prefix (uppercase, bỏ số TT
+          "001:" và ký tự rác, stop-list THE/TV/HD/VIP/NEW/LIVE...).
+        - Bỏ qua nhóm bảo vệ (Địa phương, LIVE EVENTS...): kênh tỉnh và
+          fixture bóng đá ở yên, không tham gia tầng prefix.
+        - Chỉ tag prefix có >= prefix_group_min kênh (chống nhiễu lẻ).
+        - Không ghi rules.json: tầng 2 tính động mỗi lần gom.
+        """
+        norm = self.normalizer
+        min_count = int(getattr(norm, "prefix_group_min", 4) or 4)
+        protected = set(getattr(norm, "prefix_protected_groups", []) or [])
+
+        bucket: Dict[str, List[str]] = {}
+        for canon_name, streams in self.clustered_channels.items():
+            if not streams:
+                continue
+            if streams[0].get("canonical_group") in protected:
+                continue
+            prefix = norm.extract_prefix(canon_name)
+            if not prefix:
+                continue
+            bucket.setdefault(prefix, []).append(canon_name)
+
+        self.prefix_buckets = {
+            p: names for p, names in bucket.items() if len(names) >= min_count
+        }
+
+        tagged = 0
+        for prefix, names in self.prefix_buckets.items():
+            for nm in names:
+                for s in self.clustered_channels.get(nm, []):
+                    s["prefix_sub"] = prefix
+                    tagged += 1
+
+        return {"buckets": {k: len(v) for k, v in self.prefix_buckets.items()},
+                "tagged_channels": tagged}
+
+    def _channel_is_alive(self, ch_name: str, streams: List[Dict[str, Any]],
+                          url_alive: Optional[Dict[str, bool]]) -> bool:
+        """Kênh coi là SỐNG nếu còn ít nhất 1 luồng sống (probe mới nhất,
+        không thì trạng thái DB, chưa có dữ liệu thì mặc định sống)."""
+        db_streams = self.db.get_channel_streams(ch_name)
+        for s in streams:
+            url = s["url"]
+            if url_alive is not None and url in url_alive:
+                if url_alive[url]:
+                    return True
+                continue
+            rec = next((r for r in db_streams if r["url"] == url), None)
+            if rec:
+                if rec["last_status"] == "ALIVE":
+                    return True
+            else:
+                return True
+        return False
+
+    def compute_promotion(self, url_alive: Optional[Dict[str, bool]] = None) -> Dict[str, int]:
+        """Prefix nào có > ngưỡng kênh SỐNG (mặc định trên 10, tức >= 11)
+        thì được đôn lên nhóm chính ở file xuất/UI. Trả về {prefix: số kênh sống}."""
+        norm = self.normalizer
+        promote_min = int(getattr(norm, "prefix_promote_alive_min", 11) or 11)
+
+        promoted: Dict[str, int] = {}
+        for prefix, names in (self.prefix_buckets or {}).items():
+            alive = sum(
+                1 for nm in names
+                if self._channel_is_alive(
+                    nm, self.clustered_channels.get(nm, []), url_alive)
+            )
+            if alive >= promote_min:
+                promoted[prefix] = alive
+        return promoted
+
+    def resolve_group(self, canon_name: str, canonical_group: str,
+                      promoted: Dict[str, int]) -> str:
+        """Nhóm hiển thị/xuất file: prefix được đôn thì lên nhóm chính,
+        còn lại giữ 1 trong 18 nhóm tầng 1."""
+        for s in self.clustered_channels.get(canon_name, []):
+            sub = s.get("prefix_sub")
+            if sub and sub in promoted:
+                return sub
+            break
+        return canonical_group
+
+    def display_group_order(self, url_alive: Optional[Dict[str, bool]] = None) -> List[str]:
+        """Thứ tự 2 tầng cho UI: 18 nhóm chuẩn trước, nhóm prefix được đôn sau."""
+        order = self.standard_group_order()
+        promoted = self.compute_promotion(url_alive)
+        for p in sorted(promoted.keys()):
+            if p not in order:
+                order.append(p)
+        return order
 
     def check_health(self, max_workers: int = 30, timeout: int = 4, target_mode: str = "ALL", progress_callback: Optional[Callable[[int, int, ProbeResult], None]] = None) -> Dict[str, ProbeResult]:
         """
@@ -136,13 +250,24 @@ class CuratorEngine:
 
     def generate_live_entries(self, include_backup: bool = True, probe_results: Optional[Dict[str, ProbeResult]] = None, publish_filters: Optional[Dict[str, Any]] = None) -> List[LiveChannelEntry]:
         """
-        Bước 3: Chọn lọc luồng tốt nhất cho mỗi kênh dựa trên Ping ms và Điểm uy tín
+        Bước 3: Chọn lọc luồng tốt nhất cho mỗi kênh dựa trên Ping ms và Điểm uy tín.
+        Nhóm xuất file theo 2 tầng: prefix nào có > ngưỡng kênh SỐNG
+        (prefix_promote_alive_min, mặc định trên 10) thì đôn lên nhóm chính,
+        còn lại xuất theo 1 trong 18 nhóm chuẩn tầng 1.
         """
         live_entries: List[LiveChannelEntry] = []
+
+        url_alive = ({u: p.is_alive for u, p in probe_results.items()}
+                     if probe_results else None)
+        promoted = self.compute_promotion(url_alive)
 
         for ch_name, stream_list in self.clustered_channels.items():
             if not stream_list:
                 continue
+
+            out_group = self.resolve_group(
+                ch_name, stream_list[0].get("canonical_group",
+                                            self.FALLBACK_GROUP), promoted)
 
             # Lấy thông tin xếp hạng từ DB và probe hiện tại
             candidate_streams = []
@@ -168,7 +293,7 @@ class CuratorEngine:
                 candidate_streams.append({
                     "url": url,
                     "name": ch_name,
-                    "group": s["canonical_group"],
+                    "group": out_group,
                     "logo": s["logo"],
                     "tvg_id": s["tvg_id"],
                     "is_alive": is_alive,
@@ -194,6 +319,10 @@ class CuratorEngine:
 
             # Kiểm tra bộ lọc xuất bản (Publish Filters) do Admin thiết lập
             if publish_filters:
+                # 0. Loại kênh cá độ tự động (trừ khi admin bật lại)
+                if not bool(publish_filters.get("allow_betting", False)):
+                    if is_betting_channel(best.get("name", "")):
+                        continue
                 # 1. Lọc theo nhóm kênh (Selected Groups) nếu có chỉ định
                 selected_groups = publish_filters.get("selected_groups")
                 if selected_groups is not None:

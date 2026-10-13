@@ -25,7 +25,9 @@
     "SCTV": [
       "SCTV",
       "KÊNH SCTV",
-      "TRUYỀN HÌNH SAIGONTOURIST"
+      "TRUYỀN HÌNH SAIGONTOURIST",
+      "💚| SCTV",
+      "KÊNH PHIM TRUYỆN"
     ],
     "Địa phương": [
       "Địa phương",
@@ -48,7 +50,11 @@
       "SPORTS",
       "K+",
       "K PLUS",
-      "CANAL+"
+      "CANAL+",
+      "Hội Quán Live",
+      "Hội Quán",
+      "LƯƠNG SƠN",
+      "Lương Sơn"
     ],
     "Phim & Giải Trí": [
       "Giải Trí",
@@ -60,7 +66,19 @@
       "PHIM TRUYỆN",
       "ENTERTAINMENT",
       "CINEMA",
-      "HBO"
+      "HBO",
+      "Movies",
+      "Drama",
+      "Comedy",
+      "Reality",
+      "Competition Reality",
+      "Daytime + Game Shows",
+      "Home + Food",
+      "Classic TV",
+      "Westerns",
+      "Big Brother Live",
+      "Sci",
+      "Sci-Fi"
     ],
     "Quốc Tế": [
       "Quốc Tế",
@@ -69,7 +87,13 @@
       "KÊNH NƯỚC NGOÀI",
       "Israel",
       "DISCOVERY",
-      "NATIONAL GEOGRAPHIC"
+      "NATIONAL GEOGRAPHIC",
+      "En Español",
+      "Español",
+      "Campuchia",
+      "CAMPUCHIA",
+      "NƯỚC NGOÀI",
+      "NUỚC NGOÀI"
     ],
     "🇨🇳 Trung Quốc": [
       "Trung Quốc",
@@ -101,33 +125,482 @@
       "Sự Kiện FPT PLAY",
       "Sự Kiện TV360",
       "TRỰC TIẾP",
-      "SỰ KIỆN"
+      "SỰ KIỆN",
+      "TV360 Live",
+      "TV360"
+    ],
+    "Thiếu Nhi": [
+      "Kids",
+      "Anime",
+      "Thiếu Nhi",
+      "Hoạt Hình"
+    ],
+    "Âm Nhạc": [
+      "Music Videos",
+      "Music",
+      "Âm Nhạc",
+      "MTV"
+    ],
+    "Khám Phá": [
+      "History + Science",
+      "Animals + Nature",
+      "True Crime",
+      "Khám Phá",
+      "Documentary",
+      "KÊNH ĐẶC SẮC"
+    ],
+    "Tin Tức": [
+      "News + Opinion",
+      "Local News",
+      "Thời Sự",
+      "Tin Tức"
+    ],
+    "Mua Sắm": [
+      "Mua Sắm",
+      "Mua sắm",
+      "Bán Hàng",
+      "BÁN HÀNG",
+      "Shopping",
+      "MUA SẮM"
     ]
   },
   "channel_aliases": {
-    "VTV1": ["vtv1", "vtv 1", "vtv 1 hd", "vtv1 hd", "vtv1 fhd", "vtv1 1080p", "vtv1 50fps"],
-    "VTV2": ["vtv2", "vtv 2", "vtv 2 hd", "vtv2 hd", "vtv2 fhd", "vtv2 1080p"],
-    "VTV3": ["vtv3", "vtv 3", "vtv 3 hd", "vtv3 hd", "vtv3 fhd", "vtv3 1080p", "vtv3 50fps"],
-    "VTV4": ["vtv4", "vtv 4", "vtv 4 hd", "vtv4 hd"],
-    "VTV5": ["vtv5", "vtv 5", "vtv 5 hd", "vtv5 hd"],
-    "VTV7": ["vtv7", "vtv 7", "vtv 7 hd", "vtv7 hd"],
-    "VTV8": ["vtv8", "vtv 8", "vtv 8 hd", "vtv8 hd"],
-    "VTV9": ["vtv9", "vtv 9", "vtv 9 hd", "vtv9 hd"],
-    "HTV7": ["htv7", "htv 7", "htv 7 hd", "htv7 hd"],
-    "HTV9": ["htv9", "htv 9", "htv 9 hd", "htv9 hd"],
-    "HTV Thể Thao": ["htv the thao", "htv thể thao", "htv the thao hd", "htv sports"],
-    "VTC1": ["vtc1", "vtc 1", "vtc 1 hd", "vtc1 hd"],
-    "VTC3": ["vtc3", "vtc 3", "vtc 3 hd", "vtc3 hd"],
-    "VTC14": ["vtc14", "vtc 14", "vtc 14 hd", "vtc14 hd"],
-    "K+ Sport 1": ["k+ sport 1", "k+ sport1", "k+sport 1", "k+ 1", "k+1", "k+ sport 1 hd"],
-    "K+ Sport 2": ["k+ sport 2", "k+ sport2", "k+sport 2", "k+ 2", "k+2", "k+ sport 2 hd"],
-    "K+ Cine": ["k+ cine", "k+ cine hd", "k+cine", "k+ ns"],
-    "K+ Action": ["k+ action", "k+ action hd", "k+action", "k+ pm"],
-    "Canal+ Sport": ["canal+ sport", "canal+ sport 2015", "canal + sport", "canal+ live 1"],
-    "Sky Sport F1": ["sky sport f1", "sky sports f1", "sky f1"],
-    "Sky Sport Tennis": ["sky sport tennis", "sky sports tennis"],
-    "TNT Sports 1": ["tnt sports 1", "tnt sports 1 4mbps", "tnt 1"],
-    "TNT Sports 2": ["tnt sports 2", "tnt sports 2 4mbps", "tnt 2"]
+    "VTV1": [
+      "vtv1",
+      "vtv 1",
+      "vtv 1 hd",
+      "vtv1 hd",
+      "vtv1 fhd",
+      "vtv1 1080p",
+      "vtv1 50fps"
+    ],
+    "VTV2": [
+      "vtv2",
+      "vtv 2",
+      "vtv 2 hd",
+      "vtv2 hd",
+      "vtv2 fhd",
+      "vtv2 1080p"
+    ],
+    "VTV3": [
+      "vtv3",
+      "vtv 3",
+      "vtv 3 hd",
+      "vtv3 hd",
+      "vtv3 fhd",
+      "vtv3 1080p",
+      "vtv3 50fps"
+    ],
+    "VTV4": [
+      "vtv4",
+      "vtv 4",
+      "vtv 4 hd",
+      "vtv4 hd"
+    ],
+    "VTV5": [
+      "vtv5",
+      "vtv 5",
+      "vtv 5 hd",
+      "vtv5 hd"
+    ],
+    "VTV7": [
+      "vtv7",
+      "vtv 7",
+      "vtv 7 hd",
+      "vtv7 hd"
+    ],
+    "VTV8": [
+      "vtv8",
+      "vtv 8",
+      "vtv 8 hd",
+      "vtv8 hd"
+    ],
+    "VTV9": [
+      "vtv9",
+      "vtv 9",
+      "vtv 9 hd",
+      "vtv9 hd"
+    ],
+    "HTV7": [
+      "htv7",
+      "htv 7",
+      "htv 7 hd",
+      "htv7 hd"
+    ],
+    "HTV9": [
+      "htv9",
+      "htv 9",
+      "htv 9 hd",
+      "htv9 hd"
+    ],
+    "HTV Thể Thao": [
+      "htv the thao",
+      "htv thể thao",
+      "htv the thao hd",
+      "htv sports"
+    ],
+    "VTC1": [
+      "vtc1",
+      "vtc 1",
+      "vtc 1 hd",
+      "vtc1 hd"
+    ],
+    "VTC3": [
+      "vtc3",
+      "vtc 3",
+      "vtc 3 hd",
+      "vtc3 hd"
+    ],
+    "VTC14": [
+      "vtc14",
+      "vtc 14",
+      "vtc 14 hd",
+      "vtc14 hd"
+    ],
+    "K+ Sport 1": [
+      "k+ sport 1",
+      "k+ sport1",
+      "k+sport 1",
+      "k+ 1",
+      "k+1",
+      "k+ sport 1 hd"
+    ],
+    "K+ Sport 2": [
+      "k+ sport 2",
+      "k+ sport2",
+      "k+sport 2",
+      "k+ 2",
+      "k+2",
+      "k+ sport 2 hd"
+    ],
+    "K+ Cine": [
+      "k+ cine",
+      "k+ cine hd",
+      "k+cine",
+      "k+ ns"
+    ],
+    "K+ Action": [
+      "k+ action",
+      "k+ action hd",
+      "k+action",
+      "k+ pm"
+    ],
+    "Canal+ Sport": [
+      "canal+ sport",
+      "canal+ sport 2015",
+      "canal + sport",
+      "canal+ live 1"
+    ],
+    "Sky Sport F1": [
+      "sky sport f1",
+      "sky sports f1",
+      "sky f1"
+    ],
+    "Sky Sport Tennis": [
+      "sky sport tennis",
+      "sky sports tennis"
+    ],
+    "TNT Sports 1": [
+      "tnt sports 1",
+      "tnt sports 1 4mbps",
+      "tnt 1"
+    ],
+    "TNT Sports 2": [
+      "tnt sports 2",
+      "tnt sports 2 4mbps",
+      "tnt 2"
+    ],
+    "VTV6": [
+      "vtv6"
+    ],
+    "VTV10": [
+      "vtv10"
+    ],
+    "VIETNAM TODAY": [
+      "vietnam today"
+    ],
+    "VTV5 TÂY NGUYÊN": [
+      "vtv5 tây nguyên"
+    ],
+    "SCTV6": [
+      "sctv6"
+    ],
+    "HTV THỂ THAO": [
+      "htv thể thao"
+    ],
+    "HTVC THUẦN VIỆT": [
+      "htvc thuần việt"
+    ],
+    "HTVC GIA ĐÌNH": [
+      "htvc gia đình"
+    ],
+    "HTVC PHỤ NỮ": [
+      "htvc phụ nữ"
+    ],
+    "VTV5 TÂY NAM BỘ": [
+      "vtv5 tây nam bộ"
+    ],
+    "SCTV3": [
+      "sctv3"
+    ],
+    "SCTV4": [
+      "sctv4"
+    ],
+    "SCTV7": [
+      "sctv7"
+    ],
+    "SCTV9": [
+      "sctv9"
+    ],
+    "SCTV11": [
+      "sctv11"
+    ],
+    "SCTV12": [
+      "sctv12"
+    ],
+    "SCTV13": [
+      "sctv13"
+    ],
+    "SCTV14": [
+      "sctv14"
+    ],
+    "SCTV16": [
+      "sctv16"
+    ],
+    "SCTV18": [
+      "sctv18"
+    ],
+    "SCTV19": [
+      "sctv19"
+    ],
+    "SCTV20": [
+      "sctv20"
+    ],
+    "HTVC CA NHẠC": [
+      "htvc ca nhạc"
+    ],
+    "ANTV": [
+      "antv"
+    ],
+    "QPVN": [
+      "qpvn"
+    ],
+    "CNBC": [
+      "cnbc"
+    ],
+    "FRANCE 24": [
+      "france 24"
+    ],
+    "KBS WORLD": [
+      "kbs world"
+    ],
+    "TRT WORLD": [
+      "trt world"
+    ],
+    "KIX": [
+      "kix"
+    ],
+    "BẮC NINH": [
+      "bắc ninh"
+    ],
+    "CÀ MAU": [
+      "cà mau"
+    ],
+    "ĐẮK LẮK": [
+      "đắk lắk"
+    ],
+    "HÀ TĨNH": [
+      "hà tĩnh"
+    ],
+    "HƯNG YÊN": [
+      "hưng yên"
+    ],
+    "LẠNG SƠN": [
+      "lạng sơn"
+    ],
+    "NINH BÌNH": [
+      "ninh bình"
+    ],
+    "SƠN LA": [
+      "sơn la"
+    ],
+    "THÁI NGUYÊN": [
+      "thái nguyên"
+    ],
+    "HTV1": [
+      "htv1"
+    ],
+    "HTV3": [
+      "htv3"
+    ],
+    "HTV4": [
+      "htv4"
+    ],
+    "ON VIE GIẢI TRÍ": [
+      "on vie giải trí"
+    ],
+    "ON VIE DRAMAS": [
+      "on vie dramas"
+    ],
+    "SCTV1": [
+      "sctv1"
+    ],
+    "SCTV5": [
+      "sctv5"
+    ],
+    "SCTV8": [
+      "sctv8"
+    ],
+    "SCTV10": [
+      "sctv10"
+    ],
+    "SCTV15": [
+      "sctv15"
+    ],
+    "SCTV17": [
+      "sctv17"
+    ],
+    "SCTV PHIM TỔNG HỢP": [
+      "sctv phim tổng hợp"
+    ],
+    "ASIAN FOOD NETWORK": [
+      "asian food network"
+    ],
+    "CARTOONITO": [
+      "cartoonito"
+    ],
+    "CARTOON NETWORK": [
+      "cartoon network"
+    ],
+    "BBC EARTH": [
+      "bbc earth"
+    ],
+    "ARIRANG": [
+      "arirang"
+    ],
+    "CNN": [
+      "cnn"
+    ],
+    "CNA": [
+      "cna"
+    ],
+    "CGTN": [
+      "cgtn"
+    ],
+    "CGTN DOCUMENTARY": [
+      "cgtn documentary"
+    ],
+    "DISCOVERY ASIA": [
+      "discovery asia"
+    ],
+    "HISTORY": [
+      "history"
+    ],
+    "VOV1": [
+      "vov1"
+    ],
+    "VOV2": [
+      "vov2"
+    ],
+    "VOV3": [
+      "vov3"
+    ],
+    "TÂY NINH": [
+      "tây ninh"
+    ],
+    "CCTV4": [
+      "cctv4"
+    ],
+    "CCTV10": [
+      "cctv10"
+    ],
+    "CCTV14": [
+      "cctv14"
+    ],
+    "BLV AQUA": [
+      "blv aqua"
+    ],
+    "BLV BÍ ĐAO": [
+      "blv bí đao"
+    ],
+    "BLV COZY": [
+      "blv cozy"
+    ],
+    "BLV C2": [
+      "blv c2"
+    ],
+    "BLV DR THANH": [
+      "blv dr thanh"
+    ],
+    "BLV FANTA": [
+      "blv fanta"
+    ],
+    "BLV GIÀ LÀNG": [
+      "blv già làng"
+    ],
+    "BLV HỔ VẰN": [
+      "blv hổ vằn"
+    ],
+    "BLV KHÔNG ĐỘ": [
+      "blv không độ"
+    ],
+    "BLV LAVIE": [
+      "blv lavie"
+    ],
+    "BLV MONSTER": [
+      "blv monster"
+    ],
+    "BLV MOUNTAIN DEW": [
+      "blv mountain dew"
+    ],
+    "BLV ÔLONG": [
+      "blv ôlong"
+    ],
+    "BLV PEPSI": [
+      "blv pepsi"
+    ],
+    "BLV POCARI": [
+      "blv pocari"
+    ],
+    "BLV REDBULL": [
+      "blv redbull"
+    ],
+    "BLV REVIVE": [
+      "blv revive"
+    ],
+    "BLV ROCKSTAR": [
+      "blv rockstar"
+    ],
+    "BLV RỒNG ĐỎ": [
+      "blv rồng đỏ"
+    ],
+    "BLV SAMURAI": [
+      "blv samurai"
+    ],
+    "BLV SODA": [
+      "blv soda"
+    ],
+    "BLV SPRITE": [
+      "blv sprite"
+    ],
+    "BLV STING": [
+      "blv sting"
+    ],
+    "BLV 247": [
+      "blv 247"
+    ],
+    "BLV 7UP": [
+      "blv 7up"
+    ],
+    "HTV2": [
+      "htv2"
+    ],
+    "ĐỒNG NAI 1": [
+      "đồng nai 1"
+    ],
+    "ACGL: FC ULAANBAATAR VS HANG YUEN FC": [
+      "acgl: fc ulaanbaatar vs hang yuen fc"
+    ]
   },
   "strip_patterns": [
     "\\[.*?\\]",
@@ -139,5 +612,45 @@
   "ping_thresholds": {
     "good_ms": 500,
     "fair_ms": 1500
-  }
+  },
+  "prefix_group_min": 4,
+  "prefix_stoplist": [
+    "THE",
+    "TV",
+    "HD",
+    "VIP",
+    "NEW",
+    "LIVE",
+    "FHD",
+    "UHD",
+    "SD",
+    "ALL",
+    "ONE",
+    "AND",
+    "FOR",
+    "MAX",
+    "PRO",
+    "PLUS",
+    "CHANNEL",
+    "SPORT",
+    "SPORTS",
+    "MOVIE",
+    "MOVIES",
+    "NEWS",
+    "MUSIC",
+    "KIDS",
+    "FILM",
+    "SHOW",
+    "BEST",
+    "TOP",
+    "FREE",
+    "FULL",
+    "STAR",
+    "PLAY"
+  ],
+  "prefix_protected_groups": [
+    "Địa phương",
+    "LIVE EVENTS"
+  ],
+  "prefix_promote_alive_min": 11
 }

@@ -81,7 +81,159 @@ document.addEventListener("DOMContentLoaded", () => {
   loadStats();
   loadChannels();
   loadRules();
+  refreshAiStatus();
 });
+
+// ---- AI Vilao.ai: phân loại kênh lạ ----
+let aiSuggestions = [];
+let aiKnownModelIds = [];
+
+async function refreshAiModels(manual = false) {
+  const sel = document.getElementById("aiModelInput");
+  try {
+    const res = await fetch("/api/ai/models");
+    const data = await res.json();
+    if (data.error && !(data.models && data.models.length)) {
+      if (manual) showToast("Không lấy được models: " + data.error, true);
+      return;
+    }
+    const ids = (data.models || []).map(m => m.id);
+    const isNew = ids.some(id => !aiKnownModelIds.includes(id));
+    if (isNew && aiKnownModelIds.length > 0) {
+      const fresh = ids.filter(id => !aiKnownModelIds.includes(id));
+      showToast(`Có model mới: ${fresh.join(", ")}`);
+    }
+    aiKnownModelIds = ids;
+    const current = document.getElementById("aiModelCustom")?.value.trim()
+      || data.current || (sel ? sel.value : "");
+    if (sel) {
+      sel.innerHTML = "";
+      ids.forEach(id => {
+        const opt = document.createElement("option");
+        opt.value = id;
+        opt.textContent = id;
+        sel.appendChild(opt);
+      });
+      if (current && ids.includes(current)) sel.value = current;
+    }
+  } catch (e) {
+    if (manual) showToast(`Lỗi: ${e}`, true);
+  }
+}
+
+function aiSelectedModel() {
+  const custom = (document.getElementById("aiModelCustom")?.value || "").trim();
+  if (custom) return custom;
+  const sel = document.getElementById("aiModelInput");
+  return sel ? sel.value : "";
+}
+
+async function refreshAiStatus() {
+  const badge = document.getElementById("aiStatusBadge");
+  try {
+    const res = await fetch("/api/ai/status");
+    const data = await res.json();
+    await refreshAiModels(false);
+    if (document.getElementById("aiPromptInput") && data.prompt_template) {
+      document.getElementById("aiPromptInput").value = data.prompt_template;
+    }
+    if (badge) {
+      const cur = aiSelectedModel() || data.model;
+      if (data.has_key && cur) {
+        badge.textContent = `Sẵn sàng (${cur})`;
+      } else {
+        badge.textContent = "Chưa cấu hình";
+      }
+    }
+  } catch (e) {
+    if (badge) badge.textContent = "Không nối được server";
+  }
+}
+
+async function saveAiConfig() {
+  const model = aiSelectedModel();
+  const key = (document.getElementById("aiKeyInput")?.value || "").trim();
+  const prompt = document.getElementById("aiPromptInput")?.value || "";
+  try {
+    const res = await fetch("/api/ai/save_config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: model, api_key: key, prompt_template: prompt })
+    });
+    const data = await res.json();
+    if (data.success) {
+      if (document.getElementById("aiKeyInput")) document.getElementById("aiKeyInput").value = "";
+      showToast("Đã lưu cấu hình AI.");
+      refreshAiStatus();
+    } else {
+      showToast("Lưu thất bại.", true);
+    }
+  } catch (e) {
+    showToast(`Lỗi: ${e}`, true);
+  }
+}
+
+async function aiClassifyUnknown() {
+  const box = document.getElementById("aiSuggestBox");
+  const btn = document.getElementById("btnAiApply");
+  aiSuggestions = [];
+  if (btn) btn.style.display = "none";
+  if (box) box.innerHTML = `<p class="text-sm text-dim">AI đang đọc, chờ chút...</p>`;
+  try {
+    const res = await fetch("/api/ai/classify_unknown", { method: "POST" });
+    const data = await res.json();
+    if (data.error || (data.errors && data.errors.length && !data.suggestions?.length)) {
+      const msg = data.error || (data.errors || []).join("; ");
+      if (box) box.innerHTML = `<p class="text-sm" style="color:var(--red, #ef4444);">Lỗi AI: ${escapeHtml(msg)}</p>`;
+      return;
+    }
+    aiSuggestions = data.suggestions || [];
+    if (!aiSuggestions.length) {
+      if (box) box.innerHTML = `<p class="text-sm text-dim">Không còn kênh lạ nào (hoặc AI không gợi ý được).</p>`;
+      return;
+    }
+    let html = `<p class="text-sm" style="margin-bottom:6px;">AI gợi ý ${aiSuggestions.length} kênh (duyệt rồi bấm Áp dụng):</p>`;
+    html += `<div style="max-height:260px; overflow-y:auto; display:flex; flex-direction:column; gap:4px;">`;
+    aiSuggestions.forEach((s, i) => {
+      html += `<div class="gch-row"><span class="gch-name">${s.betting ? "🔞 " : ""}${escapeHtml(s.name)}</span>` +
+              `<span class="gch-tier">→ ${escapeHtml(s.group)}${s.betting ? " • CÁ ĐỘ" : ""}</span></div>`;
+    });
+    html += `</div>`;
+    if (data.errors && data.errors.length) {
+      html += `<p class="text-sm text-dim">Lưu ý: ${escapeHtml(data.errors.join("; "))}</p>`;
+    }
+    if (box) box.innerHTML = html;
+    if (btn) btn.style.display = "";
+  } catch (e) {
+    if (box) box.innerHTML = `<p class="text-sm" style="color:#ef4444;">Lỗi: ${escapeHtml(String(e))}</p>`;
+  }
+}
+
+async function aiApplySuggestions() {
+  if (!aiSuggestions.length) return;
+  if (!confirm(`Ghi ${aiSuggestions.length} gợi ý vào rules.json?`)) return;
+  try {
+    const res = await fetch("/api/ai/apply", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ items: aiSuggestions })
+    });
+    const data = await res.json();
+    if (data.success) {
+      showToast(`Đã áp dụng ${data.applied.length} gợi ý (bỏ qua ${data.skipped.length}).`);
+      aiSuggestions = [];
+      const btn = document.getElementById("btnAiApply");
+      if (btn) btn.style.display = "none";
+      loadStats();
+      loadChannels();
+      if (typeof loadRules === "function") loadRules();
+    } else {
+      showToast("Áp dụng thất bại.", true);
+    }
+  } catch (e) {
+    showToast(`Lỗi: ${e}`, true);
+  }
+}
 
 // Toast notification
 function showToast(message, isError = false) {
@@ -129,7 +281,9 @@ function switchTab(tabId) {
     pane.classList.toggle("active", pane.id === tabId);
   });
 
-  if (tabId === "tabChannels") {
+  if (tabId === "tabSources") {
+    refreshSourcesList();
+  } else if (tabId === "tabChannels") {
     loadChannels();
   } else if (tabId === "tabGrid") {
     initGridIfEmpty();
@@ -137,6 +291,7 @@ function switchTab(tabId) {
     loadStats();
   } else if (tabId === "tabRules") {
     loadRules();
+    refreshAiStatus();
   }
 }
 
@@ -876,6 +1031,41 @@ function initDropZone() {
   });
 }
 
+// Danh sách nguồn playlist đang dùng (tab Nguồn): drive + file đã nạp.
+async function refreshSourcesList() {
+  const box = document.getElementById("activeSourcesList");
+  const driveLine = document.getElementById("drivePathLine");
+  if (!box) return;
+  try {
+    const res = await fetch("/api/sources/list");
+    const data = await res.json();
+    if (driveLine) {
+      let af = "";
+      if (data.autofeed) {
+        const mins = Math.round((data.autofeed.interval_sec || 300) / 60);
+        af = ` • Tự động feed mỗi ${mins} phút` +
+             (data.autofeed.last_scan
+               ? ` (lần cuối ${escapeHtml(data.autofeed.last_scan)}: ${escapeHtml(data.autofeed.last_result || "")})`
+               : " (đang chờ vòng đầu)");
+      }
+      driveLine.textContent = (data.drive_path
+        ? ("Drive chuẩn: " + data.drive_path)
+        : "Chưa thấy Drive chuẩn (dùng file repo hoặc link online).") + af;
+    }
+    if (!data.sources || data.sources.length === 0) {
+      box.innerHTML = `<p class="text-sm text-dim">Chưa nạp nguồn nào.</p>`;
+      return;
+    }
+    box.innerHTML = data.sources.map(s =>
+      `<div class="src-row"><span class="src-name">${escapeHtml(s.source)}</span>` +
+      `<span class="badge badge-blue">${s.count} kênh</span></div>`
+    ).join("") +
+    `<p class="text-sm text-dim" style="margin-top:6px;">Tổng: ${data.total} kênh từ ${data.sources.length} nguồn.</p>`;
+  } catch (err) {
+    box.innerHTML = `<p class="text-sm text-dim">Không tải được danh sách nguồn.</p>`;
+  }
+}
+
 async function handleFilesUpload(files) {
   let totalUploaded = 0;
   for (const file of files) {
@@ -898,6 +1088,7 @@ async function handleFilesUpload(files) {
 
   showToast(`Đã nạp thành công ${totalUploaded} kênh từ các file!`);
   loadStats();
+  refreshSourcesList();
   loadChannels();
   switchTab("tabChannels");
 }
@@ -923,6 +1114,7 @@ async function addSourceUrl() {
       showToast(`Đã thêm thành công ${data.added_channels} kênh từ URL!`);
       input.value = "";
       loadStats();
+      refreshSourcesList();
       loadChannels();
       switchTab("tabChannels");
     } else {
@@ -941,6 +1133,7 @@ async function loadDefaultRepoSource() {
     if (data.success) {
       showToast(`Đã nạp thành công ${data.loaded_channels} kênh từ iptv/default.m3u!`);
       loadStats();
+      refreshSourcesList();
       loadChannels();
       switchTab("tabChannels");
     } else {
@@ -959,6 +1152,7 @@ async function clearAllSources() {
     if (data.success) {
       showToast("Đã xóa làm mới danh sách nguồn.");
       loadStats();
+      refreshSourcesList();
       loadChannels();
     }
   } catch (err) {
@@ -1126,14 +1320,17 @@ function updateExportGroupCheckboxes(channels) {
   }
 
   container.innerHTML = "";
+  // Nhóm focus để xem kênh pane phải (mặc định nhóm đầu tiên được chọn).
+  if (!focusedExportGroup || !sortedGroups.includes(focusedExportGroup)) {
+    focusedExportGroup = sortedGroups.find(g => selectedExportGroups.has(g)) || sortedGroups[0] || "";
+  }
   sortedGroups.forEach(grp => {
     const isChecked = selectedExportGroups.has(grp);
     const count = groupCounts[grp] || 0;
 
     const label = document.createElement("label");
-    label.className = "checkbox-card";
-    label.style.borderLeft = isChecked ? "3px solid var(--accent-cyan)" : "3px solid transparent";
-    label.style.transition = "all 0.2s ease";
+    label.className = "grp-row" + (grp === focusedExportGroup ? " grp-focused" : "");
+    label.dataset.grp = grp;
 
     const input = document.createElement("input");
     input.type = "checkbox";
@@ -1141,17 +1338,27 @@ function updateExportGroupCheckboxes(channels) {
     input.checked = isChecked;
     input.addEventListener("change", (e) => {
       toggleExportGroup(grp, e.target.checked, label);
+      setFocusedExportGroup(grp);
     });
 
-    const content = document.createElement("div");
-    content.className = "chk-content";
-    content.innerHTML = `
-      <span class="chk-title">${escapeHtml(grp)}</span>
-      <span class="chk-sub">${count} kênh</span>
-    `;
+    const nameSpan = document.createElement("span");
+    nameSpan.className = "grp-name";
+    nameSpan.textContent = grp;
+    nameSpan.title = "Bấm để xem kênh nhóm này";
+    nameSpan.addEventListener("click", (e) => {
+      // Chỉ xem trước, không đổi checkbox.
+      e.preventDefault();
+      e.stopPropagation();
+      setFocusedExportGroup(grp);
+    });
+
+    const countSpan = document.createElement("span");
+    countSpan.className = "grp-count";
+    countSpan.textContent = `${count} kênh`;
 
     label.appendChild(input);
-    label.appendChild(content);
+    label.appendChild(nameSpan);
+    label.appendChild(countSpan);
     container.appendChild(label);
   });
 
@@ -1159,7 +1366,94 @@ function updateExportGroupCheckboxes(channels) {
     badge.textContent = `Đã chọn ${selectedExportGroups.size} / ${sortedGroups.length} nhóm`;
   }
 
+  renderPubChannels();
   updatePublishPreview();
+}
+
+// Dựng/xem trước danh sách kênh của 1 nhóm trong popup modal.
+function buildGrpChannelList(container, grp) {
+  container.innerHTML = "";
+  const filters = getPublishFilters();
+  const rows = (allChannels || []).filter(ch => (ch.group || "Khác") === grp);
+  rows.sort((a, b) => (a.name || "").localeCompare(b.name || "", "vi"));
+  const colors = {GOOD: "#22c55e", FAIR: "#38bdf8", POOR: "#f59e0b",
+                  STANDBY: "#94a3b8", DEAD: "#ef4444", UNKNOWN: "#64748b"};
+  let shown = 0;
+  rows.forEach(ch => {
+    const tier = getStreamQualityTier(ch.best_stream);
+    const allowed = (tier === "GOOD" && filters.allow_good) ||
+                    (tier === "FAIR" && filters.allow_fair) ||
+                    (tier === "POOR" && filters.allow_poor) ||
+                    (tier === "STANDBY" && filters.allow_standby) ||
+                    (tier === "DEAD" && filters.allow_dead);
+    // Uncheck ở bộ lọc thì ẩn hẳn khỏi list (không hiện mờ).
+    if (!allowed) return;
+    const row = document.createElement("div");
+    row.className = "gch-row";
+    row.title = tier;
+    row.innerHTML =
+      `<span class="gch-dot" style="background:${colors[tier] || "#64748b"}"></span>` +
+      `<span class="gch-name">${escapeHtml(ch.name || "(không tên)")}</span>` +
+      `<span class="gch-tier">${tier}</span>`;
+    container.appendChild(row);
+    shown++;
+  });
+  if (shown === 0) {
+    container.innerHTML = `<div class="gch-row">Không có kênh (bị lọc hết).</div>`;
+  }
+}
+
+function openGroupModal(grp) {
+  const modal = document.getElementById("groupModal");
+  const body = document.getElementById("groupModalBody");
+  const title = document.getElementById("groupModalTitle");
+  if (!modal || !body) return;
+  if (title) title.textContent = `${grp} (${countVisibleInGroup(grp)} kênh)`;
+  buildGrpChannelList(body, grp);
+  modal.style.display = "flex";
+  modal.onclick = (e) => { if (e.target === modal) closeGroupModal(); };
+}
+
+function countVisibleInGroup(grp) {
+  const filters = getPublishFilters();
+  return (allChannels || []).filter(ch => {
+    if ((ch.group || "Khác") !== grp) return false;
+    const tier = getStreamQualityTier(ch.best_stream);
+    return (tier === "GOOD" && filters.allow_good) ||
+           (tier === "FAIR" && filters.allow_fair) ||
+           (tier === "POOR" && filters.allow_poor) ||
+           (tier === "STANDBY" && filters.allow_standby) ||
+           (tier === "DEAD" && filters.allow_dead);
+  }).length;
+}
+
+function closeGroupModal() {
+  const modal = document.getElementById("groupModal");
+  if (modal) modal.style.display = "none";
+}
+
+// Focus 1 nhóm để xem kênh ở pane phải.
+let focusedExportGroup = "";
+
+function setFocusedExportGroup(grp) {
+  focusedExportGroup = grp;
+  document.querySelectorAll("#exportGroupCheckboxesGrid .grp-row").forEach(el => {
+    el.classList.toggle("grp-focused", el.dataset.grp === grp);
+  });
+  renderPubChannels();
+}
+
+function renderPubChannels() {
+  const title = document.getElementById("pubChannelsTitle");
+  const list = document.getElementById("pubChannelsList");
+  if (!title || !list) return;
+  if (!focusedExportGroup) {
+    title.textContent = "Chọn 1 nhóm để xem kênh";
+    list.innerHTML = "";
+    return;
+  }
+  title.textContent = `${focusedExportGroup} (${countVisibleInGroup(focusedExportGroup)} kênh)`;
+  buildGrpChannelList(list, focusedExportGroup);
 }
 
 function toggleExportGroup(grp, isChecked, labelEl = null) {
@@ -1190,7 +1484,7 @@ function selectAllExportGroups(selectAll) {
   selectedExportGroups.clear();
   checkboxes.forEach(cb => {
     cb.checked = selectAll;
-    const parentLabel = cb.closest(".checkbox-card");
+    const parentLabel = cb.closest(".grp-row");
     if (selectAll) {
       selectedExportGroups.add(cb.value);
       if (parentLabel) parentLabel.style.borderLeft = "3px solid var(--accent-cyan)";
@@ -1214,7 +1508,7 @@ function invertExportGroups() {
 
   checkboxes.forEach(cb => {
     cb.checked = !cb.checked;
-    const parentLabel = cb.closest(".checkbox-card");
+    const parentLabel = cb.closest(".grp-row");
     if (cb.checked) {
       selectedExportGroups.add(cb.value);
       if (parentLabel) parentLabel.style.borderLeft = "3px solid var(--accent-cyan)";
@@ -1239,10 +1533,21 @@ function getPublishFilters() {
     allow_poor: document.getElementById("chkPubPoor") ? document.getElementById("chkPubPoor").checked : false,
     allow_standby: document.getElementById("chkPubStandby") ? document.getElementById("chkPubStandby").checked : true,
     allow_dead: document.getElementById("chkPubDead") ? document.getElementById("chkPubDead").checked : false,
+    allow_betting: document.getElementById("chkPubBetting") ? document.getElementById("chkPubBetting").checked : false,
     good_threshold_ms: pingThresholds.good_ms,
     fair_threshold_ms: pingThresholds.fair_ms,
     selected_groups: Array.from(selectedExportGroups)
   };
+}
+
+// Nhận diện kênh cá độ/nhà cái (giống backend is_betting_channel).
+function isBettingChannel(name) {
+  const up = (name || "").toUpperCase();
+  const kws = ["W88", "M88", "FUN88", "BK8", "188BET", "DAFABET", "VSBET",
+               "DEBET", "HI88", "GO88", "12BET", "1XBET", "8XBET",
+               "M88.COM", "W88.COM", "NHÀ CÁI", "NHA CAI", "CÁ ĐỘ", "CA DO",
+               "TÀI XỈU", "TAI XIU", "KÈO NHÀ CÁI", "KEO NHA CAI"];
+  return kws.some(k => up.includes(k));
 }
 
 function updatePublishPreview() {
@@ -1253,6 +1558,7 @@ function updatePublishPreview() {
   let countPoor = 0;
   let countStandby = 0;
   let countDead = 0;
+  let countBetting = 0;
   let countWillExport = 0;
   let totalInSelectedGroups = 0;
 
@@ -1263,6 +1569,13 @@ function updatePublishPreview() {
       return;
     }
     totalInSelectedGroups++;
+
+    // Kênh cá độ: đếm riêng, mặc định loại khỏi xuất bản.
+    if (isBettingChannel(ch.name || "")) {
+      countBetting++;
+      if (filters.allow_betting) countWillExport++;
+      return;
+    }
 
     const tier = getStreamQualityTier(ch.best_stream);
     if (tier === "GOOD") countGood++;
@@ -1286,12 +1599,15 @@ function updatePublishPreview() {
   const elP = document.getElementById("countPubPoor");
   const elS = document.getElementById("countPubStandby");
   const elD = document.getElementById("countPubDead");
+  const elB = document.getElementById("countPubBetting");
   if (elG) elG.textContent = `${countGood} kênh`;
   if (elF) elF.textContent = `${countFair} kênh`;
   if (elP) elP.textContent = `${countPoor} kênh`;
   if (elS) elS.textContent = `${countStandby} kênh`;
   if (elD) elD.textContent = `${countDead} kênh`;
+  if (elB) elB.textContent = `${countBetting} kênh`;
 
+  renderPubChannels();
   const badge = document.getElementById("previewPublishCountBadge");
   if (badge) {
     const pct = totalInSelectedGroups > 0 ? ((countWillExport / totalInSelectedGroups) * 100).toFixed(1) : 0;

@@ -158,6 +158,16 @@
 
     <!-- TAB 2: Nguồn & Thêm M3U -->
     <section id="tabSources" class="tab-pane">
+      <!-- Card: Nguồn đang dùng -->
+      <div class="card mb-6">
+        <div class="card-header">
+          <h3>💽 Nguồn đang dùng</h3>
+          <p class="card-desc" id="drivePathLine">Drive chuẩn và các file playlist đã nạp.</p>
+        </div>
+        <div id="activeSourcesList">
+          <p class="text-sm text-dim">Chưa nạp nguồn nào.</p>
+        </div>
+      </div>
       <div class="grid-2-col">
         <!-- Card 1: Upload File -->
         <div class="card">
@@ -302,6 +312,41 @@
         </div>
       </div>
 
+      <!-- Card AI phân loại kênh lạ -->
+      <div class="card mb-4">
+        <div class="card-header flex-between">
+          <div>
+            <h3>🤖 AI Phân Loại Kênh Lạ (Vilao.ai)</h3>
+            <p class="card-desc">AI đọc tên + nhóm gốc các kênh đang rớt "Kênh Chung" rồi gợi ý nhóm chuẩn. Bạn duyệt rồi bấm Áp dụng để ghi vào rules.</p>
+          </div>
+          <span class="badge badge-blue" id="aiStatusBadge">Chưa cấu hình</span>
+        </div>
+        <div class="form-group" style="display:flex; gap:10px; flex-wrap:wrap; margin-top:10px;">
+          <div style="flex:1; min-width:200px;">
+            <label class="text-sm text-dim" for="aiModelInput">Model:</label>
+            <div style="display:flex; gap:6px;">
+              <select id="aiModelInput" style="flex:1;"></select>
+              <button type="button" class="btn btn-secondary" onclick="refreshAiModels(true)" title="Quét lại danh sách model">↻</button>
+            </div>
+            <input type="text" id="aiModelCustom" placeholder="hoặc nhập model ID khác..." style="width:100%; margin-top:6px;">
+          </div>
+          <div style="flex:2; min-width:220px;">
+            <label class="text-sm text-dim" for="aiKeyInput">API Key (lưu local, không commit):</label>
+            <input type="password" id="aiKeyInput" placeholder="sk-..." style="width:100%;">
+          </div>
+        </div>
+        <div class="form-group" style="margin-top:10px;">
+          <label class="text-sm text-dim" for="aiPromptInput">Prompt phân loại (giữ <code>{GROUPS}</code> và <code>{CHANNELS}</code>):</label>
+          <textarea id="aiPromptInput" rows="8" style="width:100%;" class="code-editor"></textarea>
+        </div>
+        <div class="form-actions mt-4" style="display:flex; gap:10px; flex-wrap:wrap;">
+          <button class="btn btn-secondary" onclick="saveAiConfig()">💾 Lưu Cấu Hình AI</button>
+          <button class="btn btn-primary" onclick="aiClassifyUnknown()">🤖 Phân Loại Kênh Lạ</button>
+          <button class="btn btn-success" id="btnAiApply" onclick="aiApplySuggestions()" style="display:none;">✅ Áp Dụng Gợi Ý</button>
+        </div>
+        <div id="aiSuggestBox" style="margin-top:10px;"></div>
+      </div>
+
       <div class="card">
         <div class="card-header flex-between">
           <div>
@@ -352,10 +397,16 @@
             </div>
           </div>
           <p class="text-sm text-dim mb-3">
-            Chọn các nhóm kênh bạn muốn đưa vào file live.m3u (mặc định chọn toàn bộ):
+            Chọn các nhóm kênh bạn muốn đưa vào file live.m3u (mặc định chọn toàn bộ). Bấm tên nhóm để xem kênh bên phải:
           </p>
-          <div class="filter-checkbox-grid" id="exportGroupCheckboxesGrid">
-            <!-- Render động danh sách nhóm kênh -->
+          <div class="pub-2pane">
+            <div class="pub-groups" id="exportGroupCheckboxesGrid">
+              <!-- Render động danh sách nhóm kênh -->
+            </div>
+            <div class="pub-channels">
+              <div class="pub-channels-title" id="pubChannelsTitle">Chọn 1 nhóm để xem kênh</div>
+              <div id="pubChannelsList"></div>
+            </div>
           </div>
         </div>
 
@@ -406,6 +457,14 @@
               <div class="chk-content">
                 <span class="chk-title">🔴 Kênh Lỗi / Chết (DEAD)</span>
                 <span class="chk-sub" id="countPubDead">0 kênh</span>
+              </div>
+            </label>
+
+            <label class="checkbox-card">
+              <input type="checkbox" id="chkPubBetting" onchange="updatePublishPreview()">
+              <div class="chk-content">
+                <span class="chk-title">🔞 Kênh Cá Độ (mặc định loại)</span>
+                <span class="chk-sub" id="countPubBetting">0 kênh</span>
               </div>
             </label>
           </div>
@@ -513,6 +572,19 @@
       </div>
       <div class="modal-body" id="modalChannelBody">
         <!-- Streams list -->
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal Xem Kênh Trong Nhóm (xuất bản) -->
+  <div class="modal-overlay" id="groupModal" style="display: none;">
+    <div class="modal-card">
+      <div class="modal-header flex-between">
+        <h3 id="groupModalTitle">Kênh trong nhóm</h3>
+        <button class="btn-close" onclick="closeGroupModal()">✕</button>
+      </div>
+      <div class="modal-body" id="groupModalBody">
+        <!-- Channel list -->
       </div>
     </div>
   </div>

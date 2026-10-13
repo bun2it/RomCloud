@@ -9,7 +9,7 @@
 
 namespace RomCloud {
 
-constexpr const char* APP_VERSION = "2.5.2";
+constexpr const char* APP_VERSION = "2.5.3";
 #ifndef GIT_COMMIT_HASH
 #define GIT_COMMIT_HASH "unknown"
 #endif
