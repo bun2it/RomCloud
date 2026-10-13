@@ -3,11 +3,11 @@
   "release_date": "2026-10-13",
   "target_os": "ALL",
   "icon_url": "https://raw.githubusercontent.com/bun2it/RomCloud/main/icon.png",
-  "full_zip_url": "https://github.com/bun2it/RomCloud/releases/download/v2.5.2/RomCloud-v2.5.2.zip",
-  "ota_manifest_url": "https://github.com/bun2it/RomCloud/releases/download/v2.5.2/ota-manifest.json",
-  "delta_zip_url": "https://github.com/bun2it/RomCloud/releases/download/v2.5.2/ota-patch-v2.5.2.zip",
-  "lite_zip_url": "https://github.com/bun2it/RomCloud/releases/download/v2.5.2/ota-core-v2.5.2.zip",
-  "completion_zip_url": "https://github.com/bun2it/RomCloud/releases/download/v2.5.2/ota-media-v2.5.2.zip",
+  "full_zip_url": "https://github.com/bun2it/RomCloud/releases/download/v2.5.3/RomCloud-v2.5.3.zip",
+  "ota_manifest_url": "https://github.com/bun2it/RomCloud/releases/download/v2.5.3/ota-manifest.json",
+  "delta_zip_url": "https://github.com/bun2it/RomCloud/releases/download/v2.5.3/ota-patch-v2.5.3.zip",
+  "lite_zip_url": "https://github.com/bun2it/RomCloud/releases/download/v2.5.3/ota-core-v2.5.3.zip",
+  "completion_zip_url": "https://github.com/bun2it/RomCloud/releases/download/v2.5.3/ota-media-v2.5.3.zip",
   "rc_web_version": "20261011",
   "rc_web_url": "https://github.com/bun2it/RomCloud/releases/download/v2.5.0/rc-web-20261011.zip",
   "os_versions": {
@@ -15,5 +15,5 @@
     "NEXTUI": "2.5.2",
     "SPRUCE_OS": "2.5.2"
   },
-  "changelog": "1. Menu ROM tab Thẻ nhớ: bấm A mở menu Chơi/Chuyển hệ/Kiểm tra/Chi tiết/Xóa.\n2. Tự nhận diện ROM theo MD5, dời về đúng hệ máy, tên game chuẩn No-Intro.\n3. Tự tải ảnh bìa Libretro nhanh và chính xác hơn.\n4. Sửa treo khi đổi chất lượng lúc đang phát YouTube."
+  "changelog": "1. Có playlist kênh mới là máy tự báo — bấm Y để tải.\n2. YouTube đúng nhãn chất lượng: 720p ra đúng 720p, thêm nấc 480p.\n3. Tinh chỉnh hiệu năng và sửa lỗi nhỏ."
 }
