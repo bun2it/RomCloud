@@ -253,6 +253,10 @@ private:
     uint8_t m_lastKbKeys[6] = {0, 0, 0, 0, 0, 0};
     uint16_t m_lastConsumerUsage = 0;
     uint32_t m_lastWheelMs = 0;
+    float m_mouseFilterX = 0.0f;
+    float m_mouseFilterY = 0.0f;
+    float m_mouseAccumX = 0.0f;
+    float m_mouseAccumY = 0.0f;
 
     bool m_inited = false; // chỉ UI thread chạm (worker set cuối cùng)
     std::atomic<bool> m_initStarted{false}; // init worker chỉ chạy 1 lần

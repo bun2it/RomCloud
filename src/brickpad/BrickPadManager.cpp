@@ -12,6 +12,7 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <cstring>
+#include <cmath>
 
 namespace RomCloud {
 namespace BrickPad {
@@ -585,6 +586,10 @@ void BrickPadManager::sendNeutral() {
     std::memset(m_lastKbKeys, 0, 6);
     m_lastConsumerUsage = 0;
     m_lastWheelMs = 0;
+    m_mouseFilterX = 0.0f;
+    m_mouseFilterY = 0.0f;
+    m_mouseAccumX = 0.0f;
+    m_mouseAccumY = 0.0f;
 }
 
 void BrickPadManager::pumpHid() {
@@ -626,7 +631,7 @@ void BrickPadManager::pumpHid() {
     // Chỉ vào chế độ Chuột + Bàn phím KHI user chọn PadMode::KEYBOARD!
     // Khi ở PadMode::GAMEPAD, tuyệt đối gửi Gamepad report chuẩn.
     if (m_mode == PadMode::KEYBOARD && m_identity == ControllerIdentity::PC_LAPTOP) {
-        // 1. Cần Analog Trái: di chuyển con trỏ chuột (dx, dy)
+        // 1. Cần Analog Trái: di chuyển chuột mượt mà (2D Vector + EMA Filter + Sub-pixel Accumulator)
         int rawX = (int)cur.stickLX - 128;
         int rawY = (int)cur.stickLY - 128;
         if (std::abs(rawX) <= 10 && std::abs(rawY) <= 10) {
@@ -638,26 +643,53 @@ void BrickPadManager::pumpHid() {
             }
         }
 
-        int speed = m_store.mouseSpeed;
-        if (speed < 1) speed = 1;
-        if (speed > 10) speed = 10;
+        // EMA Low-Pass Filter: lọc nhiễu rung lắc ADC phần cứng
+        m_mouseFilterX = 0.55f * (float)rawX + 0.45f * m_mouseFilterX;
+        m_mouseFilterY = 0.55f * (float)rawY + 0.45f * m_mouseFilterY;
 
-        auto calcDelta = [speed](int raw) -> int8_t {
-            if (std::abs(raw) <= 10) return 0;
-            int sign = raw > 0 ? 1 : -1;
-            int mag = std::abs(raw) - 10;
-            // Smooth non-linear curve scaled by mouse speed setting (1..10)
-            int base = (mag * mag) / 400 + (mag / 6);
-            int d = (base * speed) / 8 + 1;
-            int maxCap = speed * 4;
-            if (maxCap < 6) maxCap = 6;
-            if (maxCap > 40) maxCap = 40;
-            if (d > maxCap) d = maxCap;
-            return (int8_t)(sign * d);
-        };
+        // Chuẩn hóa Vector 2D [-1.0 .. 1.0]
+        float normX = m_mouseFilterX / 127.0f;
+        float normY = m_mouseFilterY / 127.0f;
+        float mag = std::sqrt(normX * normX + normY * normY);
 
-        int8_t dx = calcDelta(rawX);
-        int8_t dy = calcDelta(rawY);
+        int8_t dx = 0;
+        int8_t dy = 0;
+        const float kDeadzone = 0.08f; // ~10 counts / 127
+
+        if (mag > kDeadzone) {
+            if (mag > 1.0f) mag = 1.0f;
+            float normalizedMag = (mag - kDeadzone) / (1.0f - kDeadzone);
+            float dirX = normX / mag;
+            float dirY = normY / mag;
+
+            int speedSetting = m_store.mouseSpeed;
+            if (speedSetting < 1) speedSetting = 1;
+            if (speedSetting > 10) speedSetting = 10;
+
+            // Vận tốc tối đa tính theo setting (6.0 px/frame ở mức 1 đến 37.5 px/frame ở mức 10)
+            float maxSpeed = 6.0f + (float)(speedSetting - 1) * 3.5f;
+
+            // Đường cong lũy thừa 1.8: đẩy nhẹ cực chính xác từng pixel, đẩy mạnh lướt nhanh
+            float curvedMag = std::pow(normalizedMag, 1.8f);
+            float targetDx = dirX * curvedMag * maxSpeed;
+            float targetDy = dirY * curvedMag * maxSpeed;
+
+            // Sub-pixel Accumulator: tích lũy số dư thập phân qua từng frame 60 FPS
+            m_mouseAccumX += targetDx;
+            m_mouseAccumY += targetDy;
+
+            dx = (int8_t)m_mouseAccumX;
+            dy = (int8_t)m_mouseAccumY;
+
+            m_mouseAccumX -= (float)dx;
+            m_mouseAccumY -= (float)dy;
+        } else {
+            // Khi thả cần về tâm: dừng ngay lập tức, không trôi dạt
+            m_mouseFilterX = 0.0f;
+            m_mouseFilterY = 0.0f;
+            m_mouseAccumX = 0.0f;
+            m_mouseAccumY = 0.0f;
+        }
 
         // 2. Nút B: Chuột trái (0x01), Nút A: Chuột phải (0x02)
         uint8_t mouseBtns = 0;
