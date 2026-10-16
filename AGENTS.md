@@ -8,15 +8,19 @@ All AI agents working on this codebase must adhere strictly to the established a
 3. **Screen Resolution:** Hardcoded 1024x768 (4:3). Header is 64px, Footer is 53px, Content area is 651px (Y = 64..715).
 4. **Button B Standard:** Button B is exclusively **Back / Cancel / Exit**. NEVER bind Button B to Backspace/Delete in virtual keyboards or text fields.
 5. **Footer Bar:** `drawAppFooter()` handles its own background and line separator. NEVER draw redundant manual rectangles over `drawAppFooter()`.
-6. **GameCast Defaults:**
-   - Port 8090 (never 6666).
-   - Default resolution: 512x384 @ 60 FPS Turbo Mode (`m_nativeRes = false`).
-   - TCP Send Buffer: 32KB (`SO_SNDBUF = 32768`).
-   - Do NOT initialize `/dev/uinput` on daemon boot (only lazy-init on actual web gamepad button press).
+6. **BrickPad Defaults (thay GameCast từ v2.6):**
+   - Bluetooth Classic HID (PSM 0x11/0x13, SDP qua BlueZ ProfileManager).
+   - Report/descriptor + VID/PID theo identity (Xbox/PlayStation/Switch/PC).
+   - UI 1 màn duy nhất: trạng thái + thiết bị đã lưu. Chưa nối: nút điều
+     khiển UI. Đã nối: nút đi thẳng ra host (chỉ F1 thoát được).
+   - SELECT: overlay chọn Platform & Chế độ. F1: thoát HID (ngắt + rời màn).
+   - Pair agent `NoInputNoOutput` (JustWorks). Đăng ký Profile KHÔNG truyền
+     PSM (BlueZ build này double-bind EADDRINUSE — app tự bind cả 2 PSM).
+   - Đổi mode nhanh: giữ SELECT+START 1s (phím FN1/FN2 không lộ qua SDL).
 7. **Build & Deploy:**
    - Build: `./build.sh` (cross-compiles for `aarch64-linux-gnu.2.33`).
-   - Binaries: `bin/RomCloud` and `bin/gamecast_d`.
-   - Deploy: `adb push bin/RomCloud ... && adb push bin/gamecast_d ... && adb shell sync`.
+   - Binaries: `bin/RomCloud` (duy nhất — đã xóa `gamecast_d`).
+   - Deploy máy test: `./deploy-adb.sh` (bung full-zip qua adb, giữ data/config/iptv user). CẤM chỉ `adb push bin/*` — máy test sẽ lệch file runtime (launch.sh/scripts/assets/lib).
 8. **TrimUI Brick Chin Buttons & Icons Standard:**
    - Order (Left to Right): **MENU - SELECT - START**.
    - Input mapping: Left (`GUIDE` / Joy 8) = `Button::MENU`, Middle (`BACK` / Joy 6) = `Button::SELECT`, Right (`START` / Joy 7) = `Button::START`. NEVER swap BACK and GUIDE.

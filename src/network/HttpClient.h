@@ -24,6 +24,11 @@ public:
     void shutdown();
 
     HttpResponse get(const std::string& url, const std::vector<std::string>& headers = {}, int timeoutSec = 15);
+    // GET chỉ lấy maxBytes đầu rồi ngắt (đo ping/liveness): không tải full
+    // body (stream live vô hạn), không log từng URL. Dùng chung handle tái
+    // dùng (keep-alive + DNS cache) nên nhanh hơn fork curl mỗi lần đo.
+    // success = có byte trả về (kể cả ngắt giữa chừng vì đủ maxBytes).
+    HttpResponse getFirstBytes(const std::string& url, int timeoutSec = 8, size_t maxBytes = 2048);
     HttpResponse post(const std::string& url, const std::string& postData, const std::vector<std::string>& headers = {}, int timeoutSec = 15);
     HttpResponse postForm(const std::string& url, const std::unordered_map<std::string, std::string>& formData, const std::vector<std::string>& headers = {}, int timeoutSec = 15);
 

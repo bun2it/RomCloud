@@ -3,7 +3,7 @@
 #include "../auth/AuthManager.h"
 #include "../backup/BackupManager.h"
 #include "../browser/chrome/ChromeBridge.h"
-#include "../cast/CastManager.h"
+#include "../brickpad/BrickPadManager.h"
 #include "../config/AppConfig.h"
 #include "../database/DatabaseManager.h"
 #include "../database/RomIndexer.h"
@@ -94,7 +94,7 @@ void UIManager::initGridMenu() {
       {"games", "THƯ VIỆN", "GAMES.png", "Danh sách ROM"},
       {"iptv", "XEM TV", "TV.png", "Kênh TV online"},
       {"youtube", "YOUTUBE", "YOUTUBE.png", "YouTube"},
-      {"cast", "GAME CAST", "CAST.png", "Cast lên TV & Laptop"},
+      {"cast", "BRICKPAD", "BRICKPAD.png", "Tay cầm Bluetooth cho TV & PC"},
       {"explorer", "EXPLORER", "FOLDER.png", "Duyet file SD"},
       {"weather", "OFFICEGO", "OFFICEGO.png", "Thời tiết & Lịch"},
       {"browser", "WEB", "BROWSER.png", "Web Chrome ngoài + portal"},
@@ -140,10 +140,16 @@ bool UIManager::init(SDL_Window *window, SDL_Renderer *renderer) {
       m_fontMedium = TTF_OpenFont(path, 30);
     if (!m_fontSmall)
       m_fontSmall = TTF_OpenFont(path, 24);
+    if (!m_fontSmallItalic) {
+      m_fontSmallItalic = TTF_OpenFont(path, 20);
+      if (m_fontSmallItalic) {
+        TTF_SetFontStyle(m_fontSmallItalic, TTF_STYLE_ITALIC);
+      }
+    }
     if (m_fontTitle && m_fontHuge && m_fontLarge && m_fontMedium &&
         m_fontSmall) {
       Logger::info(std::string("Loaded TTF font from: ") + path +
-                   " (Sizes: 42, 100, 36, 30, 24)");
+                   " (Sizes: 42, 100, 36, 30, 24, 20 italic)");
       m_fontPathUsed = path; // P9: CSS font-size siblings open from here
       break;
     }
@@ -264,40 +270,6 @@ bool UIManager::init(SDL_Window *window, SDL_Renderer *renderer) {
   // P0-2: start thumbnail decode worker thread
   startThumbWorker();
 
-  // P1-2: CastManager callback — khi FN switch hoặc A press thay đổi stream
-  // state, show toast để user biết hệ thống đã phản hồi (im lặng trước đó).
-  // Callback chạy trên UI thread (gọi từ UIManager::update()).
-  CastManager::instance().setFnToggleCallback(
-      [this](bool running, bool viaFnSwitch) {
-        if (viaFnSwitch) {
-          showToast(running ? "GameCast: BẬT bởi công tắc FN"
-                            : "GameCast: TẮT bởi công tắc FN",
-                    running ? SDL_Color{34, 197, 94, 255}
-                            : SDL_Color{148, 163, 184, 255},
-                    1800);
-        }
-      });
-
-  // P3-D: nếu user gạt FN = ON khi Wi-Fi mất, CastManager skip start() và gọi
-  // callback này để UI hiển thị toast cảnh báo (tránh "im lặng" gây hiểu nhầm).
-  CastManager::instance().setNoWifiFnCallback([this]() {
-    showToast("⚠ Không thể bật Cast - Wi-Fi chưa kết nối (vào Settings)",
-              {252, 165, 165, 255}, 2500);
-  });
-
-  // P3-B: khi gamecast_d bị kill ngoài (OOM, crash, ...) và tự restart thành
-  // công / thất bại, báo user qua toast. Reset elapsed time nếu restart thành
-  // công (m_streamStartedAt sẽ được update trong start()).
-  CastManager::instance().setAutoReconnectCallback([this](bool succeeded) {
-    if (succeeded) {
-      showToast("↻ Cast bị ngắt - đã tự khởi động lại", {59, 130, 246, 255},
-                2500);
-    } else {
-      showToast("✗ Cast bị ngắt - không thể tự khởi động lại (bấm A thử lại)",
-                {239, 68, 68, 255}, 3500);
-    }
-  });
-
   // P0 Screensaver: khởi tạo engine
   m_saver.init(this, m_renderer);
 
@@ -306,6 +278,7 @@ bool UIManager::init(SDL_Window *window, SDL_Renderer *renderer) {
 
 void UIManager::shutdown() {
   unlink("/tmp/stay_awake");
+  setBpBacklightOff(false);
   // P0-2: stop thumb worker thread before destroying renderer
   stopThumbWorker();
   CoverManager::instance().shutdown();
@@ -355,6 +328,10 @@ void UIManager::shutdown() {
     TTF_CloseFont(m_fontSmall);
     m_fontSmall = nullptr;
   }
+  if (m_fontSmallItalic) {
+    TTF_CloseFont(m_fontSmallItalic);
+    m_fontSmallItalic = nullptr;
+  }
 
   TTF_Quit();
 }
@@ -365,8 +342,7 @@ void UIManager::shutdown() {
 static bool isHeavyState(UIState s) {
   return s == UIState::IPTV_PLAYLIST_SELECT || s == UIState::IPTV_LIST ||
          s == UIState::IPTV_SEARCH || s == UIState::YOUTUBE_HOME ||
-         s == UIState::YOUTUBE_RESULTS || s == UIState::YOUTUBE_SEARCH ||
-         s == UIState::GAME_CAST;
+         s == UIState::YOUTUBE_RESULTS || s == UIState::YOUTUBE_SEARCH;
 }
 
 bool UIManager::goBack() {
@@ -418,6 +394,10 @@ void UIManager::setState(UIState state) {
       if (m_stateHistory.size() > 30)
         m_stateHistory.erase(m_stateHistory.begin());
     }
+  }
+  if (m_currentState == UIState::BRICK_PAD && state != UIState::BRICK_PAD) {
+    setBpBacklightOff(false);
+    m_bpSessionStartMs = 0;
   }
   if (state == UIState::EXIT_REQUESTED)
     m_stateHistory.clear();
@@ -642,8 +622,8 @@ void UIManager::update() {
     }
   }
 
-  // Poll Hardware FN Switch for GameCast stream toggle
-  CastManager::instance().update();
+  // BrickPad: pump Bluetooth HID + scan/pair timers mỗi frame.
+  BrickPad::BrickPadManager::instance().update();
 
   // Reaper nền phiên web: ngoài state CHROME mà không phiên nào chạy
   // (m_pid<=0) thì quét xác theo tên mỗi 10s. Weston/electron sót (launcher
@@ -673,50 +653,6 @@ void UIManager::update() {
     m_cloudAutoSync = true;
     showToast("Đã liên kết Drive! Đang đồng bộ...", {34, 197, 94, 255}, 2500);
     DriveSyncEngine::instance().startSync();
-  }
-
-  // P1-2: Poll /api/status mỗi 2s khi đang ở màn GAME_CAST và có stream chạy.
-  // Fetch qua detached thread để không block UI; atomic để render đọc giá trị
-  // mới frame nhanh.
-  if (m_currentState == UIState::GAME_CAST &&
-      CastManager::instance().isRunning()) {
-    uint32_t now = SDL_GetTicks();
-    if (now - m_lastCastStatsPoll >= 2000) {
-      m_lastCastStatsPoll = now;
-      std::thread([this]() {
-        auto resp = HttpClient::instance().get(
-            "http://127.0.0.1:8090/api/status", {}, 1);
-        if (!resp.success || resp.body.empty())
-          return;
-        // JSON format (ASCII-only):
-        // {"running":true,"fps":N,"viewers":N,"downscale":bool} parse don gian
-        // bang find + stoi (tranh cat giua UTF-8 vi toan ASCII).
-        auto parseInt = [&](const std::string &key) -> int {
-          std::string pat = "\"" + key + "\":";
-          size_t pos = resp.body.find(pat);
-          if (pos == std::string::npos)
-            return -1;
-          pos += pat.size();
-          return std::atoi(resp.body.c_str() + pos);
-        };
-        auto parseBool = [&](const std::string &key) -> bool {
-          std::string pat = "\"" + key + "\":";
-          size_t pos = resp.body.find(pat);
-          if (pos == std::string::npos)
-            return false;
-          pos += pat.size();
-          return (resp.body.compare(pos, 4, "true") == 0);
-        };
-        int fps = parseInt("fps");
-        int viewers = parseInt("viewers");
-        if (fps >= 0)
-          m_castStats.fps.store(fps);
-        if (viewers >= 0)
-          m_castStats.viewers.store(viewers);
-        m_castStats.downscale.store(parseBool("downscale"));
-        m_castStats.valid.store(true);
-      }).detach();
-    }
   }
 
   // Boot: quét thẻ 1 lần để game chép tay hiện ngay (không cần bấm Đồng
@@ -1254,8 +1190,8 @@ void UIManager::update() {
         m_localSendFolderSelected = 0;
         setState(UIState::LOCALSEND_HOME);
       } else if (selectedId == "cast") {
-        CastManager::instance().init();
-        setState(UIState::GAME_CAST);
+        BrickPad::BrickPadManager::instance().init();
+        setState(UIState::BRICK_PAD);
       } else if (selectedId == "explorer") {
         m_expL.open("/mnt/SDCARD");
         m_expR.open("/mnt/SDCARD");
@@ -2012,17 +1948,9 @@ void UIManager::update() {
           std::string newUrl = WebServer::instance().getPortalUrl();
           showToast("✔ Đã đổi Web Portal: " + newUrl, {0, 180, 255, 255}, 3500);
         } else if (m_selectedSettingsRow == 8) {
-          CastManager::instance().toggle();
-          bool running = CastManager::instance().isRunning();
-          std::string ip = PlatformInfo::instance().getIpAddress("wlan0");
-          if (ip.empty() || ip == "Disconnected")
-            ip = "192.168.1.164";
-          if (running) {
-            showToast("✔ Đã bật GameCast: http://" + ip + ":8090",
-                      {34, 197, 94, 255}, 3000);
-          } else {
-            showToast("GameCast đã tắt", {239, 68, 68, 255}, 2000);
-          }
+          // Mở BrickPad (tay cầm Bluetooth thay GameCast).
+          BrickPad::BrickPadManager::instance().init();
+          setState(UIState::BRICK_PAD);
         }
       } else if (input.isButtonJustPressed(Button::X)) {
         if (m_selectedSettingsRow == 0 && AuthManager::instance().isLinked()) {
@@ -2543,16 +2471,8 @@ void UIManager::update() {
       allChannels = IPTVManager::instance().getChannels();
     }
 
-    // Ẩn kênh đã xác định mất kết nối (ping == -1). Kênh chưa đo (-2)
-    // vẫn hiện bình thường.
-    {
-      std::vector<IPTVChannel> alive;
-      alive.reserve(allChannels.size());
-      for (const auto &ch : allChannels)
-        if (IPTVManager::instance().getCachedPing(ch.url) != -1)
-          alive.push_back(ch);
-      allChannels.swap(alive);
-    }
+    // Hiện TẤT CẢ kênh (kể cả mất kết nối): lọc chết đã làm ở curator
+    // nguồn, máy chỉ hiện badge ping ("N ms" / "Mất kết nối") để user biết.
 
     // Build group list
     std::vector<std::string> groups;
@@ -2581,7 +2501,7 @@ void UIManager::update() {
     int channelCount = static_cast<int>(channels.size());
     int visibleItems = 8;
 
-    // List có thể co lại khi ping resolve xong (kênh chết bị ẩn) → clamp
+    // Clamp index theo list hiện tại
     if (channelCount == 0) {
       m_selectedIPTVChannelIndex = 0;
       m_iptvScrollOffset = 0;
@@ -2684,8 +2604,8 @@ void UIManager::update() {
                     {239, 68, 68, 255}, 4000);
         }
       } else if (channelCount == 0) {
-        // List rỗng (có thể do kênh chết bị ẩn hết) → xóa cache ping để
-        // hiện lại và đo lại từ đầu.
+        // List rỗng thật (không còn ẩn kênh chết): xóa cache ping để
+        // đo lại badge ping từ đầu.
         IPTVManager::instance().clearPingCache();
         showToast("Đang đo lại kết nối các kênh...", {0, 180, 216, 255}, 2000);
       }
@@ -3835,47 +3755,8 @@ void UIManager::update() {
     break;
   }
 
-  case UIState::GAME_CAST: {
-    if (input.isButtonJustPressed(Button::B)) {
-      setState(UIState::MENU);
-    } else if (input.isButtonJustPressed(Button::A)) {
-      // P1-2: chặn A start khi Wi-Fi mất (IP=192.168.x.x) — không cho user
-      // bật stream khi đầu bên kia không có cách kết nối.
-      bool noWifi = (CastManager::instance().getIpAddress() == "192.168.x.x");
-      if (noWifi) {
-        showToast("⚠ Wi-Fi chưa kết nối - vào Settings để kết nối",
-                  {252, 165, 165, 255}, 2200);
-        break;
-      }
-      bool currentlyRunning = CastManager::instance().isRunning();
-      if (currentlyRunning) {
-        CastManager::instance().stop();
-        showToast("GameCast: ĐÃ TẮT (Đã dừng stream triệt để)",
-                  {239, 68, 68, 255}, 1500);
-      } else {
-        bool ok =
-            CastManager::instance().start(CastManager::instance().isHdMode());
-        if (ok) {
-          showToast("GameCast: ĐÃ BẬT - Sẵn sàng stream!", {34, 197, 94, 255},
-                    2000);
-        } else {
-          showToast("GameCast: LỖI KHỞI ĐỘNG (Kiểm tra cổng/mạng)",
-                    {239, 68, 68, 255}, 2000);
-        }
-      }
-    } else if (input.isButtonJustPressed(Button::X)) {
-      // Chỉ X mới đổi độ phân giải. Y không bind để tránh nhầm lẫn (footer chỉ
-      // show X). Xem `renderFooter` cho hint tương ứng.
-      bool curHd = CastManager::instance().isHdMode();
-      CastManager::instance().setHdMode(!curHd);
-      if (!curHd) {
-        showToast("Độ phân giải: 1024x768 (Native HD)", {59, 130, 246, 255},
-                  1500);
-      } else {
-        showToast("Độ phân giải: 512x384 (Tiết kiệm Wi-Fi)",
-                  {245, 158, 11, 255}, 1500);
-      }
-    }
+  case UIState::BRICK_PAD: {
+    handleBrickPadInput();
     break;
   }
 
@@ -4230,7 +4111,7 @@ void UIManager::renderFooter() {
       m_currentState == UIState::LOCALSEND_GAME_PICKER ||
       m_currentState == UIState::LOCALSEND_PROGRESS ||
       m_currentState == UIState::FILE_EXPLORER ||
-      m_currentState == UIState::GAME_CAST) {
+      m_currentState == UIState::BRICK_PAD) {
     return;
   }
 
@@ -4446,7 +4327,13 @@ void UIManager::renderFooter() {
                 UiTheme::TEXT_FAINT, m_fontSmall);
 }
 
-void UIManager::renderToast() { m_dialogs.renderToast(m_ui, m_fontSmall); }
+void UIManager::renderToast() {
+  if (m_currentState == UIState::BRICK_PAD && m_bpSessionStartMs > 0 &&
+      SDL_GetTicks() - m_bpSessionStartMs >= 30000) {
+    return;
+  }
+  m_dialogs.renderToast(m_ui, m_fontSmall);
+}
 
 void UIManager::renderMenuState() {
   // OTA update info
@@ -5758,8 +5645,9 @@ void UIManager::renderSettingsState() {
     int curWebPort = WebServer::instance().getPort();
     std::string webUrl = "http://" + ip + ":" + std::to_string(curWebPort);
 
-    std::string castUrl = "http://" + ip + ":8090";
-    bool castRunning = CastManager::instance().isRunning();
+    std::string bpStatus = BrickPad::BrickPadManager::instance().connected()
+                               ? "Đã nối"
+                               : "Chưa nối";
 
     items.reserve(9);
 
@@ -5820,13 +5708,13 @@ void UIManager::renderSettingsState() {
                      "[A] Đổi port", SDL_Color{14, 116, 144, 255},
                      SDL_Color{255, 255, 255, 255}});
 
-    // 8: Cổng GameCast
+    // 8: Tay cầm Bluetooth (BrickPad thay GameCast)
     items.push_back(
-        {"Cổng GameCast", castUrl,
-         castRunning ? SDL_Color{34, 197, 94, 255}
-                     : SDL_Color{148, 163, 184, 255},
-         castRunning ? "[A] Tắt" : "[A] Bật",
-         castRunning ? UiTheme::ACCENT_RED : SDL_Color{21, 94, 117, 255},
+        {"Tay cầm Bluetooth", bpStatus,
+         BrickPad::BrickPadManager::instance().connected()
+             ? SDL_Color{34, 197, 94, 255}
+             : SDL_Color{148, 163, 184, 255},
+         "[A] Mở", SDL_Color{21, 94, 117, 255},
          SDL_Color{255, 255, 255, 255}});
   } else {
     // TAB 1: CÀI ĐẶT (5 mục tiện ích hệ thống & bảo trì)
@@ -7357,18 +7245,8 @@ void UIManager::renderIPTVState() {
     allChannels = IPTVManager::instance().getChannels();
   }
 
-  // Ẩn kênh đã xác định mất kết nối (ping == -1). Kênh chưa đo (-2)
-  // vẫn hiện bình thường, đo xong mà chết mới ẩn dần khi lướt list.
-  size_t preFilterCount = allChannels.size();
-  {
-    std::vector<IPTVChannel> alive;
-    alive.reserve(allChannels.size());
-    for (const auto &ch : allChannels)
-      if (IPTVManager::instance().getCachedPing(ch.url) != -1)
-        alive.push_back(ch);
-    allChannels.swap(alive);
-  }
-  size_t hiddenDeadCount = preFilterCount - allChannels.size();
+  // Hiện TẤT CẢ kênh (kể cả mất kết nối): lọc chết đã làm ở curator
+  // nguồn, máy chỉ hiện badge ping ("N ms" / "Mất kết nối") để user biết.
 
   // Build group list
   std::vector<std::string> groups;
@@ -7395,7 +7273,7 @@ void UIManager::renderIPTVState() {
   }
   int channelCount = static_cast<int>(channels.size());
 
-  // List có thể co lại khi ping resolve xong (kênh chết bị ẩn) → clamp
+  // Clamp index theo list hiện tại
   if (channelCount == 0) {
     m_selectedIPTVChannelIndex = 0;
     m_iptvScrollOffset = 0;
@@ -7412,13 +7290,17 @@ void UIManager::renderIPTVState() {
   drawRect(0, GROUP_BAR_Y + GROUP_BAR_H - 1, 1024, 1, {40, 48, 62, 255}, true);
 
   {
-    // Cụm đếm góc phải: ● [sống] ● [chết] kênh.
+    // Cụm đếm góc phải: ● [tổng] ● [mất kết nối] kênh (đếm từ cache ping).
     const int DOT_R = 8;
     const int DOT_GAP = 8;
     std::string aliveText = std::to_string(channelCount);
+    size_t deadCount = 0;
+    for (const auto &ch : channels)
+      if (IPTVManager::instance().getCachedPing(ch.url) == -1)
+        ++deadCount;
     std::string deadText;
-    if (hiddenDeadCount > 0)
-      deadText = std::to_string(hiddenDeadCount);
+    if (deadCount > 0)
+      deadText = std::to_string(deadCount);
     const std::string unitText = "kênh";
     int aliveW = textWidth(aliveText, m_fontSmall);
     int unitW = textWidth(unitText, m_fontSmall);
@@ -7501,11 +7383,6 @@ void UIManager::renderIPTVState() {
     } else if (!m_iptvSelectedGroup.empty()) {
       drawText("Không có kênh trong nhóm \"" + m_iptvSelectedGroup + "\"", 512,
                midY, {150, 160, 175, 255}, m_fontMedium, true);
-    } else if (hiddenDeadCount > 0 && preFilterCount > 0) {
-      drawText("Các kênh đều mất kết nối.", 512, midY - 16,
-               {248, 113, 113, 255}, m_fontMedium, true);
-      drawText("Kiểm tra Wi-Fi rồi bấm [A] để đo lại", 512, midY + 14,
-               {100, 110, 125, 255}, m_fontSmall, true);
     } else {
       drawText(UiStrings::IPTV_NO_CHANNELS, 512, midY - 16,
                {150, 160, 175, 255}, m_fontMedium, true);
@@ -7513,15 +7390,14 @@ void UIManager::renderIPTVState() {
                midY + 14, {100, 110, 125, 255}, m_fontSmall, true);
     }
   } else {
-    // Do ping nền cho cửa sổ giới hạn: trang hiện tại + 2 trang kế
-    // (tối đa 24 kênh). Worker ping đơn (không đẻ thread mỗi frame) nên
-    // lướt list 10k kênh cũng không crash. Kênh ngoài cửa sổ đo khi tới.
+    // Chỉ đo ping đúng nhóm/dòng đang view: đúng số dòng hiện trên màn
+    // hình, nhóm nào chưa lướt tới thì không đo (đỡ fork curl tranh mạng).
+    // Worker ping đơn + hàng đợi luôn ghi đè bằng cửa sổ mới nhất.
     {
-      constexpr int kPingWindow = 24;
       std::vector<std::string> pingUrls;
-      pingUrls.reserve(kPingWindow);
+      pingUrls.reserve(visibleItems);
       for (int i = m_iptvScrollOffset;
-           i < channelCount && i < m_iptvScrollOffset + kPingWindow; i++) {
+           i < channelCount && i < m_iptvScrollOffset + visibleItems; i++) {
         pingUrls.push_back(channels[i].url);
       }
       IPTVManager::instance().prefetchPings(pingUrls);
@@ -7994,8 +7870,8 @@ void UIManager::render() {
   case UIState::WEATHER:
     renderWeather();
     break;
-  case UIState::GAME_CAST:
-    renderGameCastState();
+  case UIState::BRICK_PAD:
+    renderBrickPadState();
     break;
   case UIState::CHROME:
     renderChromeState();
@@ -10269,192 +10145,6 @@ void UIManager::renderLsAppsList(int dlgX, int dlgY, int dlgW, int dlgH) {
            true);
 }
 
-void UIManager::renderGameCastState() {
-  // Background + Header chuẩn (giống IPTV/YouTube/Explorer)
-  // P4: bỏ custom sub-header strip cũ (Y=64..112) để đồng bộ với các app
-  // khác. Cụm status bên phải (Wi-Fi/pin/clock) tự động render bởi
-  // drawAppHeader() → khớp IPTV, YouTube, Explorer, Settings.
-  drawAppBackground();
-  drawAppHeader("GAME CAST");
-
-  std::string ip = CastManager::instance().getIpAddress();
-  std::string castUrl = CastManager::instance().getCastUrl();
-  // P1-2: Phát hiện mất Wi-Fi — placeholder "192.168.x.x" do
-  // CastManager::getIpAddress() trả về khi không lấy được IP thật. Lúc này
-  // đổi badge sang cảnh báo đỏ + disable QR/URL/nút A để user không nhầm.
-  bool noWifi = (ip == "192.168.x.x");
-  bool running = CastManager::instance().isRunning();
-  bool isHd = CastManager::instance().isHdMode();
-
-  // Layout 2 rows × 1 column (P4: chuẩn hóa theo app_conventions)
-  // Row 1: trạng thái stream + độ phân giải + IP badge góc phải
-  // Row 2: nguyên cụm kết nối TV cũ (QR + URL + stats + steps)
-  const int rowX = 24;
-  const int rowW = 1024 - 48; // 976 — full content width
-  const int rowGap = 16;
-  const int row1Y = 80;
-  const int row1H = 140;
-  const int row2Y = row1Y + row1H + rowGap; // 236
-  const int row2H = 706 - row2Y;            // 470 (còn 9px đệm cuối)
-
-  // Row 1: Status + Resolution (1 cell, 2 dòng chính)
-  drawRoundedRect(rowX, row1Y, rowW, row1H, UiTheme::RADIUS_MODAL,
-                  {18, 24, 34, 255}, true);
-  drawRoundedBorder(rowX, row1Y, rowW, row1H, UiTheme::RADIUS_MODAL,
-                    {38, 48, 64, 255}, 1);
-
-  // IP badge (top-right của Row 1)
-  if (noWifi) {
-    std::string warnTxt = "⚠ CHƯA CÓ Wi-Fi";
-    int warnW = badgeWidth(warnTxt, 32);
-    drawBadge(rowX + rowW - 24 - warnW, row1Y + 16, warnW, 32, warnTxt,
-              {127, 29, 29, 255}, {252, 165, 165, 255});
-  } else {
-    int ipW = badgeWidth("IP: " + ip, 32);
-    drawBadge(rowX + rowW - 24 - ipW, row1Y + 16, ipW, 32, "IP: " + ip,
-              {30, 41, 59, 255}, {148, 163, 184, 255});
-  }
-
-  // Dòng 1: Trạng thái Stream
-  std::string statusText;
-  SDL_Color statusColor;
-  if (noWifi) {
-    statusText = "Trạng thái:  ⚠ MẤT Wi-Fi";
-    statusColor = {252, 165, 165, 255};
-  } else if (running) {
-    statusText = "Trạng thái:  ● ĐANG PHÁT";
-    statusColor = {34, 197, 94, 255};
-  } else {
-    statusText = "Trạng thái:  ○ SẴN SÀNG";
-    statusColor = {160, 170, 185, 255};
-  }
-  drawText(statusText, rowX + 24, row1Y + 36, statusColor, m_fontLarge);
-
-  // Dòng 2: Độ phân giải
-  std::string resText = isHd ? "Độ phân giải:  1024×768 (Native HD)"
-                             : "Độ phân giải:  512×384 (Smooth 60 FPS)";
-  drawText(resText, rowX + 24, row1Y + 92, {200, 210, 225, 255}, m_fontMedium);
-
-  // Row 2 dimensions used downstream
-  int rightW = rowW; // alias for compatibility
-  int rightX = rowX;
-  int cardY = row2Y;
-
-  // Row 2: Kết nối TV & Laptop (1 cell, nguyên cụm bên phải cũ)
-  // P4: thay Card 1 (left status) + Card 2 (right QR) cũ bằng 1 cell full
-  // width chứa toàn bộ nội dung kết nối TV. Bỏ "Tính năng & Điểm nổi
-  // bật" + 5 bullets + btnCard (chứa button hints duplicate với footer).
-  drawRoundedRect(rowX, row2Y, rowW, row2H, UiTheme::RADIUS_MODAL,
-                  {18, 24, 34, 255}, true);
-  drawRoundedBorder(rowX, row2Y, rowW, row2H, UiTheme::RADIUS_MODAL,
-                    {38, 48, 64, 255}, 1);
-
-  drawText("KẾT NỐI TỪ TV & LAPTOP", rightX + rightW / 2, cardY + 22,
-           {255, 255, 255, 255}, m_fontLarge, true);
-  drawText("Quét QR hoặc Nhập URL:", rightX + rightW / 2, cardY + 58,
-           {148, 163, 184, 255}, m_fontSmall, true);
-
-  int qrSize = 180;
-  int qrX = rightX + (rightW - qrSize) / 2;
-  int qrY = cardY + 95;
-  if (noWifi) {
-    // P1-2: Thay QR bằng ô cảnh báo lớn để user hiểu vì sao không có IP.
-    drawRoundedRect(qrX, qrY, qrSize, qrSize, UiTheme::RADIUS_CARD,
-                    {38, 26, 26, 255}, true);
-    drawRoundedBorder(qrX, qrY, qrSize, qrSize, UiTheme::RADIUS_CARD,
-                      {127, 29, 29, 255}, 1);
-    drawText("⚠", qrX + qrSize / 2, qrY + 38, {252, 165, 165, 255},
-             m_fontMedium, true);
-    drawText("Chưa có Wi-Fi", qrX + qrSize / 2, qrY + 78, {252, 165, 165, 255},
-             m_fontLarge, true);
-    drawText("Brick chưa kết nối", qrX + qrSize / 2, qrY + 110,
-             {200, 160, 160, 255}, m_fontSmall, true);
-    drawText("mạng Wi-Fi", qrX + qrSize / 2, qrY + 132, {200, 160, 160, 255},
-             m_fontSmall, true);
-  } else {
-    QrRenderer::renderQrCode(m_renderer, castUrl, qrX, qrY, qrSize,
-                             {0, 0, 0, 255}, {255, 255, 255, 255});
-  }
-
-  int urlY = qrY + qrSize + 18; // P4: tighter gap
-  int urlW = rightW - 48;
-  int urlX = rowX + 24;
-  drawRoundedRect(urlX, urlY, urlW, 46, UiTheme::RADIUS_ROW, {30, 41, 59, 255},
-                  true);
-  drawRoundedBorder(
-      urlX, urlY, urlW, 46, UiTheme::RADIUS_ROW,
-      noWifi ? SDL_Color{127, 29, 29, 255} : SDL_Color{0, 180, 216, 255}, 1);
-  std::string dispUrl = noWifi
-                            ? std::string("IP sẽ hiện sau khi kết nối Wi-Fi")
-                            : truncateToWidth(castUrl, m_fontMedium, urlW - 24);
-  drawText(dispUrl, rightX + rightW / 2, urlY + 11,
-           noWifi ? SDL_Color{100, 116, 139, 255} : SDL_Color{0, 230, 255, 255},
-           m_fontMedium, true);
-
-  // P1-2: realtime stats tu /api/status — hien thi khi stream dang chay va
-  // đã fetch thành công ít nhất 1 lần (valid=true).
-  bool showStats = running && !noWifi && m_castStats.valid.load();
-  int statsY = urlY + 52; // text baseline (URL box cao 46, padding 6)
-  int stepY = urlY + (showStats ? 78 : 58);
-  if (showStats) {
-    int fps = m_castStats.fps.load();
-    int viewers = m_castStats.viewers.load();
-    // P3-C: stream elapsed time (HH:MM:SS neu >=1h, MM:SS neu <1h).
-    uint32_t elapsedMs = CastManager::instance().getStreamElapsedMs();
-    uint32_t elapsedSec = elapsedMs / 1000;
-    uint32_t h = elapsedSec / 3600;
-    uint32_t m = (elapsedSec % 3600) / 60;
-    uint32_t s = elapsedSec % 60;
-    char statsBuf[96];
-    if (h > 0) {
-      std::snprintf(statsBuf, sizeof(statsBuf),
-                    "FPS: %d  •  Viewers: %d  •  %02u:%02u:%02u", fps, viewers,
-                    h, m, s);
-    } else {
-      std::snprintf(statsBuf, sizeof(statsBuf),
-                    "FPS: %d  •  Viewers: %d  •  %02u:%02u", fps, viewers, m,
-                    s);
-    }
-    SDL_Color fpsColor = (fps >= 55) ? SDL_Color{34, 197, 94, 255}
-                         // xanh: full FPS
-                         : (fps >= 30) ? SDL_Color{245, 158, 11, 255} // cam
-                                       : SDL_Color{239, 68, 68, 255}; // do
-    drawText(statsBuf, rightX + rightW / 2, statsY, fpsColor, m_fontSmall,
-             true);
-  }
-
-  if (noWifi) {
-    // P1-2: Wi-Fi mất — đổi steps thành hướng dẫn connect.
-    drawText("1. Vào Settings → Wi-Fi để kết nối mạng", urlX, stepY,
-             {252, 165, 165, 255}, m_fontSmall);
-    drawText("2. Quay lại đây - IP & QR tự động cập nhật", urlX, stepY + 26,
-             {160, 175, 195, 255}, m_fontSmall);
-    drawText("3. Đảm bảo TV cùng Wi-Fi với Brick", urlX, stepY + 52,
-             {160, 175, 195, 255}, m_fontSmall);
-    drawText("4. Mở trình duyệt TV → Nhập URL → Stream", urlX, stepY + 78,
-             {160, 175, 195, 255}, m_fontSmall);
-  } else {
-    drawText("1. Kết nối TV / Laptop cùng Wi-Fi với máy Brick", urlX, stepY,
-             {160, 175, 195, 255}, m_fontSmall);
-    drawText("2. Mở trình duyệt Web", urlX, stepY + 26, {160, 175, 195, 255},
-             m_fontSmall);
-    drawText("3. Nhập địa chỉ trên để Stream", urlX, stepY + 52,
-             {160, 175, 195, 255}, m_fontSmall);
-    drawText("4. Cắm Gamepad hoặc dùng bàn phím để chơi", urlX, stepY + 78,
-             {160, 175, 195, 255}, m_fontSmall);
-  }
-
-  // ─── Footer chuẩn (drawAppFooter tự vẽ BG + line)
-  // P4: footer A dùng nhãn "Bật/Tắt Cast" cố định — state hiện ở Row 1
-  // (Trạng thái Stream). Đồng nhất 3 hint cho mọi state (noWifi/running/
-  // idle) → layout footer ổn định, không bị thay đổi khi state đổi.
-  using PB = UiTheme::PadBtn;
-  std::vector<UiTheme::FooterHint> hints;
-  hints.push_back({PB::A, "Bật/Tắt"});
-  hints.push_back({PB::B, "Lùi"});
-  hints.push_back({PB::X, "Chất lượng"});
-  drawAppFooter(hints);
-}
 
 // P0-1 YT perf: pre-compute truncation/format strings 1 lần khi nhận results,
 // thay vì split('|') + truncate mỗi frame. Đặt cuối file vì dùng các static

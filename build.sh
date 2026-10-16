@@ -27,10 +27,13 @@ mkdir -p bin
 
 # Release mode: RELEASE=1 ./build.sh
 #   - Build nhu dev (giu debug info), copy ban debug sang bin/*.debug,
-#   - roi strip binary chinh bang `zig objcopy --strip-all` (nhe ~5-8MB).
+#   - roi build lai voi -s (strip luc link) cho binary chinh (nhe ~4-5MB).
+#   - (zig objcopy --strip-all chua ho tro target nay -> dung -s.)
 #   - Mac dinh (dev) GIU NGUYEN debug info de debug crash.
 #   - bin/*.debug da co trong .gitignore, khong lot vao git/zip.
+#   - Co the truyen STRIPFLAG="-s" de strip ngay lan build dau.
 RELEASE="${RELEASE:-0}"
+STRIPFLAG="${STRIPFLAG:-}"
 
 # Detect git commit hash for build-id tagging in debug.log
 GIT_SHA="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
@@ -42,6 +45,7 @@ $ZIG c++ \
     -target aarch64-linux-gnu.2.33 \
     -std=c++17 \
     -O3 \
+    $STRIPFLAG \
     -Wall -Wextra \
     -Wno-error=date-time \
     -DGIT_COMMIT_HASH=\"$GIT_SHA\" \
@@ -51,6 +55,10 @@ $ZIG c++ \
     src/main.cpp \
     src/app/Application.cpp \
     src/ui/UIManager.cpp \
+    src/ui/BrickPadUI.cpp \
+    src/brickpad/BrickPadStore.cpp \
+    src/brickpad/BrickPadBt.cpp \
+    src/brickpad/BrickPadManager.cpp \
     src/ui/UiRenderer.cpp \
     src/ui/UiStrings.cpp \
     src/ui/ExplorerSync.cpp \
@@ -108,7 +116,9 @@ $ZIG c++ \
     src/rom/EmuLauncher.cpp \
     src/localsend/LocalSendManager.cpp \
     src/browser/chrome/ChromeBridge.cpp \
-    src/cast/CastManager.cpp \
+    -I/tmp/dbusarm/dev/usr/include/dbus-1.0 \
+    -I/tmp/dbusarm/dev/usr/lib/aarch64-linux-gnu/dbus-1.0/include \
+    /tmp/dbusarm/rt/lib/aarch64-linux-gnu/libdbus-1.so.3 \
     -Lsysroot/lib \
     -lSDL2 \
     -lSDL2_image \
@@ -128,35 +138,10 @@ ls -lh bin/RomCloud
 file bin/RomCloud
 
 if [ "$RELEASE" = "1" ]; then
-    echo "=== Release mode: keeping debug copy + stripping ==="
+    echo "=== Release mode: keeping debug copy + rebuilding stripped (-s) ==="
     cp bin/RomCloud bin/RomCloud.debug
-    "$ZIG" objcopy --strip-all bin/RomCloud bin/RomCloud.stripped
-    mv bin/RomCloud.stripped bin/RomCloud
+    STRIPFLAG="-s" RELEASE=0 "$SCRIPT_DIR/build.sh"
     ls -lh bin/RomCloud bin/RomCloud.debug
     file bin/RomCloud
-fi
-
-echo "=== Compiling GameCast Daemon (gamecast_d) ==="
-$ZIG c++ \
-    -target aarch64-linux-gnu.2.33 \
-    -std=c++17 \
-    -O3 \
-    -Wall -Wextra \
-    -Isrc \
-    src/cast/toojpeg.cpp \
-    src/cast/gamecast_d.cpp \
-    -lpthread \
-    -o bin/gamecast_d
-
-echo "=== Build Successful: bin/gamecast_d ==="
-ls -lh bin/gamecast_d
-file bin/gamecast_d
-
-if [ "$RELEASE" = "1" ]; then
-    cp bin/gamecast_d bin/gamecast_d.debug
-    "$ZIG" objcopy --strip-all bin/gamecast_d bin/gamecast_d.stripped
-    mv bin/gamecast_d.stripped bin/gamecast_d
-    ls -lh bin/gamecast_d bin/gamecast_d.debug
-    file bin/gamecast_d
 fi
 

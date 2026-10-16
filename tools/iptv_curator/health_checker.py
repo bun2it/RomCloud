@@ -146,11 +146,23 @@ class HealthChecker:
             )
 
     @staticmethod
-    def probe_batch(urls: List[str], max_workers: int = 25, timeout: int = 3, progress_callback: Optional[Callable[[int, int, ProbeResult], None]] = None) -> Dict[str, ProbeResult]:
-        """Quét đa luồng danh sách stream URLs và trả về kết quả theo dict[url] = ProbeResult"""
+    def probe_batch(urls: List[str], max_workers: int = 25, timeout: int = 3, progress_callback: Optional[Callable[[int, int, ProbeResult], None]] = None, slow_retry_timeout: int = 10) -> Dict[str, ProbeResult]:
+        """Quét đa luồng danh sách stream URLs và trả về kết quả theo dict[url] = ProbeResult.
+
+        Kênh chậm (mở được nhưng đợi lâu) không được kết luận chết vội:
+        URL nào rớt vì timeout ở pass nhanh sẽ quét lại 1 lần với timeout
+        dài (slow_retry_timeout). Chỉ lỗi thật (DNS/từ chối/404/rỗng) mới là DEAD.
+        """
         results: Dict[str, ProbeResult] = {}
         total = len(urls)
         completed = 0
+
+        def _is_timeout_like(res: ProbeResult) -> bool:
+            if res.is_alive:
+                return False
+            if res.error == "Timeout":
+                return True
+            return res.status_code == 0 and "timed out" in (res.error or "").lower()
 
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             future_to_url = {
@@ -164,6 +176,14 @@ class HealthChecker:
                     res = future.result()
                 except Exception as e:
                     res = ProbeResult(url=url, is_alive=False, latency_ms=timeout * 1000, error=str(e))
+
+                if _is_timeout_like(res) and slow_retry_timeout > timeout:
+                    try:
+                        slow = HealthChecker.probe_single_stream(url, slow_retry_timeout)
+                        if slow.is_alive:
+                            res = slow
+                    except Exception:
+                        pass
 
                 results[url] = res
                 completed += 1

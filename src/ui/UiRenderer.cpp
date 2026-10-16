@@ -867,6 +867,7 @@ void UiRenderer::drawRowMainSub(int x, int y, int h, const std::string &main,
 }
 
 int UiRenderer::buttonIconWidth(const std::string& button, int size) {
+  if (button.empty()) return 0;
   if (button == "L1R1" || button == "UPDOWN") return 2 * size + 2;
   return size;
 }
@@ -878,8 +879,10 @@ int UiRenderer::drawFooterHint(const std::string &button,
   int centerY = barY + barH / 2;
   int iw = buttonIconWidth(button, iconSize);
   int iconY = centerY - iconSize / 2;
-  drawButtonIcon(button, x, iconY, iconSize);
-  int lx = x + iw + gap;
+  if (!button.empty()) {
+    drawButtonIcon(button, x, iconY, iconSize);
+  }
+  int lx = button.empty() ? x : (x + iw + gap);
   int th = textHeight(font);
   int ty = centerY - th / 2;
   drawText(label, lx, ty, color, font);
@@ -1270,6 +1273,9 @@ void UiRenderer::drawAppFooter(const std::vector<UiTheme::FooterHint> &hints) {
       break;
     case PB::PLAY:
       s = "PLAY";
+      break;
+    case PB::NONE:
+      s = "";
       break;
     default:
       s = "A";

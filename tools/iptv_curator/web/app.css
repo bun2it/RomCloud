@@ -1470,6 +1470,15 @@ select {
   flex: none;
 }
 
+.gch-ms {
+  font-size: 10px;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  flex: none;
+  min-width: 64px;
+  text-align: right;
+}
+
 .gch-excluded {
   opacity: 0.45;
 }

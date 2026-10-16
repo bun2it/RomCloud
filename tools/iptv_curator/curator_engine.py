@@ -248,14 +248,17 @@ class CuratorEngine:
 
         return probe_results
 
-    def generate_live_entries(self, include_backup: bool = True, probe_results: Optional[Dict[str, ProbeResult]] = None, publish_filters: Optional[Dict[str, Any]] = None) -> List[LiveChannelEntry]:
+    def generate_live_entries(self, include_backup: bool = True, probe_results: Optional[Dict[str, ProbeResult]] = None, publish_filters: Optional[Dict[str, Any]] = None, resolve_720p: bool = True, resolve_workers: int = 10, resolve_timeout: int = 5) -> List[LiveChannelEntry]:
         """
         Bước 3: Chọn lọc luồng tốt nhất cho mỗi kênh dựa trên Ping ms và Điểm uy tín.
         Nhóm xuất file theo 2 tầng: prefix nào có > ngưỡng kênh SỐNG
         (prefix_promote_alive_min, mặc định trên 10) thì đôn lên nhóm chính,
         còn lại xuất theo 1 trong 18 nhóm chuẩn tầng 1.
+        resolve_720p=True: ép sẵn mỗi URL đã chọn về variant <=720p
+        (variant_resolver) rồi mới xuất — máy phát thẳng, khỏi dò lúc bấm phát.
         """
         live_entries: List[LiveChannelEntry] = []
+        pending: List[Any] = []  # (best_tam, second_tam|None) cho phase 2
 
         url_alive = ({u: p.is_alive for u, p in probe_results.items()}
                      if probe_results else None)
@@ -314,8 +317,60 @@ class CuratorEngine:
                 )
             )
 
-            # Chọn link chính
-            best = candidate_streams[0]
+            # Chọn link chính (tạm) + dự phòng (tạm): gom lại resolve
+            # 720p hàng loạt ở dưới, rồi mới lọc/xếp cuối bằng ms tươi.
+            pending.append((
+                candidate_streams[0],
+                candidate_streams[1]
+                if include_backup and len(candidate_streams) > 1
+                else None,
+            ))
+
+
+        # Ép sẵn 720p + đo ms tươi: resolve 1 lượt cho mọi URL tạm chọn
+        # (dedupe trong resolve_many). Rewrite thành công (capped/probed)
+        # thì ms = thời gian fetch đã chứng minh sống; còn lại giữ số cũ.
+        # Lọc publish + vai best/backup đều dùng ms tươi này.
+        self.last_resolve_stats: Dict[str, int] = {"capped": 0, "probed": 0,
+                                                   "kept": 0, "failed": 0}
+        mapping: Dict[str, Any] = {}
+        if resolve_720p and pending:
+            try:
+                from variant_resolver import resolve_many, is_hls_url
+                targets = []
+                for _best, _second in pending:
+                    if is_hls_url(_best["url"]):
+                        targets.append(_best["url"])
+                    if _second is not None and is_hls_url(_second["url"]):
+                        targets.append(_second["url"])
+                mapping = resolve_many(targets, workers=resolve_workers,
+                                       timeout=resolve_timeout)
+            except Exception as ex:
+                print(f"[resolve-720p] bỏ qua (lỗi {ex}), giữ URL gốc.")
+
+        def _pair_key(x):
+            return (0 if x["is_alive"] else 1,
+                    x["latency"] if x["is_alive"] else 9999,
+                    -x["score"])
+
+        for best, second in pending:
+            cands = [best] if second is None else [best, second]
+            for cand in cands:
+                u = cand["url"]
+                if u in mapping:
+                    new_url, info, ms = mapping[u]
+                    self.last_resolve_stats[info] = \
+                        self.last_resolve_stats.get(info, 0) + 1
+                    if info in ("capped", "probed"):
+                        cand["url"] = new_url
+                        cand["is_alive"] = True
+                        if ms > 0:
+                            cand["latency"] = ms
+                        cand["last_status"] = "ALIVE"
+            # Xếp lại cặp best/backup bằng ms tươi (vai trò có thể đổi)
+            cands.sort(key=_pair_key)
+            best = cands[0]
+            second = cands[1] if len(cands) > 1 else None
 
             # Kiểm tra bộ lọc xuất bản (Publish Filters) do Admin thiết lập
             if publish_filters:
@@ -375,8 +430,7 @@ class CuratorEngine:
             ))
 
             # Chọn link dự phòng (nếu có hơn 1 stream và được bật)
-            if include_backup and len(candidate_streams) > 1:
-                second = candidate_streams[1]
+            if second is not None:
                 if second["is_alive"] or second["score"] >= 40:
                     live_entries.append(LiveChannelEntry(
                         name=second["name"],
@@ -391,7 +445,7 @@ class CuratorEngine:
 
         return live_entries
 
-    def export(self, output_dir: Optional[str] = None, include_backup: bool = True, probe_results: Optional[Dict[str, ProbeResult]] = None, publish_filters: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def export(self, output_dir: Optional[str] = None, include_backup: bool = True, probe_results: Optional[Dict[str, ProbeResult]] = None, publish_filters: Optional[Dict[str, Any]] = None, resolve_720p: bool = True) -> Dict[str, Any]:
         """
         Bước 4: Xuất ra live.m3u và iptv_manifest.json
         """
@@ -410,12 +464,13 @@ class CuratorEngine:
                 except Exception as e:
                     print(f"Không thể xóa file cũ {old_file}: {e}")
 
-        entries = self.generate_live_entries(include_backup=include_backup, probe_results=probe_results, publish_filters=publish_filters)
+        entries = self.generate_live_entries(include_backup=include_backup, probe_results=probe_results, publish_filters=publish_filters, resolve_720p=resolve_720p)
         manifest = PlaylistExporter.export_files(entries, m3u_path, manifest_path)
 
         return {
             "m3u_path": m3u_path,
             "manifest_path": manifest_path,
             "manifest": manifest,
-            "exported_entries": len(entries)
+            "exported_entries": len(entries),
+            "resolved_720p": getattr(self, "last_resolve_stats", {})
         }

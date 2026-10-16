@@ -63,13 +63,14 @@ echo "Target binary: $OUTPUT_BIN"
 
 mkdir -p build
 
-$CXX_CMD -std=c++17 -O2 -Wall -Wextra \
+$CXX_CMD -std=c++17 -O2 -Wall -Wextra -Wno-date-time \
     -DPC_SIMULATOR_MODE \
     $EXTRA_CFLAGS \
     -Isrc \
     src/main.cpp \
     src/app/Application.cpp \
     src/ui/UIManager.cpp \
+    src/ui/BrickPadUI.cpp \
     src/ui/UiRenderer.cpp \
     src/ui/UiStrings.cpp \
     src/ui/SearchInputModal.cpp \
@@ -108,7 +109,9 @@ $CXX_CMD -std=c++17 -O2 -Wall -Wextra \
     src/rom/FbneoCompatDb.cpp \
     src/rom/EmuLauncher.cpp \
     src/localsend/LocalSendManager.cpp \
-    src/cast/CastManager.cpp \
+    src/brickpad/BrickPadStore.cpp \
+    src/brickpad/BrickPadBt.cpp \
+    src/brickpad/BrickPadManager.cpp \
     src/ui/ExplorerSync.cpp \
     src/browser/chrome/ChromeBridge.cpp \
     src/weather/WeatherManager.cpp \

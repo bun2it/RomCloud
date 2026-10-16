@@ -506,12 +506,14 @@ class CuratorRequestHandler(BaseHTTPRequestHandler):
         if path == "/api/export":
             body = self.read_json_body()
             include_backup = body.get("include_backup", True)
+            resolve_720p = body.get("resolve_720p", True)
             publish_filters = body.get("publish_filters", None)
             if "selected_groups" in body:
                 if publish_filters is None:
                     publish_filters = {}
                 publish_filters["selected_groups"] = body["selected_groups"]
-            res = engine.export(include_backup=include_backup, publish_filters=publish_filters)
+            res = engine.export(include_backup=include_backup, publish_filters=publish_filters,
+                                resolve_720p=resolve_720p)
             self.send_json({"success": True, "result": res})
             return
 
@@ -519,13 +521,15 @@ class CuratorRequestHandler(BaseHTTPRequestHandler):
         if path == "/api/publish_ota":
             body = self.read_json_body() if self.headers.get("Content-Length") else {}
             include_backup = body.get("include_backup", True)
+            resolve_720p = body.get("resolve_720p", True)
             publish_filters = body.get("publish_filters", None)
             if "selected_groups" in body:
                 if publish_filters is None:
                     publish_filters = {}
                 publish_filters["selected_groups"] = body["selected_groups"]
             dest_dir = os.path.join(REPO_ROOT, "iptv")
-            res = engine.export(output_dir=dest_dir, include_backup=include_backup, publish_filters=publish_filters)
+            res = engine.export(output_dir=dest_dir, include_backup=include_backup, publish_filters=publish_filters,
+                                resolve_720p=resolve_720p)
             self.send_json({
                 "success": True,
                 "message": f"Đã xuất bản thành công vào thư mục {dest_dir}",
@@ -537,13 +541,15 @@ class CuratorRequestHandler(BaseHTTPRequestHandler):
         if path == "/api/git_commit_push_ota":
             body = self.read_json_body() if self.headers.get("Content-Length") else {}
             include_backup = body.get("include_backup", True)
+            resolve_720p = body.get("resolve_720p", True)
             publish_filters = body.get("publish_filters", None)
             if "selected_groups" in body:
                 if publish_filters is None:
                     publish_filters = {}
                 publish_filters["selected_groups"] = body["selected_groups"]
             dest_dir = os.path.join(REPO_ROOT, "iptv")
-            res = engine.export(output_dir=dest_dir, include_backup=include_backup, publish_filters=publish_filters)
+            res = engine.export(output_dir=dest_dir, include_backup=include_backup, publish_filters=publish_filters,
+                                resolve_720p=resolve_720p)
 
             manifest_file = os.path.join("iptv", "iptv_manifest.json")
             playlist_file = os.path.join("iptv", "live.m3u")

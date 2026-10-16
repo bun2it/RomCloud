@@ -48,10 +48,9 @@ cp -f iconsel.png "$STAGING_DIR/Apps/RomCloud/iconsel.png" 2>/dev/null || cp ico
 cp -f icontop.png "$STAGING_DIR/Apps/RomCloud/icontop.png" 2>/dev/null || cp icon.png "$STAGING_DIR/Apps/RomCloud/icontop.png"
 cp launch.sh "$STAGING_DIR/Apps/RomCloud/"
 cp bin/RomCloud "$STAGING_DIR/Apps/RomCloud/bin/"
-if [ -f bin/gamecast_d ]; then
-    cp bin/gamecast_d "$STAGING_DIR/Apps/RomCloud/bin/"
-    chmod +x "$STAGING_DIR/Apps/RomCloud/bin/gamecast_d"
-fi
+# BrickPad thay GameCast: không còn gamecast_d. Xóa bản cũ nếu sót lại để
+# tránh zombie giữ cổng Bluetooth/SDP.
+rm -f "$STAGING_DIR/Apps/RomCloud/bin/gamecast_d"
 # Copy YouTube support (python3 + yt-dlp)
 # yt-dlp-glibc (38MB) chi dong trong goi Full; goi Lite se tu tai qua
 # mpv_bundle.zip khi phat YouTube lan dau (UpdateManager::checkAndInstallDependencies).

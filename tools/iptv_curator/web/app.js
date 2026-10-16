@@ -1391,9 +1391,12 @@ function buildGrpChannelList(container, grp) {
     const row = document.createElement("div");
     row.className = "gch-row";
     row.title = tier;
+    const ms = (ch.best_stream && ch.best_stream.latency_ms > 0)
+      ? `${ch.best_stream.latency_ms} ms` : "—";
     row.innerHTML =
       `<span class="gch-dot" style="background:${colors[tier] || "#64748b"}"></span>` +
       `<span class="gch-name">${escapeHtml(ch.name || "(không tên)")}</span>` +
+      `<span class="gch-ms">${ms}</span>` +
       `<span class="gch-tier">${tier}</span>`;
     container.appendChild(row);
     shown++;
@@ -1655,6 +1658,7 @@ async function publishToRomCloud() {
     return;
   }
   const filters = getPublishFilters();
+  const includeBackup = document.getElementById("chkIncludeBackup") ? document.getElementById("chkIncludeBackup").checked : true;
   if (!confirm(`Đẩy file live.m3u và manifest của ${selectedExportGroups.size} nhóm kênh đã chọn trực tiếp vào thư mục RomCloud iptv/ để máy handheld dùng ngay?`)) return;
   showToast("Đang xuất bản vào thư mục RomCloud/iptv/...");
 
@@ -1663,7 +1667,7 @@ async function publishToRomCloud() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        include_backup: true,
+        include_backup: includeBackup,
         publish_filters: filters
       })
     });
@@ -1685,6 +1689,7 @@ async function publishAndCommitToGitHub() {
     return;
   }
   const filters = getPublishFilters();
+  const includeBackup = document.getElementById("chkIncludeBackup") ? document.getElementById("chkIncludeBackup").checked : true;
   const ok = confirm(`Hành động này sẽ:\n1. Xuất file live.m3u & iptv_manifest.json cho ${selectedExportGroups.size} nhóm kênh đã chọn\n2. Tự động Git Commit chỉ riêng thư mục iptv/\n3. Git Push thẳng lên GitHub (main) để máy handheld cập nhật OTA ngay lập tức\n\nBạn có muốn thực hiện không?`);
   if (!ok) return;
 
@@ -1695,7 +1700,7 @@ async function publishAndCommitToGitHub() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        include_backup: true,
+        include_backup: includeBackup,
         publish_filters: filters
       })
     });

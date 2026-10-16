@@ -21,6 +21,8 @@ enum class Button {
     SELECT,
     MENU,
     PLAY,
+    FN_LEFT,
+    FN_RIGHT,
     COUNT
 };
 
@@ -38,6 +40,22 @@ public:
     // keyboard input handlers — never for confirm/cancel/play actions.
     bool isButtonRepeat(Button btn) const;
     void reset();
+
+    // Check FN buttons (F1 / F2 key, joy button, or Linux evdev)
+    bool isFnLeftTriggered();
+    bool isFnRightTriggered();
+
+    // Raw analog stick positions (0..255, 128 = center)
+    uint8_t getStickLX() const { return m_stickLX; }
+    uint8_t getStickLY() const { return m_stickLY; }
+    uint8_t getStickRX() const { return m_stickRX; }
+    uint8_t getStickRY() const { return m_stickRY; }
+
+    // Pure D-pad inputs (physical D-pad buttons, hats, keyboard arrows - excluding analog sticks)
+    bool isPureDpadUp() const { return m_dpadUp || m_hatUp || m_keyUp; }
+    bool isPureDpadDown() const { return m_dpadDown || m_hatDown || m_keyDown; }
+    bool isPureDpadLeft() const { return m_dpadLeft || m_hatLeft || m_keyLeft; }
+    bool isPureDpadRight() const { return m_dpadRight || m_hatRight || m_keyRight; }
 
 private:
     InputManager() = default;
@@ -82,6 +100,11 @@ private:
     // Hold-to-repeat timing
     uint32_t m_pressStartTime[static_cast<int>(Button::COUNT)] = {0};
     uint32_t m_lastRepeatTime[static_cast<int>(Button::COUNT)] = {0};
+    // Analog stick states (0..255, 128 = center)
+    uint8_t m_stickLX = 128;
+    uint8_t m_stickLY = 128;
+    uint8_t m_stickRX = 128;
+    uint8_t m_stickRY = 128;
 
     void mapKeyboardKey(SDL_Keycode key, bool isDown);
 };

@@ -77,19 +77,39 @@ Mọi màn hình và tính năng phải tuân thủ chuẩn điều khiển vậ
 
 ---
 
-## 6. GameCast & Streaming (ĐÃ KIỂM CHỨNG)
+## 6. BrickPad — Tay cầm Bluetooth Classic HID (thay GameCast từ v2.6)
 
-1. **Cổng mạng (Port):** Luôn là cổng **8090** (URL: `http://<IP>:8090/cast`). Cấm đổi về 6666 vì Chrome/Edge chặn với mã lỗi `ERR_UNSAFE_PORT`.
-2. **Độ phân giải & Tốc độ mặc định:**
-   - Mặc định là **512x384 @ 60 FPS** (Turbo Mode, integer downscale 2x từ 1024x768).
-   - Đã kiểm chứng thực tế trên chip Cortex-A53: 512x384 chỉ mất 15.8ms/frame -> đạt **60 FPS mượt mà**, gói tin ~10–12KB, không làm quá tải chip Wi-Fi XRadio XR829.
-   - Không được để mặc định 1024x768 Native (vì CPU chỉ nén tối đa 14 FPS và frame 90KB gây nghẽn Wi-Fi, drop frame liên tục).
-3. **Bộ đệm mạng (Anti-Buffer Bloat):**
-   - Socket buffer cố định `SO_SNDBUF = 32768` (32KB). Tuyệt đối không tăng lên 256KB vì sẽ làm dồn 15-20 frame cũ trong nhân Linux, gây độ trễ tích lũy từ 300ms đến 1 giây.
-4. **Không tạo tay cầm ảo khi khởi động:**
-   - Cấm tự tiện gọi `VirtualGamepad::init()` (`/dev/uinput`) khi daemon vừa bật. Chỉ khởi tạo lazy khi có lệnh bấm phím từ web gửi về. Việc tạo uinput sớm sẽ cướp quyền Player 1 của tay cầm vật lý TrimUI và gây crash trình quản lý phím `trimui_inputd` khi vào game.
-5. **Công tắc phần cứng FN:** GPIO 243. Gạt xuống = kill triệt để daemon ngầm.
-6. **Ưu tiên CPU:** Khởi chạy daemon với `nice -n 10` để giả lập game luôn được ưu tiên 100% CPU.
+1. **Kiến trúc:** BrickPad là 1 module trong `RomCloud` (`src/brickpad/`:
+   `BrickPadProtocol` + `BrickPadStore` + `BrickPadBt` + `BrickPadManager`,
+   UI trong `src/ui/BrickPadUI.cpp`). Không còn daemon `gamecast_d`, không
+   còn port 8090 (đã trả tự do cho WebServer).
+2. **HID chuẩn (ĐÃ KIỂM CHỨNG trên BrickPad standalone):**
+   - Classic Bluetooth HID (BR/EDR, L2CAP PSM 0x11/0x13 + SDP record qua
+     BlueZ `ProfileManager1.RegisterProfile` + record Device ID 0x1200).
+   - Report gamepad 8 byte `[ID=1][hat][btn_lo][btn_hi][LX][LY][RX][RY]` +
+     keyboard Report ID 2 (modifiers + 6 keycode). Descriptor giữ nguyên —
+     Android TV / macOS / Windows nhận đủ, không cần driver.
+   - Gửi change-triggered (chỉ khi report đổi); phím keyboard = press rồi
+     release ngay (quên release → kẹt phím).
+3. **Ràng buộc BlueZ build trên máy (CẤM re-test):**
+   - Đăng ký Profile **KHÔNG truyền PSM** (BlueZ build này bind PSM 2 lần
+     rồi báo EADDRINUSE). App tự `bind` + `listen` cả 2 PSM.
+   - Pair agent capability `NoInputNoOutput` (JustWorks). Không có agent →
+     pair với TV treo ở bước xác nhận.
+   - `hciconfig hci0 class 0x000508`, `sspmode 1`, `piscan`, discoverable +
+     pairable on (timeout 0).
+   - Kết nối lại dùng L2CAP trực tiếp (Brick là peripheral;
+     `Device1.Connect()` của BlueZ dành cho host-role).
+4. **Nguyên tắc UI/nghiệp vụ (1 màn duy nhất):**
+   - Màn trạng thái + thiết bị đã lưu. Chưa nối: nút chỉ điều khiển UI
+     (D-pad + A chọn/nối + B lùi, X quên 2 nhịp, Y đổi tên, MENU quét).
+   - Đã nối: nút đi thẳng ra host, chỉ F1 thoát được (ngắt + rời màn).
+   - SELECT: overlay chọn Platform & Chế độ. MENU: quét thiết bị mới.
+   - Đổi mode Tay cầm/Bàn phím: giữ SELECT+START 1s (phím FN1/FN2 vật lý
+     không lộ qua SDL nên không bind được).
+   - Preset store 1 file JSON trên thẻ nhớ (`data/brickpad_presets.json`),
+     schema tương thích BrickPad standalone. Đổi preset nhanh khi chơi:
+     giữ SELECT + bấm L1/R1.
 
 ---
 
@@ -108,12 +128,13 @@ Mọi màn hình và tính năng phải tuân thủ chuẩn điều khiển vậ
    ```bash
    ./build.sh
    ```
-   (Sử dụng công cụ Zig C++ với target `aarch64-linux-gnu.2.33`).
+   (Sử dụng công cụ Zig C++ với target `aarch64-linux-gnu.2.33`.
+   BrickPad link `libdbus-1.so.3` qua headers trong `/tmp/dbusarm`
+   — xem `build.sh`. Build PC Simulator không có dbus thì dùng stub.)
 2. **Nạp vào máy TrimUI Brick:**
    ```bash
    adb push bin/RomCloud /mnt/SDCARD/Apps/RomCloud/bin/RomCloud
-   adb push bin/gamecast_d /mnt/SDCARD/Apps/RomCloud/bin/gamecast_d
-   adb shell "chmod +x /mnt/SDCARD/Apps/RomCloud/bin/RomCloud /mnt/SDCARD/Apps/RomCloud/bin/gamecast_d && sync"
+   adb shell "chmod +x /mnt/SDCARD/Apps/RomCloud/bin/RomCloud && sync"
    ```
 
 ---

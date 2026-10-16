@@ -167,11 +167,11 @@ bool WebServer::start(int port) {
     return true;
 
   // Safe portal port pool: 8888, 8889, 8890, 8081, 8082, 8085, 9000, 9999.
-  // NEVER use 8080 (held by stock SFTPGo) or 8090 (held by GameCast daemon).
+  // NEVER use 8080 (held by stock SFTPGo). 8090 freed (GameCast removed).
   const int candidates[] = {port, 8888, 8889, 8890, 8081, 8082, 8085, 9000, 9999};
   int tried[12] = {0};
   for (int cand : candidates) {
-    if (cand <= 0 || cand > 65535 || cand == 8080 || cand == 8090)
+    if (cand <= 0 || cand > 65535 || cand == 8080)
       continue;
     bool dup = false;
     for (int t : tried) {
@@ -3826,12 +3826,6 @@ void WebServer::handleClient(int clientFd) {
         "Connection: close\r\n\r\n" +
         body;
     send(clientFd, res.c_str(), res.length(), 0);
-  } else if (method == "GET" && (path == "/cast" || path == "/stream")) {
-    std::string ip = PlatformInfo::instance().getIpAddress();
-    std::string target = "http://" + ip + ":8090" + path;
-    std::string res = "HTTP/1.1 302 Found\r\nLocation: " + target + "\r\nConnection: close\r\n\r\n";
-    send(clientFd, res.c_str(), res.length(), 0);
-    return;
   } else if (method == "GET" &&
              (path == "/debug.log" || path == "/api/debug_log")) {
     // Ho tro query ?lines=N de tail N dong cuoi (browser preview)

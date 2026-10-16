@@ -28,6 +28,12 @@ if [ -f "./config.json" ]; then
     sed -i 's/"iconsel": *"icon.png"/"iconsel": ""/g' ./config.json 2>/dev/null || true
 fi
 
+
+# Khôi phục BlueZ link keys từ thẻ nhớ SD
+if [ -d "./data/bluetooth_keys" ] && [ -d "/etc/bluetooth/keys" ]; then
+    cp -af ./data/bluetooth_keys/. /etc/bluetooth/keys/ 2>/dev/null || true
+fi
+
 install_pending_ota() {
     NEW_BIN="./bin/RomCloud.new"
     TARGET_BIN="./bin/RomCloud"
@@ -119,6 +125,12 @@ while true; do
     fi
     break
 done
+
+# Sao lưu BlueZ link keys ra thẻ nhớ SD trước khi thoát
+mkdir -p ./data/bluetooth_keys 2>/dev/null
+if [ -d /etc/bluetooth/keys ]; then
+    cp -af /etc/bluetooth/keys/. ./data/bluetooth_keys/ 2>/dev/null || true
+fi
 
 # Sync file systems to SD card before returning to TrimUI MainUI
 sync

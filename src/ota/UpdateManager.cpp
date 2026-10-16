@@ -781,6 +781,7 @@ bool UpdateManager::repairIfBroken() {
     "assets/button_icons/START.png",
     "scripts/youtube_search.py",
     "assets/apps_icons/YOUTUBE.png",
+    "assets/apps_icons/BRICKPAD.png",
   };
   const char* needExec[] = {
     "scripts/youtube_search.sh",

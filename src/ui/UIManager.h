@@ -69,7 +69,7 @@ enum class UIState {
   TEXT_VIEWER,   // Xem nội dung file text từ File Explorer
   WEATHER,       // Thời tiết & Lịch (+ tab Đồng hồ, Camera)
   CLOCK_ALARM,   // Modal báo thức kêu (briefing)
-  GAME_CAST,     // GameCast TV & Laptop streaming
+  BRICK_PAD,     // BrickPad: tay cầm Bluetooth cho TV & PC (thay GameCast)
   CHROME,        // Chromium nhúng (viewport stream + map nút)
   GAME_PLAYING,  // Emulator giữ màn hình (không vẽ, không bắt phím)
   SCREENSAVER,   // P0: Screensaver (starfield/fire/clock/picture)
@@ -115,6 +115,7 @@ private:
   TTF_Font *m_fontLarge = nullptr;
   TTF_Font *m_fontMedium = nullptr;
   TTF_Font *m_fontSmall = nullptr;
+  TTF_Font *m_fontSmallItalic = nullptr;
   std::string m_fontPathUsed;  // P9: resolved TTF file for CSS font-size
 
   UIState m_currentState = UIState::MENU;
@@ -805,8 +806,21 @@ private:
   void renderIPTVSearchState();
   void renderYouTubeSearchState();
   void renderYouTubeResultsState();
-  void renderGameCastState();
-  bool m_castNativeRes = false;
+  void renderBrickPadState();
+  void handleBrickPadInput();
+  void renderBpScan();
+  void renderBpDevices();
+  void renderBpSession();
+  void renderBpPlatformOverlay();
+  void setBpBacklightOff(bool off);
+  uint32_t m_bpSessionStartMs = 0;
+  // Bàn phím ảo RomCloud dùng cho chế độ Bàn phím BrickPad (gõ -> HID).
+  VkState m_bpVk;
+  std::vector<std::string> m_bpVkHist;
+  SearchInputModal::Config m_bpModalCfg;
+  std::string m_bpModalTitle;
+  std::string m_bpModalPh;
+  std::string m_bpRenameMac;
 
   // LocalSend P2P
   void renderLocalSendHome();
@@ -981,18 +995,6 @@ private:
   // Gửi báo cáo lỗi thủ công chạy nền: true = đang gửi (chặn bấm lặp),
   // toast "Đang gửi..." giữ suốt tiến trình, xong mới báo kết quả.
   std::atomic<bool> m_manualReportSending{false};
-
-  // P1-2: realtime stream telemetry from GET http://127.0.0.1:8090/api/status.
-  // Polled mỗi 2s khi UIState=GAME_CAST, render mỗi frame. atomic để tránh
-  // race voi HTTP fetch thread.
-  struct CastStats {
-    std::atomic<int> fps{0};
-    std::atomic<int> viewers{0};
-    std::atomic<bool> downscale{false};
-    std::atomic<bool> valid{
-        false}; // true sau khi fetch thanh cong it nhat 1 lan
-  } m_castStats;
-  uint32_t m_lastCastStatsPoll = 0;
 
   // Settings Tab: Cache cleaner & Wi-Fi diagnostics
   uint64_t calculateCacheSizeBytes();

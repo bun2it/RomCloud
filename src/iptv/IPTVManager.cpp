@@ -2792,9 +2792,10 @@ bool IPTVManager::stop() {
 
 static std::mutex s_pingMutex;
 
-// TẠM TẮT dò kênh chết (probe ping curl từng URL): mỗi lần lướt list là một
-// đợt fork curl tranh WiFi/CPU với mpv HLS. Bật lại = đổi false -> true.
-static constexpr bool kPingProbeEnabled = false;
+// Đo ping hiển thị badge ms từng kênh (user yêu cầu bật lại: lọc kênh
+// chết đã làm ở curator nguồn, máy chỉ hiện trạng thái, không ẩn kênh).
+// Worker đơn + cửa sổ 24 URL nên không đẻ thread mỗi frame.
+static constexpr bool kPingProbeEnabled = true;
 
 int IPTVManager::getCachedPing(const std::string &url) {
     if (!kPingProbeEnabled) return -2; // "..." trung tính, không "Mất kết nối"
@@ -2847,17 +2848,33 @@ void IPTVManager::prefetchPings(const std::vector<std::string> &urls) {
                         m_pingInFlight.insert(u);
                 }
                 for (const auto &url : batch) {
+                    // Đo trong process bằng HttpClient tái dùng handle
+                    // (keep-alive + DNS cache + TLS session): nhanh hơn nhiều
+                    // so với fork curl mỗi URL (bắt tay lại từ đầu). Chỉ lấy
+                    // 2KB đầu rồi ngắt — stream live vô hạn cũng không kẹt.
+                    // Timeout 8s: kênh chậm vẫn SỐNG với ms cao, chỉ lỗi thật
+                    // (DNS/từ chối/404/rỗng/HTML lỗi) mới "Mất kết nối".
                     uint32_t t0 = SDL_GetTicks();
-                    std::string cmd = "curl -k -s -L -I -m 2 -o /dev/null -w \"%{http_code}\" \"" + url + "\" 2>/dev/null";
-                    FILE *fp = popen(cmd.c_str(), "r");
-                    int code = 0;
-                    if (fp) {
-                        char buf[32];
-                        if (fgets(buf, sizeof(buf), fp)) code = atoi(buf);
-                        pclose(fp);
-                    }
+                    HttpResponse pr = HttpClient::instance().getFirstBytes(url, 8, 2048);
                     uint32_t t1 = SDL_GetTicks();
-                    int ms = (code >= 200 && code < 400) ? static_cast<int>(t1 - t0) : -1;
+                    int code = pr.statusCode;
+                    bool okBody = false;
+                    if (!pr.body.empty()) {
+                        bool wantM3u8 = (url.find(".m3u8") != std::string::npos);
+                        std::string s = pr.body;
+                        for (char &c : s) c = (char)::tolower((unsigned char)c);
+                        bool isHtml = (s.find("<html") != std::string::npos ||
+                                       s.find("<!doctype html") != std::string::npos);
+                        if (!wantM3u8) {
+                            okBody = !isHtml;
+                        } else {
+                            okBody = (s.find("#extm3u") != std::string::npos ||
+                                      s.find("#extinf") != std::string::npos);
+                            if (!okBody && !isHtml) okBody = true;
+                        }
+                    }
+                    int ms = (pr.success && code >= 200 && code < 400 && okBody)
+                                 ? static_cast<int>(t1 - t0) : -1;
                     {
                         std::lock_guard<std::mutex> lk(s_pingMutex);
                         m_pingCache[url] = ms;

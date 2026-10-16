@@ -1,6 +1,12 @@
 #include "InputManager.h"
 #include "../logging/Logger.h"
 #include "../platform/PlatformInfo.h"
+#include "../brickpad/BrickPadManager.h"
+#include <fcntl.h>
+#include <unistd.h>
+#if defined(__linux__)
+#include <linux/input.h>
+#endif
 
 namespace RomCloud {
 
@@ -57,6 +63,7 @@ void InputManager::reset() {
     m_hatUp = m_hatDown = m_hatLeft = m_hatRight = false;
     m_keyUp = m_keyDown = m_keyLeft = m_keyRight = false;
     m_axisL2 = m_axisR2 = false;
+    m_stickLX = m_stickLY = m_stickRX = m_stickRY = 128;
 }
 
 void InputManager::mapKeyboardKey(SDL_Keycode key, bool isDown) {
@@ -86,7 +93,8 @@ void InputManager::mapKeyboardKey(SDL_Keycode key, bool isDown) {
         case SDLK_c:      btn = Button::R2; break;
         case SDLK_TAB:
         case SDLK_PERIOD: btn = Button::SELECT; break;
-        case SDLK_F1:
+        case SDLK_F1:     btn = Button::FN_LEFT; break;
+        case SDLK_F2:     btn = Button::FN_RIGHT; break;
         case SDLK_SLASH:  btn = Button::START; break;
         case SDLK_HOME:
         case SDLK_COMMA:  btn = Button::MENU; break;
@@ -120,10 +128,26 @@ void InputManager::update() {
                 break;
 
             case SDL_KEYDOWN:
+                if (event.key.keysym.sym == SDLK_F1 || event.key.keysym.scancode == SDL_SCANCODE_F1) {
+                    int bi = static_cast<int>(Button::FN_LEFT);
+                    if (!m_currentStates[bi]) m_justPressed[bi] = true;
+                    m_currentStates[bi] = true;
+                } else if (event.key.keysym.sym == SDLK_F2 || event.key.keysym.scancode == SDL_SCANCODE_F2) {
+                    int bi = static_cast<int>(Button::FN_RIGHT);
+                    if (!m_currentStates[bi]) m_justPressed[bi] = true;
+                    m_currentStates[bi] = true;
+                }
                 mapKeyboardKey(event.key.keysym.sym, true);
                 break;
 
             case SDL_KEYUP:
+                if (event.key.keysym.sym == SDLK_F1 || event.key.keysym.scancode == SDL_SCANCODE_F1) {
+                    int bi = static_cast<int>(Button::FN_LEFT);
+                    m_currentStates[bi] = false;
+                } else if (event.key.keysym.sym == SDLK_F2 || event.key.keysym.scancode == SDL_SCANCODE_F2) {
+                    int bi = static_cast<int>(Button::FN_RIGHT);
+                    m_currentStates[bi] = false;
+                }
                 mapKeyboardKey(event.key.keysym.sym, false);
                 break;
 
@@ -155,6 +179,10 @@ void InputManager::update() {
                     case SDL_CONTROLLER_BUTTON_BACK:       setBtn(Button::SELECT, down); break;
                     case SDL_CONTROLLER_BUTTON_GUIDE:      setBtn(Button::MENU, down); break;
                     case SDL_CONTROLLER_BUTTON_MISC1:
+                    case SDL_CONTROLLER_BUTTON_PADDLE1:
+                        setBtn(Button::FN_LEFT, down); break;
+                    case SDL_CONTROLLER_BUTTON_PADDLE2:
+                        setBtn(Button::FN_RIGHT, down); break;
                     case SDL_CONTROLLER_BUTTON_TOUCHPAD:
                         setBtn(Button::PLAY, down); break;
                     default: break;
@@ -168,6 +196,17 @@ void InputManager::update() {
                 const int RELEASE_ZONE = 9000;
                 int axis = event.caxis.axis;
                 int16_t val = event.caxis.value;
+
+                auto toByte = [](int16_t v) -> uint8_t {
+                    int mapped = ((int)v + 32768) / 256;
+                    if (mapped < 0) mapped = 0;
+                    if (mapped > 255) mapped = 255;
+                    return static_cast<uint8_t>(mapped);
+                };
+                if (axis == SDL_CONTROLLER_AXIS_LEFTX) m_stickLX = toByte(val);
+                else if (axis == SDL_CONTROLLER_AXIS_LEFTY) m_stickLY = toByte(val);
+                else if (axis == SDL_CONTROLLER_AXIS_RIGHTX) m_stickRX = toByte(val);
+                else if (axis == SDL_CONTROLLER_AXIS_RIGHTY) m_stickRY = toByte(val);
 
                 if (axis == SDL_CONTROLLER_AXIS_LEFTX || axis == SDL_CONTROLLER_AXIS_RIGHTX) {
                     if (val < -DEADZONE) {
@@ -235,32 +274,45 @@ void InputManager::update() {
             }
 
             case SDL_JOYAXISMOTION: {
-                const int DEADZONE = 12000;
-                const int RELEASE_ZONE = 9000;
                 int axis = event.jaxis.axis;
                 int16_t val = event.jaxis.value;
+                if (!m_controller) {
+                    auto toByte = [](int16_t v) -> uint8_t {
+                        int mapped = ((int)v + 32768) / 256;
+                        if (mapped < 0) mapped = 0;
+                        if (mapped > 255) mapped = 255;
+                        return static_cast<uint8_t>(mapped);
+                    };
+                    if (axis == 0) m_stickLX = toByte(val);
+                    else if (axis == 1) m_stickLY = toByte(val);
+                    else if (axis == 2 || axis == 3) m_stickRX = toByte(val);
+                    else if (axis == 4) m_stickRY = toByte(val);
 
-                if (axis == 0 || axis == 2) {
-                    if (val < -DEADZONE) {
-                        m_joyAxisLeft = true;
-                        m_joyAxisRight = false;
-                    } else if (val > DEADZONE) {
-                        m_joyAxisRight = true;
-                        m_joyAxisLeft = false;
-                    } else if (std::abs(val) < RELEASE_ZONE) {
-                        m_joyAxisLeft = false;
-                        m_joyAxisRight = false;
-                    }
-                } else if (axis == 1 || axis == 3) {
-                    if (val < -DEADZONE) {
-                        m_joyAxisUp = true;
-                        m_joyAxisDown = false;
-                    } else if (val > DEADZONE) {
-                        m_joyAxisDown = true;
-                        m_joyAxisUp = false;
-                    } else if (std::abs(val) < RELEASE_ZONE) {
-                        m_joyAxisUp = false;
-                        m_joyAxisDown = false;
+                    const int DEADZONE = 12000;
+                    const int RELEASE_ZONE = 9000;
+
+                    if (axis == 0) {
+                        if (val < -DEADZONE) {
+                            m_joyAxisLeft = true;
+                            m_joyAxisRight = false;
+                        } else if (val > DEADZONE) {
+                            m_joyAxisRight = true;
+                            m_joyAxisLeft = false;
+                        } else if (std::abs(val) < RELEASE_ZONE) {
+                            m_joyAxisLeft = false;
+                            m_joyAxisRight = false;
+                        }
+                    } else if (axis == 1) {
+                        if (val < -DEADZONE) {
+                            m_joyAxisUp = true;
+                            m_joyAxisDown = false;
+                        } else if (val > DEADZONE) {
+                            m_joyAxisDown = true;
+                            m_joyAxisUp = false;
+                        } else if (std::abs(val) < RELEASE_ZONE) {
+                            m_joyAxisUp = false;
+                            m_joyAxisDown = false;
+                        }
                     }
                 }
                 break;
@@ -291,6 +343,9 @@ void InputManager::update() {
             m_lastRepeatTime[i] = 0;
         }
     }
+
+    // Fast-path: Dispatch immediate HID report in BrickPad SESSION (0ms UI render lag)
+    BrickPad::BrickPadManager::instance().onInputEvent();
 }
 
 bool InputManager::isButtonPressed(Button btn) const {
@@ -341,6 +396,73 @@ bool InputManager::isButtonRepeat(Button btn) const {
             return true;
         }
     }
+    return false;
+}
+
+#if defined(__linux__)
+static int s_evFds[8] = {-1, -1, -1, -1, -1, -1, -1, -1};
+static bool s_evInited = false;
+static bool s_fnLeftLatched = false;
+static bool s_fnRightLatched = false;
+
+static void pollLinuxEvents() {
+    if (!s_evInited) {
+        s_evInited = true;
+        for (int i = 0; i < 8; i++) {
+            char path[32];
+            std::snprintf(path, sizeof(path), "/dev/input/event%d", i);
+            int fd = open(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+            if (fd >= 0) {
+                s_evFds[i] = fd;
+            }
+        }
+    }
+
+    for (int i = 0; i < 8; i++) {
+        if (s_evFds[i] < 0) continue;
+        struct input_event evs[16];
+        ssize_t bytes = read(s_evFds[i], evs, sizeof(evs));
+        if (bytes > 0) {
+            int count = (int)(bytes / sizeof(struct input_event));
+            for (int k = 0; k < count; k++) {
+                if (evs[k].type == 1) { // EV_KEY
+                    if (evs[k].code == 59 && evs[k].value == 1) { // KEY_F1 (FN1)
+                        s_fnLeftLatched = true;
+                    } else if (evs[k].code == 60 && evs[k].value == 1) { // KEY_F2 (FN2)
+                        s_fnRightLatched = true;
+                    }
+                }
+            }
+        }
+    }
+}
+#endif
+
+bool InputManager::isFnLeftTriggered() {
+    if (isButtonPressed(Button::FN_LEFT) || isButtonJustPressed(Button::FN_LEFT)) return true;
+
+#if defined(__linux__)
+    pollLinuxEvents();
+    if (s_fnLeftLatched) {
+        s_fnLeftLatched = false;
+        return true;
+    }
+#endif
+
+    return false;
+}
+
+bool InputManager::isFnRightTriggered() {
+    if (isButtonPressed(Button::FN_RIGHT) || isButtonJustPressed(Button::FN_RIGHT)) return true;
+
+#if defined(__linux__)
+    pollLinuxEvents();
+    if (s_fnRightLatched) {
+        s_fnRightLatched = false;
+        return true;
+    }
+#endif
+
     return false;
 }
 

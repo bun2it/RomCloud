@@ -22,8 +22,7 @@ static size_t writeCallback(void* contents, size_t size, size_t nmemb, void* use
     return totalSize;
 }
 
-static size_t headerCallback(char* buffer, size_t size, size_t nitems, void* userdata) {
-    size_t totalSize = size * nitems;
+static size_t headerCallback(char* buffer, size_t size, size_t nitems, void* userdata) {    size_t totalSize = size * nitems;
     auto* headers = static_cast<std::unordered_map<std::string, std::string>*>(userdata);
     if (headers) {
         std::string line(buffer, totalSize);
@@ -239,6 +238,79 @@ HttpResponse HttpClient::get(const std::string& url, const std::vector<std::stri
 
     if (chunk) curl_slist_free_all(chunk);
     // GIỮ handle cho request sau (keep-alive) — chỉ free ở shutdown().
+    return response;
+}
+
+// Vùng đệm ngắt sớm cho getFirstBytes: đủ maxBytes thì trả 0 để curl
+// dừng transfer (CURLE_WRITE_ERROR) mà không tải tiếp stream vô hạn.
+struct CappedBuffer {
+    std::string* out;
+    size_t cap;
+};
+
+static size_t cappedWriteCallback(void* contents, size_t size, size_t nmemb, void* userp) {
+    size_t totalSize = size * nmemb;
+    auto* cb = static_cast<CappedBuffer*>(userp);
+    if (!cb || !cb->out) return 0;
+    size_t have = cb->out->size();
+    if (have >= cb->cap) return 0; // đủ rồi: ngắt
+    size_t want = cb->cap - have;
+    size_t take = totalSize < want ? totalSize : want;
+    cb->out->append(static_cast<char*>(contents), take);
+    return (cb->out->size() >= cb->cap) ? 0 : totalSize;
+}
+
+HttpResponse HttpClient::getFirstBytes(const std::string& url, int timeoutSec, size_t maxBytes) {
+    if (!m_initialized) init();
+
+    HttpResponse response;
+    std::lock_guard<std::mutex> lock(m_getMutex);
+    if (!m_getCurl) {
+        m_getCurl = curl_easy_init();
+        if (!m_getCurl) {
+            response.error = "Failed to initialize CURL handle";
+            return response;
+        }
+    }
+    CURL* curl = m_getCurl;
+    curl_easy_reset(curl);
+
+    struct curl_slist* chunk = nullptr;
+    chunk = curl_slist_append(chunk, "Accept: */*");
+
+    CappedBuffer capped{&response.body, maxBytes > 0 ? maxBytes : 2048};
+    curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, chunk);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, cappedWriteCallback);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &capped);
+    curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, headerCallback);
+    curl_easy_setopt(curl, CURLOPT_HEADERDATA, &response.headers);
+    applyCommonOptions(curl, chunk, timeoutSec);
+    if (access("/etc/ssl/certs/ca-certificates.crt", F_OK) == 0) {
+        curl_easy_setopt(curl, CURLOPT_CAINFO, "/etc/ssl/certs/ca-certificates.crt");
+    }
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
+    curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
+
+    CURLcode res = curl_easy_perform(curl);
+    long httpCode = 0;
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &httpCode);
+    response.statusCode = static_cast<int>(httpCode);
+    // Thành công = nhận được byte (kể cả ngắt sớm vì đủ maxBytes, curl báo
+    // CURLE_WRITE_ERROR nhưng body đã có). Không log từng URL (đo ping dày).
+    if (!response.body.empty()) {
+        response.success = true;
+    } else if (res == CURLE_OK) {
+        response.success = (response.statusCode >= 200 && response.statusCode < 300);
+        if (!response.success) response.error = "HTTP " + std::to_string(response.statusCode);
+    } else {
+        response.error = curl_easy_strerror(res);
+        response.success = false;
+    }
+
+    if (chunk) curl_slist_free_all(chunk);
     return response;
 }
 
