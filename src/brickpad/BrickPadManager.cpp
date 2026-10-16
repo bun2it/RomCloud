@@ -184,6 +184,8 @@ void BrickPadManager::pumpSockets() {
         if (c >= 0) {
             int fl = fcntl(c, F_GETFL, 0);
             fcntl(c, F_SETFL, fl | O_NONBLOCK);
+            int sndbuf = 512;
+            setsockopt(c, SOL_SOCKET, SO_SNDBUF, &sndbuf, sizeof(sndbuf));
             if (m_intrFd >= 0) close(m_intrFd);
             m_intrFd = c;
             std::string pm = BrickPadBt::peerMacFromFd(c);
@@ -494,6 +496,10 @@ bool BrickPadManager::connectHost(const std::string &mac, std::string &err) {
     }
     if (m_ctrlFd >= 0) close(m_ctrlFd);
     if (m_intrFd >= 0) close(m_intrFd);
+    if (c2 >= 0) {
+        int sndbuf = 512;
+        setsockopt(c2, SOL_SOCKET, SO_SNDBUF, &sndbuf, sizeof(sndbuf));
+    }
     m_ctrlFd = c1;
     m_intrFd = c2;
     m_peerMac = mac;
@@ -631,64 +637,67 @@ void BrickPadManager::pumpHid() {
     // Chỉ vào chế độ Chuột + Bàn phím KHI user chọn PadMode::KEYBOARD!
     // Khi ở PadMode::GAMEPAD, tuyệt đối gửi Gamepad report chuẩn.
     if (m_mode == PadMode::KEYBOARD && m_identity == ControllerIdentity::PC_LAPTOP) {
-        // 1. Cần Analog Trái: di chuyển chuột mượt mà (2D Vector + EMA Filter + Sub-pixel Accumulator)
+        // 1. Cần Analog Trái: di chuyển chuột mượt mà, chống trôi lố (Instant Brake + Coalescing)
         int rawX = (int)cur.stickLX - 128;
         int rawY = (int)cur.stickLY - 128;
-        if (std::abs(rawX) <= 10 && std::abs(rawY) <= 10) {
+        if (std::abs(rawX) <= 12 && std::abs(rawY) <= 12) {
             int rx = (int)cur.stickRX - 128;
             int ry = (int)cur.stickRY - 128;
-            if (std::abs(rx) > 10 || std::abs(ry) > 10) {
+            if (std::abs(rx) > 12 || std::abs(ry) > 12) {
                 rawX = rx;
                 rawY = ry;
             }
         }
 
-        // EMA Low-Pass Filter: lọc nhiễu rung lắc ADC phần cứng
-        m_mouseFilterX = 0.55f * (float)rawX + 0.45f * m_mouseFilterX;
-        m_mouseFilterY = 0.55f * (float)rawY + 0.45f * m_mouseFilterY;
-
-        // Chuẩn hóa Vector 2D [-1.0 .. 1.0]
-        float normX = m_mouseFilterX / 127.0f;
-        float normY = m_mouseFilterY / 127.0f;
-        float mag = std::sqrt(normX * normX + normY * normY);
-
+        // Kiểm tra vùng nghỉ phần cứng: nếu cần ở tâm thì phanh khựng tức thì
+        bool stickAtCenter = (std::abs(rawX) <= 15 && std::abs(rawY) <= 15);
         int8_t dx = 0;
         int8_t dy = 0;
-        const float kDeadzone = 0.08f; // ~10 counts / 127
 
-        if (mag > kDeadzone) {
-            if (mag > 1.0f) mag = 1.0f;
-            float normalizedMag = (mag - kDeadzone) / (1.0f - kDeadzone);
-            float dirX = normX / mag;
-            float dirY = normY / mag;
-
-            int speedSetting = m_store.mouseSpeed;
-            if (speedSetting < 1) speedSetting = 1;
-            if (speedSetting > 10) speedSetting = 10;
-
-            // Vận tốc tối đa tính theo setting (6.0 px/frame ở mức 1 đến 37.5 px/frame ở mức 10)
-            float maxSpeed = 6.0f + (float)(speedSetting - 1) * 3.5f;
-
-            // Đường cong lũy thừa 1.8: đẩy nhẹ cực chính xác từng pixel, đẩy mạnh lướt nhanh
-            float curvedMag = std::pow(normalizedMag, 1.8f);
-            float targetDx = dirX * curvedMag * maxSpeed;
-            float targetDy = dirY * curvedMag * maxSpeed;
-
-            // Sub-pixel Accumulator: tích lũy số dư thập phân qua từng frame 60 FPS
-            m_mouseAccumX += targetDx;
-            m_mouseAccumY += targetDy;
-
-            dx = (int8_t)m_mouseAccumX;
-            dy = (int8_t)m_mouseAccumY;
-
-            m_mouseAccumX -= (float)dx;
-            m_mouseAccumY -= (float)dy;
-        } else {
-            // Khi thả cần về tâm: dừng ngay lập tức, không trôi dạt
+        if (stickAtCenter) {
             m_mouseFilterX = 0.0f;
             m_mouseFilterY = 0.0f;
             m_mouseAccumX = 0.0f;
             m_mouseAccumY = 0.0f;
+        } else {
+            // EMA Low-Pass Filter: lọc rung lắc ADC chỉ khi đang di chuyển
+            m_mouseFilterX = 0.65f * (float)rawX + 0.35f * m_mouseFilterX;
+            m_mouseFilterY = 0.65f * (float)rawY + 0.35f * m_mouseFilterY;
+
+            // Chuẩn hóa Vector 2D [-1.0 .. 1.0]
+            float normX = m_mouseFilterX / 127.0f;
+            float normY = m_mouseFilterY / 127.0f;
+            float mag = std::sqrt(normX * normX + normY * normY);
+
+            const float kDeadzone = 0.12f; // ~15 counts / 127 bảo đảm buông tay dừng ngay
+            if (mag > kDeadzone) {
+                if (mag > 1.0f) mag = 1.0f;
+                float normalizedMag = (mag - kDeadzone) / (1.0f - kDeadzone);
+                float dirX = normX / mag;
+                float dirY = normY / mag;
+
+                int speedSetting = m_store.mouseSpeed;
+                if (speedSetting < 1) speedSetting = 1;
+                if (speedSetting > 10) speedSetting = 10;
+
+                // Vận tốc tối đa tính theo setting: 5 px/frame (speed 1) đến 25 px/frame (speed 10)
+                float maxSpeed = 5.0f + (float)(speedSetting - 1) * 2.2f;
+
+                // Đường cong lũy thừa 1.8: đẩy nhẹ cực chính xác từng pixel, đẩy mạnh lướt nhanh
+                float curvedMag = std::pow(normalizedMag, 1.8f);
+                float targetDx = dirX * curvedMag * maxSpeed;
+                float targetDy = dirY * curvedMag * maxSpeed;
+
+                // Sub-pixel Accumulator: tích lũy số dư thập phân qua từng frame
+                m_mouseAccumX += targetDx;
+                m_mouseAccumY += targetDy;
+
+                dx = (int8_t)m_mouseAccumX;
+                dy = (int8_t)m_mouseAccumY;
+
+                m_mouseAccumX -= (float)dx;
+                m_mouseAccumY -= (float)dy;
+            }
         }
 
         // 2. Nút B: Chuột trái (0x01), Nút A: Chuột phải (0x02)
@@ -700,8 +709,13 @@ void BrickPadManager::pumpHid() {
         int8_t wheel = 0;
         uint8_t mouseReportId = (m_identity == ControllerIdentity::PC_LAPTOP) ? 0x01 : 0x03;
         if (dx != 0 || dy != 0 || wheel != 0 || mouseBtns != m_lastMouseButtons) {
-            BrickPadBt::sendMouse(m_intrFd, mouseBtns, dx, dy, wheel, mouseReportId);
-            m_lastMouseButtons = mouseBtns;
+            if (BrickPadBt::sendMouse(m_intrFd, mouseBtns, dx, dy, wheel, mouseReportId)) {
+                m_lastMouseButtons = mouseBtns;
+            } else {
+                // Nếu buffer socket tạm thời bận, giữ lại delta để gộp vào frame sau (Coalescing)
+                m_mouseAccumX += (float)dx;
+                m_mouseAccumY += (float)dy;
+            }
         }
 
         // 4. Bàn phím (Report ID 0x02):
