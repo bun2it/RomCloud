@@ -1,19 +1,19 @@
 {
-  "version": "2.5.3",
-  "release_date": "2026-10-13",
+  "version": "2.6.0",
+  "release_date": "2026-10-16",
   "target_os": "ALL",
   "icon_url": "https://raw.githubusercontent.com/bun2it/RomCloud/main/icon.png",
-  "full_zip_url": "https://github.com/bun2it/RomCloud/releases/download/v2.5.3/RomCloud-v2.5.3.zip",
-  "ota_manifest_url": "https://github.com/bun2it/RomCloud/releases/download/v2.5.3/ota-manifest.json",
-  "delta_zip_url": "https://github.com/bun2it/RomCloud/releases/download/v2.5.3/ota-patch-v2.5.3.zip",
-  "lite_zip_url": "https://github.com/bun2it/RomCloud/releases/download/v2.5.3/ota-core-v2.5.3.zip",
-  "completion_zip_url": "https://github.com/bun2it/RomCloud/releases/download/v2.5.3/ota-media-v2.5.3.zip",
+  "full_zip_url": "https://github.com/bun2it/RomCloud/releases/download/v2.6.0/RomCloud-v2.6.0.zip",
+  "ota_manifest_url": "https://github.com/bun2it/RomCloud/releases/download/v2.6.0/ota-manifest.json",
+  "delta_zip_url": "https://github.com/bun2it/RomCloud/releases/download/v2.6.0/ota-patch-v2.6.0.zip",
+  "lite_zip_url": "https://github.com/bun2it/RomCloud/releases/download/v2.6.0/ota-core-v2.6.0.zip",
+  "completion_zip_url": "https://github.com/bun2it/RomCloud/releases/download/v2.6.0/ota-media-v2.6.0.zip",
   "rc_web_version": "20261011",
   "rc_web_url": "https://github.com/bun2it/RomCloud/releases/download/v2.5.0/rc-web-20261011.zip",
   "os_versions": {
-    "STOCK_PS": "2.5.3",
-    "NEXTUI": "2.5.3",
-    "SPRUCE_OS": "2.5.3"
+    "STOCK_PS": "2.6.0",
+    "NEXTUI": "2.6.0",
+    "SPRUCE_OS": "2.6.0"
   },
-  "changelog": "1. Có playlist kênh mới là máy tự báo — bấm Y để tải.\n2. YouTube đúng nhãn chất lượng: 720p ra đúng 720p, thêm nấc 480p.\n3. Tinh chỉnh hiệu năng và sửa lỗi nhỏ."
+  "changelog": "v2.6.0: Ra mắt BrickPad thay thế GameCast — Tay cầm Bluetooth (chuẩn Xbox) & Desk Remote (chuột mượt mà, bàn phím ảo gõ từ xa) cho Laptop, PC, Android TV Box."
 }
