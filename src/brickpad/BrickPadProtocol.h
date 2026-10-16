@@ -482,6 +482,7 @@ inline int kbUsageFor(char c, bool shift, uint8_t &mod) {
 // Remote mặc định chế độ Keyboard: nút Brick -> usage HID.
 enum : uint8_t {
     KU_ENTER = 0x28, KU_ESC = 0x29, KU_BKSP = 0x2A, KU_SPACE = 0x2C,
+    KU_PGUP = 0x4B, KU_PGDN = 0x4E,
     KU_RIGHT = 0x4F, KU_LEFT = 0x50, KU_DOWN = 0x51, KU_UP = 0x52
 };
 

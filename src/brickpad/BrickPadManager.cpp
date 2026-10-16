@@ -659,26 +659,13 @@ void BrickPadManager::pumpHid() {
         int8_t dx = calcDelta(rawX);
         int8_t dy = calcDelta(rawY);
 
-        // 2. Nút A: Chuột trái (0x01), Nút B: Chuột phải (0x02)
+        // 2. Nút B: Chuột trái (0x01), Nút A: Chuột phải (0x02)
         uint8_t mouseBtns = 0;
-        if (cur.btnA) mouseBtns |= 0x01; // Left Click
-        if (cur.btnB) mouseBtns |= 0x02; // Right Click / Back
+        if (cur.btnB) mouseBtns |= 0x01; // Left Click
+        if (cur.btnA) mouseBtns |= 0x02; // Right Click
 
-        // 3. Cuộn trang (Scroll Wheel):
-        // Nút L2 = Cuộn xuống, R2 = Cuộn lên
+        // 3. Chuột (Report ID 0x01):
         int8_t wheel = 0;
-        uint32_t now = SDL_GetTicks();
-        bool wheelDown = cur.btnL2;
-        bool wheelUp = cur.btnR2;
-        if (wheelUp || wheelDown) {
-            if (m_lastWheelMs == 0 || (now - m_lastWheelMs >= 85)) {
-                wheel = wheelUp ? 1 : -1;
-                m_lastWheelMs = now;
-            }
-        } else {
-            m_lastWheelMs = 0;
-        }
-
         uint8_t mouseReportId = (m_identity == ControllerIdentity::PC_LAPTOP) ? 0x01 : 0x03;
         if (dx != 0 || dy != 0 || wheel != 0 || mouseBtns != m_lastMouseButtons) {
             BrickPadBt::sendMouse(m_intrFd, mouseBtns, dx, dy, wheel, mouseReportId);
@@ -686,20 +673,25 @@ void BrickPadManager::pumpHid() {
         }
 
         // 4. Bàn phím (Report ID 0x02):
-        // D-pad Lên/Xuống/Trái/Phải: Đủ 4 phím mũi tên điều hướng
-        // Nút X: Spacebar (Dừng/Phát video)
-        // Nút Y: Enter (Chọn dòng)
-        // Nút Start: Enter, Nút Select: Esc
+        // D-pad Lên/Xuống/Trái/Phải: 4 phím mũi tên điều hướng
+        // L1: Page Up, R1: Page Down
+        // Nút X: Backspace
+        // Nút Y: Space
+        // Nút Select: Enter, Nút Start: Spacebar
         uint8_t kbKeys[6] = {0, 0, 0, 0, 0, 0};
         int ki = 0;
         if (cur.dpadUp && ki < 6)    kbKeys[ki++] = KU_UP;
         if (cur.dpadDown && ki < 6)  kbKeys[ki++] = KU_DOWN;
         if (cur.dpadLeft && ki < 6)  kbKeys[ki++] = KU_LEFT;
         if (cur.dpadRight && ki < 6) kbKeys[ki++] = KU_RIGHT;
-        if (cur.btnX && ki < 6)      kbKeys[ki++] = KU_SPACE;
-        if (cur.btnY && ki < 6)      kbKeys[ki++] = KU_ENTER;
-        if (cur.btnStart && ki < 6)  kbKeys[ki++] = KU_ENTER;
-        if (cur.btnSelect && ki < 6) kbKeys[ki++] = KU_ESC;
+        if (cur.btnL1 && ki < 6)     kbKeys[ki++] = KU_PGUP;
+        if (cur.btnR1 && ki < 6)     kbKeys[ki++] = KU_PGDN;
+        if (cur.btnX && ki < 6)      kbKeys[ki++] = KU_BKSP;
+        if (cur.btnY && ki < 6)      kbKeys[ki++] = KU_SPACE;
+        if (!(cur.btnSelect && cur.btnStart)) {
+            if (cur.btnSelect && ki < 6) kbKeys[ki++] = KU_ENTER;
+            if (cur.btnStart && ki < 6)  kbKeys[ki++] = KU_SPACE;
+        }
 
         if (std::memcmp(kbKeys, m_lastKbKeys, 6) != 0) {
             BrickPadBt::sendKb(m_intrFd, 0, kbKeys);
@@ -707,10 +699,11 @@ void BrickPadManager::pumpHid() {
         }
 
         // 5. Điều khiển đa phương tiện (Consumer Report ID 0x03 - chỉ có trên PC_LAPTOP):
+        // L2: Vol +, R2: Vol -, Menu: Home
         if (m_identity == ControllerIdentity::PC_LAPTOP) {
             uint16_t consumerUsage = CU_NONE;
-            if (cur.btnL1) consumerUsage = CU_VOL_DOWN;
-            else if (cur.btnR1) consumerUsage = CU_VOL_UP;
+            if (cur.btnL2) consumerUsage = CU_VOL_UP;
+            else if (cur.btnR2) consumerUsage = CU_VOL_DOWN;
             else if (cur.btnHome) consumerUsage = CU_HOME;
 
             if (consumerUsage != m_lastConsumerUsage) {
