@@ -798,26 +798,50 @@ void UIManager::renderBpSession() {
   drawRoundedRect(kCardX, card2Y, kCardW, card2H, UiTheme::RADIUS_CARD,
                   UiTheme::CARD_BORDER, false);
 
-  int noteY = card2Y + 24;
-  int noteGap = 36;
-  drawText("• Tất cả nút bấm, D-pad và cần analog đang điều khiển trực tiếp "
-           "trên máy chủ.",
-           kCardX + kPad, noteY, UiTheme::TEXT_MAIN, m_fontSmall);
-  drawText("• Kết nối Bluetooth duy trì liên tục và tuyệt đối không bị ngắt "
-           "khi tắt màn hình.",
-           kCardX + kPad, noteY + noteGap, UiTheme::TEXT_SUB, m_fontSmall);
-  drawText("• Giữ SELECT + START trong 1 giây để chuyển đổi nhanh giữa Tay cầm "
-           "và Bàn phím.",
-           kCardX + kPad, noteY + noteGap * 2, UiTheme::ACCENT_CYAN,
-           m_fontSmall);
   if (bp.mode() == BrickPad::PadMode::KEYBOARD &&
       bp.identity() == BrickPad::ControllerIdentity::PC_LAPTOP) {
-    drawText("• Bấm MENU để bật Bàn phím ảo nhập text và bắn sang laptop.",
-             kCardX + kPad, noteY + noteGap * 3, UiTheme::ACCENT_CYAN,
-             m_fontSmall);
-    drawText("• Bấm F1 để thoát HID. Bấm F2 để đánh thức sáng màn hình.",
-             kCardX + kPad, noteY + noteGap * 4, UiTheme::TEXT_DIM, m_fontSmall);
+    drawText("SƠ ĐỒ PHÍM DESK REMOTE (BÀN PHÍM + CHUỘT):", kCardX + kPad,
+             card2Y + 16, UiTheme::ACCENT_CYAN, m_fontSmall);
+
+    int col1X = kCardX + kPad;
+    int col2X = kCardX + 340;
+    int col3X = kCardX + 660;
+    int rowY0 = card2Y + 50;
+    int rowGap = 36;
+
+    // Cột 1: Chuột & Bàn phím ảo
+    drawText("• Stick L : Chuột (Trỏ)", col1X, rowY0, UiTheme::TEXT_MAIN, m_fontSmall);
+    drawText("• Nút B   : Chuột Trái", col1X, rowY0 + rowGap, UiTheme::TEXT_MAIN, m_fontSmall);
+    drawText("• Nút A   : Chuột Phải", col1X, rowY0 + rowGap * 2, UiTheme::TEXT_MAIN, m_fontSmall);
+    drawText("• MENU    : Bàn phím ảo", col1X, rowY0 + rowGap * 3, UiTheme::ACCENT_CYAN, m_fontSmall);
+
+    // Cột 2: Bàn phím gõ nhanh
+    drawText("• Nút Y   : Phím Space", col2X, rowY0, UiTheme::TEXT_MAIN, m_fontSmall);
+    drawText("• Nút X   : Backspace", col2X, rowY0 + rowGap, UiTheme::TEXT_MAIN, m_fontSmall);
+    drawText("• SELECT  : Phím Enter", col2X, rowY0 + rowGap * 2, UiTheme::TEXT_MAIN, m_fontSmall);
+    drawText("• START   : Phím Space", col2X, rowY0 + rowGap * 3, UiTheme::TEXT_MAIN, m_fontSmall);
+
+    // Cột 3: Cuộn trang & Âm lượng & Phím cứng
+    drawText("• L1 / R1 : PgUp / PgDn", col3X, rowY0, UiTheme::TEXT_MAIN, m_fontSmall);
+    drawText("• L2 / R2 : Vol + / Vol -", col3X, rowY0 + rowGap, UiTheme::TEXT_MAIN, m_fontSmall);
+    drawText("• D-Pad   : Mũi tên 4 chiều", col3X, rowY0 + rowGap * 2, UiTheme::TEXT_MAIN, m_fontSmall);
+    drawText("• F1 / F2 : Thoát / Sáng màn", col3X, rowY0 + rowGap * 3, UiTheme::TEXT_DIM, m_fontSmall);
+
+    drawText("• Giữ SELECT + START 1s để chuyển sang Tay cầm chơi game",
+             kCardX + kPad, card2Y + 212, UiTheme::TEXT_DIM, m_fontSmall);
   } else {
+    int noteY = card2Y + 24;
+    int noteGap = 36;
+    drawText("• Tất cả nút bấm, D-pad và cần analog đang điều khiển trực tiếp "
+             "trên máy chủ.",
+             kCardX + kPad, noteY, UiTheme::TEXT_MAIN, m_fontSmall);
+    drawText("• Kết nối Bluetooth duy trì liên tục và tuyệt đối không bị ngắt "
+             "khi tắt màn hình.",
+             kCardX + kPad, noteY + noteGap, UiTheme::TEXT_SUB, m_fontSmall);
+    drawText("• Giữ SELECT + START trong 1 giây để chuyển đổi nhanh giữa Tay cầm "
+             "và Bàn phím.",
+             kCardX + kPad, noteY + noteGap * 2, UiTheme::ACCENT_CYAN,
+             m_fontSmall);
     drawText("• Bấm F1 để ngắt kết nối và thoát về Home. Bấm F2 để bật/tắt sáng "
              "màn hình.",
              kCardX + kPad, noteY + noteGap * 3, UiTheme::TEXT_DIM, m_fontSmall);
