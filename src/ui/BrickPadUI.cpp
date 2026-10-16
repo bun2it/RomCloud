@@ -5,6 +5,7 @@
 // Nguyên tắc: D-pad + A (chọn) + B (lùi), focus sáng rõ, chữ lớn,
 // SELECT mở overlay chọn Platform & Chế độ, F1 thoát HID.
 // Chưa nối: nút chỉ điều khiển UI. Đã nối: nút đi thẳng ra host.
+#include "../app/Application.h"
 #include "../brickpad/BrickPadBt.h"
 #include "../brickpad/BrickPadManager.h"
 #include "../input/InputManager.h"
@@ -166,7 +167,7 @@ void UIManager::handleBrickPadInput() {
         } else {
           bp.cyclePlatform();
         }
-        showToast("Thoát RomCloud vào lại để áp dụng thay đổi",
+        showToast("Bấm B để lưu & khởi động lại app",
                   {245, 158, 11, 255}, 1800);
       } else if (bp.chooserCursor() == 1) {
         if (isXbox) {
@@ -184,7 +185,7 @@ void UIManager::handleBrickPadInput() {
                            ? BrickPad::PadMode::KEYBOARD
                            : BrickPad::PadMode::GAMEPAD);
           }
-          showToast("Thoát RomCloud vào lại để áp dụng thay đổi",
+          showToast("Bấm B để lưu & khởi động lại app",
                     {245, 158, 11, 255}, 1800);
         }
       } else if (bp.chooserCursor() == 2 && !isXbox) {
@@ -199,21 +200,10 @@ void UIManager::handleBrickPadInput() {
     } else if (b) {
       bp.setChooser(0);
       bp.saveStore();
-      if (!m_bpConfigMac.empty()) {
-        auto devId = bp.store().deviceIdentity(m_bpConfigMac);
-        int devM = bp.store().deviceMode(m_bpConfigMac);
-        bool sameCfg = (devId == bp.identity() &&
-                        (devM == 1) == (bp.mode() == BrickPad::PadMode::KEYBOARD));
-        if (!sameCfg) {
-          showToast("Đã lưu. Thoát RomCloud vào lại để áp dụng cho thiết bị này!",
-                    {245, 158, 11, 255}, 2500);
-        } else {
-          showToast("Đã lưu cấu hình thiết bị", {34, 197, 94, 255}, 1800);
-        }
-        m_bpConfigMac.clear();
-      } else {
-        showToast("Đã lưu cấu hình", {34, 197, 94, 255}, 1800);
-      }
+      m_bpConfigMac.clear();
+      showToast("Đang lưu & khởi động lại RomCloud...", {34, 197, 94, 255}, 1500);
+      Application::instance().requestRestart();
+      return;
     }
     return;
   }
@@ -650,12 +640,12 @@ void UIManager::renderBpPlatformOverlay() {
                   m_fontSmall);
   }
   int promptY = isXbox ? (y + 198) : (y + 252);
-  drawText("Bấm [B] Đóng & lưu cấu hình cho thiết bị", x + w / 2, promptY,
+  drawText("Bấm [B] Lưu & khởi động lại để áp dụng", x + w / 2, promptY,
            UiTheme::ACCENT_CYAN, m_fontSmall, true);
   using PB = UiTheme::PadBtn;
   drawAppFooter({{PB::DPAD, "Chọn / Đổi"},
                  {PB::A, "Thay đổi"},
-                 {PB::B, "Đóng & Lưu"}});
+                 {PB::B, "Lưu & Khởi động lại"}});
 }
 
 void UIManager::setBpBacklightOff(bool off) {
