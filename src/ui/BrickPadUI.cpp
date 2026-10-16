@@ -133,20 +133,27 @@ void UIManager::handleBrickPadInput() {
   // Overlay chọn Platform & Chế độ & Tốc độ chuột (mở bằng SELECT): Up/Down
   // chuyển hàng, Trái/Phải hoặc A đổi giá trị, B đóng.
   if (bp.chooser() == 3) {
+    auto curId = (!m_bpConfigMac.empty()) ? bp.store().deviceIdentity(m_bpConfigMac)
+                                          : bp.identity();
+    bool isXbox = (curId == BrickPad::ControllerIdentity::XBOX);
+    int maxRows = isXbox ? 2 : 3;
+    if (bp.chooserCursor() >= maxRows) {
+      bp.setChooserCursor(0);
+    }
+
     if (up) {
       int c = bp.chooserCursor() - 1;
       if (c < 0)
-        c = 2;
+        c = maxRows - 1;
       bp.setChooserCursor(c);
     } else if (down) {
       int c = bp.chooserCursor() + 1;
-      if (c > 2)
+      if (c >= maxRows)
         c = 0;
       bp.setChooserCursor(c);
     } else if (left || right || a) {
       if (bp.chooserCursor() == 0) {
         if (!m_bpConfigMac.empty()) {
-          auto curId = bp.store().deviceIdentity(m_bpConfigMac);
           auto newId = (curId == BrickPad::ControllerIdentity::XBOX)
                            ? BrickPad::ControllerIdentity::PC_LAPTOP
                            : BrickPad::ControllerIdentity::XBOX;
@@ -162,20 +169,25 @@ void UIManager::handleBrickPadInput() {
         showToast("Thoát RomCloud vào lại để áp dụng thay đổi",
                   {245, 158, 11, 255}, 1800);
       } else if (bp.chooserCursor() == 1) {
-        if (!m_bpConfigMac.empty()) {
-          int curMode = bp.store().deviceMode(m_bpConfigMac);
-          int newMode = (curMode == 1 ? 0 : 1);
-          bp.store().setDeviceMode(m_bpConfigMac, newMode);
-          bp.store().lastMode = newMode;
-          bp.saveStore();
+        if (isXbox) {
+          showToast("Xbox chỉ hỗ trợ chế độ Tay cầm",
+                    {245, 158, 11, 255}, 1800);
         } else {
-          bp.setMode(bp.mode() == BrickPad::PadMode::GAMEPAD
-                         ? BrickPad::PadMode::KEYBOARD
-                         : BrickPad::PadMode::GAMEPAD);
+          if (!m_bpConfigMac.empty()) {
+            int curMode = bp.store().deviceMode(m_bpConfigMac);
+            int newMode = (curMode == 1 ? 0 : 1);
+            bp.store().setDeviceMode(m_bpConfigMac, newMode);
+            bp.store().lastMode = newMode;
+            bp.saveStore();
+          } else {
+            bp.setMode(bp.mode() == BrickPad::PadMode::GAMEPAD
+                           ? BrickPad::PadMode::KEYBOARD
+                           : BrickPad::PadMode::GAMEPAD);
+          }
+          showToast("Thoát RomCloud vào lại để áp dụng thay đổi",
+                    {245, 158, 11, 255}, 1800);
         }
-        showToast("Thoát RomCloud vào lại để áp dụng thay đổi",
-                  {245, 158, 11, 255}, 1800);
-      } else if (bp.chooserCursor() == 2) {
+      } else if (bp.chooserCursor() == 2 && !isXbox) {
         int delta = left ? -1 : 1;
         int s = bp.mouseSpeed() + delta;
         if (s < 1)
@@ -578,7 +590,12 @@ void UIManager::renderBpPlatformOverlay() {
   if (bp.chooser() != 3)
     return;
   beginModalDim();
-  int w = 680, h = 310;
+
+  auto curId = (!m_bpConfigMac.empty()) ? bp.store().deviceIdentity(m_bpConfigMac)
+                                        : bp.identity();
+  bool isXbox = (curId == BrickPad::ControllerIdentity::XBOX);
+  int numRows = isXbox ? 2 : 3;
+  int w = 680, h = isXbox ? 260 : 310;
   int x = (1024 - w) / 2, y = (768 - h) / 2;
   drawModalDialog(x, y, w, h, UiTheme::RADIUS_MODAL, UiTheme::CARD_SOLID,
                   UiTheme::CARD_SOLID, 56);
@@ -601,7 +618,7 @@ void UIManager::renderBpPlatformOverlay() {
   drawText(truncateToWidth(title, m_fontLarge, w - 56), x + 28, y + 12,
            UiTheme::TEXT_MAIN, m_fontLarge);
   const char *rows[3] = {"Platform", "Chế độ", "Tốc độ chuột (1-10)"};
-  for (int i = 0; i < 3; i++) {
+  for (int i = 0; i < numRows; i++) {
     int ry = y + 70 + i * 56;
     if (i == bp.chooserCursor())
       drawFocusRow(x + 16, ry, w - 32, 48);
@@ -613,11 +630,12 @@ void UIManager::renderBpPlatformOverlay() {
         val = bp.platformName();
       }
     } else if (i == 1) {
-      if (!m_bpConfigMac.empty()) {
-        int dm = bp.store().deviceMode(m_bpConfigMac);
-        val = (dm == 1 ? "Bàn phím + Chuột" : "Tay cầm");
+      if (isXbox) {
+        val = "Tay cầm (Cố định)";
       } else {
-        val = bp.modeLabel();
+        int dm = (!m_bpConfigMac.empty()) ? bp.store().deviceMode(m_bpConfigMac)
+                                          : (int)bp.mode();
+        val = (dm == 1 ? "Bàn phím + Chuột" : "Tay cầm");
       }
     } else {
       val = "Mức " + std::to_string(bp.mouseSpeed()) + " / 10";
@@ -625,12 +643,14 @@ void UIManager::renderBpPlatformOverlay() {
     drawText(rows[i], x + 40, ry + 8,
              i == bp.chooserCursor() ? UiTheme::TEXT_MAIN : UiTheme::TEXT_SUB,
              m_fontSmall);
-    drawTextRight("< " + val + " >", x + w - 40, ry + 8,
+    std::string valTxt = (i == 1 && isXbox) ? val : ("< " + val + " >");
+    drawTextRight(valTxt, x + w - 40, ry + 8,
                   i == bp.chooserCursor() ? UiTheme::ACCENT_CYAN
                                           : UiTheme::TEXT_DIM,
                   m_fontSmall);
   }
-  drawText("Bấm [B] Đóng & lưu cấu hình cho thiết bị", x + w / 2, y + 252,
+  int promptY = isXbox ? (y + 198) : (y + 252);
+  drawText("Bấm [B] Đóng & lưu cấu hình cho thiết bị", x + w / 2, promptY,
            UiTheme::ACCENT_CYAN, m_fontSmall, true);
   using PB = UiTheme::PadBtn;
   drawAppFooter({{PB::DPAD, "Chọn / Đổi"},

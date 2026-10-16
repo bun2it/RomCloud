@@ -539,6 +539,7 @@ bool BrickPadStore::setDeviceIdentity(const std::string &mac, ControllerIdentity
         std::string have; normalizeMac(d.address, have);
         if (have == want) {
             d.identity = id;
+            if (id == ControllerIdentity::XBOX) d.mode = 0;
             return true;
         }
     }
@@ -547,6 +548,7 @@ bool BrickPadStore::setDeviceIdentity(const std::string &mac, ControllerIdentity
         std::string have; normalizeMac(d.address, have);
         if (have == want) {
             d.identity = id;
+            if (id == ControllerIdentity::XBOX) d.mode = 0;
             return true;
         }
     }
@@ -557,8 +559,12 @@ int BrickPadStore::deviceMode(const std::string &mac) const {
     std::string want; normalizeMac(mac, want);
     for (const auto &d : devices) {
         std::string have; normalizeMac(d.address, have);
-        if (have == want) return d.mode;
+        if (have == want) {
+            if (d.identity == ControllerIdentity::XBOX) return 0;
+            return d.mode;
+        }
     }
+    if (lastPlatform == ControllerIdentity::XBOX) return 0;
     return lastMode;
 }
 
@@ -568,7 +574,7 @@ bool BrickPadStore::setDeviceMode(const std::string &mac, int mode) {
     for (auto &d : devices) {
         std::string have; normalizeMac(d.address, have);
         if (have == want) {
-            d.mode = mode;
+            d.mode = (d.identity == ControllerIdentity::XBOX) ? 0 : mode;
             return true;
         }
     }
@@ -576,7 +582,7 @@ bool BrickPadStore::setDeviceMode(const std::string &mac, int mode) {
     for (auto &d : devices) {
         std::string have; normalizeMac(d.address, have);
         if (have == want) {
-            d.mode = mode;
+            d.mode = (d.identity == ControllerIdentity::XBOX) ? 0 : mode;
             return true;
         }
     }

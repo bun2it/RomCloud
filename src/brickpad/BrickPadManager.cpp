@@ -39,9 +39,14 @@ bool BrickPadManager::init() {
     bool had = m_store.load(m_storePath);
     if (!had) saveStore(); // lần đầu: ghi defaults
 
-    // Cập nhật identity và mode: ưu tiên lấy từ cấu hình cuối cùng đã lưu
+    // Cập nhật identity và mode: Xbox luôn là GAMEPAD; PC_LAPTOP lấy theo store
     m_identity = m_store.lastPlatform;
-    m_mode = (PadMode)m_store.lastMode;
+    if (m_identity == ControllerIdentity::XBOX) {
+        m_mode = PadMode::GAMEPAD;
+        m_store.lastMode = 0;
+    } else {
+        m_mode = (PadMode)m_store.lastMode;
+    }
 
     IdentityInfo idInfo = getIdentityInfo(m_identity);
     m_btName = idInfo.btName;
@@ -620,7 +625,7 @@ void BrickPadManager::pumpHid() {
     // Report ID 0x01: Chuột (A = Left, B = Right, D-pad Up/Down = Wheel, Stick = Pointer)
     // Chỉ vào chế độ Chuột + Bàn phím KHI user chọn PadMode::KEYBOARD!
     // Khi ở PadMode::GAMEPAD, tuyệt đối gửi Gamepad report chuẩn.
-    if (m_mode == PadMode::KEYBOARD) {
+    if (m_mode == PadMode::KEYBOARD && m_identity == ControllerIdentity::PC_LAPTOP) {
         // 1. Cần Analog Trái: di chuyển con trỏ chuột (dx, dy)
         int rawX = (int)cur.stickLX - 128;
         int rawY = (int)cur.stickLY - 128;
