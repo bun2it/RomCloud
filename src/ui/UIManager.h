@@ -821,6 +821,7 @@ private:
   std::string m_bpModalTitle;
   std::string m_bpModalPh;
   std::string m_bpRenameMac;
+  std::string m_bpConfigMac;
 
   // LocalSend P2P
   void renderLocalSendHome();

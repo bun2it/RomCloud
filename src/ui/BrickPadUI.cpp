@@ -143,45 +143,65 @@ void UIManager::handleBrickPadInput() {
       if (c > 2)
         c = 0;
       bp.setChooserCursor(c);
-    } else if (left) {
+    } else if (left || right || a) {
       if (bp.chooserCursor() == 0) {
-        bp.cyclePlatform();
-        showToast("Thoát BrickPad vào lại để thay đổi có hiệu lực",
+        if (!m_bpConfigMac.empty()) {
+          auto curId = bp.store().deviceIdentity(m_bpConfigMac);
+          auto newId = (curId == BrickPad::ControllerIdentity::XBOX)
+                           ? BrickPad::ControllerIdentity::PC_LAPTOP
+                           : BrickPad::ControllerIdentity::XBOX;
+          bp.store().setDeviceIdentity(m_bpConfigMac, newId);
+          int newMode = (newId == BrickPad::ControllerIdentity::PC_LAPTOP) ? 1 : 0;
+          bp.store().setDeviceMode(m_bpConfigMac, newMode);
+          bp.store().lastPlatform = newId;
+          bp.store().lastMode = newMode;
+          bp.saveStore();
+        } else {
+          bp.cyclePlatform();
+        }
+        showToast("Thoát RomCloud vào lại để áp dụng thay đổi",
                   {245, 158, 11, 255}, 1800);
       } else if (bp.chooserCursor() == 1) {
-        bp.setMode(bp.mode() == BrickPad::PadMode::GAMEPAD
-                       ? BrickPad::PadMode::KEYBOARD
-                       : BrickPad::PadMode::GAMEPAD);
-        showToast("Thoát BrickPad vào lại để thay đổi có hiệu lực",
+        if (!m_bpConfigMac.empty()) {
+          int curMode = bp.store().deviceMode(m_bpConfigMac);
+          int newMode = (curMode == 1 ? 0 : 1);
+          bp.store().setDeviceMode(m_bpConfigMac, newMode);
+          bp.store().lastMode = newMode;
+          bp.saveStore();
+        } else {
+          bp.setMode(bp.mode() == BrickPad::PadMode::GAMEPAD
+                         ? BrickPad::PadMode::KEYBOARD
+                         : BrickPad::PadMode::GAMEPAD);
+        }
+        showToast("Thoát RomCloud vào lại để áp dụng thay đổi",
                   {245, 158, 11, 255}, 1800);
       } else if (bp.chooserCursor() == 2) {
-        int s = bp.mouseSpeed() - 1;
+        int delta = left ? -1 : 1;
+        int s = bp.mouseSpeed() + delta;
         if (s < 1)
           s = 10;
-        bp.setMouseSpeed(s);
-      }
-    } else if (right || a) {
-      if (bp.chooserCursor() == 0) {
-        bp.cyclePlatform();
-        showToast("Thoát BrickPad vào lại để thay đổi có hiệu lực",
-                  {245, 158, 11, 255}, 1800);
-      } else if (bp.chooserCursor() == 1) {
-        bp.setMode(bp.mode() == BrickPad::PadMode::GAMEPAD
-                       ? BrickPad::PadMode::KEYBOARD
-                       : BrickPad::PadMode::GAMEPAD);
-        showToast("Thoát BrickPad vào lại để thay đổi có hiệu lực",
-                  {245, 158, 11, 255}, 1800);
-      } else if (bp.chooserCursor() == 2) {
-        int s = bp.mouseSpeed() + 1;
         if (s > 10)
           s = 1;
         bp.setMouseSpeed(s);
       }
     } else if (b) {
       bp.setChooser(0);
-      bp.applyPlatformLiveAsync();
       bp.saveStore();
-      showToast("Đã lưu cấu hình", {34, 197, 94, 255}, 1800);
+      if (!m_bpConfigMac.empty()) {
+        auto devId = bp.store().deviceIdentity(m_bpConfigMac);
+        int devM = bp.store().deviceMode(m_bpConfigMac);
+        bool sameCfg = (devId == bp.identity() &&
+                        (devM == 1) == (bp.mode() == BrickPad::PadMode::KEYBOARD));
+        if (!sameCfg) {
+          showToast("Đã lưu. Thoát RomCloud vào lại để áp dụng cho thiết bị này!",
+                    {245, 158, 11, 255}, 2500);
+        } else {
+          showToast("Đã lưu cấu hình thiết bị", {34, 197, 94, 255}, 1800);
+        }
+        m_bpConfigMac.clear();
+      } else {
+        showToast("Đã lưu cấu hình", {34, 197, 94, 255}, 1800);
+      }
     }
     return;
   }
@@ -205,11 +225,23 @@ void UIManager::handleBrickPadInput() {
     } else if (a && n > 0 && !bp.pairBusy()) {
       const auto &d = devs[(size_t)ci];
       if (d.paired) {
-        std::string err;
-        if (!bp.connectHost(d.mac, err))
-          showToast(err, {239, 68, 68, 255}, 2500);
-        else
-          bp.goScreen(BpScreen::DEVICES);
+        BrickPad::ControllerIdentity devId = bp.store().deviceIdentity(d.mac);
+        int devM = bp.store().deviceMode(d.mac);
+        bool sameConfig = (devId == bp.identity() &&
+                           (devM == 1) == (bp.mode() == BrickPad::PadMode::KEYBOARD));
+        if (!sameConfig) {
+          bp.store().lastPlatform = devId;
+          bp.store().lastMode = devM;
+          bp.saveStore();
+          showToast("Thiết bị này dùng cấu hình khác. Thoát RomCloud vào lại để kết nối!",
+                    {239, 68, 68, 255}, 3000);
+        } else {
+          std::string err;
+          if (!bp.connectHost(d.mac, err))
+            showToast(err, {239, 68, 68, 255}, 2500);
+          else
+            bp.goScreen(BpScreen::DEVICES);
+        }
       } else {
         bp.startPair(d.mac, d.name);
         showToast("Đang pair — chờ thiết bị xác nhận...", {245, 158, 11, 255},
@@ -250,10 +282,17 @@ void UIManager::handleBrickPadInput() {
       } else {
         BrickPad::ControllerIdentity devId = bp.store().deviceIdentity(d.mac);
         int devM = bp.store().deviceMode(d.mac);
-        bp.setIdentity(devId);
-        bp.setMode(devM == 1 ? BrickPad::PadMode::KEYBOARD
-                             : BrickPad::PadMode::GAMEPAD);
-        bp.startConnect(d.mac);
+        bool sameConfig = (devId == bp.identity() &&
+                           (devM == 1) == (bp.mode() == BrickPad::PadMode::KEYBOARD));
+        if (!sameConfig) {
+          bp.store().lastPlatform = devId;
+          bp.store().lastMode = devM;
+          bp.saveStore();
+          showToast("Thiết bị này dùng cấu hình khác. Thoát RomCloud vào lại để kết nối!",
+                    {239, 68, 68, 255}, 3000);
+        } else {
+          bp.startConnect(d.mac);
+        }
       }
     } else if (x && n > 0 && ci < n) {
       // X: Quên thiết bị (2 nhịp: arm rồi xác nhận).
@@ -288,7 +327,13 @@ void UIManager::handleBrickPadInput() {
       m_bpModalCfg.focusMode = 1;
       bp.setVkOpen(true);
     } else if (select) {
-      // SELECT: mở overlay chọn Platform & Chế độ.
+      // SELECT: mở overlay chọn Platform & Chế độ cho thiết bị đang chọn (nếu có)
+      if (n > 0 && ci < n) {
+        const auto &d = devs[(size_t)rows[(size_t)ci]];
+        m_bpConfigMac = d.mac;
+      } else {
+        m_bpConfigMac.clear();
+      }
       bp.setChooser(3);
     } else if (menu) {
       // MENU: Quét mới
@@ -459,8 +504,8 @@ void UIManager::renderBpDevices() {
       std::string plat = bp.getPlatformNameFor(d.mac);
       int dMode = bp.store().deviceMode(d.mac);
       std::string modeDesc =
-          (dMode == 1 || bp.store().lastMode == 1)
-              ? ("Bàn phím + Chuột tốc độ " + std::to_string(bp.mouseSpeed()))
+          (dMode == 1)
+              ? ("Bàn phím + Chuột (tốc độ " + std::to_string(bp.mouseSpeed()) + ")")
               : "Tay cầm";
       std::string rowText = dName + " - " + plat + " - " + modeDesc;
       int rowTextY = textYCentered(yy, cardH, m_fontMedium);
@@ -537,20 +582,46 @@ void UIManager::renderBpPlatformOverlay() {
   int x = (1024 - w) / 2, y = (768 - h) / 2;
   drawModalDialog(x, y, w, h, UiTheme::RADIUS_MODAL, UiTheme::CARD_SOLID,
                   UiTheme::CARD_SOLID, 56);
-  drawText("PLATFORM & CẤU HÌNH", x + 28, y + 12, UiTheme::TEXT_MAIN,
-           m_fontLarge);
+
+  std::string title = "PLATFORM & CẤU HÌNH";
+  if (!m_bpConfigMac.empty()) {
+    std::string dName = m_bpConfigMac;
+    for (const auto &d : bp.store().devices) {
+      std::string normWant, normHave;
+      BrickPad::BrickPadStore::normalizeMac(m_bpConfigMac, normWant);
+      BrickPad::BrickPadStore::normalizeMac(d.address, normHave);
+      if (normWant == normHave) {
+        dName = (d.alias.empty() || BrickPad::isMacAddress(d.alias)) ? d.address
+                                                                     : d.alias;
+        break;
+      }
+    }
+    title = "CẤU HÌNH: " + dName;
+  }
+  drawText(truncateToWidth(title, m_fontLarge, w - 56), x + 28, y + 12,
+           UiTheme::TEXT_MAIN, m_fontLarge);
   const char *rows[3] = {"Platform", "Chế độ", "Tốc độ chuột (1-10)"};
   for (int i = 0; i < 3; i++) {
     int ry = y + 70 + i * 56;
     if (i == bp.chooserCursor())
       drawFocusRow(x + 16, ry, w - 32, 48);
     std::string val;
-    if (i == 0)
-      val = bp.platformName();
-    else if (i == 1)
-      val = bp.modeLabel();
-    else
+    if (i == 0) {
+      if (!m_bpConfigMac.empty()) {
+        val = bp.platformNameOf(bp.store().deviceIdentity(m_bpConfigMac));
+      } else {
+        val = bp.platformName();
+      }
+    } else if (i == 1) {
+      if (!m_bpConfigMac.empty()) {
+        int dm = bp.store().deviceMode(m_bpConfigMac);
+        val = (dm == 1 ? "Bàn phím + Chuột" : "Tay cầm");
+      } else {
+        val = bp.modeLabel();
+      }
+    } else {
       val = "Mức " + std::to_string(bp.mouseSpeed()) + " / 10";
+    }
     drawText(rows[i], x + 40, ry + 8,
              i == bp.chooserCursor() ? UiTheme::TEXT_MAIN : UiTheme::TEXT_SUB,
              m_fontSmall);
@@ -559,12 +630,12 @@ void UIManager::renderBpPlatformOverlay() {
                                           : UiTheme::TEXT_DIM,
                   m_fontSmall);
   }
-  drawText("Bấm [B] Đóng để áp dụng cấu hình phát sóng", x + w / 2, y + 252,
+  drawText("Bấm [B] Đóng & lưu cấu hình cho thiết bị", x + w / 2, y + 252,
            UiTheme::ACCENT_CYAN, m_fontSmall, true);
   using PB = UiTheme::PadBtn;
   drawAppFooter({{PB::DPAD, "Chọn / Đổi"},
                  {PB::A, "Thay đổi"},
-                 {PB::B, "Đóng & Áp dụng"}});
+                 {PB::B, "Đóng & Lưu"}});
 }
 
 void UIManager::setBpBacklightOff(bool off) {

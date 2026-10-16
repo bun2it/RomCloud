@@ -285,8 +285,6 @@ void InputManager::update() {
                     };
                     if (axis == 0) m_stickLX = toByte(val);
                     else if (axis == 1) m_stickLY = toByte(val);
-                    else if (axis == 2 || axis == 3) m_stickRX = toByte(val);
-                    else if (axis == 4) m_stickRY = toByte(val);
 
                     const int DEADZONE = 12000;
                     const int RELEASE_ZONE = 9000;

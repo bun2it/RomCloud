@@ -225,8 +225,6 @@ void BrickPadManager::onConnected(const std::string &mac) {
         if (realName.empty() || isMacAddress(realName)) realName = peerName();
         if (isMacAddress(realName)) realName = "";
         m_store.devTouch(useMac, realName);
-        m_store.setDeviceIdentity(useMac, m_identity);
-        m_store.setDeviceMode(useMac, (int)m_mode);
         saveStore();
         refreshDevs();
         std::string nm = peerName();
@@ -328,8 +326,6 @@ void BrickPadManager::refreshDevs() {
         if (r.connected) {
             r.paired = true;
             m_store.devTouch(d.mac, r.name);
-            m_store.setDeviceIdentity(d.mac, m_identity);
-            m_store.setDeviceMode(d.mac, (int)m_mode);
         } else if (d.paired) {
             m_store.devTouch(d.mac, r.name);
         }
@@ -410,8 +406,6 @@ void BrickPadManager::refreshDevs() {
                 m_devs.push_back(r);
                 seenMacs.push_back(pmac);
                 m_store.devTouch(m_peerMac, r.name);
-                m_store.setDeviceIdentity(m_peerMac, m_identity);
-                m_store.setDeviceMode(m_peerMac, (int)m_mode);
                 saveStore();
             }
         }
@@ -575,10 +569,13 @@ void BrickPadManager::sendNeutral() {
         m_lastReportLen = len;
         m_reportValid = true;
     }
-    BrickPadBt::sendMouse(m_intrFd, 0, 0, 0, 0, 0x01);
+    uint8_t mouseReportId = (m_identity == ControllerIdentity::PC_LAPTOP) ? 0x01 : 0x03;
+    BrickPadBt::sendMouse(m_intrFd, 0, 0, 0, 0, mouseReportId);
     uint8_t z[6] = {0};
     BrickPadBt::sendKb(m_intrFd, 0, z);
-    BrickPadBt::sendConsumer(m_intrFd, 0);
+    if (m_identity == ControllerIdentity::PC_LAPTOP) {
+        BrickPadBt::sendConsumer(m_intrFd, 0);
+    }
     m_lastMouseButtons = 0;
     std::memset(m_lastKbKeys, 0, 6);
     m_lastConsumerUsage = 0;
@@ -663,12 +660,11 @@ void BrickPadManager::pumpHid() {
         if (cur.btnB) mouseBtns |= 0x02; // Right Click / Back
 
         // 3. Cuộn trang (Scroll Wheel):
-        // Nút L2 = Cuộn xuống, R2 = Cuộn lên, hoặc Cần phải Y nếu có
+        // Nút L2 = Cuộn xuống, R2 = Cuộn lên
         int8_t wheel = 0;
         uint32_t now = SDL_GetTicks();
-        int rightY = (int)cur.stickRY - 128;
-        bool wheelDown = cur.btnL2 || (rightY > 30);
-        bool wheelUp = cur.btnR2 || (rightY < -30);
+        bool wheelDown = cur.btnL2;
+        bool wheelUp = cur.btnR2;
         if (wheelUp || wheelDown) {
             if (m_lastWheelMs == 0 || (now - m_lastWheelMs >= 85)) {
                 wheel = wheelUp ? 1 : -1;
@@ -678,8 +674,9 @@ void BrickPadManager::pumpHid() {
             m_lastWheelMs = 0;
         }
 
+        uint8_t mouseReportId = (m_identity == ControllerIdentity::PC_LAPTOP) ? 0x01 : 0x03;
         if (dx != 0 || dy != 0 || wheel != 0 || mouseBtns != m_lastMouseButtons) {
-            BrickPadBt::sendMouse(m_intrFd, mouseBtns, dx, dy, wheel, 0x01);
+            BrickPadBt::sendMouse(m_intrFd, mouseBtns, dx, dy, wheel, mouseReportId);
             m_lastMouseButtons = mouseBtns;
         }
 
@@ -704,18 +701,17 @@ void BrickPadManager::pumpHid() {
             std::memcpy(m_lastKbKeys, kbKeys, 6);
         }
 
-        // 5. Điều khiển đa phương tiện (Consumer Report ID 0x03):
-        // Nút L1: Giảm âm lượng (0x00EA)
-        // Nút R1: Tăng âm lượng (0x00E9)
-        // Nút Menu: Home trên Android / Start Windows (0x0223)
-        uint16_t consumerUsage = CU_NONE;
-        if (cur.btnL1) consumerUsage = CU_VOL_DOWN;
-        else if (cur.btnR1) consumerUsage = CU_VOL_UP;
-        else if (cur.btnHome) consumerUsage = CU_HOME;
+        // 5. Điều khiển đa phương tiện (Consumer Report ID 0x03 - chỉ có trên PC_LAPTOP):
+        if (m_identity == ControllerIdentity::PC_LAPTOP) {
+            uint16_t consumerUsage = CU_NONE;
+            if (cur.btnL1) consumerUsage = CU_VOL_DOWN;
+            else if (cur.btnR1) consumerUsage = CU_VOL_UP;
+            else if (cur.btnHome) consumerUsage = CU_HOME;
 
-        if (consumerUsage != m_lastConsumerUsage) {
-            BrickPadBt::sendConsumer(m_intrFd, consumerUsage);
-            m_lastConsumerUsage = consumerUsage;
+            if (consumerUsage != m_lastConsumerUsage) {
+                BrickPadBt::sendConsumer(m_intrFd, consumerUsage);
+                m_lastConsumerUsage = consumerUsage;
+            }
         }
 
         m_prevInput = cur;
@@ -905,20 +901,6 @@ void BrickPadManager::setIdentity(ControllerIdentity id, bool applyLive) {
         BrickPadBt::instance().reregisterProfiles(m_identity);
     }
 
-    // Luôn lưu lại platform đã chọn cho thiết bị
-    std::string targetMac = m_peerMac;
-    if (targetMac.empty() && m_screen == BpScreen::DEVICES) {
-        auto devs = scanDevs();
-        std::vector<int> rows;
-        for (size_t i = 0; i < devs.size(); i++)
-            if (devs[i].paired) rows.push_back((int)i);
-        if (m_cursor >= 0 && m_cursor < (int)rows.size()) {
-            targetMac = devs[(size_t)rows[(size_t)m_cursor]].mac;
-        }
-    }
-    if (!targetMac.empty()) {
-        m_store.setDeviceIdentity(targetMac, m_identity);
-    }
     saveStore();
 }
 
@@ -947,7 +929,6 @@ const std::vector<std::string> &BrickPadManager::btNameSuggest() {
 
 void BrickPadManager::startConnect(const std::string &mac) {
     if (m_connectBusy.load() || connected() || mac.empty()) return;
-    syncDevicePlatform(mac);
     m_connectBusy.store(true);
     std::thread([this, mac]() {
         std::string err;
