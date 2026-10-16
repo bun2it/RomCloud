@@ -8,6 +8,7 @@
 #include "../brickpad/BrickPadBt.h"
 #include "../brickpad/BrickPadManager.h"
 #include "../input/InputManager.h"
+#include "../platform/PlatformInfo.h"
 #include "../ui/SearchInputModal.h"
 #include "../ui/UIManager.h"
 #include "../ui/UiTheme.h"
@@ -486,14 +487,38 @@ void UIManager::renderBpDevices() {
     }
   }
 
-  // Dòng chữ cảnh báo nhiễu sóng ngay trên footer
+  // Dòng chữ cảnh báo nhiễu sóng lăn liên tục như banner ngay trên footer
   TTF_Font *fItalic = m_fontSmallItalic ? m_fontSmallItalic : m_fontSmall;
   std::string warnText =
       "Wi-Fi và Bluetooth trên TrimUI Brick Pro dùng chung băng tần 2.4GHz nên "
       "có thể gây nhiễu, chập chờn hoặc rớt kết nối.";
+  std::string fullMsg = warnText + "        •        ";
+  int msgW = textWidth(fullMsg, fItalic);
   int warnY = UiTheme::FOOTER_Y - 28;
-  drawText(truncateToWidth(warnText, fItalic, UiTheme::APP_W - 48),
-           UiTheme::APP_W / 2, warnY, UiTheme::TEXT_SUB, fItalic, true);
+  int bannerX = kCardX;
+  int bannerW = kCardW;
+
+  if (msgW > 0) {
+    SDL_Rect clip = {
+        PlatformInfo::instance().scaleX(bannerX),
+        PlatformInfo::instance().scaleY(warnY - 4),
+        PlatformInfo::instance().scaleW(bannerW),
+        PlatformInfo::instance().scaleH(30)
+    };
+    SDL_RenderSetClipRect(m_renderer, &clip);
+
+    int scrollX = static_cast<int>((SDL_GetTicks() * 50) / 1000) % msgW;
+    int drawX = bannerX - scrollX;
+    while (drawX < bannerX + bannerW) {
+      drawText(fullMsg, drawX, warnY, UiTheme::TEXT_SUB, fItalic);
+      drawX += msgW;
+    }
+
+    SDL_RenderSetClipRect(m_renderer, nullptr);
+  } else {
+    drawText(truncateToWidth(warnText, fItalic, bannerW),
+             UiTheme::APP_W / 2, warnY, UiTheme::TEXT_SUB, fItalic, true);
+  }
 
   // Hint sắp xếp: A chọn, B thoát, X quên, Y đổi tên, SELECT: Cài đặt
   drawAppFooter({{PB::A, "Chọn"},
