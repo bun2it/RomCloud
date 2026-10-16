@@ -72,8 +72,15 @@ void UIManager::handleBrickPadInput() {
   auto y = input.isButtonJustPressed(Button::Y);
   auto start = input.isButtonJustPressed(Button::START);
 
-  // Bàn phím ảo RomCloud đang mở (đổi tên thiết bị): route hết vào modal.
+  // Bàn phím ảo RomCloud đang mở (đổi tên thiết bị hoặc gõ ra host): route hết vào modal.
   if (bp.vkOpen()) {
+    bool menu = input.isButtonJustPressed(Button::MENU);
+    if (menu) {
+      bp.setVkOpen(false);
+      m_bpRenameMac.clear();
+      m_bpSessionStartMs = SDL_GetTicks();
+      return;
+    }
     bool l1 = input.isButtonJustPressed(Button::L1);
     bool r1 = input.isButtonJustPressed(Button::R1);
     bool sel = input.isButtonJustPressed(Button::SELECT);
@@ -97,9 +104,11 @@ void UIManager::handleBrickPadInput() {
         // VK mở để gõ chữ ra host (chế độ Bàn phím): gửi qua HID.
         bp.typeText(q);
       }
+      m_bpSessionStartMs = SDL_GetTicks();
     } else if (res == SearchInputModal::Result::Cancel) {
       bp.setVkOpen(false);
       m_bpRenameMac.clear();
+      m_bpSessionStartMs = SDL_GetTicks();
     }
     return;
   }
@@ -127,6 +136,30 @@ void UIManager::handleBrickPadInput() {
       // Nút F2 đánh thức màn hình sáng lại 30s
       m_bpSessionStartMs = SDL_GetTicks();
       setBpBacklightOff(false);
+    }
+    // Ở chế độ PC/Laptop Desk Remote: bấm MENU để mở bàn phím ảo gõ chữ ra host!
+    if (bp.mode() == BrickPad::PadMode::KEYBOARD &&
+        bp.identity() == BrickPad::ControllerIdentity::PC_LAPTOP) {
+      if (input.isButtonJustPressed(Button::MENU)) {
+        m_bpRenameMac.clear();
+        m_bpVk.query.clear();
+        m_bpVk.telexMode = false;
+        m_bpModalCfg.ui = &m_ui;
+        m_bpModalCfg.vk = &m_bpVk;
+        m_bpModalCfg.history = &m_bpVkHist;
+        m_bpModalCfg.fSmall = m_fontSmall;
+        m_bpModalCfg.fMedium = m_fontMedium;
+        m_bpModalCfg.fLarge = m_fontLarge;
+        m_bpModalCfg.title = "BÀN PHÍM TỪ XA (DESK REMOTE)";
+        m_bpModalCfg.placeholder = "Nhập văn bản cần truyền sang máy tính...";
+        m_bpModalCfg.actionLabels[4] = "Gửi";
+        m_bpModalCfg.focusMode = 1;
+        setBpBacklightOff(false);
+        m_bpSessionStartMs = SDL_GetTicks();
+        bp.sendNeutral();
+        bp.setVkOpen(true);
+        return;
+      }
     }
     return;
   }
@@ -777,9 +810,18 @@ void UIManager::renderBpSession() {
            "và Bàn phím.",
            kCardX + kPad, noteY + noteGap * 2, UiTheme::ACCENT_CYAN,
            m_fontSmall);
-  drawText("• Bấm F1 để ngắt kết nối và thoát về Home. Bấm F2 để bật/tắt sáng "
-           "màn hình.",
-           kCardX + kPad, noteY + noteGap * 3, UiTheme::TEXT_DIM, m_fontSmall);
+  if (bp.mode() == BrickPad::PadMode::KEYBOARD &&
+      bp.identity() == BrickPad::ControllerIdentity::PC_LAPTOP) {
+    drawText("• Bấm MENU để bật Bàn phím ảo nhập text và bắn sang laptop.",
+             kCardX + kPad, noteY + noteGap * 3, UiTheme::ACCENT_CYAN,
+             m_fontSmall);
+    drawText("• Bấm F1 để thoát HID. Bấm F2 để đánh thức sáng màn hình.",
+             kCardX + kPad, noteY + noteGap * 4, UiTheme::TEXT_DIM, m_fontSmall);
+  } else {
+    drawText("• Bấm F1 để ngắt kết nối và thoát về Home. Bấm F2 để bật/tắt sáng "
+             "màn hình.",
+             kCardX + kPad, noteY + noteGap * 3, UiTheme::TEXT_DIM, m_fontSmall);
+  }
 
   // 4. Footer: 2 Pill màu trắng nằm ngay chính giữa, chữ center vertical chuẩn
   // xác
@@ -813,7 +855,7 @@ void UIManager::renderBrickPadState() {
       m_bpSessionStartMs = SDL_GetTicks();
     }
     uint32_t elapsed = SDL_GetTicks() - m_bpSessionStartMs;
-    if (elapsed >= 30000) {
+    if (elapsed >= 30000 && !bp.vkOpen()) {
       // Màn hình đen sau 30s để tiết kiệm pin (tuyệt đối không ngắt kết nối trừ
       // khi bấm F1)
       setBpBacklightOff(true);
@@ -824,6 +866,9 @@ void UIManager::renderBrickPadState() {
     setBpBacklightOff(false);
     drawAppBackground();
     renderBpSession();
+    if (bp.vkOpen()) {
+      SearchInputModal::render(m_bpModalCfg);
+    }
     return;
   }
 

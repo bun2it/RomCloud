@@ -115,6 +115,7 @@ public:
     // --- bàn phím ảo RomCloud (mở ở chế độ Bàn phím, commit -> gửi HID) ---
     bool vkOpen() const { return m_vkOpen; }
     void setVkOpen(bool o) { m_vkOpen = o; }
+    void sendNeutral();
     // Gõ chuỗi Latin qua HID (ký tự không hỗ trợ sẽ bỏ qua).
     void typeText(const std::string &s);
 
@@ -228,7 +229,6 @@ private:
     bool hidAllowed() const;
     void pumpScan();
     void pumpCombo(); // SELECT+START giữ 1s đổi mode
-    void sendNeutral();
     void onConnected(const std::string &mac);
     void onDisconnected(bool userInitiated);
 

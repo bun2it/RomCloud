@@ -589,7 +589,7 @@ void BrickPadManager::sendNeutral() {
 
 void BrickPadManager::pumpHid() {
     bool conn = (m_intrFd >= 0);
-    if (!conn) {
+    if (!conn || m_vkOpen || m_qmOpen) {
         m_comboStartMs = 0;
         m_l1r1StartMs = 0;
         return;
@@ -699,12 +699,11 @@ void BrickPadManager::pumpHid() {
         }
 
         // 5. Điều khiển đa phương tiện (Consumer Report ID 0x03 - chỉ có trên PC_LAPTOP):
-        // L2: Vol +, R2: Vol -, Menu: Home
+        // L2: Vol +, R2: Vol - (Phím MENU dành cho mở Bàn phím ảo)
         if (m_identity == ControllerIdentity::PC_LAPTOP) {
             uint16_t consumerUsage = CU_NONE;
             if (cur.btnL2) consumerUsage = CU_VOL_UP;
             else if (cur.btnR2) consumerUsage = CU_VOL_DOWN;
-            else if (cur.btnHome) consumerUsage = CU_HOME;
 
             if (consumerUsage != m_lastConsumerUsage) {
                 BrickPadBt::sendConsumer(m_intrFd, consumerUsage);
