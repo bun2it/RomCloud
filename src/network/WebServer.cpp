@@ -1362,17 +1362,23 @@ std::string WebServer::buildHtmlResponse() {
 
         <div class="card" style="margin-top: 20px;">
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-            <h3 style="margin: 0;">BrickPad - Cấu hình RetroArch cho Laptop</h3>
+            <h3 style="margin: 0;">BrickPad - Cấu hình RetroArch cho Máy tính</h3>
             <span style="font-size: 12px; font-weight: 600; color: #10b981; background: rgba(16, 185, 129, 0.1); padding: 3px 8px; border-radius: 6px;">Xbox Mode</span>
           </div>
           <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 14px;">
-            Khi kết nối TrimUI Brick với Laptop ở chế độ <b>Xbox Wireless Controller</b>, tải file profile này và copy vào thư mục <code>RetroArch/autoconfig/xinput/</code> (hoặc <code>sdl2/</code>) để RetroArch tự nhận diện chuẩn 100% các nút và cần analog.
+            Khi kết nối TrimUI Brick với Máy tính qua Bluetooth (chế độ <b>Xbox Wireless Controller</b>), bạn tải profile phù hợp dưới đây để RetroArch tự nhận diện chuẩn 100% các nút và cần analog:
           </p>
-          <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
-            <a href="/retroarch_xbox.cfg" download="Xbox_Wireless_Controller.cfg" class="btn btn-primary" style="text-decoration: none; display: inline-flex; align-items: center; gap: 6px;">
-              Tải Xbox_Wireless_Controller.cfg
+          <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
+            <a href="/retroarch_xbox_win.cfg" download="Xbox_Wireless_Controller.cfg" class="btn btn-primary" style="text-decoration: none; display: inline-flex; align-items: center; gap: 6px;">
+              🪟 Tải cho Windows (XInput)
             </a>
-            <span style="font-size: 12px; color: var(--text-dim);">Thư mục lưu: <code>RetroArch/autoconfig/xinput/</code></span>
+            <a href="/retroarch_xbox_mac.cfg" download="Xbox_Wireless_Controller.cfg" class="btn btn-primary" style="text-decoration: none; display: inline-flex; align-items: center; gap: 6px; background: #059669;">
+              🍎 Tải cho macOS / Linux (SDL2)
+            </a>
+          </div>
+          <div style="margin-top: 10px; font-size: 12px; color: var(--text-dim); line-height: 1.6;">
+            • <b>Windows:</b> Copy vào <code>RetroArch/autoconfig/xinput/</code><br>
+            • <b>macOS:</b> Copy vào <code>~/Library/Application Support/RetroArch/autoconfig/sdl2/</code>
           </div>
         </div>
       </div>
@@ -3896,14 +3902,80 @@ void WebServer::handleClient(int clientFd) {
     send(clientFd, res.c_str(), res.length(), 0);
     return;
   } else if (method == "GET" &&
-             (path == "/retroarch_xbox.cfg" || path == "/api/brickpad/retroarch_xbox.cfg" ||
-              path == "/Xbox_Wireless_Controller.cfg")) {
+             (path == "/retroarch_xbox_win.cfg" || path == "/api/brickpad/retroarch_win.cfg")) {
     std::string cfg =
-        "# RetroArch Autoconfig Profile cho TrimUI Brick (BrickPad Xbox Mode - SDL2 / macOS / PC)\n"
-        "# Luu file vao: RetroArch/autoconfig/sdl2/ hoac RetroArch/autoconfig/xinput/\n"
+        "# RetroArch Autoconfig Profile cho TrimUI Brick (BrickPad Xbox Mode - Windows XInput)\n"
+        "# Luu file vao: RetroArch/autoconfig/xinput/\n"
+        "input_driver = \"xinput\"\n"
+        "input_device = \"Xbox Wireless Controller\"\n"
+        "input_device_display_name = \"TrimUI Brick (Xbox Mode - Windows)\"\n"
+        "input_vendor_id = \"1118\"\n"
+        "input_product_id = \"765\"\n"
+        "\n"
+        "input_b_btn = \"0\"\n"
+        "input_a_btn = \"1\"\n"
+        "input_y_btn = \"2\"\n"
+        "input_x_btn = \"3\"\n"
+        "input_select_btn = \"6\"\n"
+        "input_start_btn = \"7\"\n"
+        "input_l_btn = \"4\"\n"
+        "input_r_btn = \"5\"\n"
+        "input_l2_axis = \"+2\"\n"
+        "input_r2_axis = \"+5\"\n"
+        "input_l3_btn = \"8\"\n"
+        "input_r3_btn = \"9\"\n"
+        "\n"
+        "input_up_btn = \"h0up\"\n"
+        "input_down_btn = \"h0down\"\n"
+        "input_left_btn = \"h0left\"\n"
+        "input_right_btn = \"h0right\"\n"
+        "\n"
+        "input_l_x_plus_axis = \"+0\"\n"
+        "input_l_x_minus_axis = \"-0\"\n"
+        "input_l_y_plus_axis = \"+1\"\n"
+        "input_l_y_minus_axis = \"-1\"\n"
+        "\n"
+        "input_b_btn_label = \"B\"\n"
+        "input_a_btn_label = \"A\"\n"
+        "input_y_btn_label = \"Y\"\n"
+        "input_x_btn_label = \"X\"\n"
+        "input_select_btn_label = \"Select\"\n"
+        "input_start_btn_label = \"Start\"\n"
+        "input_l_btn_label = \"L1\"\n"
+        "input_r_btn_label = \"R1\"\n"
+        "input_l2_axis_label = \"L2\"\n"
+        "input_r2_axis_label = \"R2\"\n"
+        "input_up_btn_label = \"D-Pad Up\"\n"
+        "input_down_btn_label = \"D-Pad Down\"\n"
+        "input_left_btn_label = \"D-Pad Left\"\n"
+        "input_right_btn_label = \"D-Pad Right\"\n"
+        "input_l_x_plus_axis_label = \"Left Stick Right\"\n"
+        "input_l_x_minus_axis_label = \"Left Stick Left\"\n"
+        "input_l_y_plus_axis_label = \"Left Stick Down\"\n"
+        "input_l_y_minus_axis_label = \"Left Stick Up\"\n";
+
+    std::string res =
+        "HTTP/1.1 200 OK\r\n"
+        "Content-Type: text/plain; charset=UTF-8\r\n"
+        "Content-Disposition: attachment; filename=\"Xbox_Wireless_Controller.cfg\"\r\n"
+        "Cache-Control: no-cache, no-store\r\n"
+        "Access-Control-Allow-Origin: *\r\n"
+        "Content-Length: " +
+        std::to_string(cfg.length()) +
+        "\r\n"
+        "Connection: close\r\n\r\n" +
+        cfg;
+    send(clientFd, res.c_str(), res.length(), 0);
+    return;
+  } else if (method == "GET" &&
+             (path == "/retroarch_xbox_mac.cfg" || path == "/retroarch_xbox.cfg" ||
+              path == "/api/brickpad/retroarch_mac.cfg" || path == "/Xbox_Wireless_Controller.cfg")) {
+    std::string cfg =
+        "# RetroArch Autoconfig Profile cho TrimUI Brick (BrickPad Xbox Mode - macOS / Linux SDL2)\n"
+        "# Luu file vao: RetroArch/autoconfig/sdl2/\n"
         "input_driver = \"sdl2\"\n"
         "input_device = \"Xbox Wireless Controller\"\n"
-        "input_device_display_name = \"TrimUI Brick (Xbox Mode)\"\n"
+        "input_device_display_name = \"TrimUI Brick (Xbox Mode - Mac/SDL2)\"\n"
         "input_vendor_id = \"1118\"\n"
         "input_product_id = \"765\"\n"
         "\n"
